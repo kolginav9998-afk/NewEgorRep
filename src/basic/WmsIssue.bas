@@ -708,6 +708,8 @@ Function IssuePostRow(r As Long) As String
     PlanLockBits(SH_ISSUES, r, 0, IC_LAST, ISSUE_LOCKS_POSTED)
     PlanSetValue(SH_STOCK, mCn, SC_QTY, s2, False)
     PlanSetValue(SYS_SHEET, SK_NEXT_NO, 1, k + 1, False)
+    ' «Заказы».X of the receipt that created this EI shows its balance (Phase 3)
+    WmsOrders.PlanStockMirror(mCn, s2)
     res = ApplyOperation(0, 0)
     If Left(res, 6) = "ERR-RB" Then SetStatus(r, "Не проведено: " & Mid(res, 8))
     IssuePostRow = res
@@ -814,9 +816,12 @@ Function IssueFixRow(r As Long, vEI As Variant, vQty As Variant, vWho As Variant
     PlanLockBits(SH_ISSUES, r, 0, IC_LAST, ISSUE_LOCKS_POSTED)
     If mCn = n1 Then
         PlanSetValue(SH_STOCK, n1, SC_QTY, qNew, False)
+        WmsOrders.PlanStockMirror(n1, qNew)
     Else
         PlanSetValue(SH_STOCK, n1, SC_QTY, Round3(s1 + q1), False)
         PlanSetValue(SH_STOCK, mCn, SC_QTY, qNew, False)
+        WmsOrders.PlanStockMirror(n1, Round3(s1 + q1))
+        WmsOrders.PlanStockMirror(mCn, qNew)
     End If
     res = ApplyOperation(0, 0)
     IssueFixRow = res
@@ -901,6 +906,7 @@ Function IssueDeleteRow(r As Long) As String
     PlanSetValue(SH_STOCK, n1, SC_QTY, Round3(s1 + q1), False)
     PlanSetValue(SH_ISSUES, r, IC_CTL, ST_DELETED, False)
     PlanLockBits(SH_ISSUES, r, 0, IC_LAST, ISSUE_LOCKS_POSTED)
+    WmsOrders.PlanStockMirror(n1, Round3(s1 + q1))
     IssueDeleteRow = ApplyOperation(0, 0)
     Exit Function
 EH:

@@ -24,6 +24,7 @@ Global gLockOwned As Boolean
 ' test seam: honoured only when _SYS MODE = TEST (see FaultPoint, FaultCut)
 Global gFaultPoint As Integer
 Global gFaultMode As Integer
+Global gFaultSheet As String
 Global gHardStop As Boolean
 ' operation plan under construction (one at a time; Basic runs macros sequentially)
 Global gPlanType As String
@@ -358,6 +359,8 @@ Function WmsStartup() As String
     WmsIssue.RecipientsInvalidate()
     ' the file holds no rows hidden by a filter (OnDocSave): the filter the user left is run again
     WmsUi.FiltersAtStart()
+    ' order statuses that depend on the date («Просрочено») are recalculated at the opening
+    WmsOrders.RefreshAtStartup()
     WmsUi.UiAfterStartup()
     UndoEnd()
     AddNote("запуск WMS " & (GetSystemTicks() - t0) & " мс")
@@ -553,6 +556,13 @@ End Sub
 ' quantity text replaced by its numeric value), so an empty cell is also an acceptable precondition on replay
 Sub PlanSetValue(sSheet As String, r As Long, c As Integer, vAfter As Variant, bRestorable As Boolean)
     PlanAdd("V", sSheet, r, CStr(c), EncCell(SheetByName(sSheet).getCellByPosition(c, r)), EncVar(vAfter), bRestorable)
+End Sub
+
+' derived display value (a status, a balance mirror, a control text): written and rolled back like a value, but on replay
+' it is neither evidence that the operation ran nor a conflict — WMS also refreshes such cells outside operations (the
+' overdue status changes with the date), so the saved book may hold an older derived value than the journal line
+Sub PlanDerived(sSheet As String, r As Long, c As Integer, vAfter As Variant)
+    PlanAdd("D", sSheet, r, CStr(c), EncCell(SheetByName(sSheet).getCellByPosition(c, r)), EncVar(vAfter), True)
 End Sub
 
 ' user input that the operation relies on; not modified now, restored from the journal if lost in a crash
@@ -857,7 +867,7 @@ Private Function ApplyWrites(mode As Integer) As String
     half = gPlanN \ 2
     For i = 0 To gPlanN - 1
         Select Case gPW_Kind(i)
-        Case "V"
+        Case "V", "D"
             If Not DecToCell(SheetByName(gPW_Sheet(i)).getCellByPosition(CInt(gPW_Col(i)), gPW_Row(i)), gPW_After(i)) Then
                 ApplyWrites = "неизвестная кодировка значения в плане операции"
                 Exit Function
@@ -884,6 +894,16 @@ Private Function ApplyWrites(mode As Integer) As String
             Exit Function
         End Select
         If i = half Then FaultPoint(2)
+        ' test seam: after the last write of the block of one sheet (e.g. the new EI reserved in _SYS, the «Наличие» row)
+        If gFaultPoint = 9 Then
+            If gPW_Sheet(i) = gFaultSheet Then
+                If i = gPlanN - 1 Then
+                    FaultPoint(9)
+                ElseIf gPW_Sheet(i + 1) <> gFaultSheet Then
+                    FaultPoint(9)
+                End If
+            End If
+        End If
     Next i
     ApplyWrites = ""
 End Function
@@ -936,8 +956,21 @@ Function TestSetFault(point As Integer, fmode As Integer) As String
     TestSetFault = "OK"
 End Function
 
+' point 9: the fault fires after the last write of the operation's block of writes to sheet sSheet
+Function TestSetFaultSheet(sSheet As String, fmode As Integer) As String
+    WmsInit()
+    If SysStr(SK_MODE) <> "TEST" Then
+        TestSetFaultSheet = "REFUSED:не тестовая книга"
+        Exit Function
+    End If
+    gFaultPoint = 9
+    gFaultMode = fmode
+    gFaultSheet = sSheet
+    TestSetFaultSheet = "OK"
+End Function
+
 ' points: 1 after STARTED, 2 in the middle of the writes, 3 after the journal append, 6/7/8 inside the completion
-' (CommitSeq: before any write / after COMMITTED / after LAST_SEQ) — see FaultPoint;
+' (CommitSeq: before any write / after COMMITTED / after LAST_SEQ), 9 after the writes to one sheet — see FaultPoint;
 ' 4 and 5 inside the append: the line is written only in part (4: half, 5: all but its final LF), then the write fails.
 ' modes: 1 error, 2 store the book and stop (crash simulation), 3 error that stays armed (the retry fails as well)
 Function FaultCut(n As Long) As Long

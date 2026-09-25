@@ -25,6 +25,7 @@ Sub Analyze()
     ' 2. service data
     p = SysLayoutProblem()
     If p = "" Then p = WmsIssue.SheetsProblem()
+    If p = "" Then p = WmsOrders.SheetsProblem()
     If p <> "" Then
         SetBlocked("SYS_CORRUPT", p)
         Exit Sub
@@ -182,7 +183,8 @@ End Function
 Private Function ClassifyReplay() As String
     Dim i As Long, cur As String, nApply As Long, nAlready As Long, oCell As Object
     For i = 0 To gPlanN - 1
-        If gPW_Kind(i) <> "L" Then
+        ' L (cell protection) and D (derived display values, refreshed by WMS outside operations too) are not evidence
+        If gPW_Kind(i) <> "L" And gPW_Kind(i) <> "D" Then
             oCell = SheetByName(gPW_Sheet(i)).getCellByPosition(CInt(gPW_Col(i)), gPW_Row(i))
             cur = EncCell(oCell)
             If gPW_Kind(i) = "V" And SameEnc(gPW_Before(i), gPW_After(i)) Then
@@ -246,6 +248,7 @@ Function Recover() As String
             GoTo DONE
         End If
         If gJR_Type(i) = "ABANDON" Or gJR_Type(i) = "START" Or IsAbandoned(seq) Then
+            If gJR_Type(i) = "ABANDON" Then ApplyAbandonCounters(gJR_Fields(i))
             CommitSeq(seq)
             nSkip = nSkip + 1
         Else
@@ -285,7 +288,7 @@ End Function
 ' after it. The abandoned operations stay in the journal for manual reconciliation.
 Function AbandonTail() As String
     Dim lastSeq As Long, fromSeq As Long, toSeq As Long, p As String, sLine As String, why As String, rc As Integer
-    Dim i As Long, lst As String
+    Dim i As Long, lst As String, maxEI As Double, maxNo As Double, nextEI As Double, nextNo As Double
     WmsInit()
     If gBlock <> "TAIL" Then
         AbandonTail = "«Отложить хвост журнала» не требуется: " & StateLine()
@@ -302,8 +305,15 @@ Function AbandonTail() As String
     toSeq = gJR_Seq(gJR_N - 1)
     For i = 0 To gJR_N - 1
         If i < 20 Then lst = lst & IIf(lst <> "", ", ", "") & gJR_Seq(i) & ":" & gJR_Type(i)
+        TailCounters(gJR_Fields(i), maxEI, maxNo)
     Next i
-    sLine = WmsJournal.BuildLine(toSeq + 1, "ABANDON", Array("FROM=" & fromSeq, "TO=" & toSeq, "REASON=" & Esc("решение пользователя: хвост журнала не применён")))
+    ' numbers the abandoned operations handed out (an EI label, an issue №) are never issued again
+    nextEI = SysNum(SK_NEXT_EI)
+    If maxEI + 1 > nextEI Then nextEI = maxEI + 1
+    nextNo = SysNum(SK_NEXT_NO)
+    If maxNo + 1 > nextNo Then nextNo = maxNo + 1
+    sLine = WmsJournal.BuildLine(toSeq + 1, "ABANDON", Array("FROM=" & fromSeq, "TO=" & toSeq, "NEXT_EI=" & NumStr(nextEI), _
+        "NEXT_NO=" & NumStr(nextNo), "REASON=" & Esc("решение пользователя: хвост журнала не применён")))
     rc = WmsJournal.AppendLine(sLine, toSeq + 1, why)
     If rc <> 1 Then
         AbandonTail = "ОШИБКА: запись в журнал не удалась: " & why
@@ -311,11 +321,41 @@ Function AbandonTail() As String
         WmsStartup()
         Exit Function
     End If
+    ApplyAbandonCounters(Array("NEXT_EI=" & NumStr(nextEI), "NEXT_NO=" & NumStr(nextNo)))
     CommitSeq(toSeq + 1)
     gState = ""
     WmsStartup()
     AbandonTail = "отложено операций: " & (toSeq - fromSeq + 1) & " (seq " & fromSeq & ".." & toSeq & "), они остаются в журнале для ручной сверки: " & lst
 End Function
+
+' largest EI and issue № named by the fields of one journal entry (0 when none)
+Private Sub TailCounters(fields As Variant, ByRef maxEI As Double, ByRef maxNo As Double)
+    Dim v As String, n As Long, canon As String, msg As String
+    v = FieldValue(fields, "EI")
+    If v <> "" Then
+        If WmsIssue.NormalizeEI(v, n, canon, msg) Then
+            If n > maxEI Then maxEI = n
+        End If
+    End If
+    v = FieldValue(fields, "NO")
+    If IsDigits(v) And Len(v) <= 9 Then
+        If CDbl(v) > maxNo Then maxNo = CDbl(v)
+    End If
+End Sub
+
+' an ABANDON record raises NEXT_EI / NEXT_NO past the numbers of the abandoned operations (never lowers them); repeated
+' application is harmless, so a crash between the journal line and the book is covered by «Восстановить»
+Private Sub ApplyAbandonCounters(fields As Variant)
+    Dim v As String
+    v = FieldValue(fields, "NEXT_EI")
+    If IsDigits(v) And Len(v) <= 9 Then
+        If CDbl(v) > SysNum(SK_NEXT_EI) Then SysPutNum(SK_NEXT_EI, CDbl(v))
+    End If
+    v = FieldValue(fields, "NEXT_NO")
+    If IsDigits(v) And Len(v) <= 9 Then
+        If CDbl(v) > SysNum(SK_NEXT_NO) Then SysPutNum(SK_NEXT_NO, CDbl(v))
+    End If
+End Sub
 
 ' «Сделать рабочим файлом»: this file becomes the working WMS (after a deliberate move or restore).
 ' bStartNewJournal: only when the folder has no journal at all — a START record continues the numbering.

@@ -3,6 +3,9 @@
 Option Explicit
 
 Private mKeyProblems As Long
+' _RCV rows read in chunks while the sorted EI keys are walked (each chunk at most once): EI, OLID, row hint
+Private mRcvChunk As Long
+Private mRcvData As Variant
 
 Private Function Ln(sStatus As String, sItem As String, sDetail As String) As String
     Ln = sStatus & " " & sItem & IIf(sDetail <> "", ": " & sDetail, "") & Chr(10)
@@ -105,6 +108,12 @@ Function SelfCheck() As String
     Else
         out = out & Ln("OK", "реестр «" & SH_STOCK & "»", s)
     End If
+    s = ReceiptsCheck()
+    If Left(s, 6) = "ОШИБКА" Then
+        out = out & Ln("FAIL", "приходы и заказы", Mid(s, 8))
+    Else
+        out = out & Ln("OK", "приходы и заказы", s)
+    End If
     s = WmsIssue.RecipientsDuplicates()
     If s <> "" Then
         out = out & Ln("WARN", "справочник «" & SH_RCPT & "»", "повторяются сокращения " & s & " — такие сокращения не подставляются")
@@ -176,10 +185,169 @@ EH:
     RegistryCheck = "ОШИБКА: проверка реестра не выполнена: " & Error$
 End Function
 
+' ---------------------------------------------------------------- receipts and order positions (Phase 3)
+' Every receipt of _RCV against «Наличие» (a live receipt has its registry row; a storno has balance 0 and the storno
+' state), every position of _ORD against the sum of its live receipts, NEXT_EI above every EI of the book, the row hints.
+' Chunks of CHECK_CHUNK_ROWS rows, only the needed columns (spec §24).
+Function ReceiptsCheck() As String
+    Dim rcv As Object, stk As Object, ords As Object, iss As Object, os As Object, nOl As Long, nextEI As Long, last As Long
+    Dim r0 As Long, r1 As Long, i As Long, d As Variant, st As Variant, sumQ() As Double, cnt() As Long, nod() As Long, hint() As Long
+    Dim ol As Long, nRcv As Long, nStorno As Long, nBad As Long, first As String, nPos As Long, nCancel As Long, nRest As Long
+    Dim nStale As Long, maxEI As Long, n As Long, t0 As Long, canon As String, q As Variant, dv As Variant, where As String, v As Variant, x As Double
+    On Error GoTo EH
+    t0 = GetSystemTicks()
+    rcv = gDoc.Sheets.getByName(SH_RCV)
+    stk = gDoc.Sheets.getByName(SH_STOCK)
+    ords = gDoc.Sheets.getByName(SH_ORD)
+    os = gDoc.Sheets.getByName(SH_ORDERS)
+    iss = gDoc.Sheets.getByName(SH_ISSUES)
+    nOl = WmsOrders.NextOl()
+    nextEI = CLng(SysNum(SK_NEXT_EI))
+    ReDim sumQ(nOl)
+    ReDim cnt(nOl)
+    ReDim nod(nOl)
+    last = LastUsedRow(rcv)
+    If last >= nextEI Then Bad(nBad, first, SH_RCV & ": приход с номером ЕИ ≥ NEXT_EI " & nextEI)
+    ReDim hint(IIf(last > 0, last, 0))
+    For r0 = 1 To last Step CHECK_CHUNK_ROWS
+        r1 = r0 + CHECK_CHUNK_ROWS - 1
+        If r1 > last Then r1 = last
+        d = rcv.getCellRangeByPosition(0, r0, RV_LAST, r1).getDataArray()
+        st = stk.getCellRangeByPosition(0, r0, SC_LAST, r1).getDataArray()
+        For i = 0 To r1 - r0
+            n = r0 + i
+            hint(n) = -1
+            If CStr(d(i)(RV_EI)) <> "" Then
+                canon = EI_PREFIX & Right("0000000" & n, 8)
+                If CStr(d(i)(RV_EI)) <> canon Or VarType(d(i)(RV_OL)) <> 5 Or VarType(d(i)(RV_QTY)) <> 5 Or CStr(st(i)(SC_EI)) <> canon _
+                    Or CStr(d(i)(RV_STATE)) <> RV_LIVE Then where = SH_RCV & " строка " & (n + 1) & " (" & canon & ")"
+                If CStr(d(i)(RV_EI)) <> canon Then
+                    Bad(nBad, first, where & ": записан «" & d(i)(RV_EI) & "»")
+                ElseIf VarType(d(i)(RV_OL)) <> 5 Or VarType(d(i)(RV_QTY)) <> 5 Or VarType(d(i)(RV_ROW)) <> 5 Then
+                    Bad(nBad, first, where & ": повреждены OLID, строка или количество")
+                ElseIf d(i)(RV_OL) < 1 Or d(i)(RV_OL) >= nOl Or d(i)(RV_QTY) <= 0 Then
+                    Bad(nBad, first, where & ": OLID вне диапазона или количество ≤ 0")
+                ElseIf CStr(st(i)(SC_EI)) <> canon Then
+                    Bad(nBad, first, where & ": нет строки в «" & SH_STOCK & "»")
+                Else
+                    nRcv = nRcv + 1
+                    hint(n) = CLng(d(i)(RV_ROW))
+                    ol = CLng(d(i)(RV_OL))
+                    q = st(i)(SC_QTY)
+                    If CStr(d(i)(RV_STATE)) = RV_LIVE Then
+                        sumQ(ol) = sumQ(ol) + d(i)(RV_QTY)
+                        cnt(ol) = cnt(ol) + 1
+                        If VarType(d(i)(RV_NODOC)) = 5 Then nod(ol) = nod(ol) + d(i)(RV_NODOC)
+                        If VarType(q) <> 5 Then
+                            Bad(nBad, first, SH_RCV & " строка " & (n + 1) & " (" & canon & "): остаток в реестре не число")
+                        ElseIf q > d(i)(RV_QTY) + 0.0000001 Then
+                            Bad(nBad, first, SH_RCV & " строка " & (n + 1) & " (" & canon & "): остаток " & q & " больше прихода " & d(i)(RV_QTY))
+                        End If
+                    ElseIf CStr(d(i)(RV_STATE)) = RV_STORNO Then
+                        nStorno = nStorno + 1
+                        If VarType(q) <> 5 Then
+                            Bad(nBad, first, where & ": остаток сторнированного прихода не число")
+                        ElseIf q <> 0 Or CStr(st(i)(SC_STATE)) <> EI_ST_STORNO Then
+                            Bad(nBad, first, where & ": приход удалён (сторно), а в реестре остаток " & q & ", состояние «" & st(i)(SC_STATE) & "»")
+                        End If
+                    Else
+                        Bad(nBad, first, where & ": неизвестное состояние «" & d(i)(RV_STATE) & "»")
+                    End If
+                End If
+            End If
+        Next i
+    Next r0
+    ' positions: dense rows 1..NEXT_OL-1, totals equal to the sum of their live receipts
+    last = LastUsedRow(ords)
+    If last >= nOl Then Bad(nBad, first, SH_ORD & ": позиция с OLID ≥ NEXT_OL " & nOl)
+    For r0 = 1 To nOl - 1 Step CHECK_CHUNK_ROWS
+        r1 = r0 + CHECK_CHUNK_ROWS - 1
+        If r1 > nOl - 1 Then r1 = nOl - 1
+        d = ords.getCellRangeByPosition(0, r0, OD_LAST, r1).getDataArray()
+        For i = 0 To r1 - r0
+            ol = r0 + i
+            where = SH_ORD & " OLID "
+            If VarType(d(i)(OD_ID)) <> 5 Then
+                Bad(nBad, first, where & ol & ": строка пуста или повреждена")
+            ElseIf d(i)(OD_ID) <> ol Or VarType(d(i)(OD_RCV)) <> 5 Or VarType(d(i)(OD_CNT)) <> 5 Or VarType(d(i)(OD_ORD)) <> 5 Then
+                Bad(nBad, first, where & ol & ": повреждена")
+            Else
+                nPos = nPos + 1
+                If Abs(d(i)(OD_RCV) - sumQ(ol)) > 0.0000001 Or d(i)(OD_CNT) <> cnt(ol) Or d(i)(OD_NODOC) <> nod(ol) Then
+                    Bad(nBad, first, where & ol & ": получено " & d(i)(OD_RCV) & " / приходов " & d(i)(OD_CNT) & ", а по приходам " & sumQ(ol) & " / " & cnt(ol))
+                End If
+                If CStr(d(i)(OD_CANCEL)) = OD_CANCEL_ORDER Then
+                    nCancel = nCancel + 1
+                    If cnt(ol) > 0 Then Bad(nBad, first, where & ol & ": отменённая позиция имеет действующие приходы")
+                ElseIf CStr(d(i)(OD_CANCEL)) = OD_CANCEL_REST Then
+                    nRest = nRest + 1
+                ElseIf CStr(d(i)(OD_CANCEL)) <> "" Then
+                    Bad(nBad, first, where & ol & ": неизвестная отметка отмены «" & d(i)(OD_CANCEL) & "»")
+                End If
+            End If
+        Next i
+    Next r0
+    ' «Заказы».V: every EI below NEXT_EI; outdated row hints (rows inserted above) are healed by the next operation
+    last = LastUsedRow(os)
+    For r0 = 1 To last Step CHECK_CHUNK_ROWS
+        r1 = r0 + CHECK_CHUNK_ROWS - 1
+        If r1 > last Then r1 = last
+        dv = os.getCellRangeByPosition(OC_EI, r0, OC_EI, r1).getDataArray()
+        For i = 0 To r1 - r0
+            v = dv(i)(0)
+            If Len(v) = 11 Then
+                x = Val(Mid(v, 4))
+                If x >= 1 And x <= UBound(hint) Then
+                    If hint(x) >= 0 And hint(x) <> r0 + i Then nStale = nStale + 1
+                End If
+                If x > maxEI Then
+                    If WmsOrders.StrictEI(CStr(v), n) Then maxEI = n
+                End If
+            End If
+        Next i
+    Next r0
+    ' posted issues («Выдачи».L)
+    last = LastUsedRow(iss)
+    For r0 = 1 To last Step CHECK_CHUNK_ROWS
+        r1 = r0 + CHECK_CHUNK_ROWS - 1
+        If r1 > last Then r1 = last
+        dv = iss.getCellRangeByPosition(IC_EI, r0, IC_EI, r1).getDataArray()
+        d = iss.getCellRangeByPosition(IC_NO, r0, IC_NO, r1).getDataArray()
+        For i = 0 To r1 - r0
+            If VarType(d(i)(0)) = 5 Then
+                v = dv(i)(0)
+                If Len(v) = 11 Then
+                    If Val(Mid(v, 4)) > maxEI Then
+                        If WmsOrders.StrictEI(CStr(v), n) Then maxEI = n
+                    End If
+                End If
+            End If
+        Next i
+    Next r0
+    If LastUsedRow(stk) > maxEI Then maxEI = LastUsedRow(stk)
+    If maxEI >= nextEI Then Bad(nBad, first, "NEXT_EI " & nextEI & " не больше максимального ЕИ книги " & maxEI)
+    If nBad > 0 Then
+        ReceiptsCheck = "ОШИБКА: расхождений " & nBad & " (" & first & ")"
+    Else
+        ReceiptsCheck = "приходов " & nRcv & " (из них сторно " & nStorno & "), позиций заказов " & nPos & " (отменено " & nCancel _
+            & ", с отменённым остатком " & nRest & "), расхождений нет, NEXT_EI " & nextEI & " выше всех ЕИ книги" _
+            & IIf(nStale > 0, ", устаревших подсказок строк " & nStale & " (исправятся следующей операцией)", "") & ", " & (GetSystemTicks() - t0) & " мс"
+    End If
+    Exit Function
+EH:
+    ReceiptsCheck = "ОШИБКА: проверка приходов не выполнена: " & Error$ & " (строка " & Erl & ")"
+End Function
+
+Private Sub Bad(ByRef nBad As Long, ByRef first As String, s As String)
+    nBad = nBad + 1
+    If first = "" Then first = s
+End Sub
+
 ' ---------------------------------------------------------------- full key check
-' _SYS KEY_SHEETS = "sheet|keyCol|ctlCol|counterRow|inputCol;..." (0-based columns; counterRow = _SYS row of NEXT_*).
+' _SYS KEY_SHEETS = "sheet|keyCol|ctlCol|counterRow|inputCol[|EI];..." (0-based columns; counterRow = _SYS row of NEXT_*).
 ' A key the WMS never issued (≥ NEXT_*), an invalid key or a repeated key marks the row «КОПИЯ» (never posted);
-' of repeated keys the first row in sheet order is kept as the original.
+' of repeated keys the first row in sheet order is kept as the original. Type EI («Заказы».V): the key is the canonical
+' EI text; it must also be a receipt of this WMS (_RCV), and of repeated keys the row its receipt is registered at wins.
 
 Function FullKeyCheck(bMark As Boolean) As String
     Dim specs As Variant, i As Long, res As String
@@ -194,6 +362,24 @@ Function FullKeyCheck(bMark As Boolean) As String
         If specs(i) <> "" Then res = res & IIf(res <> "", "; ", "") & CheckKeySheet(CStr(specs(i)), bMark)
     Next i
     FullKeyCheck = res
+End Function
+
+' True when EI n is a receipt of this WMS; hintRow = the row its receipt is registered at
+Private Function RcvKeyInfo(n As Long, ByRef hintRow As Long) As Boolean
+    Dim c0 As Long, c1 As Long, row As Variant
+    hintRow = -1
+    If n < 1 Or n > MAX_SHEET_ROW Then Exit Function
+    c0 = ((n - 1) \ CHECK_CHUNK_ROWS) * CHECK_CHUNK_ROWS + 1
+    If c0 <> mRcvChunk Then
+        c1 = c0 + CHECK_CHUNK_ROWS - 1
+        If c1 > MAX_SHEET_ROW Then c1 = MAX_SHEET_ROW
+        mRcvData = gDoc.Sheets.getByName(SH_RCV).getCellRangeByPosition(RV_EI, c0, RV_ROW, c1).getDataArray()
+        mRcvChunk = c0
+    End If
+    row = mRcvData(n - c0)
+    If CStr(row(RV_EI)) <> EI_PREFIX & Right("0000000" & n, 8) Then Exit Function
+    If VarType(row(RV_ROW)) = 5 Then hintRow = CLng(row(RV_ROW))
+    RcvKeyInfo = True
 End Function
 
 Private Function LastUsedRow(sh As Object) As Long
@@ -213,6 +399,7 @@ Private Function CheckKeySheet(spec As String, bMark As Boolean) As String
     Dim dKey As Variant, dCtl As Variant, dIn As Variant, buf() As Variant, nb As Long, nK As Long
     Dim nNever As Long, nBad As Long, nUnposted As Long, nDup As Long, t0 As Long, scr As Object, wasProt As Boolean
     Dim prevKey As Double, prevRow As Long, d As Variant, desc As Variant, fld(1) As New com.sun.star.table.TableSortField
+    Dim isEI As Boolean, n As Long, reg As Boolean, hintRow As Long, origIsHint As Boolean, x As Long, kShow As String
     On Error GoTo EH
     t0 = GetSystemTicks()
     a = Split(spec, "|")
@@ -221,6 +408,8 @@ Private Function CheckKeySheet(spec As String, bMark As Boolean) As String
     ctlCol = CInt(a(2))
     cntRow = CInt(a(3))
     inCol = CInt(a(4))
+    If UBound(a) >= 5 Then isEI = (a(5) = "EI")
+    mRcvChunk = -1
     sh = SheetByName(sName)
     last = LastUsedRow(sh)
     nextKey = SysNum(cntRow)
@@ -238,15 +427,19 @@ Private Function CheckKeySheet(spec As String, bMark As Boolean) As String
         nb = 0
         For i = 0 To r1 - r0
             k = dKey(i)(0)
+            If isEI And CStr(k) <> "" Then
+                ' the EI key is text: its number is the key (a text that is not a canonical EI is invalid)
+                If WmsOrders.StrictEI(CStr(k), n) Then k = CDbl(n) Else k = -1
+            End If
             If Left(CStr(dCtl(i)(0)), 5) = "КОПИЯ" Then
                 ' already marked
             ElseIf VarType(k) = 5 Then
                 If k < 1 Or k <> Int(k) Then
                     nBad = nBad + 1
-                    If bMark Then MarkCopy(sh, ctlCol, r0 + i, "неверный ключ " & k)
+                    If bMark Then MarkCopy(sh, ctlCol, r0 + i, "неверный ключ «" & dKey(i)(0) & "»")
                 ElseIf k >= nextKey Then
                     nNever = nNever + 1
-                    If bMark Then MarkCopy(sh, ctlCol, r0 + i, "ключ " & k & " не выдавался WMS")
+                    If bMark Then MarkCopy(sh, ctlCol, r0 + i, "ключ " & dKey(i)(0) & " не выдавался WMS")
                 Else
                     buf(nb) = Array(CDbl(k), CDbl(r0 + i))
                     nb = nb + 1
@@ -284,14 +477,41 @@ Private Function CheckKeySheet(spec As String, bMark As Boolean) As String
             d = gSysSh.getCellRangeByPosition(3, r0, 4, r1).getDataArray()
             For j = 0 To r1 - r0
                 If d(j)(0) = prevKey Then
-                    nDup = nDup + 1
-                    If bMark Then MarkCopy(sh, ctlCol, CLng(d(j)(1)), "ключ " & d(j)(0) & " повторяет строку " & (prevRow + 1))
+                    If isEI Then kShow = WmsIssue.EiCanon(CLng(d(j)(0))) Else kShow = CStr(d(j)(0))
+                    x = CLng(d(j)(1))
+                    If isEI And Not reg Then
+                        nNever = nNever + 1
+                        If bMark Then MarkCopy(sh, ctlCol, x, kShow & " не создан приходом WMS")
+                    ElseIf isEI And Not origIsHint And x = hintRow Then
+                        ' the row the receipt is registered at is the original, the row seen first is the copy
+                        nDup = nDup + 1
+                        If bMark Then MarkCopy(sh, ctlCol, prevRow, kShow & " повторяет строку " & (x + 1))
+                        prevRow = x
+                        origIsHint = True
+                    Else
+                        nDup = nDup + 1
+                        If bMark Then MarkCopy(sh, ctlCol, x, "ключ " & kShow & " повторяет строку " & (prevRow + 1))
+                    End If
                 Else
                     prevKey = d(j)(0)
                     prevRow = CLng(d(j)(1))
+                    If isEI Then
+                        reg = RcvKeyInfo(CLng(prevKey), hintRow)
+                        origIsHint = (prevRow = hintRow)
+                        If Not reg Then
+                            nNever = nNever + 1
+                            If bMark Then MarkCopy(sh, ctlCol, prevRow, WmsIssue.EiCanon(CLng(prevKey)) & " не создан приходом WMS")
+                        End If
+                    End If
                 End If
             Next j
         Next r0
+    ElseIf nK = 1 And isEI Then
+        d = gSysSh.getCellRangeByPosition(3, 0, 4, 0).getDataArray()
+        If Not RcvKeyInfo(CLng(d(0)(0)), hintRow) Then
+            nNever = nNever + 1
+            If bMark Then MarkCopy(sh, ctlCol, CLng(d(0)(1)), WmsIssue.EiCanon(CLng(d(0)(0))) & " не создан приходом WMS")
+        End If
     End If
     gSysSh.getCellRangeByPosition(3, 0, 4, nK + 1).clearContents(com.sun.star.sheet.CellFlags.VALUE + com.sun.star.sheet.CellFlags.STRING)
     If wasProt Then gSysSh.protect(PROTECT_PWD)

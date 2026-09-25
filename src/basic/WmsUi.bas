@@ -25,7 +25,7 @@ Global gUiFixDate As String
 
 ' filtered WMS ranges whose rows were shown for a save (FiltersStash) and are filtered again after it (FiltersRestore)
 Global gFltN As Integer
-Global gFltName(1) As String
+Global gFltName(2) As String
 
 ' ================================================================ status panel «Главная»
 
@@ -69,7 +69,7 @@ End Function
 ' The panel is derived state (recomputed at every start and action): writing it does not make an unchanged book
 ' «modified», otherwise LibreOffice would ask to save after merely opening and closing WMS.
 Sub UiRefresh(sLast As String)
-    Dim sh As Object, n As Long, c As Object, wasModified As Boolean, color As Long
+    Dim sh As Object, n As Long, c As Object, wasModified As Boolean, color As Long, s As String
     On Error GoTo EH
     If IsNull(gDoc) Or IsEmpty(gDoc) Then Exit Sub
     If Not gDoc.Sheets.hasByName(SH_MAIN) Then Exit Sub
@@ -90,12 +90,21 @@ Sub UiRefresh(sLast As String)
     If c.CellBackColor <> color Then c.CellBackColor = color
     n = WmsIssue.UnpostedCount()
     If n > 0 Then
-        PutB(sh, MR_UNPOSTED, IIf(gUnpostedMore, "не менее ", "") & n & " строк(и) с ЕИ без № — ещё не проведены")
+        s = "выдачи: " & IIf(gUnpostedMore, "не менее ", "") & n & " строк(и) с ЕИ без № — ещё не проведены"
     ElseIf n = 0 Then
-        PutB(sh, MR_UNPOSTED, "нет")
+        s = "выдачи: нет"
     Else
-        PutB(sh, MR_UNPOSTED, "не удалось посчитать — отфильтруйте «№» = пусто")
+        s = "выдачи: не удалось посчитать — отфильтруйте «№» = пусто"
     End If
+    n = WmsOrders.UnpostedReceipts()
+    If n > 0 Then
+        s = s & Chr(10) & "приходы: " & IIf(gRcvUnpostedMore, "не менее ", "") & n & " строк(и) «Заказы» с фактом (F) без ЕИ — приход ещё не проведён"
+    ElseIf n = 0 Then
+        s = s & Chr(10) & "приходы: нет"
+    Else
+        s = s & Chr(10) & "приходы: не удалось посчитать — отфильтруйте «Внутренний код» = пусто"
+    End If
+    PutB(sh, MR_UNPOSTED, s)
     PutB(sh, MR_NOTES, Replace(gReport, " | ", Chr(10)))
     If sLast <> "" Then
         PutB(sh, MR_LAST, sLast)
@@ -423,7 +432,7 @@ End Function
 ' names of the WMS database ranges that currently have filter conditions
 Private Function FilteredRanges() As Variant
     Dim names As Variant, i As Integer, out() As String, n As Integer, db As Object
-    names = Array("WMS_ISSUES", "WMS_STOCK")
+    names = Array("WMS_ORDERS", "WMS_ISSUES", "WMS_STOCK")
     ReDim out(UBound(names))
     For i = 0 To UBound(names)
         If gDoc.DatabaseRanges.hasByName(names(i)) Then

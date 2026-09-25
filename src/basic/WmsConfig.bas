@@ -1,8 +1,9 @@
 ' WmsConfig — constants, _SYS layout, settings, LibreOffice settings management (AutoInput).
-' MASTER SPEC v0.3: §3 sources as text, §10/§29 AutoInput, §16 protection, §20 journal, §22 lock, §24 chunks, §26 backups.
+' MASTER SPEC v0.3: §3 sources as text, §10/§29 AutoInput, §16 protection, §20 journal, §22 lock, §24 chunks, §26 backups,
+' §2 and §14 fixed sheets «Выдачи», «Заказы» and their service structures.
 Option Explicit
 
-Public Const WMS_CORE_VERSION = "0.2.0-phase2"
+Public Const WMS_CORE_VERSION = "0.3.0-phase3"
 Public Const WMS_SYS_SCHEMA = "WMS-SYS-1"
 
 Public Const SYS_SHEET = "_SYS"
@@ -110,6 +111,118 @@ Public Const MAX_SHEET_ROW = 1048575
 Public Const PREVIEW_MAX_ROWS = 500
 ' «Главная»: at most this many separate blocks of rows without № are examined for the unposted count
 Public Const UNPOSTED_MAX_BLOCKS = 20000
+
+' ---------------------------------------------------------------- Phase 3: orders and ordinary receipts (spec §2, §4–§6, §14–§16)
+Public Const SH_ORDERS = "Заказы"
+Public Const SH_ORD = "_ORD"
+Public Const SH_RCV = "_RCV"
+Public Const SH_IDX = "_IDX"
+
+' «Заказы» A:AB — a fixed user interface (spec §2): 0-based column indices
+Public Const OC_ORDER = 0
+Public Const OC_NAME = 1
+Public Const OC_DOC = 2
+Public Const OC_INVOICE = 3
+Public Const OC_ART = 4
+Public Const OC_FACT = 5
+Public Const OC_DOCQTY = 6
+Public Const OC_ORDQTY = 7
+Public Const OC_UNIT = 8
+Public Const OC_PRICE = 9
+Public Const OC_SUM = 10
+Public Const OC_SUPPLIER = 11
+Public Const OC_SELLER = 12
+Public Const OC_RDATE = 13
+Public Const OC_DDATE = 14
+Public Const OC_ODATE = 15
+Public Const OC_EDATE = 16
+Public Const OC_BUYER = 17
+Public Const OC_CAT = 18
+Public Const OC_ASSIGNED = 19
+Public Const OC_PLACE = 20
+Public Const OC_EI = 21
+Public Const OC_STATUS = 22
+Public Const OC_STOCK = 23
+Public Const OC_CTL = 24
+Public Const OC_NOTE = 25
+Public Const OC_DAYS = 26
+Public Const OC_DUP = 27
+Public Const OC_LAST = 27
+
+' cell protection of a «Заказы» row, one character per column A..AB ("1" = locked). An order row that has no receipt yet:
+' everything the user enters is open, what WMS fills (V W X Y AB) is locked. A row with a receipt or a cancelled position:
+' everything that describes the movement, the position or the status is locked; K M Q R T Z AA stay open.
+Public Const ORDER_LOCKS_OPEN = "0000000000000000000001111001"
+Public Const ORDER_LOCKS_POSTED = "1111111111010111001011111001"
+
+' W «Статус»: the business status of an order position (on its source row only, spec §6, v0.1 §15)
+Public Const OS_WAITING = "Ожидается"
+Public Const OS_OVERDUE = "Просрочено"
+Public Const OS_PARTIAL = "Частично получено"
+Public Const OS_RECEIVED = "Получено"
+Public Const OS_NODOCS = "Получено без документов"
+Public Const OS_CANCELLED = "Отменено"
+Public Const OS_REST_CANCELLED = "Частично получено / остаток отменён"
+Public Const OS_PARTIAL_OVERDUE = "Частично получено / просрочено"
+' W of an additional receipt row (technical status: the position status is shown on its source row)
+Public Const OS_ADD = "Дополнительное поступление"
+Public Const OS_ADD_STORNO = "Поступление удалено (сторно)"
+
+' «Наличие» H «Состояние» of an EI created by a receipt
+Public Const EI_ST_ACTIVE = "Активен"
+Public Const EI_ST_STORNO = "Приход удалён (сторно)"
+
+' _ORD — order positions (OrderLineID = row index, dense), created by the first operation of a position (spec §14, D-006)
+Public Const OD_ID = 0
+Public Const OD_ROW = 1
+Public Const OD_KEY = 2
+Public Const OD_FP = 3
+Public Const OD_ORD = 4
+Public Const OD_RCV = 5
+Public Const OD_CNT = 6
+Public Const OD_NODOC = 7
+Public Const OD_CANCEL = 8
+Public Const OD_LAST = 8
+' _ORD!L1 holds NEXT_OL, the next OrderLineID
+Public Const OD_NEXT_COL = 11
+Public Const OD_CANCEL_ORDER = "ORDER"
+Public Const OD_CANCEL_REST = "REST"
+
+' _RCV — receipts, one row per EI created by a receipt (row index = EI number, dense like «Наличие»)
+Public Const RV_EI = 0
+Public Const RV_OL = 1
+Public Const RV_ROW = 2
+Public Const RV_DUP = 3
+Public Const RV_STATE = 4
+Public Const RV_KIND = 5
+Public Const RV_QTY = 6
+Public Const RV_NODOC = 7
+Public Const RV_DUPKEY = 8
+Public Const RV_LAST = 8
+Public Const RV_LIVE = "LIVE"
+Public Const RV_STORNO = "STORNO"
+Public Const RV_SRC = "SRC"
+Public Const RV_ADD = "ADD"
+
+' _IDX — lookup cells: the criterion is written into column B, formulas of the Calc engine answer (spec §25: MATCH/COUNTIF,
+' not a Basic loop). Rows (0-based) of column B:
+Public Const IX_KEY = 0
+Public Const IX_START = 1
+Public Const IX_NONCE = 2
+Public Const IX_ECHO = 3
+Public Const IX_V_MATCH = 4
+Public Const IX_V_COUNT = 5
+Public Const IX_DUP_MATCH = 6
+Public Const IX_DUP_COUNT = 7
+Public Const IX_A_MATCH = 8
+Public Const IX_W_MATCH = 9
+' the scratch cell (unlocked) for one-shot array formulas: rows of «Заказы» whose date-dependent status must be checked
+Public Const IX_LIST = 10
+
+' «Площадка / Поставщик» values that start a special receipt (spec §7) — not an ordinary receipt, next stage
+Public Const SPECIAL_SUPPLIERS = "офис|производство|детали|старый склад"
+' «Обновить статусы» examines at most this many separate blocks of rows without a status
+Public Const REFRESH_MAX_BLOCKS = 20000
 
 Function SysKeyNames() As Variant
     SysKeyNames = Array("SCHEMA", "INSTANCE_ID", "MODE", "CORE_VERSION", "LAST_SEQ", "NEXT_EI", "NEXT_NO", "NEXT_RET", _
