@@ -1,0 +1,193 @@
+' WmsConfig — constants, _SYS layout, settings, LibreOffice settings management (AutoInput).
+' MASTER SPEC v0.3: §3 sources as text, §10/§29 AutoInput, §16 protection, §20 journal, §22 lock, §24 chunks, §26 backups.
+Option Explicit
+
+Public Const WMS_CORE_VERSION = "0.2.0-phase2"
+Public Const WMS_SYS_SCHEMA = "WMS-SYS-1"
+
+Public Const SYS_SHEET = "_SYS"
+Public Const JOURNAL_DIR = "WMS_Journal"
+Public Const BACKUP_DIR = "WMS_Backups"
+Public Const LOCK_FILE = "wms.lock"
+Public Const JOURNAL_PREFIX = "WMS_journal_"
+Public Const JOURNAL_EXT = ".csv"
+Public Const AUTOINPUT_STATE_FILE = "wms_autoinput.state"
+
+' Sheet protection guards against accidents, not against a determined user (spec §16: the password is not used in daily work).
+Public Const PROTECT_PWD = "wms"
+
+' _SYS: column A = key, column B = value; row index (0-based) = SK_* constant. Layout is checked at every start.
+Public Const SK_SCHEMA = 0
+Public Const SK_INSTANCE = 1
+Public Const SK_MODE = 2
+Public Const SK_CORE_VERSION = 3
+Public Const SK_LAST_SEQ = 4
+Public Const SK_NEXT_EI = 5
+Public Const SK_NEXT_NO = 6
+Public Const SK_NEXT_RET = 7
+Public Const SK_JPOS = 8
+Public Const SK_REG_URL = 9
+Public Const SK_TX_STATE = 10
+Public Const SK_TX_SEQ = 11
+Public Const SK_TX_TYPE = 12
+Public Const SK_TX_TIME = 13
+Public Const SK_TX_BI = 14
+Public Const SK_SAVE_STAMP = 15
+Public Const SK_SAVE_SEQ = 16
+Public Const SK_MAX_QTY = 17
+Public Const SK_KEY_SHEETS = 18
+Public Const SYS_ROWS = 19
+
+' transaction marker states
+Public Const TX_NONE = "NONE"
+Public Const TX_STARTED = "STARTED"
+Public Const TX_COMMITTED = "COMMITTED"
+
+' settings
+Public Const BACKUP_KEEP_DAILY = 14
+Public Const BACKUP_KEEP_MANUAL = 10
+Public Const BACKUP_KEEP_UPGRADE = 5
+Public Const BACKUP_KEEP_MIGRATION = 5
+Public Const CHECK_CHUNK_ROWS = 20000
+Public Const JPOS_VERIFY_WINDOW = 4096
+Public Const QTY_MAX_DECIMALS = 3
+Public Const QTY_MAX_INT_DIGITS = 9
+
+' ---------------------------------------------------------------- Phase 2: issues by EI (spec §2, §4, §5, §9, §10, §16)
+Public Const SH_MAIN = "Главная"
+Public Const SH_ISSUES = "Выдачи"
+Public Const SH_STOCK = "Наличие"
+Public Const SH_RCPT = "Получатели"
+
+' «Выдачи» A:R — a fixed user interface (spec §2): 0-based column indices
+Public Const IC_NO = 0
+Public Const IC_DOC = 1
+Public Const IC_NAME = 2
+Public Const IC_ART = 3
+Public Const IC_QTY = 4
+Public Const IC_PCT = 5
+Public Const IC_UNIT = 6
+Public Const IC_DATE = 7
+Public Const IC_WHO = 8
+Public Const IC_PLACE = 9
+Public Const IC_CAT = 10
+Public Const IC_EI = 11
+Public Const IC_RET = 12
+Public Const IC_RETPCT = 13
+Public Const IC_NOTE = 14
+Public Const IC_BEFORE = 15
+Public Const IC_AFTER = 16
+Public Const IC_CTL = 17
+Public Const IC_LAST = 17
+
+' cell protection of a «Выдачи» row, one character per column A..R ("1" = locked). Unposted: the inputs B E F H I L and
+' the informational M N O are open, everything WMS fills is locked. Posted: only B M N O stay open (D-013).
+Public Const ISSUE_LOCKS_OPEN = "101100100110000111"
+Public Const ISSUE_LOCKS_POSTED = "101111111111000111"
+
+' «Контроль» (R) of a row that WMS posted, corrected or cancelled; a copy is marked КОПИЯ (spec §15)
+Public Const ST_POSTED = "Проведено"
+Public Const ST_FIXED = "Проведено (исправлено)"
+Public Const ST_DELETED = "Удалено (сторно)"
+
+' «Наличие» — the permanent EI registry, one row per EI, row index = EI number (spec §5, v0.1 §24/§37)
+Public Const SC_EI = 0
+Public Const SC_NAME = 1
+Public Const SC_ART = 2
+Public Const SC_UNIT = 3
+Public Const SC_QTY = 4
+Public Const SC_PLACE = 5
+Public Const SC_CAT = 6
+Public Const SC_STATE = 7
+Public Const SC_SRC = 8
+Public Const SC_LAST = 8
+
+Public Const EI_PREFIX = "ЕИ-"
+Public Const EI_DIGITS = 8
+Public Const MAX_SHEET_ROW = 1048575
+
+' a change of more rows at once (paste, fill) gets its preview only for this many rows; the rest is cleared (spec §13)
+Public Const PREVIEW_MAX_ROWS = 500
+' «Главная»: at most this many separate blocks of rows without № are examined for the unposted count
+Public Const UNPOSTED_MAX_BLOCKS = 20000
+
+Function SysKeyNames() As Variant
+    SysKeyNames = Array("SCHEMA", "INSTANCE_ID", "MODE", "CORE_VERSION", "LAST_SEQ", "NEXT_EI", "NEXT_NO", "NEXT_RET", _
+        "JOURNAL_POS", "REGISTERED_URL", "TX_STATE", "TX_SEQ", "TX_TYPE", "TX_TIME", "TX_BEFORE_IMAGE", _
+        "SAVE_STAMP", "SAVE_SEQ", "MAX_QTY", "KEY_SHEETS")
+End Function
+
+' keys of _SYS that must hold numbers
+Function SysNumericKeys() As Variant
+    SysNumericKeys = Array(SK_LAST_SEQ, SK_NEXT_EI, SK_NEXT_NO, SK_NEXT_RET, SK_TX_SEQ, SK_SAVE_STAMP, SK_SAVE_SEQ, SK_MAX_QTY)
+End Function
+
+' ---------------------------------------------------------------- AutoInput (spec §10, §29; decision D-031)
+' The setting belongs to the LibreOffice user profile and is global: it affects every Calc document of this profile
+' while WMS runs. The original value is remembered in a small file inside the profile (not in the book), so that it
+' survives a crash or an unsaved session and is restored at the next clean close of WMS.
+
+Private Function CalcInputAccess(bUpdate As Boolean) As Object
+    Dim cp As Object, a(0) As New com.sun.star.beans.PropertyValue
+    cp = CreateUnoService("com.sun.star.configuration.ConfigurationProvider")
+    a(0).Name = "nodepath"
+    a(0).Value = "/org.openoffice.Office.Calc/Input"
+    If bUpdate Then
+        CalcInputAccess = cp.createInstanceWithArguments("com.sun.star.configuration.ConfigurationUpdateAccess", a())
+    Else
+        CalcInputAccess = cp.createInstanceWithArguments("com.sun.star.configuration.ConfigurationAccess", a())
+    End If
+End Function
+
+Function AutoInputGet() As Boolean
+    AutoInputGet = CalcInputAccess(False).getByName("AutoInput")
+End Function
+
+Sub AutoInputSet(bOn As Boolean)
+    Dim ua As Object
+    ua = CalcInputAccess(True)
+    ua.replaceByName("AutoInput", bOn)
+    ua.commitChanges()
+End Sub
+
+Private Function AutoInputStateUrl() As String
+    AutoInputStateUrl = CreateUnoService("com.sun.star.util.PathSettings").UserConfig & "/" & AUTOINPUT_STATE_FILE
+End Function
+
+' Called at WMS start. Returns a short note for the startup report.
+Function AutoInputDisable() As String
+    Dim sfa As Object, url As String, wasOn As Boolean
+    On Error GoTo EH
+    sfa = CreateUnoService("com.sun.star.ucb.SimpleFileAccess")
+    url = AutoInputStateUrl()
+    wasOn = AutoInputGet()
+    If Not sfa.exists(url) Then
+        ' remember the user's own value only once: after a crash the file still holds the original
+        WmsCore.WriteTextFile(url, "original=" & IIf(wasOn, "1", "0") & Chr(10))
+    End If
+    If wasOn Then AutoInputSet(False)
+    AutoInputDisable = "автоввод Calc выключен на время работы WMS (настройка общая для LibreOffice)"
+    Exit Function
+EH:
+    AutoInputDisable = "ВНИМАНИЕ: не удалось выключить автоввод Calc: " & Error$
+End Function
+
+' Called at clean close. Restores the remembered value and forgets it.
+Function AutoInputRestore() As String
+    Dim sfa As Object, url As String, s As String
+    On Error GoTo EH
+    sfa = CreateUnoService("com.sun.star.ucb.SimpleFileAccess")
+    url = AutoInputStateUrl()
+    If Not sfa.exists(url) Then
+        AutoInputRestore = ""
+        Exit Function
+    End If
+    s = WmsCore.ReadTextFile(url)
+    If InStr(s, "original=1") > 0 Then AutoInputSet(True)
+    If InStr(s, "original=0") > 0 Then AutoInputSet(False)
+    sfa.kill(url)
+    AutoInputRestore = "автоввод Calc восстановлен"
+    Exit Function
+EH:
+    AutoInputRestore = "ВНИМАНИЕ: не удалось восстановить автоввод Calc: " & Error$
+End Function
