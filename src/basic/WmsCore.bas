@@ -355,12 +355,15 @@ Function WmsStartup() As String
     ' the analysis writes to the book (registration, marker rollback, copy marks): none of it may be undone by Ctrl+Z
     UndoBegin()
     WmsRecovery.Analyze()
+    WmsIssue.RecipientsInvalidate()
+    ' the file holds no rows hidden by a filter (OnDocSave): the filter the user left is run again
+    WmsUi.FiltersAtStart()
+    WmsUi.UiAfterStartup()
     UndoEnd()
     AddNote("запуск WMS " & (GetSystemTicks() - t0) & " мс")
     WmsStartup = StateLine() & " | " & gReport
     Exit Function
 EH:
-    UndoEnd()
     ' unexpected error anywhere in startup: posting stays forbidden (D-028)
     gState = "BLOCKED"
     If gBlock = "" Then
@@ -368,6 +371,8 @@ EH:
         gBlockText = "ошибка запуска WMS: " & Error$ & " (строка " & Erl & ")"
     End If
     AddNote("ЗАБЛОКИРОВАНО [STARTUP_ERROR]: " & Error$)
+    WmsUi.UiAfterStartup()
+    UndoEnd()
     WmsStartup = StateLine() & " | " & gReport
 End Function
 
@@ -387,6 +392,16 @@ Sub OnDocSave(Optional oEvent As Variant)
     If IsNull(gSysSh) Or IsEmpty(gSysSh) Then Exit Sub
     SysPutNum(SK_SAVE_STAMP, gDoc.getDocumentProperties().EditingCycles + 1)
     SysPutNum(SK_SAVE_SEQ, SysNum(SK_LAST_SEQ))
+    ' D-041: rows hidden by a filter are unhidden for the save (LibreOffice would open a file with many hidden rows
+    ' very slowly, WmsUi.FiltersStash); the filter conditions stay and are applied again after the save
+    WmsUi.FiltersStash()
+End Sub
+
+' "Save" finished or failed: the rows shown for it are filtered again
+Sub OnDocSaveDone(Optional oEvent As Variant)
+    On Error Resume Next
+    WmsInit()
+    WmsUi.FiltersRestore()
 End Sub
 
 ' ================================================================ explicit user actions (spec §21)
@@ -550,6 +565,11 @@ End Sub
 ' cell protection of columns c1..c2 in row r
 Sub PlanLock(sSheet As String, r As Long, c1 As Integer, c2 As Integer, bLocked As Boolean)
     PlanAdd("L", sSheet, r, c1 & ":" & c2, LockBits(sSheet, r, c1, c2), String(c2 - c1 + 1, IIf(bLocked, "1", "0")), False)
+End Sub
+
+' cell protection of columns c1..c2 in row r, one character per column ("1" locked, "0" open)
+Sub PlanLockBits(sSheet As String, r As Long, c1 As Integer, c2 As Integer, bits As String)
+    PlanAdd("L", sSheet, r, c1 & ":" & c2, LockBits(sSheet, r, c1, c2), bits, False)
 End Sub
 
 Function PlanCount() As Long

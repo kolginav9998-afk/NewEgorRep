@@ -2,7 +2,7 @@
 ' MASTER SPEC v0.3: §3 sources as text, §10/§29 AutoInput, §16 protection, §20 journal, §22 lock, §24 chunks, §26 backups.
 Option Explicit
 
-Public Const WMS_CORE_VERSION = "0.1.0-phase1"
+Public Const WMS_CORE_VERSION = "0.2.0-phase2"
 Public Const WMS_SYS_SCHEMA = "WMS-SYS-1"
 
 Public Const SYS_SHEET = "_SYS"
@@ -52,6 +52,64 @@ Public Const CHECK_CHUNK_ROWS = 20000
 Public Const JPOS_VERIFY_WINDOW = 4096
 Public Const QTY_MAX_DECIMALS = 3
 Public Const QTY_MAX_INT_DIGITS = 9
+
+' ---------------------------------------------------------------- Phase 2: issues by EI (spec §2, §4, §5, §9, §10, §16)
+Public Const SH_MAIN = "Главная"
+Public Const SH_ISSUES = "Выдачи"
+Public Const SH_STOCK = "Наличие"
+Public Const SH_RCPT = "Получатели"
+
+' «Выдачи» A:R — a fixed user interface (spec §2): 0-based column indices
+Public Const IC_NO = 0
+Public Const IC_DOC = 1
+Public Const IC_NAME = 2
+Public Const IC_ART = 3
+Public Const IC_QTY = 4
+Public Const IC_PCT = 5
+Public Const IC_UNIT = 6
+Public Const IC_DATE = 7
+Public Const IC_WHO = 8
+Public Const IC_PLACE = 9
+Public Const IC_CAT = 10
+Public Const IC_EI = 11
+Public Const IC_RET = 12
+Public Const IC_RETPCT = 13
+Public Const IC_NOTE = 14
+Public Const IC_BEFORE = 15
+Public Const IC_AFTER = 16
+Public Const IC_CTL = 17
+Public Const IC_LAST = 17
+
+' cell protection of a «Выдачи» row, one character per column A..R ("1" = locked). Unposted: the inputs B E F H I L and
+' the informational M N O are open, everything WMS fills is locked. Posted: only B M N O stay open (D-013).
+Public Const ISSUE_LOCKS_OPEN = "101100100110000111"
+Public Const ISSUE_LOCKS_POSTED = "101111111111000111"
+
+' «Контроль» (R) of a row that WMS posted, corrected or cancelled; a copy is marked КОПИЯ (spec §15)
+Public Const ST_POSTED = "Проведено"
+Public Const ST_FIXED = "Проведено (исправлено)"
+Public Const ST_DELETED = "Удалено (сторно)"
+
+' «Наличие» — the permanent EI registry, one row per EI, row index = EI number (spec §5, v0.1 §24/§37)
+Public Const SC_EI = 0
+Public Const SC_NAME = 1
+Public Const SC_ART = 2
+Public Const SC_UNIT = 3
+Public Const SC_QTY = 4
+Public Const SC_PLACE = 5
+Public Const SC_CAT = 6
+Public Const SC_STATE = 7
+Public Const SC_SRC = 8
+Public Const SC_LAST = 8
+
+Public Const EI_PREFIX = "ЕИ-"
+Public Const EI_DIGITS = 8
+Public Const MAX_SHEET_ROW = 1048575
+
+' a change of more rows at once (paste, fill) gets its preview only for this many rows; the rest is cleared (spec §13)
+Public Const PREVIEW_MAX_ROWS = 500
+' «Главная»: at most this many separate blocks of rows without № are examined for the unposted count
+Public Const UNPOSTED_MAX_BLOCKS = 20000
 
 Function SysKeyNames() As Variant
     SysKeyNames = Array("SCHEMA", "INSTANCE_ID", "MODE", "CORE_VERSION", "LAST_SEQ", "NEXT_EI", "NEXT_NO", "NEXT_RET", _

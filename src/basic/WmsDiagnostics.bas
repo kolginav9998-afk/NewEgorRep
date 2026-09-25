@@ -99,6 +99,18 @@ Function SelfCheck() As String
     Else
         out = out & Ln("OK", "автоввод Calc", "выключен")
     End If
+    s = RegistryCheck()
+    If Left(s, 6) = "ОШИБКА" Then
+        out = out & Ln("FAIL", "реестр «" & SH_STOCK & "»", Mid(s, 8))
+    Else
+        out = out & Ln("OK", "реестр «" & SH_STOCK & "»", s)
+    End If
+    s = WmsIssue.RecipientsDuplicates()
+    If s <> "" Then
+        out = out & Ln("WARN", "справочник «" & SH_RCPT & "»", "повторяются сокращения " & s & " — такие сокращения не подставляются")
+    Else
+        out = out & Ln("OK", "справочник «" & SH_RCPT & "»", "записей " & WmsIssue.RecipientsCount() & ", сокращения уникальны")
+    End If
     s = FullKeyCheck(False)
     If Left(s, 6) = "ОШИБКА" Or InStr(s, "; ОШИБКА") > 0 Then
         out = out & Ln("FAIL", "ключи", s)
@@ -115,6 +127,53 @@ SUMMARY:
         If Left(lines(i), 4) = "WARN" Then nWarn = nWarn + 1
     Next i
     SelfCheck = "САМОПРОВЕРКА WMS: ошибок " & nFail & ", предупреждений " & nWarn & Chr(10) & out
+End Function
+
+' ---------------------------------------------------------------- EI registry «Наличие» (spec §5, §49)
+' Row n must hold ЕИ n (dense addressing) and a balance ≥ 0. Two columns, in chunks of CHECK_CHUNK_ROWS.
+Function RegistryCheck() As String
+    Dim sh As Object, cur As Object, last As Long, r0 As Long, r1 As Long, i As Long, dEI As Variant, dQ As Variant
+    Dim nEI As Long, nGap As Long, nBad As Long, nNeg As Long, first As String, t0 As Long, canon As String
+    On Error GoTo EH
+    t0 = GetSystemTicks()
+    sh = gDoc.Sheets.getByName(SH_STOCK)
+    cur = sh.createCursor()
+    cur.gotoEndOfUsedArea(False)
+    last = cur.getRangeAddress().EndRow
+    For r0 = 1 To last Step CHECK_CHUNK_ROWS
+        r1 = r0 + CHECK_CHUNK_ROWS - 1
+        If r1 > last Then r1 = last
+        dEI = sh.getCellRangeByPosition(SC_EI, r0, SC_EI, r1).getDataArray()
+        dQ = sh.getCellRangeByPosition(SC_QTY, r0, SC_QTY, r1).getDataArray()
+        For i = 0 To r1 - r0
+            canon = WmsIssue.EiCanon(r0 + i)
+            If CStr(dEI(i)(0)) = canon Then
+                nEI = nEI + 1
+                If VarType(dQ(i)(0)) <> 5 Then
+                    If CStr(dQ(i)(0)) <> "" Then
+                        nBad = nBad + 1
+                        If first = "" Then first = "строка " & (r0 + i + 1) & ": остаток не число"
+                    End If
+                ElseIf dQ(i)(0) < 0 Then
+                    nNeg = nNeg + 1
+                    If first = "" Then first = "строка " & (r0 + i + 1) & ": отрицательный остаток " & dQ(i)(0)
+                End If
+            ElseIf CStr(dEI(i)(0)) = "" Then
+                nGap = nGap + 1
+            Else
+                nBad = nBad + 1
+                If first = "" Then first = "строка " & (r0 + i + 1) & ": «" & dEI(i)(0) & "» вместо " & canon
+            End If
+        Next i
+    Next r0
+    If nBad + nNeg > 0 Then
+        RegistryCheck = "ОШИБКА: ЕИ " & nEI & ", нарушений адресации " & nBad & ", отрицательных остатков " & nNeg & " (" & first & ")"
+    Else
+        RegistryCheck = "ЕИ " & nEI & IIf(nGap > 0, ", пустых строк " & nGap, "") & ", адресация и остатки в порядке, " & (GetSystemTicks() - t0) & " мс"
+    End If
+    Exit Function
+EH:
+    RegistryCheck = "ОШИБКА: проверка реестра не выполнена: " & Error$
 End Function
 
 ' ---------------------------------------------------------------- full key check
@@ -145,7 +204,7 @@ Private Function LastUsedRow(sh As Object) As Long
 End Function
 
 Private Sub MarkCopy(sh As Object, ctlCol As Integer, r As Long, txt As String)
-    sh.getCellByPosition(ctlCol, r).setString("КОПИЯ: " & txt & " — не проводится, удалите командой «Очистить копию»")
+    sh.getCellByPosition(ctlCol, r).setString("КОПИЯ: " & txt & " — не проводится, очистите строку кнопкой «Очистить»")
 End Sub
 
 Private Function CheckKeySheet(spec As String, bMark As Boolean) As String

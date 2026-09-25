@@ -24,6 +24,7 @@ Sub Analyze()
     End If
     ' 2. service data
     p = SysLayoutProblem()
+    If p = "" Then p = WmsIssue.SheetsProblem()
     If p <> "" Then
         SetBlocked("SYS_CORRUPT", p)
         Exit Sub
@@ -122,7 +123,8 @@ Sub Analyze()
         End If
         SysPutNum(SK_SAVE_STAMP, ec)
     End If
-    SysPutStr(SK_CORE_VERSION, WMS_CORE_VERSION)
+    ' written only when it changes: an unchanged book must not look modified after a start (LibreOffice would ask to save)
+    If SysStr(SK_CORE_VERSION) <> WMS_CORE_VERSION Then SysPutStr(SK_CORE_VERSION, WMS_CORE_VERSION)
     gState = "CLEAN"
 End Sub
 
@@ -183,7 +185,15 @@ Private Function ClassifyReplay() As String
         If gPW_Kind(i) <> "L" Then
             oCell = SheetByName(gPW_Sheet(i)).getCellByPosition(CInt(gPW_Col(i)), gPW_Row(i))
             cur = EncCell(oCell)
-            If gPW_Kind(i) = "V" Then
+            If gPW_Kind(i) = "V" And SameEnc(gPW_Before(i), gPW_After(i)) Then
+                ' a write that leaves the cell as it was tells nothing about whether the operation ran (e.g. a preview
+                ' already showing the registry value); only a third value is a conflict
+                If Not (SameEnc(cur, gPW_After(i)) Or (gPW_Restorable(i) And cur = "E")) Then
+                    ClassifyReplay = "CONFLICT:" & gPW_Sheet(i) & "!" & ColLetter(CInt(gPW_Col(i))) & (gPW_Row(i) + 1) _
+                        & " — в книге «" & Left(cur, 40) & "», ожидалось «" & Left(gPW_After(i), 40) & "»"
+                    Exit Function
+                End If
+            ElseIf gPW_Kind(i) = "V" Then
                 If SameEnc(cur, gPW_After(i)) Then
                     nAlready = nAlready + 1
                 ElseIf SameEnc(cur, gPW_Before(i)) Or (gPW_Restorable(i) And cur = "E") Then

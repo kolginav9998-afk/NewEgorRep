@@ -81,6 +81,7 @@ class Office:
         self.smgr = self.ctx.ServiceManager
         self.desktop = self.smgr.createInstanceWithContext("com.sun.star.frame.Desktop", self.ctx)
         self.dispatcher = self.smgr.createInstanceWithContext("com.sun.star.frame.DispatchHelper", self.ctx)
+        self.toolkit = self.smgr.createInstanceWithContext("com.sun.star.awt.Toolkit", self.ctx)
 
     # ---------------------------------------------------------------- documents
     def new_calc(self):
@@ -90,7 +91,19 @@ class Office:
         """macros: css.document.MacroExecMode (0 never, 4 always without warning)."""
         kw = dict(MacroExecutionMode=macros, Hidden=hidden)
         kw.update(extra)
-        return self.desktop.loadComponentFromURL(uno.systemPathToFileUrl(os.path.abspath(path)), "_blank", 0, props(**kw))
+        doc = self.desktop.loadComponentFromURL(uno.systemPathToFileUrl(os.path.abspath(path)), "_blank", 0, props(**kw))
+        self.idle()
+        return doc
+
+    def idle(self):
+        """Let LibreOffice run what it has queued, in particular the document's OnLoad macro, which Calc posts
+        asynchronously after loading. Calling a Basic macro through the script provider while that event is being
+        dispatched can deadlock LibreOffice (the main thread holds the SolarMutex and waits for the script framework,
+        the bridge thread holds the script framework and waits for the SolarMutex); a user never does both at once."""
+        try:
+            self.toolkit.processEventsToIdle()
+        except Exception:
+            pass
 
     def dispatch(self, doc, cmd, **args):
         frame = doc.getCurrentController().getFrame()

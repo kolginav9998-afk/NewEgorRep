@@ -13,8 +13,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from wmslo import Office, props  # noqa: E402
-from build_ods import build, SYS_KEYS  # noqa: E402
+from build_ods import build, SYS_KEYS, synthetic_registry  # noqa: E402
 import journal_oracle  # noqa: E402
+import issue_oracle  # noqa: E402
+
+ISSUE_COLS = "ABCDEFGHIJKLMNOPQR"
+# initial balances of the synthetic EIs of a test book (tools/build_ods.synthetic_registry)
+INITIAL_STOCK = {row[0]: row[4] for row in synthetic_registry()}
 
 OUT = os.path.abspath(os.environ.get("WMS_TEST_OUT") or tempfile.mkdtemp(prefix="wms_phase1_"))
 PROFILES = os.path.join(OUT, "profiles")
@@ -131,6 +136,62 @@ class Session:
 
     def check(self, expect_tail=0):
         return journal_oracle.check(self.doc, self.jdir, expect_tail)
+
+    # «Выдачи» (Phase 2)
+    def I(self, func, *a):
+        return self.B(func, *a, module="WmsIssue")
+
+    def U(self, func, *a):
+        return self.B(func, *a, module="WmsUi")
+
+    def iss(self, r):
+        """values of «Выдачи» row r (0-based; row 1 is the first data row)"""
+        return tuple(self.doc.Sheets.getByName("Выдачи").getCellRangeByPosition(0, r, 17, r).getDataArray()[0])
+
+    def iss_cell(self, col, r):
+        cell = self.doc.Sheets.getByName("Выдачи").getCellByPosition(ISSUE_COLS.index(col), r)
+        return cell.getType().value, cell.getString(), cell.getValue()
+
+    def iss_locks(self, r):
+        sh = self.doc.Sheets.getByName("Выдачи")
+        return "".join("1" if sh.getCellByPosition(c, r).CellProtection.IsLocked else "0" for c in range(18))
+
+    def stock(self, n):
+        return self.doc.Sheets.getByName("Наличие").getCellByPosition(4, n).getValue()
+
+    def goto(self, sheet, ref):
+        ctl = self.doc.getCurrentController()
+        ctl.setActiveSheet(self.doc.Sheets.getByName(sheet))
+        self.o.dispatch(self.doc, ".uno:GoToCell", ToPoint=f"${sheet}.{ref}")
+
+    def type_iss(self, col, r, text):
+        """enter text into «Выдачи» like a user (GoToCell + EnterString): the sheet's change handler runs"""
+        self.goto("Выдачи", f"${col}${r + 1}")
+        self.o.dispatch(self.doc, ".uno:EnterString", StringName=text)
+
+    def issue_input(self, r, ei=None, qty=None, date=None, who=None, doc=None, note=None):
+        for col, v in (("L", ei), ("E", qty), ("H", date), ("I", who), ("B", doc), ("O", note)):
+            if v is not None:
+                self.type_iss(col, r, v)
+
+    def click(self, button, r=None, col="L"):
+        """a button of «Выдачи» for the row under the cursor (the same macro the button is bound to)"""
+        if r is not None:
+            self.goto("Выдачи", f"${col}${r + 1}")
+        return self.U(button)
+
+    def post(self, r):
+        return self.I("IssuePostRow", r)
+
+    def main_status(self):
+        sh = self.doc.Sheets.getByName("Главная")
+        return [sh.getCellByPosition(1, r).getString() for r in range(2, 9)]
+
+    def active_sheet(self):
+        return self.doc.getCurrentController().getActiveSheet().getName()
+
+    def icheck(self, expect_tail=0, initial=None):
+        return issue_oracle.check(self.doc, self.jdir, INITIAL_STOCK if initial is None else initial, expect_tail)
 
     def journal(self):
         return journal_oracle.read_journal(self.jdir)
