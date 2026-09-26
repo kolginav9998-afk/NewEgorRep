@@ -1,8 +1,8 @@
 """Assemble a WMS workbook from the text sources (MASTER SPEC v0.3 §3: Basic sources are text, the ODS is a build artefact).
 
     python3 tools/build_ods.py OUT.ods            production book: «Главная», «Заказы», «Иной приход», «Выдачи», «Возврат»,
-                                                  «Наличие», «Получатели», service sheets _ORD, _RCV, _SPR, _ART, _RET, _ISS,
-                                                  _IDX, _SYS
+                                                  «Корректировки», «Наличие», «Получатели», service sheets _ORD, _RCV, _SPR,
+                                                  _ART, _RET, _ISS, _ADJ, _IDX, _SYS
     python3 tools/build_ods.py OUT.ods --test     test book: + test module, the synthetic _TST sheet, synthetic EIs and
                                                   recipients, MODE=TEST
 
@@ -31,10 +31,12 @@ PWD = "wms"                      # WmsConfig.PROTECT_PWD
 SYS_KEYS = ["SCHEMA", "INSTANCE_ID", "MODE", "CORE_VERSION", "LAST_SEQ", "NEXT_EI", "NEXT_NO", "NEXT_RET",
             "JOURNAL_POS", "REGISTERED_URL", "TX_STATE", "TX_SEQ", "TX_TYPE", "TX_TIME", "TX_BEFORE_IMAGE",
             "SAVE_STAMP", "SAVE_SEQ", "MAX_QTY", "KEY_SHEETS",
-            "NEXT_SPL", "NEXT_OFF", "NEXT_PROD", "NEXT_DET", "NEXT_OLD", "NEXT_OTH"]        # WmsConfig.SysKeyNames() (WMS-SYS-2)
+            "NEXT_SPL", "NEXT_OFF", "NEXT_PROD", "NEXT_DET", "NEXT_OLD", "NEXT_OTH", "NEXT_ADJ"]   # WmsConfig.SysKeyNames() (WMS-SYS-3)
+SCHEMA = "WMS-SYS-3"                                                                  # WmsConfig.WMS_SYS_SCHEMA
 SK_SAVE_STAMP = SYS_KEYS.index("SAVE_STAMP")
 MODULES = ["WmsConfig", "WmsCore", "WmsJournal", "WmsLock", "WmsBackup", "WmsRecovery", "WmsDiagnostics", "WmsIssue", "WmsUi",
-           "WmsOrders", "WmsReceipt", "WmsOrdersUi", "WmsReturn", "WmsReturnUi", "WmsSpecial", "WmsSpecialUi"]
+           "WmsOrders", "WmsReceipt", "WmsOrdersUi", "WmsReturn", "WmsReturnUi", "WmsSpecial", "WmsSpecialUi", "WmsAdjust", "WmsAdjustUi",
+           "WmsExport", "WmsMigrate"]
 TEST_MODULES = ["WmsTestOps"]
 TEST_SHEET = "_TST"
 LAST_ROW = 1048575
@@ -94,6 +96,17 @@ SPR_HEADERS = ["№ строки", "Событие", "Тип", "ЕИ", "Режи
                "Ключ антидубля", "Артикул (норм.)", "Разобрано как", "Исправлений"]                  # WmsConfig SR_*
 ART = "_ART"
 ART_HEADERS = ["Артикул (норм.)", "ЕИ", "Артикул"]                                                  # WmsConfig AR_*
+# «Корректировки» A:S — moves, write-offs, inventory corrections (Final Core; WmsConfig AC_*); the service data in _ADJ
+ADJUST = "Корректировки"
+ADJUST_HEADERS = ["№", "Вид", "Внутренний код", "Наименование", "Артикул", "Единица измерения", "Списать, количество",
+                  "Фактический остаток", "Учётный остаток", "Новое место", "Дата", "Причина / основание", "Место до", "Остаток до",
+                  "Остаток после", "Разница", "Контроль", "Пакет", "Комментарий"]
+ADJUST_WIDTHS = [1500, 3000, 3300, 6000, 3000, 2300, 2300, 2500, 2500, 2800, 2600, 5000, 2800, 2300, 2300, 2300, 7000, 3500, 4500]
+ADJUST_LOCKS_OPEN = "1001110000001111100"      # WmsConfig.ADJUST_LOCKS_OPEN: unposted rows, inputs B C G H I J K L R S open
+ADJUST_KINDS = ["Перемещение", "Списание", "Инвентаризация"]      # WmsConfig.ADJ_KIND_NAMES
+ADJ = "_ADJ"
+ADJ_HEADERS = ["№", "Вид", "ЕИ", "Изменение остатка", "Состояние", "Строка (индекс)", "Место до", "Место после", "Учётный остаток",
+               "Фактический остаток", "Дата"]                                                   # WmsConfig AJ_*
 # _SYS KEY_SHEETS: sheet|keyCol|ctlCol|counterRow|inputCol[|EI|RET|SPR] — the full key check after a save without WMS (spec §15)
 ISSUE_KEY_SPEC = f"{ISSUES}|0|17|{SYS_KEYS.index('NEXT_NO')}|11"
 # «Заказы»: the key is the EI in V (text), issued from NEXT_EI; the input column is F (a quantity without a receipt)
@@ -102,6 +115,8 @@ ORDER_KEY_SPEC = f"{ORDERS}|21|24|{SYS_KEYS.index('NEXT_EI')}|5|EI"
 RETURN_KEY_SPEC = f"{RETURNS}|0|13|{SYS_KEYS.index('NEXT_RET')}|5|RET"
 # «Иной приход»: the key is the line № in A, issued from NEXT_SPL and registered in _SPR; the input column is F (quantity)
 SPECIAL_KEY_SPEC = f"{SPECIAL}|0|17|{SYS_KEYS.index('NEXT_SPL')}|5|SPR"
+# «Корректировки»: the key is the № in A, issued from NEXT_ADJ and registered in _ADJ; the input column is B (the kind)
+ADJUST_KEY_SPEC = f"{ADJUST}|0|16|{SYS_KEYS.index('NEXT_ADJ')}|1|ADJ"
 # _TST (Phase 1 test sheet): A key (issued from NEXT_NO), B text (input), C quantity (text input), D control/status
 TEST_KEY_SPEC = f"{TEST_SHEET}|0|3|{SYS_KEYS.index('NEXT_NO')}|1"
 
@@ -267,6 +282,35 @@ def build_special(doc, sh):
         x += 2900
 
 
+def build_adjust(doc, sh):
+    header(sh, ADJUST_HEADERS, ADJUST_WIDTHS, height=1700)
+    text = number_format(doc, "@", ("ru", "RU"))
+    # A №: whole numbers; C EI and G H I quantities: text input (identifiers as typed, quantities parsed by WMS — spec §12);
+    # K date; N O P balances
+    sh.getCellRangeByPosition(0, 1, 0, LAST_ROW).NumberFormat = number_format(doc, "0")
+    for c in (2, 6, 7, 8, 9, 17):
+        sh.getCellRangeByPosition(c, 1, c, LAST_ROW).NumberFormat = text
+    sh.getCellRangeByPosition(10, 1, 10, LAST_ROW).NumberFormat = number_format(doc, "DD.MM.YYYY")
+    for c, bit in enumerate(ADJUST_LOCKS_OPEN):
+        if bit == "0":
+            sh.getCellRangeByPosition(c, 1, c, LAST_ROW).CellProtection = protection(False)
+    # B «Вид»: a list to choose from (WMS checks the value itself)
+    rng = sh.getCellRangeByPosition(1, 1, 1, LAST_ROW)
+    v = rng.Validation
+    v.Type = uno.Enum("com.sun.star.sheet.ValidationType", "LIST")
+    v.ShowList = 1
+    v.IgnoreBlankCells = True
+    v.ShowErrorMessage = False
+    v.setFormula1(";".join(f'"{t}"' for t in ADJUST_KINDS))
+    rng.Validation = v
+    x = 150
+    for name, label, macro in (("btnAdjCheck", "Проверить", "WmsAdjustUi.BtnAdjCheck"), ("btnAdjPost", "Провести", "WmsAdjustUi.BtnAdjPost"),
+                               ("btnAdjFix", "Исправить", "WmsAdjustUi.BtnAdjFix"), ("btnAdjDelete", "Удалить", "WmsAdjustUi.BtnAdjDelete"),
+                               ("btnAdjClear", "Очистить", "WmsAdjustUi.BtnAdjClear")):
+        add_button(doc, sh, name, label, macro, x, 120, 2750, 650)
+        x += 2900
+
+
 def build_stock(doc, sh, rows):
     header(sh, STOCK_HEADERS, STOCK_WIDTHS)
     sh.getCellRangeByPosition(0, 1, 0, LAST_ROW).NumberFormat = number_format(doc, "@", ("ru", "RU"))
@@ -313,7 +357,7 @@ def build_service(doc, sheets):
     for c, h in enumerate(RCV_HEADERS):
         rcv.getCellByPosition(c, 0).setString(h)
     rcv.getCellRangeByPosition(8, 1, 8, LAST_ROW).NumberFormat = number_format(doc, "@", ("ru", "RU"))
-    for name, heads in ((RET, RET_HEADERS), (ISS, ISS_HEADERS), (SPR, SPR_HEADERS), (ART, ART_HEADERS)):
+    for name, heads in ((RET, RET_HEADERS), (ISS, ISS_HEADERS), (SPR, SPR_HEADERS), (ART, ART_HEADERS), (ADJ, ADJ_HEADERS)):
         sh = sheets.getByName(name)
         for c, h in enumerate(heads):
             sh.getCellByPosition(c, 0).setString(h)
@@ -321,6 +365,8 @@ def build_service(doc, sheets):
         sheets.getByName(SPR).getCellRangeByPosition(c, 1, c, LAST_ROW).NumberFormat = number_format(doc, "@", ("ru", "RU"))
     for c in (0, 2):                       # _ART: the article key and the article as typed are texts
         sheets.getByName(ART).getCellRangeByPosition(c, 1, c, LAST_ROW).NumberFormat = number_format(doc, "@", ("ru", "RU"))
+    for c in (1, 2, 4, 6, 7):              # _ADJ: kind, EI, state and the places are texts
+        sheets.getByName(ADJ).getCellRangeByPosition(c, 1, c, LAST_ROW).NumberFormat = number_format(doc, "@", ("ru", "RU"))
     idx = sheets.getByName(IDX)
     o = f"$'{ORDERS}'"
     r = f"$'{RCV}'"
@@ -350,6 +396,7 @@ def build_service(doc, sheets):
     x_ = f"$'{SPECIAL}'"
     a_ = f"$'{ART}'"
     p_ = f"$'{SPR}'"
+    k_ = f"$'{ADJUST}'"
     more = [    # WmsConfig IX_I_MATCH, IX_RA_MATCH, IX_RA_COUNT (Phase 4), IX_XA_*, IX_ART_*, IX_XD_* (Phase 5), after the scratch cell
         ("Выдачи.A: MATCH", f"=MATCH($B$1;INDEX({i_}.$A:$A;$B$2+2):INDEX({i_}.$A:$A;1048576);0)+$B$2"),
         ("Возврат.A: MATCH", f"=MATCH($B$1;INDEX({v}.$A:$A;$B$2+2):INDEX({v}.$A:$A;1048576);0)+$B$2"),
@@ -360,6 +407,9 @@ def build_service(doc, sheets):
         ("_ART.A: COUNTIF", f"=COUNTIF({a_}.$A:$A;$B$1)"),
         ("_SPR.J: MATCH", f"=MATCH($B$1;INDEX({p_}.$J:$J;$B$2+2):INDEX({p_}.$J:$J;1048576);0)+$B$2"),
         ("_SPR.J: COUNTIF", f"=COUNTIF({p_}.$J:$J;$B$1)"),
+        # WmsConfig IX_AA_MATCH, IX_AA_COUNT (Final Core)
+        ("Корректировки.A: MATCH", f"=MATCH($B$1;INDEX({k_}.$A:$A;$B$2+2):INDEX({k_}.$A:$A;1048576);0)+$B$2"),
+        ("Корректировки.A: COUNTIF", f"=COUNTIF({k_}.$A:$A;$B$1)"),
     ]
     for i, (label, f) in enumerate(more, start=len(cells) + 1):
         idx.getCellByPosition(0, i).setString(label)
@@ -393,10 +443,11 @@ def build_main(doc, sh):
     y = sh.getCellByPosition(0, 10).Position.Y
     buttons = (("btnRecover", "Восстановить", "WmsUi.BtnRecover"), ("btnAbandon", "Отложить хвост журнала", "WmsUi.BtnAbandon"),
                ("btnUnlock", "Снять блокировку WMS", "WmsUi.BtnUnlock"), ("btnRegister", "Сделать рабочим файлом", "WmsUi.BtnRegister"),
-               ("btnSelfCheck", "Самопроверка", "WmsUi.BtnSelfCheck"), ("btnBackup", "Резервная копия", "WmsUi.BtnBackup"))
+               ("btnSelfCheck", "Самопроверка", "WmsUi.BtnSelfCheck"), ("btnBackup", "Резервная копия", "WmsUi.BtnBackup"),
+               ("btnExport", "Экспорт для инструментов", "WmsExport.BtnExport"), ("btnLoadBatch", "Загрузить пакет", "WmsExport.BtnLoadBatch"))
     for i, (name, label, macro) in enumerate(buttons):
         add_button(doc, sh, name, label, macro, 200 + (i % 2) * 6700, y + (i // 2) * 1000, 6400, 800)
-    help_row = 15
+    help_row = 20
     sh.getCellByPosition(0, help_row).setString(
         "Приход: на листе «Заказы» в строке заказа укажите фактическое количество (F), дату поступления (N), место хранения (U), "
         "при наличии — документ (C, G, O) и нажмите «Провести приход»: будет создан новый ЕИ. Следующая поставка той же позиции — "
@@ -406,10 +457,14 @@ def build_main(doc, sh):
         "Приход не по заказу (Офис, Производство, Детали, Старый склад, Иной): лист «Иной приход» — тип прихода (B), наименование, "
         "артикул (для деталей обязателен: тот же артикул пополняет тот же ЕИ), количество, единица, дата, место и «Провести»; "
         "несколько выделенных строк можно провести одним поступлением (один № OFF/PROD/DET/OLD/OTH). "
+        "Перемещение, списание, инвентаризация: лист «Корректировки» — вид (B), ЕИ (C), для списания количество (G), для "
+        "инвентаризации фактический остаток (H), для перемещения новое место (J), дата (K), причина (L) и «Провести». "
+        "«Экспорт для инструментов» создаёт снимок для WMS_TOOLBOX в папке WMS_Export рядом с книгой; «Загрузить пакет» — "
+        "строки из файла инструмента (они проводятся обычными проверками). "
         "«Исправить» и «Удалить» работают для проведённой строки под курсором, «Очистить» — для непроведённой строки или копии.")
     sh.getCellRangeByPosition(0, help_row, 1, help_row).merge(True)
     sh.getCellByPosition(0, help_row).IsTextWrapped = True
-    sh.getRows().getByIndex(help_row).Height = 4200
+    sh.getRows().getByIndex(help_row).Height = 5800
 
 
 def patch_content(path, fn):
@@ -442,16 +497,17 @@ def build(office, out_path, test=False, instance_id=None):
     sheets = doc.Sheets
     main = sheets.getByIndex(0)
     main.Name = MAIN
-    for i, name in enumerate((ORDERS, SPECIAL, ISSUES, RETURNS, STOCK, RCPT, ORD, RCV, SPR, ART, RET, ISS, IDX, "_SYS"), start=1):
+    for i, name in enumerate((ORDERS, SPECIAL, ISSUES, RETURNS, ADJUST, STOCK, RCPT, ORD, RCV, SPR, ART, RET, ISS, ADJ, IDX, "_SYS"), start=1):
         sheets.insertNewByName(name, i)
     sys_sh = sheets.getByName("_SYS")
     values = {
-        "SCHEMA": "WMS-SYS-2", "INSTANCE_ID": instance_id or "%016X" % random.getrandbits(64), "MODE": "TEST" if test else "PROD",
+        "SCHEMA": SCHEMA, "INSTANCE_ID": instance_id or "%016X" % random.getrandbits(64), "MODE": "TEST" if test else "PROD",
         "CORE_VERSION": "", "LAST_SEQ": 0, "NEXT_EI": 1, "NEXT_NO": 1, "NEXT_RET": 1, "JOURNAL_POS": "", "REGISTERED_URL": "",
         "TX_STATE": "NONE", "TX_SEQ": 0, "TX_TYPE": "", "TX_TIME": "", "TX_BEFORE_IMAGE": "", "SAVE_STAMP": 0, "SAVE_SEQ": 0,
         "MAX_QTY": 100000,
-        "KEY_SHEETS": ISSUE_KEY_SPEC + ";" + ORDER_KEY_SPEC + ";" + RETURN_KEY_SPEC + ";" + SPECIAL_KEY_SPEC + (";" + TEST_KEY_SPEC if test else ""),
-        "NEXT_SPL": 1, "NEXT_OFF": 1, "NEXT_PROD": 1, "NEXT_DET": 1, "NEXT_OLD": 1, "NEXT_OTH": 1,
+        "KEY_SHEETS": ISSUE_KEY_SPEC + ";" + ORDER_KEY_SPEC + ";" + RETURN_KEY_SPEC + ";" + SPECIAL_KEY_SPEC + ";" + ADJUST_KEY_SPEC
+                      + (";" + TEST_KEY_SPEC if test else ""),
+        "NEXT_SPL": 1, "NEXT_OFF": 1, "NEXT_PROD": 1, "NEXT_DET": 1, "NEXT_OLD": 1, "NEXT_OTH": 1, "NEXT_ADJ": 1,
     }
     registry = synthetic_registry() if test else []
     if registry:
@@ -468,6 +524,7 @@ def build(office, out_path, test=False, instance_id=None):
     build_issues(doc, sheets.getByName(ISSUES))
     build_returns(doc, sheets.getByName(RETURNS))
     build_special(doc, sheets.getByName(SPECIAL))
+    build_adjust(doc, sheets.getByName(ADJUST))
     build_stock(doc, sheets.getByName(STOCK), registry)
     build_recipients(sheets.getByName(RCPT), TEST_RECIPIENTS if test else [])
     build_service(doc, sheets)
@@ -476,6 +533,7 @@ def build(office, out_path, test=False, instance_id=None):
     autofilter(doc, order.index(SPECIAL), "WMS_SPECIAL", len(SPECIAL_HEADERS))
     autofilter(doc, order.index(ISSUES), "WMS_ISSUES", len(ISSUE_HEADERS))
     autofilter(doc, order.index(RETURNS), "WMS_RETURNS", len(RETURN_HEADERS))
+    autofilter(doc, order.index(ADJUST), "WMS_ADJUST", len(ADJUST_HEADERS))
     autofilter(doc, order.index(STOCK), "WMS_STOCK", len(STOCK_HEADERS))
     # lookups of the Calc engine (_IDX): whole-cell comparison, no regular expressions; wildcards are escaped by WMS
     doc.setPropertyValue("MatchWholeCell", True)
@@ -503,24 +561,25 @@ def build(office, out_path, test=False, instance_id=None):
     bind_event(sheets.getByName(ORDERS).Events, "OnChange", "WmsOrders.OnOrdersChange")
     bind_event(sheets.getByName(RETURNS).Events, "OnChange", "WmsReturn.OnReturnsChange")
     bind_event(sheets.getByName(SPECIAL).Events, "OnChange", "WmsSpecial.OnSpecialChange")
+    bind_event(sheets.getByName(ADJUST).Events, "OnChange", "WmsAdjust.OnAdjustChange")
     bind_event(sheets.getByName(RCPT).Events, "OnChange", "WmsIssue.OnRecipientsChange")
     ctl = doc.getCurrentController()
-    for name in (ORDERS, SPECIAL, ISSUES, RETURNS, STOCK, RCPT):
+    for name in (ORDERS, SPECIAL, ISSUES, RETURNS, ADJUST, STOCK, RCPT):
         ctl.setActiveSheet(sheets.getByName(name))
         ctl.freezeAtPosition(0, 1)
     ctl.setActiveSheet(sheets.getByName(ISSUES))
     ctl.select(sheets.getByName(ISSUES).getCellByPosition(11, 1))
-    for name in (ORD, RCV, SPR, ART, RET, ISS, IDX, "_SYS"):
+    for name in (ORD, RCV, SPR, ART, RET, ISS, ADJ, IDX, "_SYS"):
         sheets.getByName(name).IsVisible = False
-    for name in (MAIN, ORDERS, SPECIAL, ISSUES, RETURNS, STOCK, ORD, RCV, SPR, ART, RET, ISS, IDX, "_SYS"):
+    for name in (MAIN, ORDERS, SPECIAL, ISSUES, RETURNS, ADJUST, STOCK, ORD, RCV, SPR, ART, RET, ISS, ADJ, IDX, "_SYS"):
         sheets.getByName(name).protect(PWD)
     doc.protect(PWD)
     if os.path.exists(out_path):
         os.remove(out_path)
     doc.storeAsURL(uno.systemPathToFileUrl(out_path), props(FilterName="calc8"))
     doc.close(True)
-    patch_content(out_path, lambda x: allow_insert_rows(allow_insert_rows(allow_insert_rows(allow_insert_rows(x, ISSUES), ORDERS), RETURNS),
-                                                         SPECIAL))
+    patch_content(out_path, lambda x: allow_insert_rows(allow_insert_rows(allow_insert_rows(allow_insert_rows(allow_insert_rows(
+        x, ISSUES), ORDERS), RETURNS), SPECIAL), ADJUST))
     # the saved file must carry the save stamp WMS expects (EditingCycles after this save), otherwise the first
     # start would report "saved without WMS"; fix it up with macros disabled so no event interferes
     doc = office.load(out_path, macros=0, hidden=True)
@@ -538,8 +597,8 @@ def build(office, out_path, test=False, instance_id=None):
         raise RuntimeError(f"save stamp {stamp} != EditingCycles {ec}")
     with zipfile.ZipFile(out_path) as z:
         xml = z.read("content.xml").decode("utf-8")
-    if xml.count('loext:insert-rows="true"') != 4:
-        raise RuntimeError("the «insert rows» protection option of «Выдачи»/«Заказы»/«Возврат»/«Иной приход» did not survive the save")
+    if xml.count('loext:insert-rows="true"') != 5:
+        raise RuntimeError("the «insert rows» protection option of «Выдачи»/«Заказы»/«Возврат»/«Иной приход»/«Корректировки» did not survive the save")
     return out_path
 
 

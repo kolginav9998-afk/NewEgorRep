@@ -1,19 +1,20 @@
 # WMS_STATE — состояние проекта
 
-**Обновлено:** 26.09.2026, **Core Phase 5 PRIME «Все специальные приходы» принят** (D-071…D-088; пункты 11 и 17 — в редакции пользователя). Идёт **«FINAL WMS MARATHON»** (`CLAUDE_TASK.md`): контрольная точка M1 «Phase 5 accepted» — один commit этапа и обычный push в `claude/festive-lamport-l4f8f1`. Компактное техническое состояние — `FINAL_HANDOFF.md`.
+**Обновлено:** 26.09.2026, идёт **«FINAL WMS MARATHON»** (`CLAUDE_TASK.md`). Контрольная точка **M2 «Final Core»** — корректировки, снимок для инструментов, пакеты, перенос `MIGRATE`; **ядро feature-frozen**; правила П-1…П-12 — на утверждении (`CLAUDE_REPORT_FINAL_CORE.md` §9). Компактное техническое состояние — `FINAL_HANDOFF.md`.
 
 ## Версии и документы
 
 | Что | Где |
 |---|---|
 | Спецификация | **v0.3** — `WMS_MASTER_SPEC.md`, дополнена решениями D-039…D-044 (§9, §16, §20, §21), D-045…D-059 (§5, §6, §21, §23, §31), D-060…D-070 (§6, §9, §11, §14, §21, §23, §31) и D-071…D-088 (§7, §8, §31). Прежняя v0.1 — `docs/history/WMS_MASTER_SPEC_v0.1.md` |
-| Решения | `WMS_DECISIONS.md`: D-001…D-088 (D-071…D-088 — приёмка этапа 5; D-081, D-087 — в редакции пользователя) |
+| Решения | `WMS_DECISIONS.md`: D-001…D-088 (D-071…D-088 — приёмка этапа 5; D-081, D-087 — в редакции пользователя). На утверждении: П-1…П-12 (Final Core, `CLAUDE_REPORT_FINAL_CORE.md` §9) |
 | Текущее задание | `CLAUDE_TASK.md` — «FINAL WMS MARATHON — ОТ PHASE 5 ДО PRODUCTION 1.0» (выполняется; milestone M1…M5). Прежние: Phase 5 — `docs/history/CLAUDE_TASK_CORE_PHASE5.md`, Phase 4 — `docs/history/CLAUDE_TASK_CORE_PHASE4.md`, Phase 3 — `docs/history/CLAUDE_TASK_CORE_PHASE3.md`, Phase 2 — `docs/history/CLAUDE_TASK_CORE_PHASE2.md`, Phase 1 — `docs/history/CLAUDE_TASK_CORE_PHASE1.md` |
 | Техническое состояние | `FINAL_HANDOFF.md` — листы и колонки, служебные таблицы, счётчики, операции журнала, инварианты, решения, команды тестов, план марафона |
-| Отчёты этапов | `CLAUDE_REPORT_CORE_PHASE5_SPECIAL_RECEIPTS.md` (этап 5, принят), `CLAUDE_REPORT_CORE_PHASE4_RETURNS.md` (этап 4), `CLAUDE_REPORT_CORE_PHASE3_RECEIPTS.md` (этап 3), `CLAUDE_REPORT_CORE_PHASE2_ISSUES.md` (этап 2), `CLAUDE_REPORT_CORE_PHASE1.md` (этап 1) |
+| Отчёты этапов | `CLAUDE_REPORT_FINAL_CORE.md` (M2 Final Core), `CLAUDE_REPORT_CORE_PHASE5_SPECIAL_RECEIPTS.md` (этап 5, принят), `CLAUDE_REPORT_CORE_PHASE4_RETURNS.md` (этап 4), `CLAUDE_REPORT_CORE_PHASE3_RECEIPTS.md` (этап 3), `CLAUDE_REPORT_CORE_PHASE2_ISSUES.md` (этап 2), `CLAUDE_REPORT_CORE_PHASE1.md` (этап 1) |
 | Результаты тестов | `TEST_REPORT.md` |
 | История ревью | `docs/reviews/CLAUDE_REPORT_ARCHITECTURE.md` (ревью v0.1), `docs/reviews/CLAUDE_REPORT_P1_P4.md` (прототипы) |
-| Ядро | `0.5.0-phase5`, схема `_SYS` — **`WMS-SYS-2`** (+ `NEXT_SPL`, `NEXT_OFF`, `NEXT_PROD`, `NEXT_DET`, `NEXT_OLD`, `NEXT_OTH`); книгу этапа 4 (`WMS-SYS-1`) ядро этапа 5 не открывает |
+| Ядро | `0.6.0-final-core` (продукт `0.6.0`), схема `_SYS` — **`WMS-SYS-3`** (+ `NEXT_ADJ`); книги этапов 1–5 (`WMS-SYS-1`, `WMS-SYS-2`) ядро не открывает — перенос импортёром |
+| Контракт с инструментами | `docs/EXPORT_CONTRACT.md` — снимок `WMS-SNAPSHOT-1`, пакет `WMS-BATCH-1` |
 | Среда проверки | LibreOffice 24.2.7 (Linux, облачный контейнер) |
 
 ## Контрольные точки Git
@@ -23,7 +24,8 @@
 - **PR #1** (коммиты `2934140`, `7e6d280`, `561be9e`) слит пользователем в `main` 25.09.2026 — merge-коммит `defb278`. Слит самим пользователем, не Claude.
 - **Core Phase 3** — коммит `0125af3bd075d5e0eb3d6c9401c2e05f0fdd986f` в той же ветке, поверх `main` (`defb278`); принят после ручной проверки пользователем.
 - **Core Phase 4** — коммит `17774f98a70b12644b7637a2e5df02d34c83eb74` в той же ветке поверх `0125af3`; обычный push, без force; принят пользователем окончательно — **контрольная точка Core Phase 5**.
-- **Core Phase 5** — принят пользователем (D-071…D-088); commit контрольной точки M1 марафона в той же ветке поверх `17774f9`, обычный push, без force.
+- **Core Phase 5** — принят пользователем (D-071…D-088); commit `bff146e` (M1) в той же ветке поверх `17774f9`, обычный push, без force.
+- **M2 Final Core** — commit контрольной точки в той же ветке поверх `bff146e`, обычный push, без force.
 - Новых PR и веток Claude не создавал, `main` не менял и не сливал, force push не было.
 
 ## Что реализовано
@@ -46,11 +48,19 @@
 - **Recovery** для каждого типа во всех точках задания; «Отложить хвост» не даёт переиспользовать № строки, № события, ЕИ.
 - **Dry-run миграции** `tools/migration_dryrun.py` — проверка таблицы переноса без изменения книги; пустой тип источника — блокирующая ошибка, `--default-source` — только явно (D-087).
 
+**M2 Final Core — последние операции ядра** (`CLAUDE_REPORT_FINAL_CORE.md`; правила П-1…П-12 — на утверждении):
+- Лист **«Корректировки»**: `MOVE` (перемещение ЕИ целиком), `WRITE_OFF` (списание, не ниже 0), `INV_ADJ` (инвентаризация: учётный → фактический, разница); «Исправить» и «Удалить» (сторно) — по одной операции; сторно прихода запрещено при действующих корректировках ЕИ.
+- **«Экспорт для инструментов»** — неизменяемый снимок `WMS-SNAPSHOT-1` вне книги (таблицы, служебные таблицы, копия журнала, manifest с SHA-256); **«Загрузить пакет»** — файл инструмента `WMS-BATCH-1` проверяется целиком и проводится обычными операциями.
+- **`MIGRATE`** — перенос ЕИ старого склада с прежним номером (журнал происхождения); импортёр — M3.
+- **Ядро feature-frozen:** дальше — только исправления ошибок и совместимые изменения.
+
 Всё пишется только через `ApplyOperation`.
 
 ## Что работает
 
-- **M1 (приёмка этапа 5, один полный набор на одном коде, `TEST_REPORT.md`):** этап 5 — `tests/run_phase5.py`, 32 сценария (X01–X32), **156 PASS / 0 FAIL / 0 SKIP**; этап 4 — **169**, этап 3 — **148**, этап 2 — **77**, этап 1 — **80** PASS (0 FAIL, 0 SKIP); окна этапа 5 — **16 из 16**; компиляция — OK.
+- **M2 (Final Core, один полный набор на одном коде, `TEST_REPORT.md`):** Final Core — `tests/run_final_core.py`, 25 сценариев (Y01–Y25), **82 PASS / 0 FAIL / 0 SKIP**; этап 5 — **156**, этап 4 — **169**, этап 3 — **148**, этап 2 — **77**, этап 1 — **80** PASS (0 FAIL, 0 SKIP); окна: Final Core — **8 из 8**, этап 5 — **16 из 16**, этап 4 — **15 из 15**, этап 3 — **10 из 10**, этап 2 — **7 из 7**; компиляция — OK; оракул — без расхождений во всех сценариях.
+- **Бенчмарк M2** (`tests/bench_final_core.py`): на 100 000 / 250 000 движений перемещение, списание, инвентаризация — 65–77 мс в среднем, максимум любой операции 187 / 409 мс; исправление ~40–48, сторно ~32–35 мс; «Экспорт для инструментов» — 16 / 38 с (34 / 85 МБ); самопроверка — 37 / 98 с, ошибок 0; сохранение — 9,9 / 22,9 с; открытие — 5,8 / 14,0 с; оракул — 0 / 0 расхождений.
+- **M1 (приёмка этапа 5, один полный набор на одном коде):** этап 5 — `tests/run_phase5.py`, 32 сценария (X01–X32), **156 PASS / 0 FAIL / 0 SKIP**; этап 4 — **169**, этап 3 — **148**, этап 2 — **77**, этап 1 — **80** PASS (0 FAIL, 0 SKIP); окна этапа 5 — **16 из 16**; компиляция — OK.
 - **До приёмки (финальный набор этапа 5, A и B):** этап 5 — 154 PASS ×2.
 - **Регрессия:** этап 4 — `tests/run_phase4.py` A **169 PASS / 0 FAIL / 0 SKIP**, B **169 PASS / 0 FAIL / 0 SKIP**; этап 3 — `tests/run_phase3.py` A **148 PASS / 0 FAIL / 0 SKIP**, B **148 PASS / 0 FAIL / 0 SKIP**; этап 2 — `tests/run_phase2.py` A **77 PASS / 0 FAIL / 0 SKIP**, B **77 PASS / 0 FAIL / 0 SKIP**; этап 1 — `tests/run_phase1.py` A **80 PASS / 0 FAIL / 0 SKIP**, B **80 PASS / 0 FAIL / 0 SKIP**.
 - **Окна (Xvfb):** `tests/gui_phase5.py` — 16 из 16 (M1), `tests/gui_phase4.py` — 15 из 15, `tests/gui_phase3.py` — 10 из 10, `tests/gui_phase2.py` — 7 из 7 (финальный набор этапа 5).
@@ -62,7 +72,8 @@
 
 Полный список — `CLAUDE_REPORT_CORE_PHASE5_SPECIAL_RECEIPTS.md`, раздел 18; решения на утверждение — раздел 21. Главное:
 
-- **Книга этапа 4 ядром этапа 5 не открывается** (схема `WMS-SYS-1`): ручная проверка и пилот — с новой книги этапа 5.
+- **Книги этапов 1–5 ядром 0.6.0 не открываются** (схемы `WMS-SYS-1`, `WMS-SYS-2`): работа — с новой книги, данные — переносом.
+- **Частичного перемещения и разделения ЕИ нет** (П-2, D-080).
 - **Split иного прихода не реализован**; пересчёта единиц нет.
 - **Не проверено на складском Ubuntu-ПК** (D-036). Нажатие кнопок мышью не автоматизировано.
 - **Самопроверка и полная проверка ключей** на больших книгах небыстрые; обычный запуск их не выполняет (D-044).
@@ -74,6 +85,9 @@
 python3 tools/build_ods.py WMS.ods                   # производственная книга (реестр и справочник пустые)
 python3 tools/build_ods.py WMS_TEST.ods --test       # тестовая книга (+ WmsTestOps, _TST, 200 синтетических ЕИ, 5 получателей)
 Xvfb :99 &  python3 tools/basic_compile_check.py --display :99
+WMS_TEST_OUT=/tmp/wms_fc python3 tests/run_final_core.py [y01 y24 ...]
+WMS_TEST_OUT=/tmp/wms_gfc python3 tests/gui_final_core.py --display :99
+WMS_TEST_OUT=/tmp/wms_bfc python3 tests/bench_final_core.py [100000 250000]
 WMS_TEST_OUT=/tmp/wms_p5 python3 tests/run_phase5.py [x01 x30 ...]
 WMS_TEST_OUT=/tmp/wms_p4 python3 tests/run_phase4.py [w01 w46 ...]
 WMS_TEST_OUT=/tmp/wms_p3 python3 tests/run_phase3.py [r01 r47 ...]
@@ -89,7 +103,7 @@ python3 tools/migration_dryrun.py table.csv --book WMS.ods --report dryrun.md
 ## Что дальше
 
 План — `CLAUDE_TASK.md` («FINAL WMS MARATHON»), техническое состояние и следующий шаг — `FINAL_HANDOFF.md`:
-1. **M2 Final Core:** `MOVE`, `WRITE_OFF`, `INV_ADJ` (лист «Корректировки»), «Экспорт для инструментов» (снимок вне книги), приём пакетов инструментов; ядро — feature-frozen.
+1. **M2 Final Core** — эта контрольная точка.
 2. **M3:** migration importer (DRY RUN → MIGRATE COPY → VERIFY → PROMOTE), `WMS_PROD_CANDIDATE.ods`.
 3. **M4:** `WMS_TOOLBOX/` и `WMS_TOOLBOX.ods`.
 4. **M5:** документация кладовщика, финальный end-to-end, пакет проверки на складском Ubuntu-ПК и принтере; затем — реальный файл остатков для миграции (от пользователя).

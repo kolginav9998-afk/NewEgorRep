@@ -3,10 +3,14 @@
 ' §2 and §14 fixed sheets «Выдачи», «Заказы», «Возврат», «Иной приход» and their service structures.
 Option Explicit
 
-Public Const WMS_CORE_VERSION = "0.5.0-phase5"
-' Phase 5 appended the counters of the special receipts (rows 19..24); a book of an earlier core has WMS-SYS-1
-Public Const WMS_SYS_SCHEMA = "WMS-SYS-2"
+Public Const WMS_CORE_VERSION = "0.6.0-final-core"
+' the product (the release of the whole WMS book and its tools; the snapshot for the tools names it)
+Public Const WMS_PRODUCT_VERSION = "0.6.0"
+' Phase 5 appended the counters of the special receipts (rows 19..24), Final Core the counter of the corrections (row 25);
+' a book of an earlier core has WMS-SYS-1 (Phase 1–4) or WMS-SYS-2 (Phase 5)
+Public Const WMS_SYS_SCHEMA = "WMS-SYS-3"
 Public Const WMS_SYS_SCHEMA_OLD = "WMS-SYS-1"
+Public Const WMS_SYS_SCHEMA_P5 = "WMS-SYS-2"
 
 Public Const SYS_SHEET = "_SYS"
 Public Const JOURNAL_DIR = "WMS_Journal"
@@ -46,7 +50,9 @@ Public Const SK_NEXT_PROD = 21
 Public Const SK_NEXT_DET = 22
 Public Const SK_NEXT_OLD = 23
 Public Const SK_NEXT_OTH = 24
-Public Const SYS_ROWS = 25
+' Final Core (WMS-SYS-3): the № of the corrections (MOVE / WRITE_OFF / INV_ADJ)
+Public Const SK_NEXT_ADJ = 25
+Public Const SYS_ROWS = 26
 
 ' transaction marker states
 Public Const TX_NONE = "NONE"
@@ -247,6 +253,9 @@ Public Const IX_ART_MATCH = 16
 Public Const IX_ART_COUNT = 17
 Public Const IX_XD_MATCH = 18
 Public Const IX_XD_COUNT = 19
+' Final Core: «Корректировки».A (the № of a correction)
+Public Const IX_AA_MATCH = 20
+Public Const IX_AA_COUNT = 21
 
 ' ---------------------------------------------------------------- Phase 4: returns of issued goods (spec §11, §14, D-004, D-011)
 Public Const SH_RETURNS = "Возврат"
@@ -366,6 +375,8 @@ Public Const AR_LAST = 2
 Public Const SRC_CODES = "OFF|PROD|DET|OLD|OTH"
 Public Const SRC_NAMES = "Офис|Производство|Детали|Старый склад|Иной"
 Public Const SRC_STYPES = "Офис|Производство|Детали|Старый склад|Иной приход"
+' the «Тип источника» of a detail EI (one article — one EI; a later receipt of the article refills it)
+Public Const SRC_STYPES_PART = "Детали"
 Public Const EVENT_DIGITS = 8
 
 ' «Площадка / Поставщик» values that start a special receipt (spec §7): not an ordinary receipt of «Заказы» — it is
@@ -374,22 +385,76 @@ Public Const SPECIAL_SUPPLIERS = "офис|производство|детали
 ' «Обновить статусы» examines at most this many separate blocks of rows without a status
 Public Const REFRESH_MAX_BLOCKS = 20000
 
+' ---------------------------------------------------------------- Final Core: corrections of the stock (FINAL WMS MARATHON §2)
+' One light user sheet for the last operations of the core: MOVE (a place change of an EI), WRITE_OFF (a write-off, not an
+' issue to a person), INV_ADJ (an inventory correction: the difference between the actual and the book balance).
+Public Const SH_ADJUST = "Корректировки"
+Public Const SH_ADJ = "_ADJ"
+
+' «Корректировки» A:S: 0-based column indices
+Public Const AC_NO = 0
+Public Const AC_KIND = 1
+Public Const AC_EI = 2
+Public Const AC_NAME = 3
+Public Const AC_ART = 4
+Public Const AC_UNIT = 5
+Public Const AC_QTY = 6
+Public Const AC_FACT = 7
+Public Const AC_BOOK = 8
+Public Const AC_PLACE = 9
+Public Const AC_DATE = 10
+Public Const AC_REASON = 11
+Public Const AC_FROM = 12
+Public Const AC_BEFORE = 13
+Public Const AC_AFTER = 14
+Public Const AC_DIFF = 15
+Public Const AC_CTL = 16
+Public Const AC_BATCH = 17
+Public Const AC_NOTE = 18
+Public Const AC_LAST = 18
+
+' cell protection of a «Корректировки» row, one character per column A..S ("1" = locked). Unposted: the inputs B C G H I J
+' K L, the batch mark R and the comment S are open; what WMS fills (A D E F M N O P Q) is locked. Posted or cancelled:
+' only S stays open.
+Public Const ADJUST_LOCKS_OPEN = "1001110000001111100"
+Public Const ADJUST_LOCKS_POSTED = "1111111111111111110"
+
+' the kinds: name in column B, code in _ADJ and the journal
+Public Const ADJ_KIND_NAMES = "Перемещение|Списание|Инвентаризация"
+Public Const ADJ_KIND_CODES = "MOVE|WRITE_OFF|INV_ADJ"
+
+' _ADJ — the corrections, one row per № (row index = №, dense like «Наличие»): kind, EI, change of the balance
+' (WRITE_OFF < 0, INV_ADJ the difference, MOVE 0), state LIVE / STORNO, row hint, places before and after the move,
+' the book and the actual balance of an inventory, the date
+Public Const AJ_NO = 0
+Public Const AJ_KIND = 1
+Public Const AJ_EI = 2
+Public Const AJ_QTY = 3
+Public Const AJ_STATE = 4
+Public Const AJ_ROW = 5
+Public Const AJ_FROM = 6
+Public Const AJ_TO = 7
+Public Const AJ_BOOK = 8
+Public Const AJ_FACT = 9
+Public Const AJ_DATE = 10
+Public Const AJ_LAST = 10
+
 Function SysKeyNames() As Variant
     SysKeyNames = Array("SCHEMA", "INSTANCE_ID", "MODE", "CORE_VERSION", "LAST_SEQ", "NEXT_EI", "NEXT_NO", "NEXT_RET", _
         "JOURNAL_POS", "REGISTERED_URL", "TX_STATE", "TX_SEQ", "TX_TYPE", "TX_TIME", "TX_BEFORE_IMAGE", _
-        "SAVE_STAMP", "SAVE_SEQ", "MAX_QTY", "KEY_SHEETS", "NEXT_SPL", "NEXT_OFF", "NEXT_PROD", "NEXT_DET", "NEXT_OLD", "NEXT_OTH")
+        "SAVE_STAMP", "SAVE_SEQ", "MAX_QTY", "KEY_SHEETS", "NEXT_SPL", "NEXT_OFF", "NEXT_PROD", "NEXT_DET", "NEXT_OLD", "NEXT_OTH", "NEXT_ADJ")
 End Function
 
 ' keys of _SYS that must hold numbers
 Function SysNumericKeys() As Variant
     SysNumericKeys = Array(SK_LAST_SEQ, SK_NEXT_EI, SK_NEXT_NO, SK_NEXT_RET, SK_TX_SEQ, SK_SAVE_STAMP, SK_SAVE_SEQ, SK_MAX_QTY, _
-        SK_NEXT_SPL, SK_NEXT_OFF, SK_NEXT_PROD, SK_NEXT_DET, SK_NEXT_OLD, SK_NEXT_OTH)
+        SK_NEXT_SPL, SK_NEXT_OFF, SK_NEXT_PROD, SK_NEXT_DET, SK_NEXT_OLD, SK_NEXT_OTH, SK_NEXT_ADJ)
 End Function
 
 ' counters that must be ≥ 1 (numbers handed out from 1)
 Function SysCounterKeys() As Variant
     SysCounterKeys = Array(SK_NEXT_EI, SK_NEXT_NO, SK_NEXT_RET, SK_MAX_QTY, SK_NEXT_SPL, SK_NEXT_OFF, SK_NEXT_PROD, SK_NEXT_DET, _
-        SK_NEXT_OLD, SK_NEXT_OTH)
+        SK_NEXT_OLD, SK_NEXT_OTH, SK_NEXT_ADJ)
 End Function
 
 ' ---------------------------------------------------------------- AutoInput (spec §10, §29; decision D-031)

@@ -325,10 +325,18 @@ def v11_double_click():
         for t in th:
             t.join(60)
         ents = [e for e in s.journal()[0] if e["type"] == "ISSUE"]
-        R.add(c, "двойной клик кнопки «Провести» (два нажатия одновременно): одна выдача, одно списание, последнее сообщение «уже проведено»",
+        # the order of the two answers is not fixed: LibreOffice Basic yields to the event loop while a macro runs, so the
+        # second press may be answered («уже проведено» / «операция уже выполняется») before the first one's «OK» is
+        # recorded; the recorded last message is then «OK:1». What must hold: one posting, one decrement, and a press on the
+        # posted row answers «уже проведено» — checked with one more press after both have finished
+        last = s.U("TestUiLastMessage")
+        s.U("BtnPost")
+        again = s.U("TestUiLastMessage")
+        R.add(c, "двойной клик кнопки «Провести» (два нажатия одновременно): одна выдача, одно списание, повторное нажатие — «уже проведено»",
               len(ents) == 1 and s.stock(4) == 9.0 and s.iss(1)[0] == 1.0 and s.sysv("NEXT_NO") == 2
-              and s.U("TestUiLastMessage").startswith("SKIP:уже проведено"),
-              f"последнее сообщение {res[-1:]}; записей ISSUE {len(ents)}; остаток {s.stock(4)}")
+              and (last.startswith("SKIP:уже проведено") or last == "OK:1") and again.startswith("SKIP:уже проведено")
+              and len([e for e in s.journal()[0] if e["type"] == "ISSUE"]) == 1,
+              f"ответы нажатий {res}; последнее {last!r}; ещё нажатие {again!r}; записей ISSUE {len(ents)}; остаток {s.stock(4)}")
         # the same through the posting function, each call's own answer recorded
         fill(s, 2, "5", "1")
         ans = []
@@ -338,8 +346,11 @@ def v11_double_click():
         for t in th:
             t.join(60)
         ents = [e for e in s.journal()[0] if e["type"] == "ISSUE"]
-        R.add(c, "два одновременных вызова проведения одной строки: ответы «OK» и «уже проведено», одно списание",
-              sorted(ans) == ["OK:2", "SKIP:уже проведено (№ 2)"] and len(ents) == 2 and s.stock(5) == 4.0,
+        # the second call is answered «уже проведено» — or «операция уже выполняется» when it runs inside the first one
+        R.add(c, "два одновременных вызова проведения одной строки: ответы «OK» и «уже проведено» (или «уже выполняется»), одно списание",
+              len(ans) == 2 and ans.count("OK:2") == 1
+              and [a for a in ans if a != "OK:2"][0] in ("SKIP:уже проведено (№ 2)", "BUSY:операция уже выполняется")
+              and len(ents) == 2 and s.stock(5) == 4.0,
               f"ответы {ans}; записей ISSUE {len(ents)}; остаток {s.stock(5)}")
         oracle(c, s, "двойной клик")
     finally:

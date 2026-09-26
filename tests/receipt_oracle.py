@@ -27,6 +27,14 @@ issued event of the same type, the unit of an EI never changes by a refill, a pl
 storno of the last live line of an EI is refused while it has live issues or returns (D-069), a storno of one addition
 never makes the balance negative, identification keeps the EI. tests/special_oracle.py compares the replay with
 «Иной приход», _SPR, _ART and the cards in «Наличие».
+
+Final Core: the corrections (MOVE, WRITE_OFF, INV_ADJ and their *_FIX / *_DEL) are replayed by replay_adjust() with the
+rules of the task written independently: a move keeps the quantity and names the place the EI really had (no silent
+place change), a correction or storno of a move only while the EI is still where the move put it; a write-off never
+more than the balance; an inventory correction records the difference against the balance the EI really had (BOOK),
+never zero; a storno or correction never makes a balance negative; the № is monotonic and never reused; the storno of
+the last receipt of an EI is refused while it has live corrections (D-069). tests/adjust_oracle.py compares the replay
+with «Корректировки» and _ADJ.
 """
 import datetime
 import re
@@ -37,6 +45,9 @@ RECEIPT_TYPES = ("RECEIPT", "RECEIPT_ADD", "RECEIPT_FIX", "RECEIPT_DEL", "ORDER_
 ISSUE_TYPES = ("ISSUE", "ISSUE_FIX", "ISSUE_DEL")
 RETURN_TYPES = ("RETURN", "RETURN_FIX", "RETURN_DEL")
 SPECIAL_TYPES = ("SP_RECEIPT", "SP_REFILL", "SP_FIX", "SP_DEL", "SP_IDENTIFY")
+ADJUST_TYPES = ("MOVE", "MOVE_FIX", "MOVE_DEL", "WRITE_OFF", "WRITE_OFF_FIX", "WRITE_OFF_DEL", "INV_ADJ", "INV_ADJ_FIX", "INV_ADJ_DEL")
+MIGRATE_TYPES = ("MIGRATE",)
+MIGRATE_STYPES = ("Поставщик", "Офис", "Производство", "Детали", "Старый склад", "Иной приход")
 SP_CODES = ("OFF", "PROD", "DET", "OLD", "OTH")
 SP_NAME = {"OFF": "Офис", "PROD": "Производство", "DET": "Детали", "OLD": "Старый склад", "OTH": "Иной"}          # «Иной приход».B
 SP_STYPE = {"OFF": "Офис", "PROD": "Производство", "DET": "Детали", "OLD": "Старый склад", "OTH": "Иной приход"}  # «Наличие».J
@@ -220,7 +231,7 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
         bad("снимок до изменения не очищен")
     applied = [e for e in ours if e["seq"] <= last]
     abandoned = journal_oracle.abandoned_seqs(applied)
-    ops = [e for e in applied if e["seq"] not in abandoned and e["type"] in RECEIPT_TYPES + ISSUE_TYPES + RETURN_TYPES + SPECIAL_TYPES]
+    ops = [e for e in applied if e["seq"] not in abandoned and e["type"] in RECEIPT_TYPES + ISSUE_TYPES + RETURN_TYPES + SPECIAL_TYPES + ADJUST_TYPES + MIGRATE_TYPES]
     min_next_ei = 1
     min_next_ret = 1
     for e in applied:
@@ -255,6 +266,7 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
         receipts, positions, issues = {}, {}, {}
         place = {}
         returns, ret_sum, ret_cnt = {}, {}, {}
+        adjs = {}
     else:
         bal = dict(base["bal"])
         receipts = {k: dict(v) for k, v in base["receipts"].items()}
@@ -264,6 +276,7 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
         returns = {k: dict(v) for k, v in base.get("returns", {}).items()}
         ret_sum = dict(base.get("ret_sum", {}))
         ret_cnt = dict(base.get("ret_cnt", {}))
+        adjs = {k: dict(v) for k, v in base.get("adjs", {}).items()}
     touched_place = set()                               # EIs whose current place a movement set (checked in «Наличие».F)
     n_ret_ops = 0
     created = []                                        # every EI a receipt created, in order
@@ -348,6 +361,9 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
             live_ret = [n for n, v in returns.items() if v["state"] == "LIVE" and v["ei"] == ei]
             if live_iss or live_ret:
                 bad(f"seq {sq} RECEIPT_DEL {ei}: сторно прихода при действующих выдачах {live_iss[:5]} / возвратах {live_ret[:5]} (D-069)", "R")
+            live_adj = [n for n, v in adjs.items() if v["state"] == "LIVE" and v["ei"] == ei]
+            if live_adj:
+                bad(f"seq {sq} RECEIPT_DEL {ei}: сторно прихода при действующих корректировках {live_adj[:5]} (D-069)", "R")
             bal[ei] -= rec["qty"]
             rec["state"] = "STORNO"
             p = positions[rec["ol"]]
@@ -378,7 +394,11 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
             n_ret_ops += 1
             replay_return(t, f, sq, bal, issues, returns, ret_sum, ret_cnt, place, touched_place, bad)
         elif t in SPECIAL_TYPES:
-            replay_special(t, f, sq, bal, sp, place, issues, returns, created, receipts, bad)
+            replay_special(t, f, sq, bal, sp, place, issues, returns, created, receipts, bad, adjs)
+        elif t in ADJUST_TYPES:
+            replay_adjust(t, f, sq, bal, adjs, place, touched_place, bad)
+        elif t in MIGRATE_TYPES:
+            replay_migrate(f, sq, bal, place, sp, created, bad)
         else:
             # Phase 2 issues
             no = int(float(f["NO"]))
@@ -642,7 +662,7 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
                      invariants_failed=sorted(inv_fail, key=str)))
     if out is not None:
         out.update(bal=bal, issues=issues, returns=returns, ret_sum=ret_sum, ret_cnt=ret_cnt, place=place, min_next_ret=min_next_ret,
-                   sysv=sysv, ops=ops, book_ei=book_ei, sp=sp, receipts=receipts, initial=initial, base=base, inv_fail=inv_fail)
+                   sysv=sysv, ops=ops, book_ei=book_ei, sp=sp, receipts=receipts, initial=initial, base=base, inv_fail=inv_fail, adjs=adjs)
     return P, info
 
 
@@ -800,7 +820,7 @@ def _live_dependents(ei, issues, returns):
             [k for k, v in returns.items() if v["state"] == "LIVE" and v["ei"] == ei])
 
 
-def replay_special(t, f, sq, bal, sp, place, issues, returns, created, receipts, bad):
+def replay_special(t, f, sq, bal, sp, place, issues, returns, created, receipts, bad, adjs=None):
     """one special receipt operation of the journal, checked against the rules of the task of Phase 5 (see the module
     docstring); invariants S1…S10 of tests/special_oracle.py"""
     lines, eis, index = sp["lines"], sp["eis"], sp["index"]
@@ -993,13 +1013,17 @@ def replay_special(t, f, sq, bal, sp, place, issues, returns, created, receipts,
         if abs(q - L["qty"]) > EPS:
             bad(f"seq {sq} SP_DEL № {n}: QTY {q} ≠ приход строки {L['qty']}")
         others = [k for k, x in lines.items() if x["ei"] == ei and x["state"] == "LIVE" and k != n]
-        last = not others
+        # a migrated EI keeps its transferred stock: a line of it is never «the last receipt»
+        last = not others and not (card or {}).get("migrated")
         if (f.get("LAST") == "1") != last:
             bad(f"seq {sq} SP_DEL № {n}: LAST {f.get('LAST')} ≠ расчётному ({'последняя' if last else 'есть другие'} строка ЕИ)", "S6")
         if last:
             li, lr = _live_dependents(ei, issues, returns)
             if li or lr:
                 bad(f"seq {sq} SP_DEL № {n}: сторно последнего прихода {ei} при действующих выдачах {li[:5]} / возвратах {lr[:5]} (D-069)", "S6")
+            la = [k for k, v in (adjs or {}).items() if v["state"] == "LIVE" and v["ei"] == ei]
+            if la:
+                bad(f"seq {sq} SP_DEL № {n}: сторно последнего прихода {ei} при действующих корректировках {la[:5]} (D-069)", "S6")
         if bal[ei] < q - EPS:
             bad(f"seq {sq} SP_DEL № {n}: остаток {bal[ei]} меньше прихода строки {q} — стал бы отрицательным", "S6")
         if abs(fnum("BAL_BEFORE") - bal[ei]) > EPS:
@@ -1036,3 +1060,148 @@ def replay_special(t, f, sq, bal, sp, place, issues, returns, created, receipts,
             card["artkey"] = L["artkey"] = k
         card.update(name=f.get("NAME", ""), art=f.get("ART", ""), cat=f.get("CAT", ""), state=EI_ACTIVE, src=card["src"] + " → " + typ, stype=typ)
         L.update(name=f.get("NAME", ""), art=f.get("ART", ""), cat=f.get("CAT", ""), ident=typ)
+
+
+def replay_adjust(t, f, sq, bal, adjs, place, touched_place, bad):
+    """one correction of the journal (Final Core), checked against the rules of the task written independently of the
+    Basic code; the invariants of the corrections are reported as "A"."""
+    def fnum(k):
+        v = f.get(k, "")
+        return float(v) if v != "" else None
+
+    n, ei = int(f["ADJ"]), f["EI"]
+    kind = t.replace("_FIX", "").replace("_DEL", "")
+    if f.get("KIND") != kind:
+        bad(f"seq {sq} {t} № {n}: KIND {f.get('KIND')!r} ≠ {kind}", "A")
+    if ei not in bal:
+        bad(f"seq {sq} {t} № {n}: {ei} не существует", "A")
+        return
+    if not f.get("REASON"):
+        bad(f"seq {sq} {t} № {n}: нет причины / основания", "A")
+    if t == kind:
+        if n in adjs:
+            bad(f"seq {sq} {t}: № {n} выдан повторно", "A")
+            return
+        if adjs and n <= max(adjs):
+            bad(f"seq {sq} {t}: № {n} не больше уже выданного {max(adjs)}", "A")
+        a = dict(kind=kind, ei=ei, state="LIVE", delta=0.0, frm=None, to=None, book=None, fact=None, date=f.get("DATE"),
+                 reason=f.get("REASON"), batch=f.get("BATCH", ""), fixes=0, row=int(f.get("ROW", 0)))
+        if kind == "MOVE":
+            # the place of an EI the journal never set (the initial registry, a trusted snapshot) is known from here on
+            if ei not in place:
+                place[ei] = f.get("FROM", "")
+            if f.get("FROM", "") != (place.get(ei) or ""):
+                bad(f"seq {sq} MOVE № {n}: FROM {f.get('FROM')!r} ≠ месту {ei} по движениям {place.get(ei)!r} (тихое изменение места)", "A")
+            if (f.get("TO") or "").strip().lower() == (f.get("FROM") or "").strip().lower():
+                bad(f"seq {sq} MOVE № {n}: новое место совпадает со старым", "A")
+            if fnum("BAL") is not None and abs(fnum("BAL") - bal[ei]) > EPS:
+                bad(f"seq {sq} MOVE № {n}: BAL {f.get('BAL')} ≠ остатку {bal[ei]} (перемещение не меняет количество)", "A")
+            a.update(frm=f.get("FROM", ""), to=f.get("TO", ""))
+            place[ei] = f.get("TO", "")
+            touched_place.add(ei)
+        elif kind == "WRITE_OFF":
+            q = fnum("QTY")
+            if q is None or q <= 0:
+                bad(f"seq {sq} WRITE_OFF № {n}: количество {f.get('QTY')!r}", "A")
+                return
+            if abs(fnum("BAL_BEFORE") - bal[ei]) > EPS:
+                bad(f"seq {sq} WRITE_OFF № {n}: BAL_BEFORE {f.get('BAL_BEFORE')} ≠ {bal[ei]}", 3)
+            if q > bal[ei] + EPS:
+                bad(f"seq {sq} WRITE_OFF № {n}: списано {q} больше остатка {bal[ei]}", 6)
+            bal[ei] -= q
+            a["delta"] = -q
+        else:
+            book, fact, diff = fnum("BOOK"), fnum("FACT"), fnum("DIFF")
+            if book is None or abs(book - bal[ei]) > EPS:
+                bad(f"seq {sq} INV_ADJ № {n}: учётный остаток {f.get('BOOK')} ≠ остатку {ei} по движениям {bal[ei]}", "A")
+            if fact is None or fact < -EPS or diff is None or abs(diff - (fact - (book or 0))) > EPS or abs(diff) < EPS:
+                bad(f"seq {sq} INV_ADJ № {n}: факт {f.get('FACT')}, разница {f.get('DIFF')} не сходятся с учётным {f.get('BOOK')} или разница 0", "A")
+                return
+            bal[ei] += diff
+            a.update(delta=diff, book=book, fact=fact)
+        adjs[n] = a
+    else:
+        a = adjs.get(n)
+        if a is None or a["state"] != "LIVE" or a["ei"] != ei or a["kind"] != kind:
+            bad(f"seq {sq} {t} № {n}: нет действующей корректировки этого вида и ЕИ ({a})", "A")
+            return
+        if kind == "MOVE":
+            if (place.get(ei) or "").strip().lower() != (a["to"] or "").strip().lower():
+                bad(f"seq {sq} {t} № {n}: место {ei} {place.get(ei)!r} уже не то, куда его переместили ({a['to']!r})", "A")
+            if t == "MOVE_DEL":
+                place[ei] = a["frm"]
+                a["state"] = "STORNO"
+            else:
+                if f.get("OLD_TO") != a["to"]:
+                    bad(f"seq {sq} MOVE_FIX № {n}: OLD_TO {f.get('OLD_TO')!r} ≠ {a['to']!r}", "A")
+                if (f.get("TO") or "").strip().lower() == (a["frm"] or "").strip().lower():
+                    bad(f"seq {sq} MOVE_FIX № {n}: исправление вернуло ЕИ на прежнее место (это сторно)", "A")
+                place[ei] = f.get("TO", "")
+                a["to"] = f.get("TO", "")
+                a["fixes"] += 1
+            touched_place.add(ei)
+        else:
+            if fnum("BAL_BEFORE") is not None and abs(fnum("BAL_BEFORE") - bal[ei]) > EPS:
+                bad(f"seq {sq} {t} № {n}: BAL_BEFORE {f.get('BAL_BEFORE')} ≠ {bal[ei]}", 3)
+            if t.endswith("_DEL"):
+                bal[ei] -= a["delta"]
+                a["state"] = "STORNO"
+            else:
+                if kind == "WRITE_OFF":
+                    q = fnum("QTY")
+                    if q is None or q <= 0 or abs(fnum("OLD_QTY") + a["delta"]) > EPS:
+                        bad(f"seq {sq} WRITE_OFF_FIX № {n}: количество {f.get('QTY')} / OLD_QTY {f.get('OLD_QTY')} ≠ {-a['delta']}", "A")
+                        return
+                    nd = -q
+                else:
+                    fact, diff = fnum("FACT"), fnum("DIFF")
+                    if fnum("BOOK") is None or abs(fnum("BOOK") - a["book"]) > EPS or abs(fnum("OLD_DIFF") - a["delta"]) > EPS:
+                        bad(f"seq {sq} INV_ADJ_FIX № {n}: BOOK/OLD_DIFF {f.get('BOOK')}/{f.get('OLD_DIFF')} ≠ {a['book']}/{a['delta']}", "A")
+                    if fact is None or diff is None or abs(diff - (fact - a["book"])) > EPS or abs(diff) < EPS:
+                        bad(f"seq {sq} INV_ADJ_FIX № {n}: факт {f.get('FACT')}, разница {f.get('DIFF')} не сходятся", "A")
+                        return
+                    nd = diff
+                    a["fact"] = fact
+                bal[ei] += nd - a["delta"]
+                a["delta"] = nd
+                a["fixes"] += 1
+            if bal[ei] < -EPS:
+                bad(f"seq {sq} {t} № {n}: остаток {ei} стал отрицательным ({bal[ei]})", 6)
+            if fnum("BAL_AFTER") is not None and abs(fnum("BAL_AFTER") - bal[ei]) > EPS:
+                bad(f"seq {sq} {t} № {n}: BAL_AFTER {f.get('BAL_AFTER')} ≠ {bal[ei]}", 3)
+        a["date"] = f.get("DATE", a["date"])
+        a["reason"] = f.get("REASON", a["reason"])
+    if t == kind and kind != "MOVE" and fnum("BAL_AFTER") is not None and abs(fnum("BAL_AFTER") - bal[ei]) > EPS:
+        bad(f"seq {sq} {t} № {n}: BAL_AFTER {f.get('BAL_AFTER')} ≠ {bal[ei]}", 3)
+
+
+def replay_migrate(f, sq, bal, place, sp, created, bad):
+    """one transfer of an existing EI (MIGRATE): the number is kept, never an existing EI, a part enters the index (one
+    article — one EI), the card as the transfer wrote it; the invariants of the transfer are reported as "M"."""
+    ei = f["EI"]
+    if ei in bal or ei in sp["eis"]:
+        bad(f"seq {sq} MIGRATE {ei}: ЕИ уже существовал — перенос перенумеровал или слил ЕИ", "M")
+        return
+    q = float(f["QTY"])
+    stype = f.get("STYPE", "")
+    if q < 0:
+        bad(f"seq {sq} MIGRATE {ei}: отрицательное количество {q}", "M")
+    if stype not in MIGRATE_STYPES:
+        bad(f"seq {sq} MIGRATE {ei}: тип источника «{stype}» (пустой тип не переносится молча, D-087)", "M")
+    if not f.get("ORIGIN"):
+        bad(f"seq {sq} MIGRATE {ei}: нет происхождения (ORIGIN)", "M")
+    part = stype == "Детали"
+    key = article_key(f.get("ART", "")) if part else ""
+    if part:
+        if not key:
+            bad(f"seq {sq} MIGRATE {ei}: деталь без артикула", "M")
+        elif key in sp["index"]:
+            bad(f"seq {sq} MIGRATE {ei}: артикул «{key}» уже у {sp['index'][key]} — второй ЕИ для одного артикула", "M")
+        else:
+            sp["index"][key] = ei
+    bal[ei] = q
+    place[ei] = f.get("PLACE", "")
+    created.append(ei)
+    sp["eis"][ei] = dict(code="MIG", stype=stype, name=f.get("NAME", ""), art=f.get("ART", ""), unit=f.get("UNIT", ""), cat=f.get("CAT", ""),
+                         state=EI_REVIEW if stype == "Иной приход" else EI_ACTIVE,
+                         src="Перенос" + (f" ({f['MARK']})" if f.get("MARK") else ""), artkey=key, part=part, first=None, migrated=q)

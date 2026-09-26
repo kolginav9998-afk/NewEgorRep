@@ -27,7 +27,7 @@ Global gUiFixDate As String
 
 ' filtered WMS ranges whose rows were shown for a save (FiltersStash) and are filtered again after it (FiltersRestore)
 Global gFltN As Integer
-Global gFltName(4) As String
+Global gFltName(5) As String
 
 ' ================================================================ status panel «Главная»
 
@@ -121,6 +121,14 @@ Sub UiRefresh(sLast As String)
         s = s & Chr(10) & "иной приход: нет"
     Else
         s = s & Chr(10) & "иной приход: не удалось посчитать — отфильтруйте «№ строки» = пусто"
+    End If
+    n = WmsAdjust.UnpostedAdjustments()
+    If n > 0 Then
+        s = s & Chr(10) & "корректировки: " & n & " строк(и) «" & SH_ADJUST & "» с видом (B) без № — ещё не проведены"
+    ElseIf n = 0 Then
+        s = s & Chr(10) & "корректировки: нет"
+    Else
+        s = s & Chr(10) & "корректировки: не удалось посчитать — отфильтруйте «№» = пусто"
     End If
     PutB(sh, MR_UNPOSTED, s)
     PutB(sh, MR_NOTES, Replace(gReport, " | ", Chr(10)))
@@ -469,7 +477,7 @@ End Function
 ' names of the WMS database ranges that currently have filter conditions
 Private Function FilteredRanges() As Variant
     Dim names As Variant, i As Integer, out() As String, n As Integer, db As Object
-    names = Array("WMS_ORDERS", "WMS_SPECIAL", "WMS_ISSUES", "WMS_RETURNS", "WMS_STOCK")
+    names = Array("WMS_ORDERS", "WMS_SPECIAL", "WMS_ISSUES", "WMS_RETURNS", "WMS_ADJUST", "WMS_STOCK")
     ReDim out(UBound(names))
     For i = 0 To UBound(names)
         If gDoc.DatabaseRanges.hasByName(names(i)) Then

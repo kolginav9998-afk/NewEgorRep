@@ -76,6 +76,12 @@ def ei_history(st):
         e = h.setdefault(ei, dict(refills=0, issued=0.0, returned=0.0, balance=bal.get(ei), place=place.get(ei)))
         e["origin"] = f"Заказ {rec.get('order')}" if rec.get("order") is not None else "обычный приход"
         e["received"] = rec["qty"] if rec["state"] == "LIVE" else 0.0
+    # Final Core: a migrated EI came with its transferred stock (MIGRATE)
+    for ei, c in sp["eis"].items():
+        if c.get("code") == "MIG":
+            e = h.setdefault(ei, dict(refills=0, issued=0.0, returned=0.0, balance=bal.get(ei), place=place.get(ei)))
+            e["origin"] = c["src"]
+            e["received"] = c.get("migrated", 0.0)
     for n, L in sorted(sp["lines"].items()):
         e = h.setdefault(L["ei"], dict(refills=0, issued=0.0, returned=0.0, balance=bal.get(L["ei"]), place=place.get(L["ei"])))
         if L["mode"] == "NEW":
@@ -91,11 +97,18 @@ def ei_history(st):
     for n, r in st["returns"].items():
         if r["state"] == "LIVE" and r["ei"] in h:
             h[r["ei"]]["returned"] += r["qty"]
+    # Final Core: write-offs and inventory corrections change the balance too; moves only the place
+    for e in h.values():
+        e.setdefault("adjusted", 0.0)
+    for n, a in (st.get("adjs") or {}).items():
+        if a["state"] == "LIVE" and a["ei"] in h:
+            h[a["ei"]]["adjusted"] = h[a["ei"]].get("adjusted", 0.0) + a["delta"]
     return h
 
 
-def check(doc, jdir, initial, expect_tail=0, today=None, base=None, legacy_mn_empty=True):
-    st = {}
+def check(doc, jdir, initial, expect_tail=0, today=None, base=None, legacy_mn_empty=True, out=None):
+    """out (a dict): receives the replayed state (tests/adjust_oracle.py continues from it)"""
+    st = {} if out is None else out
     P, info, rhist = return_oracle.check(doc, jdir, initial, expect_tail, today=today, base=base, legacy_mn_empty=legacy_mn_empty, out=st)
     P = list(P)
     inv_fail = set(x for x in st["inv_fail"] if isinstance(x, str) and x.startswith("S"))
@@ -262,7 +275,7 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, legacy_mn_em
         for ei, e in hist.items():
             if e.get("received") is None:
                 continue
-            want = e["received"] - e["issued"] + e["returned"]
+            want = e["received"] - e["issued"] + e["returned"] + e.get("adjusted", 0.0)
             if abs(want - (e["balance"] or 0.0)) > 1e-4:
                 bad(f"{ei}: история не сходится: пришло {e['received']} − выдано {e['issued']} + возвращено {e['returned']} = {want}, "
                     f"остаток {e['balance']}", 3)

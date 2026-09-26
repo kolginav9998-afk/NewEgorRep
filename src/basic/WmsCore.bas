@@ -249,7 +249,12 @@ Function SysLayoutProblem() As String
     ' the schema first: a book of an earlier core is named as such, not as a damaged layout
     If gSysSh.getCellByPosition(0, SK_SCHEMA).getString() = "SCHEMA" And SysStr(SK_SCHEMA) = WMS_SYS_SCHEMA_OLD Then
         SysLayoutProblem = "книга ядра этапа 4 или раньше (схема " & WMS_SYS_SCHEMA_OLD & " без счётчиков специальных приходов): ядро " _
-            & WMS_CORE_VERSION & " её не открывает — ручная проверка и пилот начинаются с новой книги этапа 5"
+            & WMS_CORE_VERSION & " её не открывает — нужна новая книга или перенос данных"
+        Exit Function
+    End If
+    If gSysSh.getCellByPosition(0, SK_SCHEMA).getString() = "SCHEMA" And SysStr(SK_SCHEMA) = WMS_SYS_SCHEMA_P5 Then
+        SysLayoutProblem = "книга ядра этапа 5 (схема " & WMS_SYS_SCHEMA_P5 & " без листа «" & SH_ADJUST & "» и счётчика NEXT_ADJ): ядро " _
+            & WMS_CORE_VERSION & " её не открывает — нужна новая книга или перенос данных"
         Exit Function
     End If
     For i = 0 To UBound(names)

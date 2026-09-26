@@ -771,7 +771,7 @@ End Function
 Private Function RcvDelete(r As Long, checkOnly As Boolean) As String
     Dim why As String, kind As String, n As Long, canon As String, olid As Long, isSrc As Boolean, moved As Boolean, rv As Variant
     Dim od As Variant, s As Double, f As Double, newBal As Double, rcv2 As Double, nodoc2 As Double, src As Long, srcMoved As Boolean
-    Dim st As String, ctl As String, cancel As String, nIss As Long, nRet As Long
+    Dim st As String, ctl As String, cancel As String, nIss As Long, nRet As Long, nAdj As Long
     WmsInit()
     If r < 1 Or r > MAX_SHEET_ROW Then
         RcvDelete = "ERR:выберите строку заказа (не заголовок)"
@@ -816,6 +816,16 @@ Private Function RcvDelete(r As Long, checkOnly As Boolean) As String
             & IIf(s < f - 0.0000001, " (уже выдано " & WmsIssue.QtyText(WmsIssue.Round3(f - s)) & " " & Trim(Txt(r, OC_UNIT)) & ")", "") _
             & ". Сначала выполните сторно зависимых операций: " & IIf(nRet > 0, "возвратов этого ЕИ (лист «" & SH_RETURNS & "»), затем ", "") _
             & "выдач (лист «" & SH_ISSUES & "»)"
+        Exit Function
+    End If
+    ' D-069 for the corrections (Final Core): a live move, write-off or inventory correction refers to the receipt too
+    If Not WmsAdjust.LiveAdjustments(canon, nAdj) Then
+        RcvDelete = "ERR-SYS:не удалось проверить корректировки " & canon & " (формула движка Calc) — сторно не выполнено"
+        Exit Function
+    End If
+    If nAdj > 0 Then
+        RcvDelete = "ERR:По этому ЕИ (" & canon & ") есть действующие корректировки: " & nAdj & " (лист «" & SH_ADJUST _
+            & "»: перемещения, списания, инвентаризация). Сначала выполните их сторно"
         Exit Function
     End If
     If s < f - 0.0000001 Then

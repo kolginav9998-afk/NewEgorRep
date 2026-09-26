@@ -38,7 +38,7 @@ Function SelfCheck() As String
     lastSeq = CLng(SysNum(SK_LAST_SEQ))
     out = out & Ln("OK", "счётчики", "LAST_SEQ " & lastSeq & ", NEXT_EI " & SysStr(SK_NEXT_EI) & ", NEXT_NO " & SysStr(SK_NEXT_NO) & ", NEXT_RET " & SysStr(SK_NEXT_RET) _
         & ", NEXT_SPL " & SysStr(SK_NEXT_SPL) & ", NEXT_OFF " & SysStr(SK_NEXT_OFF) & ", NEXT_PROD " & SysStr(SK_NEXT_PROD) & ", NEXT_DET " & SysStr(SK_NEXT_DET) _
-        & ", NEXT_OLD " & SysStr(SK_NEXT_OLD) & ", NEXT_OTH " & SysStr(SK_NEXT_OTH))
+        & ", NEXT_OLD " & SysStr(SK_NEXT_OLD) & ", NEXT_OTH " & SysStr(SK_NEXT_OTH) & ", NEXT_ADJ " & SysStr(SK_NEXT_ADJ))
     st = SysStr(SK_TX_STATE)
     bi = SysStr(SK_TX_BI)
     If st = TX_STARTED Then
@@ -136,6 +136,12 @@ Function SelfCheck() As String
     Else
         out = out & Ln("OK", "специальные приходы", s)
     End If
+    s = WmsAdjust.AdjustCheck()
+    If Left(s, 6) = "ОШИБКА" Then
+        out = out & Ln("FAIL", "корректировки", Mid(s, 9))
+    Else
+        out = out & Ln("OK", "корректировки", s)
+    End If
     s = WmsIssue.RecipientsDuplicates()
     If s <> "" Then
         out = out & Ln("WARN", "справочник «" & SH_RCPT & "»", "повторяются сокращения " & s & " — такие сокращения не подставляются")
@@ -216,6 +222,7 @@ Function ReceiptsCheck() As String
     Dim r0 As Long, r1 As Long, i As Long, d As Variant, st As Variant, sumQ() As Double, cnt() As Long, nod() As Long, hint() As Long
     Dim ol As Long, nRcv As Long, nStorno As Long, nBad As Long, first As String, nPos As Long, nCancel As Long, nRest As Long
     Dim nStale As Long, maxEI As Long, n As Long, t0 As Long, canon As String, q As Variant, dv As Variant, where As String, v As Variant, x As Double
+    Dim plus As Variant, px As Double
     On Error GoTo EH
     t0 = GetSystemTicks()
     rcv = gDoc.Sheets.getByName(SH_RCV)
@@ -225,6 +232,8 @@ Function ReceiptsCheck() As String
     iss = gDoc.Sheets.getByName(SH_ISSUES)
     nOl = WmsOrders.NextOl()
     nextEI = CLng(SysNum(SK_NEXT_EI))
+    ' a balance may exceed its receipt by the live positive inventory corrections of the EI (Final Core)
+    plus = WmsAdjust.PlusByEI(nextEI)
     ReDim sumQ(nOl)
     ReDim cnt(nOl)
     ReDim nod(nOl)
@@ -262,8 +271,13 @@ Function ReceiptsCheck() As String
                         If VarType(d(i)(RV_NODOC)) = 5 Then nod(ol) = nod(ol) + d(i)(RV_NODOC)
                         If VarType(q) <> 5 Then
                             Bad(nBad, first, SH_RCV & " строка " & (n + 1) & " (" & canon & "): остаток в реестре не число")
-                        ElseIf q > d(i)(RV_QTY) + 0.0000001 Then
-                            Bad(nBad, first, SH_RCV & " строка " & (n + 1) & " (" & canon & "): остаток " & q & " больше прихода " & d(i)(RV_QTY))
+                        Else
+                            px = 0
+                            If n <= UBound(plus) Then px = plus(n)
+                            If q > d(i)(RV_QTY) + px + 0.0000001 Then
+                                Bad(nBad, first, SH_RCV & " строка " & (n + 1) & " (" & canon & "): остаток " & q & " больше прихода " & d(i)(RV_QTY) _
+                                    & IIf(px > 0, " и излишков инвентаризации " & px, ""))
+                            End If
                         End If
                     ElseIf CStr(d(i)(RV_STATE)) = RV_STORNO Then
                         nStorno = nStorno + 1
@@ -438,6 +452,8 @@ Private Function NotRegText(isEI As Boolean, n As Long) As String
         NotRegText = WmsIssue.EiCanon(n) & " не создан приходом WMS"
     ElseIf mRegSheet = SH_SPR Then
         NotRegText = "строка № " & n & " не зарегистрирована WMS"
+    ElseIf mRegSheet = SH_ADJ Then
+        NotRegText = "корректировка № " & n & " не зарегистрирована WMS"
     Else
         NotRegText = "возврат № " & n & " не зарегистрирован WMS"
     End If
@@ -471,12 +487,17 @@ Private Function CheckKeySheet(spec As String, bMark As Boolean) As String
     inCol = CInt(a(4))
     If UBound(a) >= 5 Then
         isEI = (a(5) = "EI")
-        isReg = (a(5) = "EI" Or a(5) = "RET" Or a(5) = "SPR")
-        ' the dense registry of a № key: _RET (returns) or _SPR (the lines of «Иной приход»), № in A, the row hint in RT_ROW / SR_ROW
+        isReg = (a(5) = "EI" Or a(5) = "RET" Or a(5) = "SPR" Or a(5) = "ADJ")
+        ' the dense registry of a № key: _RET (returns), _SPR (the lines of «Иной приход») or _ADJ (the corrections), № in A,
+        ' the row hint in RT_ROW / SR_ROW / AJ_ROW
         If a(5) = "SPR" Then
             mRegSheet = SH_SPR
             mRegLast = SR_LAST
             mRegRow = SR_ROW
+        ElseIf a(5) = "ADJ" Then
+            mRegSheet = SH_ADJ
+            mRegLast = AJ_LAST
+            mRegRow = AJ_ROW
         Else
             mRegSheet = SH_RET
             mRegLast = RT_LAST

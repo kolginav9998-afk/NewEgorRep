@@ -1324,7 +1324,7 @@ End Function
 
 Private Function SpDelete(r As Long, checkOnly As Boolean) As String
     Dim why As String, kind As String, nL As Long, sd As Variant, n As Long, canon As String, sh As Object, q As Double, bal As Double
-    Dim bal2 As Double, nLive As Long, nIss As Long, nRet As Long, bLast As Boolean, unit As String
+    Dim bal2 As Double, nLive As Long, nIss As Long, nRet As Long, bLast As Boolean, unit As String, nAdj As Long
     WmsInit()
     If r < 1 Or r > MAX_SHEET_ROW Then
         SpDelete = "ERR:выберите строку иного прихода (не заголовок)"
@@ -1362,7 +1362,8 @@ Private Function SpDelete(r As Long, checkOnly As Boolean) As String
         SpDelete = "ERR-SYS:не удалось проверить строки прихода " & canon & " (формула движка Calc) — сторно не выполнено"
         Exit Function
     End If
-    bLast = (nLive <= 1)
+    ' a migrated EI (source «Перенос…») existed before its receipt lines: cancelling the last of them keeps the EI
+    bLast = (nLive <= 1) And Left(CStr(WmsIssue.StockData(n)(SC_SRC)), 7) <> "Перенос"
     If bLast Then
         ' D-069: no live chain «issue → return» may refer to a cancelled receipt
         If Not WmsReturn.LiveDependents(canon, nIss, nRet) Then
@@ -1374,6 +1375,16 @@ Private Function SpDelete(r As Long, checkOnly As Boolean) As String
                 & IIf(bal < q - 0.0000001, " (уже выдано " & WmsIssue.QtyText(WmsIssue.Round3(q - bal)) & " " & unit & ")", "") _
                 & ". Сначала выполните сторно зависимых операций: " & IIf(nRet > 0, "возвратов этого ЕИ (лист «" & SH_RETURNS & "»), затем ", "") _
                 & "выдач (лист «" & SH_ISSUES & "»)"
+            Exit Function
+        End If
+        ' D-069 for the corrections (Final Core): a live move, write-off or inventory correction refers to the receipt too
+        If Not WmsAdjust.LiveAdjustments(canon, nAdj) Then
+            SpDelete = "ERR-SYS:не удалось проверить корректировки " & canon & " (формула движка Calc) — сторно не выполнено"
+            Exit Function
+        End If
+        If nAdj > 0 Then
+            SpDelete = "ERR:По этому ЕИ (" & canon & ") есть действующие корректировки: " & nAdj & " (лист «" & SH_ADJUST _
+                & "»: перемещения, списания, инвентаризация). Сначала выполните их сторно"
             Exit Function
         End If
     End If
@@ -1800,7 +1811,7 @@ Function SpecialCheck() As String
     Dim nIdx As Long, keys() As String, keyEI() As Long, j As Long, nStale As Long, lastRow As Long, colA As Variant, colA0 As Long
     Dim hasEntry() As Boolean, st As String, key As String, entryKey() As String, need As Boolean, stNames As Variant
     Dim kNo As Integer, kEv As Integer, kTy As Integer, kEi As Integer, kMo As Integer, kQt As Integer, kSt As Integer, kRo As Integer
-    Dim kId As Integer, sLive As String, sStorno As String, sNew As String, sAdd As String
+    Dim kId As Integer, sLive As String, sStorno As String, sNew As String, sAdd As String, plus As Variant, migrated As Boolean
     On Error GoTo EH
     t0 = GetSystemTicks()
     stNames = Split(SRC_STYPES, "|")
@@ -1812,6 +1823,8 @@ Function SpecialCheck() As String
     For i = 0 To 4
         nextEv(i) = CLng(SysNum(EventCounterKey(i)))
     Next i
+    ' a balance may exceed its live receipts by the live positive inventory corrections of the EI (Final Core)
+    plus = WmsAdjust.PlusByEI(nextEI)
     ReDim liveQ(nextEI)
     ReDim nNew(nextEI)
     ReDim isPart(nextEI)
@@ -1958,7 +1971,20 @@ Function SpecialCheck() As String
                     If CStr(sd(SC_EI)) <> WmsIssue.EiCanon(n) Then
                         Bad(nBad, first, WmsIssue.EiCanon(n) & ": нет строки в «" & SH_STOCK & "»")
                     Else
-                        If touched(n) Then
+                        ' a migrated part (source «Перенос…», MIGRATE) existed before its refills: no line created it, and its balance
+                        ' includes the transferred quantity (in the journal) — only the kind and the number are checked here
+                        migrated = (Left(CStr(sd(SC_SRC)), 7) = "Перенос")
+                        If touched(n) And migrated And nNew(n) = 0 Then
+                            nEI = nEI + 1
+                            nParts = nParts + 1
+                            If CStr(sd(SC_STYPE)) <> stNames(2) Then
+                                Bad(nBad, first, WmsIssue.EiCanon(n) & ": пополнение «Иного прихода» у перенесённого ЕИ не детали («" & sd(SC_STYPE) & "»)")
+                            ElseIf VarType(sd(SC_QTY)) <> 5 Then
+                                Bad(nBad, first, WmsIssue.EiCanon(n) & ": остаток не число")
+                            ElseIf sd(SC_QTY) < 0 Then
+                                Bad(nBad, first, WmsIssue.EiCanon(n) & ": отрицательный остаток")
+                            End If
+                        ElseIf touched(n) Then
                             If nNew(n) <> 1 Then
                                 Bad(nBad, first, WmsIssue.EiCanon(n) & ": строк иного прихода, создавших ЕИ, " & nNew(n) & " (должна быть одна)")
                             Else
@@ -1969,9 +1995,9 @@ Function SpecialCheck() As String
                                 ElseIf VarType(sd(SC_QTY)) <> 5 Then
                                     Bad(nBad, first, WmsIssue.EiCanon(n) & ": остаток не число")
                                 ElseIf anyLive(n) Then
-                                    If sd(SC_QTY) > liveQ(n) + 0.0005 Then
+                                    If sd(SC_QTY) > liveQ(n) + plus(n) + 0.0005 Then
                                         Bad(nBad, first, WmsIssue.EiCanon(n) & ": остаток " & sd(SC_QTY) & " больше суммы действующих приходов " _
-                                            & WmsIssue.QtyText(liveQ(n)))
+                                            & WmsIssue.QtyText(liveQ(n)) & IIf(plus(n) > 0, " и излишков инвентаризации " & WmsIssue.QtyText(plus(n)), ""))
                                     ElseIf CStr(sd(SC_STATE)) = EI_ST_STORNO Then
                                         Bad(nBad, first, WmsIssue.EiCanon(n) & ": есть действующие приходы, а состояние «" & EI_ST_STORNO & "»")
                                     End If

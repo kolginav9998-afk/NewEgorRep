@@ -939,7 +939,7 @@ def r28_save_reopen():
                   "W": [W(s, r) for r in (1, 2, 3, 4)] == ["Частично получено", "Дополнительное поступление", "Отменено", "Ожидается"],
                   "защита": [s.ord_locks(r) for r in (1, 2, 3, 4)] == [POSTED, POSTED, POSTED, OPEN],
                   # «Выдачи», «Заказы», since Core Phase 4 «Возврат» and since Core Phase 5 «Иной приход» allow inserting rows
-                  "вставка строк": xml.count('loext:insert-rows="true"') == 4, "автофильтр": s.doc.DatabaseRanges.hasByName("WMS_ORDERS"),
+                  "вставка строк": xml.count('loext:insert-rows="true"') == 5, "автофильтр": s.doc.DatabaseRanges.hasByName("WMS_ORDERS"),
                   "NEXT_EI": s.sysv("NEXT_EI") == 203, "NEXT_OL": s.next_ol() == 3.0}
         fact(s, 4, "7")
         nxt = post(s, 4)

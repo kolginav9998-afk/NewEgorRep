@@ -21,6 +21,7 @@ ISSUE_COLS = "ABCDEFGHIJKLMNOPQR"
 ORDER_COLS = [chr(65 + i) for i in range(26)] + ["AA", "AB"]
 RETURN_COLS = "ABCDEFGHIJKLMNO"
 SPECIAL_COLS = "ABCDEFGHIJKLMNOPQRS"
+ADJUST_COLS = "ABCDEFGHIJKLMNOPQRS"
 # initial balances of the synthetic EIs of a test book (tools/build_ods.synthetic_registry)
 INITIAL_STOCK = {row[0]: row[4] for row in synthetic_registry()}
 
@@ -360,6 +361,55 @@ class Session:
         import special_oracle
         return special_oracle.check(self.doc, self.jdir, INITIAL_STOCK if initial is None else initial, expect_tail, today=today, base=base,
                                     legacy_mn_empty=legacy_mn_empty)
+
+    # «Корректировки» (Final Core)
+    def A(self, func, *a):
+        return self.B(func, *a, module="WmsAdjust")
+
+    def AU(self, func, *a):
+        return self.B(func, *a, module="WmsAdjustUi")
+
+    def EX(self, func, *a):
+        return self.B(func, *a, module="WmsExport")
+
+    def adj(self, r):
+        """values of «Корректировки» row r (0-based; row 1 is the first data row), A..S"""
+        return tuple(self.doc.Sheets.getByName("Корректировки").getCellRangeByPosition(0, r, 18, r).getDataArray()[0])
+
+    def adj_cell(self, col, r):
+        cell = self.doc.Sheets.getByName("Корректировки").getCellByPosition(ADJUST_COLS.index(col), r)
+        return cell.getType().value, cell.getString(), cell.getValue()
+
+    def adj_locks(self, r):
+        sh = self.doc.Sheets.getByName("Корректировки")
+        return "".join("1" if sh.getCellByPosition(c, r).CellProtection.IsLocked else "0" for c in range(19))
+
+    def type_adj(self, col, r, text):
+        """enter text into «Корректировки» like a user (GoToCell + EnterString): the sheet's change handler runs"""
+        self.goto("Корректировки", f"${col}${r + 1}")
+        self.o.dispatch(self.doc, ".uno:EnterString", StringName=text)
+
+    def adjust_input(self, r, **cols):
+        """cols: column letter → text, typed through the UI in the order given (None — not typed)"""
+        for col, v in cols.items():
+            if v is not None:
+                self.type_adj(col, r, v)
+
+    def click_adj(self, button, r=None, col="B", r1=None):
+        """a button of «Корректировки» for the row (or rows r..r1) under the cursor — the macro the button is bound to"""
+        if r is not None:
+            ref = f"${col}${r + 1}" if r1 is None else f"$A${r + 1}:$S${r1 + 1}"
+            self.goto("Корректировки", ref)
+        self.AU(button)
+        return self.U("TestUiLastMessage")
+
+    def adjrec(self, n):
+        return tuple(self.doc.Sheets.getByName("_ADJ").getCellRangeByPosition(0, n, 10, n).getDataArray()[0])
+
+    def adjcheck(self, expect_tail=0, initial=None, today=None, base=None, legacy_mn_empty=True):
+        import adjust_oracle
+        return adjust_oracle.check(self.doc, self.jdir, INITIAL_STOCK if initial is None else initial, expect_tail, today=today, base=base,
+                                   legacy_mn_empty=legacy_mn_empty)
 
     def journal(self):
         return journal_oracle.read_journal(self.jdir)

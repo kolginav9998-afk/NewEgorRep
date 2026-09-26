@@ -95,7 +95,7 @@ Function SheetsProblem() As String
         Exit Function
     End If
     sh = IdxSheet()
-    For i = IX_ECHO To IX_XD_COUNT
+    For i = IX_ECHO To IX_AA_COUNT
         If i <> IX_LIST And sh.getCellByPosition(1, i).getType() <> com.sun.star.table.CellContentType.FORMULA Then
             SheetsProblem = "служебный лист " & SH_IDX & " повреждён: нет формулы поиска в строке " & (i + 1)
             Exit Function
@@ -225,11 +225,15 @@ Private Function FaLookup(ixRow As Integer, key As Variant, start As Long) As Do
     Case IX_XD_MATCH, IX_XD_COUNT
         sh = gDoc.Sheets.getByName(SH_SPR)
         col = SR_DUP
+    Case IX_AA_MATCH, IX_AA_COUNT
+        sh = gDoc.Sheets.getByName(SH_ADJUST)
+        col = AC_NO
     Case Else
         sh = RcvSheet()
         col = RV_DUP
     End Select
-    If ixRow = IX_V_COUNT Or ixRow = IX_DUP_COUNT Or ixRow = IX_RA_COUNT Or ixRow = IX_XA_COUNT Or ixRow = IX_ART_COUNT Or ixRow = IX_XD_COUNT Then
+    If ixRow = IX_V_COUNT Or ixRow = IX_DUP_COUNT Or ixRow = IX_RA_COUNT Or ixRow = IX_XA_COUNT Or ixRow = IX_ART_COUNT Or ixRow = IX_XD_COUNT _
+        Or ixRow = IX_AA_COUNT Then
         FaLookup = fa.callFunction("COUNTIF", Array(sh.getCellRangeByPosition(col, 1, col, MAX_SHEET_ROW), key))
         Exit Function
     End If
@@ -297,6 +301,17 @@ End Function
 
 Function CountSpecialNo(n As Long) As Long
     CountSpecialNo = CLng(IdxLookup(IX_XA_COUNT, CDbl(n), 0))
+End Function
+
+' Final Core: 0-based «Корректировки» row of the first correction № n (A), from data row start + 1; -1 when none
+Function FindAdjustNoRow(n As Long, start As Long) As Long
+    Dim x As Double
+    x = IdxLookup(IX_AA_MATCH, CDbl(n), start)
+    If x < 1 Then FindAdjustNoRow = -1 Else FindAdjustNoRow = CLng(x)
+End Function
+
+Function CountAdjustNo(n As Long) As Long
+    CountAdjustNo = CLng(IdxLookup(IX_AA_COUNT, CDbl(n), 0))
 End Function
 
 ' Phase 5: the _ART row of the first article key equal to key (text, compared as a whole cell, wildcards taken

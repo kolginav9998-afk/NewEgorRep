@@ -29,6 +29,7 @@ Sub Analyze()
     ' damaged _IDX
     If p = "" Then p = WmsReturn.SheetsProblem()
     If p = "" Then p = WmsSpecial.SpecialSheetsProblem()
+    If p = "" Then p = WmsAdjust.AdjustSheetsProblem()
     If p = "" Then p = WmsOrders.SheetsProblem()
     If p <> "" Then
         SetBlocked("SYS_CORRUPT", p)
@@ -293,7 +294,7 @@ End Function
 Function AbandonTail() As String
     Dim lastSeq As Long, fromSeq As Long, toSeq As Long, p As String, sLine As String, why As String, rc As Integer
     Dim i As Long, lst As String, maxEI As Double, maxNo As Double, nextEI As Double, nextNo As Double, maxRet As Double, nextRet As Double
-    Dim maxSpl As Double, nextSpl As Double, maxEv(4) As Double, nextEv(4) As Double, k As Integer, fl As String
+    Dim maxSpl As Double, nextSpl As Double, maxEv(4) As Double, nextEv(4) As Double, k As Integer, fl As String, maxAdj As Double, nextAdj As Double
     WmsInit()
     If gBlock <> "TAIL" Then
         AbandonTail = "«Отложить хвост журнала» не требуется: " & StateLine()
@@ -312,6 +313,7 @@ Function AbandonTail() As String
         If i < 20 Then lst = lst & IIf(lst <> "", ", ", "") & gJR_Seq(i) & ":" & gJR_Type(i)
         TailCounters(gJR_Fields(i), maxEI, maxNo, maxRet)
         TailSpecialCounters(gJR_Fields(i), maxSpl, maxEv)
+        TailAdjustCounter(gJR_Fields(i), maxAdj)
     Next i
     ' numbers the abandoned operations handed out (an EI label, an issue №, a return №) are never issued again
     nextEI = SysNum(SK_NEXT_EI)
@@ -329,6 +331,10 @@ Function AbandonTail() As String
         If maxEv(k) + 1 > nextEv(k) Then nextEv(k) = maxEv(k) + 1
         fl = fl & Chr(9) & SysKeyNames()(SK_NEXT_OFF + k) & "=" & NumStr(nextEv(k))
     Next k
+    ' Final Core: the № of a correction may be on a paper act too
+    nextAdj = SysNum(SK_NEXT_ADJ)
+    If maxAdj + 1 > nextAdj Then nextAdj = maxAdj + 1
+    fl = fl & Chr(9) & "NEXT_ADJ=" & NumStr(nextAdj)
     sLine = WmsJournal.BuildLine(toSeq + 1, "ABANDON", Split("FROM=" & fromSeq & Chr(9) & "TO=" & toSeq & Chr(9) & "NEXT_EI=" & NumStr(nextEI) _
         & Chr(9) & "NEXT_NO=" & NumStr(nextNo) & Chr(9) & "NEXT_RET=" & NumStr(nextRet) & Chr(9) & fl & Chr(9) & "REASON=" _
         & Esc("решение пользователя: хвост журнала не применён"), Chr(9)))
@@ -382,6 +388,15 @@ Private Sub TailSpecialCounters(fields As Variant, ByRef maxSpl As Double, maxEv
     End If
 End Sub
 
+'' Final Core: the largest correction № (ADJ) named by one journal entry
+Private Sub TailAdjustCounter(fields As Variant, ByRef maxAdj As Double)
+    Dim v As String
+    v = FieldValue(fields, "ADJ")
+    If IsDigits(v) And Len(v) <= 9 Then
+        If CDbl(v) > maxAdj Then maxAdj = CDbl(v)
+    End If
+End Sub
+
 ' an ABANDON record raises NEXT_EI / NEXT_NO / NEXT_RET past the numbers of the abandoned operations (never lowers them); repeated
 ' application is harmless, so a crash between the journal line and the book is covered by «Восстановить»
 Private Sub ApplyAbandonCounters(fields As Variant)
@@ -398,8 +413,8 @@ Private Sub ApplyAbandonCounters(fields As Variant)
     If IsDigits(v) And Len(v) <= 9 Then
         If CDbl(v) > SysNum(SK_NEXT_RET) Then SysPutNum(SK_NEXT_RET, CDbl(v))
     End If
-    ' Phase 5: NEXT_SPL and the event counters of the special receipts
-    For k = SK_NEXT_SPL To SK_NEXT_OTH
+    ' Phase 5: NEXT_SPL and the event counters of the special receipts; Final Core: NEXT_ADJ
+    For k = SK_NEXT_SPL To SK_NEXT_ADJ
         v = FieldValue(fields, SysKeyNames()(k))
         If IsDigits(v) And Len(v) <= 9 Then
             If CDbl(v) > SysNum(k) Then SysPutNum(k, CDbl(v))

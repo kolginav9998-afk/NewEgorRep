@@ -1056,7 +1056,7 @@ def x25_filter_save_reopen():
         vis2 = [visible(s, r) for r in range(1, 6)]
         checks = {"CLEAN": st(s)[0] == "CLEAN", "не «изменена» после открытия": not s.doc.isModified(), "строки при фильтре": nfilt == 0 and vis1 == vis
                   and vis2 == vis, "статусы": [s.spc(r)[16] for r in (1, 3, 5)] == ["Проведено: новый ЕИ"] * 3,
-                  "защита": [s.spc_locks(r) for r in (1, 2)] == [POSTED, OPEN], "вставка строк": xml.count('loext:insert-rows="true"') == 4,
+                  "защита": [s.spc_locks(r) for r in (1, 2)] == [POSTED, OPEN], "вставка строк": xml.count('loext:insert-rows="true"') == 5,
                   "автофильтр": s.doc.DatabaseRanges.hasByName("WMS_SPECIAL"), "счётчики": counters(s)[1:] == [204, 4, 2, 1, 1, 1, 1],
                   "непроведённые на «Главной»": "иной приход: 2 строк" in s.main_status()[3]}
         set_filter(s, 1, "Производство")
