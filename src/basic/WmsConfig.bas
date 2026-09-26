@@ -1,10 +1,12 @@
 ' WmsConfig — constants, _SYS layout, settings, LibreOffice settings management (AutoInput).
 ' MASTER SPEC v0.3: §3 sources as text, §10/§29 AutoInput, §16 protection, §20 journal, §22 lock, §24 chunks, §26 backups,
-' §2 and §14 fixed sheets «Выдачи», «Заказы», «Возврат» and their service structures.
+' §2 and §14 fixed sheets «Выдачи», «Заказы», «Возврат», «Иной приход» and their service structures.
 Option Explicit
 
-Public Const WMS_CORE_VERSION = "0.4.0-phase4"
-Public Const WMS_SYS_SCHEMA = "WMS-SYS-1"
+Public Const WMS_CORE_VERSION = "0.5.0-phase5"
+' Phase 5 appended the counters of the special receipts (rows 19..24); a book of an earlier core has WMS-SYS-1
+Public Const WMS_SYS_SCHEMA = "WMS-SYS-2"
+Public Const WMS_SYS_SCHEMA_OLD = "WMS-SYS-1"
 
 Public Const SYS_SHEET = "_SYS"
 Public Const JOURNAL_DIR = "WMS_Journal"
@@ -37,7 +39,14 @@ Public Const SK_SAVE_STAMP = 15
 Public Const SK_SAVE_SEQ = 16
 Public Const SK_MAX_QTY = 17
 Public Const SK_KEY_SHEETS = 18
-Public Const SYS_ROWS = 19
+' Phase 5 (WMS-SYS-2): the line № of «Иной приход» and the numbers of the receipt events per source
+Public Const SK_NEXT_SPL = 19
+Public Const SK_NEXT_OFF = 20
+Public Const SK_NEXT_PROD = 21
+Public Const SK_NEXT_DET = 22
+Public Const SK_NEXT_OLD = 23
+Public Const SK_NEXT_OTH = 24
+Public Const SYS_ROWS = 25
 
 ' transaction marker states
 Public Const TX_NONE = "NONE"
@@ -101,7 +110,10 @@ Public Const SC_PLACE = 5
 Public Const SC_CAT = 6
 Public Const SC_STATE = 7
 Public Const SC_SRC = 8
-Public Const SC_LAST = 8
+' Phase 5: the kind of source of the EI (Поставщик / Офис / Производство / Детали / Старый склад / Иной приход) — for
+' filters and analytics; I «Источник» keeps the document of origin («Заказ <№>», «Офис OFF-00000001», …)
+Public Const SC_STYPE = 9
+Public Const SC_LAST = 9
 
 Public Const EI_PREFIX = "ЕИ-"
 Public Const EI_DIGITS = 8
@@ -171,6 +183,10 @@ Public Const OS_ADD_STORNO = "Поступление удалено (сторн�
 ' «Наличие» H «Состояние» of an EI created by a receipt
 Public Const EI_ST_ACTIVE = "Активен"
 Public Const EI_ST_STORNO = "Приход удалён (сторно)"
+' Phase 5: an EI of «Иной приход» that is stock already but not identified yet
+Public Const EI_ST_REVIEW = "Требует разбора"
+' «Наличие» J «Тип источника» of an EI created by an ordinary receipt of «Заказы»
+Public Const STYPE_SUPPLIER = "Поставщик"
 
 ' _ORD — order positions (OrderLineID = row index, dense), created by the first operation of a position (spec §14, D-006)
 Public Const OD_ID = 0
@@ -223,6 +239,14 @@ Public Const IX_LIST = 10
 Public Const IX_I_MATCH = 11
 Public Const IX_RA_MATCH = 12
 Public Const IX_RA_COUNT = 13
+' Phase 5: «Иной приход».A (line №) MATCH and COUNTIF, _ART.A (article key of the parts) MATCH and COUNTIF, _SPR.J
+' (antidubl hash of the special receipts) MATCH and COUNTIF
+Public Const IX_XA_MATCH = 14
+Public Const IX_XA_COUNT = 15
+Public Const IX_ART_MATCH = 16
+Public Const IX_ART_COUNT = 17
+Public Const IX_XD_MATCH = 18
+Public Const IX_XD_COUNT = 19
 
 ' ---------------------------------------------------------------- Phase 4: returns of issued goods (spec §11, §14, D-004, D-011)
 Public Const SH_RETURNS = "Возврат"
@@ -271,20 +295,101 @@ Public Const IS_LAST = 3
 ' «Найти выдачу»: at most this many of the latest returnable issues of one EI are listed
 Public Const ISSUE_LIST_MAX = 100
 
-' «Площадка / Поставщик» values that start a special receipt (spec §7) — not an ordinary receipt, next stage
-Public Const SPECIAL_SUPPLIERS = "офис|производство|детали|старый склад"
+' ---------------------------------------------------------------- Phase 5: special receipts (spec §4, §7, §8, v0.1 §10–§12, §23)
+' One user sheet for every receipt that is not an order of «Заказы»: Офис, Производство, Детали, Старый склад, Иной.
+Public Const SH_SPECIAL = "Иной приход"
+Public Const SH_SPR = "_SPR"
+Public Const SH_ART = "_ART"
+
+' «Иной приход» A:S: 0-based column indices
+Public Const XC_NO = 0
+Public Const XC_TYPE = 1
+Public Const XC_EVENT = 2
+Public Const XC_NAME = 3
+Public Const XC_ART = 4
+Public Const XC_QTY = 5
+Public Const XC_UNIT = 6
+Public Const XC_DATE = 7
+Public Const XC_PLACE = 8
+Public Const XC_CAT = 9
+Public Const XC_WHO = 10
+Public Const XC_DOC = 11
+Public Const XC_MARK = 12
+Public Const XC_EI = 13
+Public Const XC_BEFORE = 14
+Public Const XC_AFTER = 15
+Public Const XC_STATUS = 16
+Public Const XC_CTL = 17
+Public Const XC_NOTE = 18
+Public Const XC_LAST = 18
+
+' cell protection of an «Иной приход» row, one character per column A..S ("1" = locked). Unposted: the inputs B..M and
+' the comment S are open, what WMS fills (A N O P Q R) is locked. Posted or cancelled: only S stays open.
+Public Const SPECIAL_LOCKS_OPEN = "1000000000000111110"
+Public Const SPECIAL_LOCKS_POSTED = "1111111111111111110"
+
+' Q «Статус» of a posted line (the kind of the line after the prefix; «Проведено (исправлено): » after a correction)
+Public Const XS_POSTED = "Проведено: "
+Public Const XS_FIXED = "Проведено (исправлено): "
+Public Const XK_NEW = "новый ЕИ"
+Public Const XK_ADD = "пополнение ЕИ"
+Public Const XK_REVIEW = "требует разбора"
+Public Const XK_IDENT = "разобрано"
+
+' _SPR — the lines of the special receipts, one row per line № (row index = line №, dense like «Наличие»)
+Public Const SR_NO = 0
+Public Const SR_EVENT = 1
+Public Const SR_TYPE = 2
+Public Const SR_EI = 3
+Public Const SR_MODE = 4
+Public Const SR_QTY = 5
+Public Const SR_STATE = 6
+Public Const SR_ROW = 7
+Public Const SR_DATE = 8
+Public Const SR_DUP = 9
+Public Const SR_DUPKEY = 10
+Public Const SR_ARTKEY = 11
+Public Const SR_IDENT = 12
+Public Const SR_FIXES = 13
+Public Const SR_LAST = 13
+' SR_MODE: the line created its EI (NEW) or added to an existing EI of a part (ADD)
+Public Const SR_NEW = "NEW"
+Public Const SR_ADD = "ADD"
+
+' _ART — the index «article of a part → its EI» (one row per article, appended; spec §8: one article — one EI)
+Public Const AR_KEY = 0
+Public Const AR_EI = 1
+Public Const AR_ART = 2
+Public Const AR_LAST = 2
+
+' the sources: code (_SPR, journal), prefix of the event ID, name on the sheet, «Тип источника» of the EI in «Наличие»
+Public Const SRC_CODES = "OFF|PROD|DET|OLD|OTH"
+Public Const SRC_NAMES = "Офис|Производство|Детали|Старый склад|Иной"
+Public Const SRC_STYPES = "Офис|Производство|Детали|Старый склад|Иной приход"
+Public Const EVENT_DIGITS = 8
+
+' «Площадка / Поставщик» values that start a special receipt (spec §7): not an ordinary receipt of «Заказы» — it is
+' posted on the sheet «Иной приход» (Core Phase 5)
+Public Const SPECIAL_SUPPLIERS = "офис|производство|детали|старый склад|иной|иной приход"
 ' «Обновить статусы» examines at most this many separate blocks of rows without a status
 Public Const REFRESH_MAX_BLOCKS = 20000
 
 Function SysKeyNames() As Variant
     SysKeyNames = Array("SCHEMA", "INSTANCE_ID", "MODE", "CORE_VERSION", "LAST_SEQ", "NEXT_EI", "NEXT_NO", "NEXT_RET", _
         "JOURNAL_POS", "REGISTERED_URL", "TX_STATE", "TX_SEQ", "TX_TYPE", "TX_TIME", "TX_BEFORE_IMAGE", _
-        "SAVE_STAMP", "SAVE_SEQ", "MAX_QTY", "KEY_SHEETS")
+        "SAVE_STAMP", "SAVE_SEQ", "MAX_QTY", "KEY_SHEETS", "NEXT_SPL", "NEXT_OFF", "NEXT_PROD", "NEXT_DET", "NEXT_OLD", "NEXT_OTH")
 End Function
 
 ' keys of _SYS that must hold numbers
 Function SysNumericKeys() As Variant
-    SysNumericKeys = Array(SK_LAST_SEQ, SK_NEXT_EI, SK_NEXT_NO, SK_NEXT_RET, SK_TX_SEQ, SK_SAVE_STAMP, SK_SAVE_SEQ, SK_MAX_QTY)
+    SysNumericKeys = Array(SK_LAST_SEQ, SK_NEXT_EI, SK_NEXT_NO, SK_NEXT_RET, SK_TX_SEQ, SK_SAVE_STAMP, SK_SAVE_SEQ, SK_MAX_QTY, _
+        SK_NEXT_SPL, SK_NEXT_OFF, SK_NEXT_PROD, SK_NEXT_DET, SK_NEXT_OLD, SK_NEXT_OTH)
+End Function
+
+' counters that must be ≥ 1 (numbers handed out from 1)
+Function SysCounterKeys() As Variant
+    SysCounterKeys = Array(SK_NEXT_EI, SK_NEXT_NO, SK_NEXT_RET, SK_MAX_QTY, SK_NEXT_SPL, SK_NEXT_OFF, SK_NEXT_PROD, SK_NEXT_DET, _
+        SK_NEXT_OLD, SK_NEXT_OTH)
 End Function
 
 ' ---------------------------------------------------------------- AutoInput (spec §10, §29; decision D-031)

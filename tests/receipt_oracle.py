@@ -18,14 +18,32 @@ The ten invariants of the task are checked explicitly (see INVARIANTS).
 Core Phase 4: the returns (RETURN, RETURN_FIX, RETURN_DEL) are replayed here too — they change the balance and the
 current place of their EI, and the rules of ISSUE_FIX / ISSUE_DEL depend on them. With `out` (a dict) the replayed
 state is handed to tests/return_oracle.py, which compares the returns with «Возврат», _RET and _ISS.
+
+Core Phase 5: the special receipts (SP_RECEIPT — a new EI of Офис / Производство / Детали / Старый склад / Иной,
+SP_REFILL — a part added to the EI of its article, SP_FIX, SP_DEL, SP_IDENTIFY) are replayed by replay_special() with
+the rules of the task written independently: one article of a part — one EI (the normalized article), a new EI never
+reuses a number, the line № and the event № (OFF-/PROD-/DET-/OLD-/OTH-) are monotonic and never reused, joining only an
+issued event of the same type, the unit of an EI never changes by a refill, a place changes only by a marked move, a
+storno of the last live line of an EI is refused while it has live issues or returns (D-069), a storno of one addition
+never makes the balance negative, identification keeps the EI. tests/special_oracle.py compares the replay with
+«Иной приход», _SPR, _ART and the cards in «Наличие».
 """
 import datetime
+import re
 
 import journal_oracle
 
 RECEIPT_TYPES = ("RECEIPT", "RECEIPT_ADD", "RECEIPT_FIX", "RECEIPT_DEL", "ORDER_CANCEL", "ORDER_CANCEL_REST")
 ISSUE_TYPES = ("ISSUE", "ISSUE_FIX", "ISSUE_DEL")
 RETURN_TYPES = ("RETURN", "RETURN_FIX", "RETURN_DEL")
+SPECIAL_TYPES = ("SP_RECEIPT", "SP_REFILL", "SP_FIX", "SP_DEL", "SP_IDENTIFY")
+SP_CODES = ("OFF", "PROD", "DET", "OLD", "OTH")
+SP_NAME = {"OFF": "Офис", "PROD": "Производство", "DET": "Детали", "OLD": "Старый склад", "OTH": "Иной"}          # «Иной приход».B
+SP_STYPE = {"OFF": "Офис", "PROD": "Производство", "DET": "Детали", "OLD": "Старый склад", "OTH": "Иной приход"}  # «Наличие».J
+SP_COUNTER = {"OFF": "NEXT_OFF", "PROD": "NEXT_PROD", "DET": "NEXT_DET", "OLD": "NEXT_OLD", "OTH": "NEXT_OTH"}
+IDENT_TYPES = ("Поставщик", "Офис", "Производство", "Детали", "Старый склад")
+EI_ACTIVE, EI_STORNO, EI_REVIEW = "Активен", "Приход удалён (сторно)", "Требует разбора"
+EVENT_RE = re.compile(r"(OFF|PROD|DET|OLD|OTH)-(\d{8})")
 EPS = 1e-6
 NULL_DATE = datetime.date(1899, 12, 30)
 ORDER_COLS = [chr(65 + i) for i in range(26)] + ["AA", "AB"]
@@ -168,6 +186,8 @@ def snapshot_base(doc, initial):
             if k and isinstance(row[0], float):
                 base["ret_sum"][k] = row[2]
                 base["ret_cnt"][k] = int(row[3])
+    # Phase 5: the special receipts (lines, index, cards) as the book holds them
+    base["sp"] = snapshot_special(doc)
     return base
 
 
@@ -200,7 +220,7 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
         bad("снимок до изменения не очищен")
     applied = [e for e in ours if e["seq"] <= last]
     abandoned = journal_oracle.abandoned_seqs(applied)
-    ops = [e for e in applied if e["seq"] not in abandoned and e["type"] in RECEIPT_TYPES + ISSUE_TYPES + RETURN_TYPES]
+    ops = [e for e in applied if e["seq"] not in abandoned and e["type"] in RECEIPT_TYPES + ISSUE_TYPES + RETURN_TYPES + SPECIAL_TYPES]
     min_next_ei = 1
     min_next_ret = 1
     for e in applied:
@@ -212,6 +232,22 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
     for e in applied:
         if e["seq"] in abandoned and e["type"] == "RETURN":
             min_next_ret = max(min_next_ret, int(e["fields"]["RET"]) + 1)
+    # Phase 5: the line № and the event № of abandoned special receipts are never issued again; ABANDON raises the counters
+    sp = new_special_state() if base is None or "sp" not in base else copy_special_state(base["sp"])
+    for e in applied:
+        fe = e["fields"]
+        if e["seq"] in abandoned and e["type"] in ("SP_RECEIPT", "SP_REFILL"):
+            if fe.get("SPL", "").isdigit():
+                sp["abandoned_spl"].add(int(fe["SPL"]))
+            m = EVENT_RE.fullmatch(fe.get("EVENT", ""))
+            if m and fe.get("EVENT_NEW") == "1":
+                sp["abandoned_ev"][m.group(1)].add(int(m.group(2)))
+        if e["type"] == "ABANDON":
+            if fe.get("NEXT_SPL", "").isdigit():
+                sp["floor_spl"] = max(sp["floor_spl"], int(fe["NEXT_SPL"]))
+            for code, key in SP_COUNTER.items():
+                if fe.get(key, "").isdigit():
+                    sp["floor_ev"][code] = max(sp["floor_ev"][code], int(fe[key]))
 
     # ------------------------------------------------------------ 1. replay
     if base is None:
@@ -341,6 +377,8 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
         elif t in RETURN_TYPES:
             n_ret_ops += 1
             replay_return(t, f, sq, bal, issues, returns, ret_sum, ret_cnt, place, touched_place, bad)
+        elif t in SPECIAL_TYPES:
+            replay_special(t, f, sq, bal, sp, place, issues, returns, created, receipts, bad)
         else:
             # Phase 2 issues
             no = int(float(f["NO"]))
@@ -604,7 +642,7 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
                      invariants_failed=sorted(inv_fail, key=str)))
     if out is not None:
         out.update(bal=bal, issues=issues, returns=returns, ret_sum=ret_sum, ret_cnt=ret_cnt, place=place, min_next_ret=min_next_ret,
-                   sysv=sysv, ops=ops, book_ei=book_ei)
+                   sysv=sysv, ops=ops, book_ei=book_ei, sp=sp, receipts=receipts, initial=initial, base=base, inv_fail=inv_fail)
     return P, info
 
 
@@ -678,3 +716,323 @@ def replay_return(t, f, sq, bal, issues, returns, ret_sum, ret_cnt, place, touch
         touched_place.add(ei)
     if abs(bal[ei] - float(f["BAL_AFTER"])) > EPS:
         bad(f"seq {sq} {t} №{n}: BAL_AFTER {f['BAL_AFTER']} ≠ {bal[ei]}", 3)
+
+
+# ================================================================ Core Phase 5: special receipts
+
+# Cyrillic capitals that look like Latin ones; spaces of every kind and the soft hyphen are dropped; every dash is "-"
+_LATIN = {"А": "A", "В": "B", "Е": "E", "Ё": "E", "К": "K", "М": "M", "Н": "H", "О": "O", "Р": "P", "С": "C", "Т": "T", "У": "Y", "Х": "X"}
+_DROP = set("\t\n\r       ­")
+
+
+def article_key(s):
+    """the key of the article of a part (the rule of the task: case, spaces and typical symbols do not make another
+    article): upper case, no spaces, dashes unified, Cyrillic lookalikes as Latin; «ABC100» and «ABC-100» stay different"""
+    out = []
+    for ch in (s or "").upper():
+        if ch in _DROP:
+            continue
+        if "‐" <= ch <= "―" or ch == "−":
+            ch = "-"
+        out.append(_LATIN.get(ch, ch))
+    return "".join(out)
+
+
+def norm_text(s):
+    """names and documents compared by the antidubl: letters and digits only, lower case, ё = е"""
+    return "_".join(re.findall(r"[0-9a-zа-я]+", (s or "").strip().lower().replace("ё", "е")))
+
+
+def dup_key(code, artkey, name, q, dserial, doc):
+    """what makes two special lines «the same event»: source + article of a part (otherwise the name) + quantity + date + document"""
+    return (code, ("a", artkey) if artkey else ("n", norm_text(name)), round(q, 6), int(dserial or 0), norm_text(doc))
+
+
+def new_special_state():
+    return dict(lines={}, eis={}, index={}, events={c: set() for c in SP_CODES}, max_spl=0, max_ev={c: 0 for c in SP_CODES},
+                abandoned_spl=set(), abandoned_ev={c: set() for c in SP_CODES}, floor_spl=1, floor_ev={c: 1 for c in SP_CODES}, ops=0)
+
+
+def copy_special_state(sp):
+    out = new_special_state()
+    out["from_base"] = sp.get("from_base", False)
+    out["lines"] = {k: dict(v) for k, v in sp["lines"].items()}
+    out["eis"] = {k: dict(v) for k, v in sp["eis"].items()}
+    out["index"] = dict(sp["index"])
+    out["events"] = {c: set(v) for c, v in sp["events"].items()}
+    out["max_spl"] = sp["max_spl"]
+    out["max_ev"] = dict(sp["max_ev"])
+    return out
+
+
+def snapshot_special(doc):
+    """the special receipts of a book taken as trusted (benchmark: a generated history without a journal): _SPR, _ART and
+    the cards of their EIs in «Наличие»"""
+    sp = new_special_state()
+    sp["from_base"] = True
+    if not doc.Sheets.hasByName("_SPR"):
+        return sp
+    stock = read(doc, "Наличие", 10)
+    for n, row in enumerate(read(doc, "_SPR", 14)):
+        if n == 0 or not isinstance(row[0], float):
+            continue
+        m = EVENT_RE.fullmatch(str(row[1]))
+        code, ei = row[2], row[3]
+        if m:
+            sp["events"][code].add(int(m.group(2)))
+            sp["max_ev"][code] = max(sp["max_ev"][code], int(m.group(2)))
+        sp["max_spl"] = max(sp["max_spl"], n)
+        sp["lines"][n] = dict(event=row[1], code=code, ei=ei, mode=row[4], qty=row[5], state=row[6], date=row[8], artkey=row[11], ident=row[12],
+                              fixes=int(row[13]) if isinstance(row[13], float) else 0, dk=None, base=True)
+        k = ei_num(ei)
+        if ei not in sp["eis"] and k is not None and k < len(stock):
+            c = stock[k]
+            sp["eis"][ei] = dict(code=code, stype=c[9], name=c[1], art=c[2], unit=c[3], cat=c[6], state=c[7], src=c[8],
+                                 artkey=article_key(c[2]) if c[9] == SP_STYPE["DET"] else "", part=c[9] == SP_STYPE["DET"], base=True)
+    for n, row in enumerate(read(doc, "_ART", 3)):
+        if n and row[0]:
+            sp["index"][row[0]] = row[1]
+    return sp
+
+
+def _live_dependents(ei, issues, returns):
+    return ([k for k, v in issues.items() if not v["deleted"] and v["ei"] == ei],
+            [k for k, v in returns.items() if v["state"] == "LIVE" and v["ei"] == ei])
+
+
+def replay_special(t, f, sq, bal, sp, place, issues, returns, created, receipts, bad):
+    """one special receipt operation of the journal, checked against the rules of the task of Phase 5 (see the module
+    docstring); invariants S1…S10 of tests/special_oracle.py"""
+    lines, eis, index = sp["lines"], sp["eis"], sp["index"]
+    sp["ops"] += 1
+    try:
+        n = int(f["SPL"])
+    except (KeyError, ValueError):
+        bad(f"seq {sq} {t}: нет № строки (SPL)", "S4")
+        return
+    ei = f.get("EI", "")
+
+    def fnum(k):
+        try:
+            return float(f[k])
+        except (KeyError, ValueError):
+            return float("nan")
+
+    if t in ("SP_RECEIPT", "SP_REFILL"):
+        code = f.get("SRC", "")
+        if code not in SP_CODES:
+            bad(f"seq {sq} {t} № {n}: неизвестный источник «{code}»", "S9")
+            return
+        if n in lines:
+            bad(f"seq {sq} {t}: № строки {n} проведён повторно", "S4")
+            return
+        if n <= sp["max_spl"] or n in sp["abandoned_spl"]:
+            bad(f"seq {sq} {t}: № строки {n} не больше выданного ранее ({sp['max_spl']}) или взят отложенной операцией", "S2")
+        m = EVENT_RE.fullmatch(f.get("EVENT", ""))
+        if not m or m.group(1) != code:
+            bad(f"seq {sq} {t} № {n}: событие «{f.get('EVENT')}» не соответствует типу {code}", "S9")
+            return
+        num = int(m.group(2))
+        if f.get("EVENT_NEW") == "1":
+            if num in sp["events"][code] or num in sp["abandoned_ev"][code] or num <= sp["max_ev"][code]:
+                bad(f"seq {sq} {t} № {n}: событие {f['EVENT']} выдано повторно или не по возрастанию (было до {sp['max_ev'][code]})", "S2")
+            sp["events"][code].add(num)
+            sp["max_ev"][code] = max(sp["max_ev"][code], num)
+        elif f.get("EVENT_NEW") == "0":
+            if num not in sp["events"][code] and num not in sp["abandoned_ev"][code]:
+                bad(f"seq {sq} {t} № {n}: присоединение к событию {f['EVENT']}, которое WMS не выдавала", "S9")
+        else:
+            bad(f"seq {sq} {t} № {n}: нет признака нового события EVENT_NEW", "S9")
+        q = fnum("QTY")
+        if not q > EPS:
+            bad(f"seq {sq} {t} № {n}: количество {f.get('QTY')!r} не больше 0", 6)
+            return
+        dser = iso_serial(f.get("DATE"))
+        name, unit, plc = f.get("NAME", ""), f.get("UNIT", ""), f.get("PLACE", "")
+        artkey = ""
+        if code == "DET":
+            artkey = article_key(f.get("ART", ""))
+            if not artkey:
+                bad(f"seq {sq} {t} № {n}: деталь без артикула", "S1")
+            if f.get("ART_KEY", "") != artkey:
+                bad(f"seq {sq} {t} № {n}: ключ артикула «{f.get('ART_KEY')}» ≠ нормализованный «{artkey}»", "S1")
+        elif f.get("ART_KEY"):
+            bad(f"seq {sq} {t} № {n}: ключ артикула у источника {code} (индекс — только у деталей)", "S1")
+        if t == "SP_RECEIPT":
+            if f.get("MODE") != "NEW":
+                bad(f"seq {sq} SP_RECEIPT № {n}: режим {f.get('MODE')!r} ≠ NEW")
+            if ei in bal or ei in receipts or ei in eis or ei_num(ei) is None:
+                bad(f"seq {sq} SP_RECEIPT № {n}: {ei} уже существовал или не ЕИ — ЕИ выдан повторно", 2)
+                return
+            created.append(ei)
+            if not (name and unit and plc and dser is not None):
+                bad(f"seq {sq} SP_RECEIPT № {n}: пустое обязательное поле (наименование {name!r}, единица {unit!r}, место {plc!r}, дата {f.get('DATE')!r})")
+            if code == "DET":
+                if artkey in index:
+                    bad(f"seq {sq} SP_RECEIPT № {n}: артикул «{artkey}» уже у {index[artkey]} — второй ЕИ для одного артикула", "S1")
+                index[artkey] = ei
+            if abs(fnum("BAL_BEFORE")) > EPS or abs(fnum("BAL_AFTER") - q) > EPS:
+                bad(f"seq {sq} SP_RECEIPT № {n}: остаток до/после {f.get('BAL_BEFORE')}/{f.get('BAL_AFTER')} ≠ 0/{q}", 3)
+            eis[ei] = dict(code=code, stype=SP_STYPE[code], name=name, art=f.get("ART", ""), unit=unit, cat=f.get("CAT", ""),
+                           state=EI_REVIEW if code == "OTH" else EI_ACTIVE, src=f"{SP_STYPE[code]} {f['EVENT']}", artkey=artkey,
+                           part=code == "DET", first=n)
+            bal[ei] = q
+            place[ei] = plc
+            before = None
+        else:
+            if f.get("MODE") != "ADD" or code != "DET":
+                bad(f"seq {sq} SP_REFILL № {n}: пополнение существующего ЕИ не у детали ({code}, {f.get('MODE')})", "S1")
+                return
+            card = eis.get(ei)
+            if card is None:
+                bad(f"seq {sq} SP_REFILL № {n}: {ei} не создан специальным приходом")
+                return
+            if index.get(artkey) != ei:
+                bad(f"seq {sq} SP_REFILL № {n}: пополнен {ei}, а артикул «{artkey}» по индексу — {index.get(artkey)}", "S1")
+            if unit.lower() != card["unit"].lower():
+                bad(f"seq {sq} SP_REFILL № {n}: единица «{unit}» ≠ единица ЕИ «{card['unit']}» (пересчёта нет)", "S7")
+            if name != card["name"]:
+                bad(f"seq {sq} SP_REFILL № {n}: наименование «{name}» не из карточки «{card['name']}»", "S1")
+            if card["state"] not in (EI_ACTIVE, EI_STORNO):
+                bad(f"seq {sq} SP_REFILL № {n}: пополнение ЕИ в состоянии «{card['state']}»")
+            if abs(fnum("BAL_BEFORE") - bal.get(ei, float("nan"))) > EPS:
+                bad(f"seq {sq} SP_REFILL № {n}: BAL_BEFORE {f.get('BAL_BEFORE')} ≠ расчётный {bal.get(ei)}", 3)
+            if plc != place.get(ei):
+                if f.get("PLACE_BEFORE") != place.get(ei):
+                    bad(f"seq {sq} SP_REFILL № {n}: место {ei} «{place.get(ei)}» → «{plc}» без отметки перемещения", "S3")
+                place[ei] = plc
+            elif "PLACE_BEFORE" in f:
+                bad(f"seq {sq} SP_REFILL № {n}: отметка перемещения без смены места", "S3")
+            bal[ei] = bal.get(ei, 0.0) + q
+            if card["state"] == EI_STORNO:
+                card["state"] = EI_ACTIVE
+            before = fnum("BAL_BEFORE")
+        if abs(fnum("BAL_AFTER") - bal[ei]) > EPS:
+            bad(f"seq {sq} {t} № {n}: BAL_AFTER {f.get('BAL_AFTER')} ≠ {bal[ei]}", 3)
+        dk = dup_key(code, artkey, name, q, dser, f.get("DOC", ""))
+        dups = [k for k, L in lines.items() if L["state"] == "LIVE" and L.get("dk") == dk]
+        if dups and not f.get("DUP") or f.get("DUP") and not dups and not sp.get("from_base"):
+            bad(f"seq {sq} {t} № {n}: антидубль — действующие строки с тем же ключом {dups[:3]}, предупреждение {f.get('DUP')!r}", "S10")
+        lines[n] = dict(event=f["EVENT"], code=code, ei=ei, mode=f.get("MODE"), qty=q, state="LIVE", date=dser, place=plc, cat=f.get("CAT", ""),
+                        who=f.get("WHO", ""), doc=f.get("DOC", ""), mark=f.get("MARK", ""), name=name, art=f.get("ART", ""), unit=unit,
+                        before=before, after=bal[ei], fixes=0, ident="", artkey=artkey, dk=dk, seq=sq)
+        sp["max_spl"] = max(sp["max_spl"], n)
+        return
+
+    L = lines.get(n)
+    if L is None or L["state"] != "LIVE":
+        bad(f"seq {sq} {t}: нет действующей строки № {n}", "S4")
+        return
+    if L["ei"] != ei or L["event"] != f.get("EVENT"):
+        bad(f"seq {sq} {t} № {n}: ЕИ/событие {ei} {f.get('EVENT')} ≠ строки {L['ei']} {L['event']} — идентичность не меняется", "S2")
+        return
+    card = eis.get(ei)
+    if card is None:
+        bad(f"seq {sq} {t} № {n}: нет карточки {ei}")
+        return
+    if t == "SP_FIX":
+        if f.get("SRC") != L["code"] or f.get("MODE") != L["mode"]:
+            bad(f"seq {sq} SP_FIX № {n}: источник/режим {f.get('SRC')} {f.get('MODE')} ≠ {L['code']} {L['mode']}", "S2")
+        q1, q2 = fnum("OLD_QTY"), fnum("QTY")
+        if abs(q1 - L["qty"]) > EPS:
+            bad(f"seq {sq} SP_FIX № {n}: OLD_QTY {q1} ≠ расчётное {L['qty']}")
+        if not q2 > EPS:
+            bad(f"seq {sq} SP_FIX № {n}: количество {q2} не больше 0", 6)
+        if abs(fnum("BAL_BEFORE") - bal[ei]) > EPS:
+            bad(f"seq {sq} SP_FIX № {n}: BAL_BEFORE {f.get('BAL_BEFORE')} ≠ {bal[ei]}", 3)
+        bal[ei] += q2 - q1
+        if bal[ei] < -EPS:
+            bad(f"seq {sq} SP_FIX № {n}: исправление сделало остаток {ei} отрицательным ({bal[ei]})", 6)
+        if abs(fnum("BAL_AFTER") - bal[ei]) > EPS:
+            bad(f"seq {sq} SP_FIX № {n}: BAL_AFTER {f.get('BAL_AFTER')} ≠ {bal[ei]}", 3)
+        is_new = L["mode"] == "NEW"
+        is_base = bool(L.get("base"))            # a line of the trusted snapshot: its row values are not known here
+        if not is_new and any(k in f for k in ("NAME", "UNIT", "CAT", "ART")):
+            bad(f"seq {sq} SP_FIX № {n}: у строки пополнения изменены данные карточки ЕИ", "S1")
+        if "NAME" in f:
+            L["name"] = card["name"] = f["NAME"]
+        if "UNIT" in f:
+            others = [k for k, x in lines.items() if x["ei"] == ei and x["state"] == "LIVE" and k != n]
+            li, lr = _live_dependents(ei, issues, returns)
+            if others or li or lr:
+                bad(f"seq {sq} SP_FIX № {n}: единица {ei} изменена при других приходах {others[:3]} / выдачах {li[:3]} / возвратах {lr[:3]}", "S7")
+            L["unit"] = card["unit"] = f["UNIT"]
+        if "CAT" in f:
+            L["cat"] = card["cat"] = f["CAT"]
+        if "ART" in f:
+            if not is_base and f.get("OLD_ART", "") != L["art"]:
+                bad(f"seq {sq} SP_FIX № {n}: OLD_ART {f.get('OLD_ART')!r} ≠ {L['art']!r}")
+            L["art"] = card["art"] = f["ART"]
+            if card["part"]:
+                nk = article_key(f["ART"])
+                if not nk or f.get("ART_KEY") != nk:
+                    bad(f"seq {sq} SP_FIX № {n}: ключ артикула {f.get('ART_KEY')!r} ≠ «{nk}»", "S1")
+                if index.get(nk, ei) != ei:
+                    bad(f"seq {sq} SP_FIX № {n}: артикул «{nk}» уже у {index[nk]} — исправление перевело деталь на чужой артикул", "S1")
+                if nk != card["artkey"]:
+                    index.pop(card["artkey"], None)
+                    index[nk] = ei
+                    card["artkey"] = L["artkey"] = nk
+        if not is_base and f.get("OLD_PLACE") != L["place"]:
+            bad(f"seq {sq} SP_FIX № {n}: OLD_PLACE {f.get('OLD_PLACE')!r} ≠ {L['place']!r}")
+        if f.get("PLACE") != f.get("OLD_PLACE"):
+            place[ei] = f.get("PLACE")
+        dser = iso_serial(f.get("DATE"))
+        L.update(qty=q2, date=dser, place=f.get("PLACE"), doc=f.get("DOC", ""), who=f.get("WHO", ""), mark=f.get("MARK", ""),
+                 fixes=L["fixes"] + 1, before=None if is_new else fnum("BAL_BEFORE") - q1, after=bal[ei])
+        if is_base:
+            L["dk"] = None
+        else:
+            dk = dup_key(L["code"], L["artkey"] if card["part"] else "", L["name"], q2, dser, L["doc"])
+            dups = [k for k, x in lines.items() if k != n and x["state"] == "LIVE" and x.get("dk") == dk]
+            if bool(dups) != bool(f.get("DUP")):
+                bad(f"seq {sq} SP_FIX № {n}: антидубль — действующие строки с тем же ключом {dups[:3]}, предупреждение {f.get('DUP')!r}", "S10")
+            L["dk"] = dk
+    elif t == "SP_DEL":
+        q = fnum("QTY")
+        if abs(q - L["qty"]) > EPS:
+            bad(f"seq {sq} SP_DEL № {n}: QTY {q} ≠ приход строки {L['qty']}")
+        others = [k for k, x in lines.items() if x["ei"] == ei and x["state"] == "LIVE" and k != n]
+        last = not others
+        if (f.get("LAST") == "1") != last:
+            bad(f"seq {sq} SP_DEL № {n}: LAST {f.get('LAST')} ≠ расчётному ({'последняя' if last else 'есть другие'} строка ЕИ)", "S6")
+        if last:
+            li, lr = _live_dependents(ei, issues, returns)
+            if li or lr:
+                bad(f"seq {sq} SP_DEL № {n}: сторно последнего прихода {ei} при действующих выдачах {li[:5]} / возвратах {lr[:5]} (D-069)", "S6")
+        if bal[ei] < q - EPS:
+            bad(f"seq {sq} SP_DEL № {n}: остаток {bal[ei]} меньше прихода строки {q} — стал бы отрицательным", "S6")
+        if abs(fnum("BAL_BEFORE") - bal[ei]) > EPS:
+            bad(f"seq {sq} SP_DEL № {n}: BAL_BEFORE {f.get('BAL_BEFORE')} ≠ {bal[ei]}", 3)
+        bal[ei] -= q
+        if abs(fnum("BAL_AFTER") - bal[ei]) > EPS:
+            bad(f"seq {sq} SP_DEL № {n}: BAL_AFTER {f.get('BAL_AFTER')} ≠ {bal[ei]}", 3)
+        L["state"] = "STORNO"
+        if last:
+            card["state"] = EI_STORNO
+            if abs(bal[ei]) > EPS:
+                bad(f"seq {sq} SP_DEL № {n}: после сторно последнего прихода остаток {ei} = {bal[ei]}, а не 0", "S6")
+    elif t == "SP_IDENTIFY":
+        if L["code"] != "OTH" or L["mode"] != "NEW":
+            bad(f"seq {sq} SP_IDENTIFY № {n}: разбор не строки иного прихода ({L['code']}, {L['mode']})", "S8")
+        if card["state"] != EI_REVIEW:
+            bad(f"seq {sq} SP_IDENTIFY № {n}: {ei} в состоянии «{card['state']}», а не «{EI_REVIEW}»", "S8")
+        typ = f.get("TYPE", "")
+        if typ not in IDENT_TYPES:
+            bad(f"seq {sq} SP_IDENTIFY № {n}: тип «{typ}» недопустим", "S8")
+        if not f.get("NAME"):
+            bad(f"seq {sq} SP_IDENTIFY № {n}: пустое наименование", "S8")
+        if (f.get("OLD_NAME"), f.get("OLD_ART", ""), f.get("OLD_CAT", "")) != (card["name"], card["art"], card["cat"]):
+            bad(f"seq {sq} SP_IDENTIFY № {n}: прежняя карточка {f.get('OLD_NAME')!r} {f.get('OLD_ART')!r} {f.get('OLD_CAT')!r} ≠ "
+                f"{card['name']!r} {card['art']!r} {card['cat']!r}", "S8")
+        if typ == SP_STYPE["DET"]:
+            k = article_key(f.get("ART", ""))
+            if not k or f.get("ART_KEY") != k:
+                bad(f"seq {sq} SP_IDENTIFY № {n}: ключ артикула {f.get('ART_KEY')!r} ≠ «{k}»", "S1")
+            if k in index:
+                bad(f"seq {sq} SP_IDENTIFY № {n}: артикул «{k}» уже у {index[k]} — второй ЕИ для одного артикула", "S1")
+            index[k] = ei
+            card["part"] = True
+            card["artkey"] = L["artkey"] = k
+        card.update(name=f.get("NAME", ""), art=f.get("ART", ""), cat=f.get("CAT", ""), state=EI_ACTIVE, src=card["src"] + " → " + typ, stype=typ)
+        L.update(name=f.get("NAME", ""), art=f.get("ART", ""), cat=f.get("CAT", ""), ident=typ)

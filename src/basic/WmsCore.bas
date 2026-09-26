@@ -25,6 +25,7 @@ Global gLockOwned As Boolean
 Global gFaultPoint As Integer
 Global gFaultMode As Integer
 Global gFaultSheet As String
+Global gFaultWrite As Long
 Global gHardStop As Boolean
 ' operation plan under construction (one at a time; Basic runs macros sequentially)
 Global gPlanType As String
@@ -245,6 +246,12 @@ Function SysLayoutProblem() As String
         Exit Function
     End If
     names = SysKeyNames()
+    ' the schema first: a book of an earlier core is named as such, not as a damaged layout
+    If gSysSh.getCellByPosition(0, SK_SCHEMA).getString() = "SCHEMA" And SysStr(SK_SCHEMA) = WMS_SYS_SCHEMA_OLD Then
+        SysLayoutProblem = "книга ядра этапа 4 или раньше (схема " & WMS_SYS_SCHEMA_OLD & " без счётчиков специальных приходов): ядро " _
+            & WMS_CORE_VERSION & " её не открывает — ручная проверка и пилот начинаются с новой книги этапа 5"
+        Exit Function
+    End If
     For i = 0 To UBound(names)
         If gSysSh.getCellByPosition(0, i).getString() <> names(i) Then
             SysLayoutProblem = SYS_SHEET & ": строка " & (i + 1) & " — ожидался ключ " & names(i) & ", найдено «" & gSysSh.getCellByPosition(0, i).getString() & "»"
@@ -266,10 +273,12 @@ Function SysLayoutProblem() As String
             Exit Function
         End If
     Next k
-    If SysNum(SK_NEXT_EI) < 1 Or SysNum(SK_NEXT_NO) < 1 Or SysNum(SK_NEXT_RET) < 1 Or SysNum(SK_MAX_QTY) < 1 Then
-        SysLayoutProblem = SYS_SHEET & ": счётчики NEXT_* и MAX_QTY должны быть ≥ 1"
-        Exit Function
-    End If
+    For Each k In SysCounterKeys()
+        If SysNum(k) < 1 Then
+            SysLayoutProblem = SYS_SHEET & ": счётчики NEXT_* и MAX_QTY должны быть ≥ 1 (" & names(k) & " = «" & SysStr(k) & "»)"
+            Exit Function
+        End If
+    Next k
     SysLayoutProblem = ""
 End Function
 
@@ -894,6 +903,10 @@ Private Function ApplyWrites(mode As Integer) As String
             Exit Function
         End Select
         If i = half Then FaultPoint(2)
+        ' test seam: after write #k of the plan (e.g. the event number or the new EI reserved in _SYS)
+        If gFaultPoint = 10 Then
+            If i = gFaultWrite Then FaultPoint(10)
+        End If
         ' test seam: after the last write of the block of one sheet (e.g. the new EI reserved in _SYS, the «Наличие» row)
         If gFaultPoint = 9 Then
             If gPW_Sheet(i) = gFaultSheet Then
@@ -969,8 +982,36 @@ Function TestSetFaultSheet(sSheet As String, fmode As Integer) As String
     TestSetFaultSheet = "OK"
 End Function
 
+' point 10: the fault fires after write #k (0-based) of the operation's plan
+Function TestSetFaultWrite(k As Long, fmode As Integer) As String
+    WmsInit()
+    If SysStr(SK_MODE) <> "TEST" Then
+        TestSetFaultWrite = "REFUSED:не тестовая книга"
+        Exit Function
+    End If
+    gFaultPoint = 10
+    gFaultMode = fmode
+    gFaultWrite = k
+    TestSetFaultWrite = "OK"
+End Function
+
+' the writes of the plan of the last operation (or of the one being built): "sheet|row|col" per line — the test seam finds
+' the index k of a write for TestSetFaultWrite
+Function TestPlanWrites() As String
+    Dim i As Long, s As String
+    WmsInit()
+    If SysStr(SK_MODE) <> "TEST" Then
+        TestPlanWrites = "REFUSED:не тестовая книга"
+        Exit Function
+    End If
+    For i = 0 To gPlanN - 1
+        s = s & gPW_Kind(i) & "|" & gPW_Sheet(i) & "|" & gPW_Row(i) & "|" & gPW_Col(i) & Chr(10)
+    Next i
+    TestPlanWrites = s
+End Function
+
 ' points: 1 after STARTED, 2 in the middle of the writes, 3 after the journal append, 6/7/8 inside the completion
-' (CommitSeq: before any write / after COMMITTED / after LAST_SEQ), 9 after the writes to one sheet — see FaultPoint;
+' (CommitSeq: before any write / after COMMITTED / after LAST_SEQ), 9 after the writes to one sheet, 10 after write #k — see FaultPoint;
 ' 4 and 5 inside the append: the line is written only in part (4: half, 5: all but its final LF), then the write fails.
 ' modes: 1 error, 2 store the book and stop (crash simulation), 3 error that stays armed (the retry fails as well)
 Function FaultCut(n As Long) As Long

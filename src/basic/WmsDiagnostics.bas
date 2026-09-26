@@ -6,10 +6,14 @@ Private mKeyProblems As Long
 ' _RCV rows read in chunks while the sorted EI keys are walked (each chunk at most once): EI, OLID, row hint
 Private mRcvChunk As Long
 Private mRcvData As Variant
-' the same for _RET while the sorted return № keys are walked: №, issue, EI, quantity, state, row hint (only its used rows)
+' the same for _RET while the sorted return № keys are walked: №, issue, EI, quantity, state, row hint (only its used rows);
+' Phase 5: the same for _SPR (the lines of «Иной приход») — the registry of the key type of the sheet being checked
 Private mRetChunk As Long
 Private mRetData As Variant
 Private mRetLast As Long
+Private mRegSheet As String
+Private mRegLast As Integer
+Private mRegRow As Integer
 
 Private Function Ln(sStatus As String, sItem As String, sDetail As String) As String
     Ln = sStatus & " " & sItem & IIf(sDetail <> "", ": " & sDetail, "") & Chr(10)
@@ -32,7 +36,9 @@ Function SelfCheck() As String
     End If
     out = out & Ln("OK", "_SYS", "схема " & SysStr(SK_SCHEMA) & ", экземпляр " & SysStr(SK_INSTANCE) & ", режим " & SysStr(SK_MODE))
     lastSeq = CLng(SysNum(SK_LAST_SEQ))
-    out = out & Ln("OK", "счётчики", "LAST_SEQ " & lastSeq & ", NEXT_EI " & SysStr(SK_NEXT_EI) & ", NEXT_NO " & SysStr(SK_NEXT_NO) & ", NEXT_RET " & SysStr(SK_NEXT_RET))
+    out = out & Ln("OK", "счётчики", "LAST_SEQ " & lastSeq & ", NEXT_EI " & SysStr(SK_NEXT_EI) & ", NEXT_NO " & SysStr(SK_NEXT_NO) & ", NEXT_RET " & SysStr(SK_NEXT_RET) _
+        & ", NEXT_SPL " & SysStr(SK_NEXT_SPL) & ", NEXT_OFF " & SysStr(SK_NEXT_OFF) & ", NEXT_PROD " & SysStr(SK_NEXT_PROD) & ", NEXT_DET " & SysStr(SK_NEXT_DET) _
+        & ", NEXT_OLD " & SysStr(SK_NEXT_OLD) & ", NEXT_OTH " & SysStr(SK_NEXT_OTH))
     st = SysStr(SK_TX_STATE)
     bi = SysStr(SK_TX_BI)
     If st = TX_STARTED Then
@@ -123,6 +129,12 @@ Function SelfCheck() As String
         out = out & Ln("FAIL", "возвраты", Mid(s, 9))
     Else
         out = out & Ln("OK", "возвраты", s)
+    End If
+    s = WmsSpecial.SpecialCheck()
+    If Left(s, 6) = "ОШИБКА" Then
+        out = out & Ln("FAIL", "специальные приходы", Mid(s, 9))
+    Else
+        out = out & Ln("OK", "специальные приходы", s)
     End If
     s = WmsIssue.RecipientsDuplicates()
     If s <> "" Then
@@ -359,6 +371,7 @@ End Sub
 ' of repeated keys the first row in sheet order is kept as the original. Type EI («Заказы».V): the key is the canonical
 ' EI text; it must also be a receipt of this WMS (_RCV), and of repeated keys the row its receipt is registered at wins.
 ' Type RET («Возврат».A): the key is the return №; it must be registered in _RET, of repeated keys the row _RET names wins.
+' Type SPR («Иной приход».A): the line №, registered in _SPR the same way.
 
 Function FullKeyCheck(bMark As Boolean) As String
     Dim specs As Variant, i As Long, res As String
@@ -393,23 +406,24 @@ Private Function RcvKeyInfo(n As Long, ByRef hintRow As Long) As Boolean
     RcvKeyInfo = True
 End Function
 
-' True when return № n is registered in _RET; hintRow = the row of «Возврат» it is registered at
+' True when № n is registered in the dense registry of the key type (_RET for returns, _SPR for the lines of «Иной
+' приход»: № in column A); hintRow = the row of the user sheet it is registered at
 Private Function RetKeyInfo(n As Long, ByRef hintRow As Long) As Boolean
     Dim c0 As Long, c1 As Long, row As Variant
     hintRow = -1
-    If mRetLast < 0 Then mRetLast = LastUsedRow(gDoc.Sheets.getByName(SH_RET))
+    If mRetLast < 0 Then mRetLast = LastUsedRow(gDoc.Sheets.getByName(mRegSheet))
     If n < 1 Or n > mRetLast Then Exit Function
     c0 = ((n - 1) \ CHECK_CHUNK_ROWS) * CHECK_CHUNK_ROWS + 1
     If c0 <> mRetChunk Then
         c1 = c0 + CHECK_CHUNK_ROWS - 1
         If c1 > mRetLast Then c1 = mRetLast
-        mRetData = gDoc.Sheets.getByName(SH_RET).getCellRangeByPosition(0, c0, RT_LAST, c1).getDataArray()
+        mRetData = gDoc.Sheets.getByName(mRegSheet).getCellRangeByPosition(0, c0, mRegLast, c1).getDataArray()
         mRetChunk = c0
     End If
     row = mRetData(n - c0)
-    If VarType(row(RT_NO)) <> 5 Then Exit Function
-    If row(RT_NO) <> n Then Exit Function
-    If VarType(row(RT_ROW)) = 5 Then hintRow = CLng(row(RT_ROW))
+    If VarType(row(0)) <> 5 Then Exit Function
+    If row(0) <> n Then Exit Function
+    If VarType(row(mRegRow)) = 5 Then hintRow = CLng(row(mRegRow))
     RetKeyInfo = True
 End Function
 
@@ -420,7 +434,13 @@ End Function
 
 ' «ЕИ-00000012 не создан приходом WMS» / «возврат № 5 не зарегистрирован WMS»
 Private Function NotRegText(isEI As Boolean, n As Long) As String
-    If isEI Then NotRegText = WmsIssue.EiCanon(n) & " не создан приходом WMS" Else NotRegText = "возврат № " & n & " не зарегистрирован WMS"
+    If isEI Then
+        NotRegText = WmsIssue.EiCanon(n) & " не создан приходом WMS"
+    ElseIf mRegSheet = SH_SPR Then
+        NotRegText = "строка № " & n & " не зарегистрирована WMS"
+    Else
+        NotRegText = "возврат № " & n & " не зарегистрирован WMS"
+    End If
 End Function
 
 Private Function LastUsedRow(sh As Object) As Long
@@ -451,7 +471,17 @@ Private Function CheckKeySheet(spec As String, bMark As Boolean) As String
     inCol = CInt(a(4))
     If UBound(a) >= 5 Then
         isEI = (a(5) = "EI")
-        isReg = (a(5) = "EI" Or a(5) = "RET")
+        isReg = (a(5) = "EI" Or a(5) = "RET" Or a(5) = "SPR")
+        ' the dense registry of a № key: _RET (returns) or _SPR (the lines of «Иной приход»), № in A, the row hint in RT_ROW / SR_ROW
+        If a(5) = "SPR" Then
+            mRegSheet = SH_SPR
+            mRegLast = SR_LAST
+            mRegRow = SR_ROW
+        Else
+            mRegSheet = SH_RET
+            mRegLast = RT_LAST
+            mRegRow = RT_ROW
+        End If
     End If
     mRcvChunk = -1
     mRetChunk = -1

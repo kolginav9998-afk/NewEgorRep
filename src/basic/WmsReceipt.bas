@@ -78,7 +78,8 @@ Private Function CheckOrderPart(r As Long, bNeedUnit As Boolean) As String
     End If
     sp = WmsOrders.SpecialSupplier(Txt(r, OC_SUPPLIER))
     If sp <> "" Then
-        CheckOrderPart = "«" & sp & "» — специальный приход, он будет реализован на следующем этапе; обычным приходом не проводится"
+        CheckOrderPart = "«" & sp & "» — специальный приход: он проводится на листе «" & SH_SPECIAL & "» (тип прихода «" & sp & "»), " _
+            & "обычным приходом «Заказов» не проводится"
         Exit Function
     End If
     mHasOdate = False
@@ -199,7 +200,7 @@ End Function
 
 ' ================================================================ plan pieces
 
-' a new «Наличие» row: EI, name, article, unit, balance, place, category, state, source
+' a new «Наличие» row: EI, name, article, unit, balance, place, category, state, source, kind of source (Поставщик)
 Private Sub PlanStockRow(n As Long, canon As String, qty As Double, sName As String, sArt As String, sUnit As String, sPlace As String, _
     sCat As String, sSrc As String)
     PlanSetValue(SH_STOCK, n, SC_EI, canon, False)
@@ -211,6 +212,7 @@ Private Sub PlanStockRow(n As Long, canon As String, qty As Double, sName As Str
     If sCat <> "" Then PlanSetValue(SH_STOCK, n, SC_CAT, sCat, False)
     PlanSetValue(SH_STOCK, n, SC_STATE, EI_ST_ACTIVE, False)
     PlanSetValue(SH_STOCK, n, SC_SRC, sSrc, False)
+    PlanSetValue(SH_STOCK, n, SC_STYPE, STYPE_SUPPLIER, False)
 End Sub
 
 ' a new _RCV row: the receipt of EI n

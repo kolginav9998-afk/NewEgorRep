@@ -27,7 +27,7 @@ Global gUiFixDate As String
 
 ' filtered WMS ranges whose rows were shown for a save (FiltersStash) and are filtered again after it (FiltersRestore)
 Global gFltN As Integer
-Global gFltName(3) As String
+Global gFltName(4) As String
 
 ' ================================================================ status panel «Главная»
 
@@ -114,6 +114,14 @@ Sub UiRefresh(sLast As String)
     Else
         s = s & Chr(10) & "возвраты: не удалось посчитать — отфильтруйте «№ возврата» = пусто"
     End If
+    n = WmsSpecial.UnpostedSpecial()
+    If n > 0 Then
+        s = s & Chr(10) & "иной приход: " & n & " строк(и) «" & SH_SPECIAL & "» с количеством (F) без № — ещё не проведены"
+    ElseIf n = 0 Then
+        s = s & Chr(10) & "иной приход: нет"
+    Else
+        s = s & Chr(10) & "иной приход: не удалось посчитать — отфильтруйте «№ строки» = пусто"
+    End If
     PutB(sh, MR_UNPOSTED, s)
     PutB(sh, MR_NOTES, Replace(gReport, " | ", Chr(10)))
     If sLast <> "" Then
@@ -151,6 +159,19 @@ Function UiConfirm(s As String) As Boolean
         UiConfirm = False
     Else
         UiConfirm = (MsgBox(s, 4 + 32, "WMS") = 6)
+    End If
+End Function
+
+' a question with three answers: 6 «Да», 7 «Нет», 2 «Отмена» (test seam: gUiAuto 1 → «Да», 2 → «Нет»)
+Function UiAsk3(s As String) As Integer
+    gUiLastMsg = s
+    gUiConfirms = gUiConfirms + 1
+    If gUiAuto = 1 Then
+        UiAsk3 = 6
+    ElseIf gUiAuto = 2 Then
+        UiAsk3 = 7
+    Else
+        UiAsk3 = MsgBox(s, 3 + 32, "WMS")
     End If
 End Function
 
@@ -448,7 +469,7 @@ End Function
 ' names of the WMS database ranges that currently have filter conditions
 Private Function FilteredRanges() As Variant
     Dim names As Variant, i As Integer, out() As String, n As Integer, db As Object
-    names = Array("WMS_ORDERS", "WMS_ISSUES", "WMS_RETURNS", "WMS_STOCK")
+    names = Array("WMS_ORDERS", "WMS_SPECIAL", "WMS_ISSUES", "WMS_RETURNS", "WMS_STOCK")
     ReDim out(UBound(names))
     For i = 0 To UBound(names)
         If gDoc.DatabaseRanges.hasByName(names(i)) Then

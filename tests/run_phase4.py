@@ -835,7 +835,8 @@ def w23_save_reopen():
         checks = {"CLEAN": st(s)[0] == "CLEAN", "не «изменена» после открытия": not s.doc.isModified(),
                   "N": [N(s, r)[:25] for r in (1, 2, 3)] == ["Проведено", "Проведено (исправлено)", "Удалено (сторно)"],
                   "защита": [s.ret_locks(r) for r in (1, 2, 3, 4)] == [POSTED, POSTED, POSTED, OPEN],
-                  "вставка строк": xml.count('loext:insert-rows="true"') == 3, "автофильтр": s.doc.DatabaseRanges.hasByName("WMS_RETURNS"),
+                  # «Выдачи», «Заказы», «Возврат» and, since Core Phase 5, «Иной приход» allow inserting rows
+                  "вставка строк": xml.count('loext:insert-rows="true"') == 4, "автофильтр": s.doc.DatabaseRanges.hasByName("WMS_RETURNS"),
                   "NEXT_RET": s.sysv("NEXT_RET") == 4.0, "остатки": (s.stock(7), s.stock(10)) == (46.0, 16.0),
                   "непроведённые на «Главной»": "возвраты: 1 строк" in s.main_status()[3]}
         nxt = post_ret(s, 4)

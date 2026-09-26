@@ -20,6 +20,7 @@ import issue_oracle  # noqa: E402
 ISSUE_COLS = "ABCDEFGHIJKLMNOPQR"
 ORDER_COLS = [chr(65 + i) for i in range(26)] + ["AA", "AB"]
 RETURN_COLS = "ABCDEFGHIJKLMNO"
+SPECIAL_COLS = "ABCDEFGHIJKLMNOPQRS"
 # initial balances of the synthetic EIs of a test book (tools/build_ods.synthetic_registry)
 INITIAL_STOCK = {row[0]: row[4] for row in synthetic_registry()}
 
@@ -302,6 +303,63 @@ class Session:
         import return_oracle
         return return_oracle.check(self.doc, self.jdir, INITIAL_STOCK if initial is None else initial, expect_tail, today=today, base=base,
                                    legacy_mn_empty=legacy_mn_empty)
+
+    # «Иной приход» (Phase 5)
+    def X(self, func, *a):
+        return self.B(func, *a, module="WmsSpecial")
+
+    def XU(self, func, *a):
+        return self.B(func, *a, module="WmsSpecialUi")
+
+    def spc(self, r):
+        """values of «Иной приход» row r (0-based; row 1 is the first data row), A..S"""
+        return tuple(self.doc.Sheets.getByName("Иной приход").getCellRangeByPosition(0, r, 18, r).getDataArray()[0])
+
+    def spc_cell(self, col, r):
+        cell = self.doc.Sheets.getByName("Иной приход").getCellByPosition(SPECIAL_COLS.index(col), r)
+        return cell.getType().value, cell.getString(), cell.getValue()
+
+    def spc_locks(self, r):
+        sh = self.doc.Sheets.getByName("Иной приход")
+        return "".join("1" if sh.getCellByPosition(c, r).CellProtection.IsLocked else "0" for c in range(19))
+
+    def type_spc(self, col, r, text):
+        """enter text into «Иной приход» like a user (GoToCell + EnterString): the sheet's change handler runs"""
+        self.goto("Иной приход", f"${col}${r + 1}")
+        self.o.dispatch(self.doc, ".uno:EnterString", StringName=text)
+
+    def special_input(self, r, **cols):
+        """cols: column letter → text, typed through the UI in the order given (None — not typed)"""
+        for col, v in cols.items():
+            if v is not None:
+                self.type_spc(col, r, v)
+
+    def click_spc(self, button, r=None, col="B", r1=None):
+        """a button of «Иной приход» for the row (or rows r..r1) under the cursor — the macro the button is bound to"""
+        if r is not None:
+            ref = f"${col}${r + 1}" if r1 is None else f"$A${r + 1}:$S${r1 + 1}"
+            self.goto("Иной приход", ref)
+        self.XU(button)
+        return self.U("TestUiLastMessage")
+
+    def sprrec(self, n):
+        return tuple(self.doc.Sheets.getByName("_SPR").getCellRangeByPosition(0, n, 13, n).getDataArray()[0])
+
+    def art_index(self):
+        sh = self.doc.Sheets.getByName("_ART")
+        cur = sh.createCursor()
+        cur.gotoEndOfUsedArea(False)
+        last = cur.getRangeAddress().EndRow
+        return [tuple(r) for r in sh.getCellRangeByPosition(0, 1, 2, max(last, 1)).getDataArray() if r[0] != ""] if last >= 1 else []
+
+    def card(self, n):
+        """«Наличие» row of EI n: A..J (J «Тип источника»)"""
+        return tuple(self.doc.Sheets.getByName("Наличие").getCellRangeByPosition(0, n, 9, n).getDataArray()[0])
+
+    def spcheck(self, expect_tail=0, initial=None, today=None, base=None, legacy_mn_empty=True):
+        import special_oracle
+        return special_oracle.check(self.doc, self.jdir, INITIAL_STOCK if initial is None else initial, expect_tail, today=today, base=base,
+                                    legacy_mn_empty=legacy_mn_empty)
 
     def journal(self):
         return journal_oracle.read_journal(self.jdir)

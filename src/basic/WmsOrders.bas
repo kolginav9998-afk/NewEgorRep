@@ -95,7 +95,7 @@ Function SheetsProblem() As String
         Exit Function
     End If
     sh = IdxSheet()
-    For i = IX_ECHO To IX_RA_COUNT
+    For i = IX_ECHO To IX_XD_COUNT
         If i <> IX_LIST And sh.getCellByPosition(1, i).getType() <> com.sun.star.table.CellContentType.FORMULA Then
             SheetsProblem = "служебный лист " & SH_IDX & " повреждён: нет формулы поиска в строке " & (i + 1)
             Exit Function
@@ -216,11 +216,20 @@ Private Function FaLookup(ixRow As Integer, key As Variant, start As Long) As Do
     Case IX_RA_MATCH, IX_RA_COUNT
         sh = gDoc.Sheets.getByName(SH_RETURNS)
         col = RC_NO
+    Case IX_XA_MATCH, IX_XA_COUNT
+        sh = gDoc.Sheets.getByName(SH_SPECIAL)
+        col = XC_NO
+    Case IX_ART_MATCH, IX_ART_COUNT
+        sh = gDoc.Sheets.getByName(SH_ART)
+        col = AR_KEY
+    Case IX_XD_MATCH, IX_XD_COUNT
+        sh = gDoc.Sheets.getByName(SH_SPR)
+        col = SR_DUP
     Case Else
         sh = RcvSheet()
         col = RV_DUP
     End Select
-    If ixRow = IX_V_COUNT Or ixRow = IX_DUP_COUNT Or ixRow = IX_RA_COUNT Then
+    If ixRow = IX_V_COUNT Or ixRow = IX_DUP_COUNT Or ixRow = IX_RA_COUNT Or ixRow = IX_XA_COUNT Or ixRow = IX_ART_COUNT Or ixRow = IX_XD_COUNT Then
         FaLookup = fa.callFunction("COUNTIF", Array(sh.getCellRangeByPosition(col, 1, col, MAX_SHEET_ROW), key))
         Exit Function
     End If
@@ -277,6 +286,33 @@ End Function
 
 Function CountReturnNo(n As Long) As Long
     CountReturnNo = CLng(IdxLookup(IX_RA_COUNT, CDbl(n), 0))
+End Function
+
+' Phase 5: 0-based «Иной приход» row of the first line № n (A), from data row start + 1; -1 when none
+Function FindSpecialNoRow(n As Long, start As Long) As Long
+    Dim x As Double
+    x = IdxLookup(IX_XA_MATCH, CDbl(n), start)
+    If x < 1 Then FindSpecialNoRow = -1 Else FindSpecialNoRow = CLng(x)
+End Function
+
+Function CountSpecialNo(n As Long) As Long
+    CountSpecialNo = CLng(IdxLookup(IX_XA_COUNT, CDbl(n), 0))
+End Function
+
+' Phase 5: the _ART row of the first article key equal to key (text, compared as a whole cell, wildcards taken
+' literally), from data row start + 1; -1 when none. COUNTIF is not used for text keys: its criterion would read a
+' leading "<", ">" or "=" of an article as an operator — a second MATCH after the first one tells a repeated key.
+Function FindArtRow(key As String, start As Long) As Long
+    Dim x As Double
+    x = IdxLookup(IX_ART_MATCH, Replace(Replace(Replace(key, "~", "~~"), "*", "~*"), "?", "~?"), start)
+    If x < 1 Then FindArtRow = -1 Else FindArtRow = CLng(x)
+End Function
+
+' Phase 5: the line № (= _SPR row) of the first special receipt line with antidubl hash h after line start; -1 when none
+Function FindSpecialDupLine(h As Double, start As Long) As Long
+    Dim x As Double
+    x = IdxLookup(IX_XD_MATCH, h, start)
+    If x < 1 Then FindSpecialDupLine = -1 Else FindSpecialDupLine = CLng(x)
 End Function
 
 ' One array formula of the Calc engine, evaluated at once in the unlocked scratch cell _IDX!B<IX_LIST> (written, read and
@@ -913,7 +949,8 @@ Function OpenRowProblem(r As Long) As String
     sh = OrdersSheet()
     sp = SpecialSupplier(sh.getCellByPosition(OC_SUPPLIER, r).getString())
     If sp <> "" Then
-        OpenRowProblem = "«" & sp & "» — специальный приход, он будет реализован на следующем этапе; обычным приходом не проводится"
+        OpenRowProblem = "«" & sp & "» — специальный приход: он проводится на листе «" & SH_SPECIAL & "» (тип прихода «" & sp & "»), " _
+            & "обычным приходом «Заказов» не проводится"
         Exit Function
     End If
     c = sh.getCellByPosition(OC_ORDQTY, r)

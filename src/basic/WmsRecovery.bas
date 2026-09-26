@@ -28,6 +28,7 @@ Sub Analyze()
     ' the sheets of the returns before the lookup formulas: a book of an earlier core (no «Возврат») is named as such, not as a
     ' damaged _IDX
     If p = "" Then p = WmsReturn.SheetsProblem()
+    If p = "" Then p = WmsSpecial.SpecialSheetsProblem()
     If p = "" Then p = WmsOrders.SheetsProblem()
     If p <> "" Then
         SetBlocked("SYS_CORRUPT", p)
@@ -292,6 +293,7 @@ End Function
 Function AbandonTail() As String
     Dim lastSeq As Long, fromSeq As Long, toSeq As Long, p As String, sLine As String, why As String, rc As Integer
     Dim i As Long, lst As String, maxEI As Double, maxNo As Double, nextEI As Double, nextNo As Double, maxRet As Double, nextRet As Double
+    Dim maxSpl As Double, nextSpl As Double, maxEv(4) As Double, nextEv(4) As Double, k As Integer, fl As String
     WmsInit()
     If gBlock <> "TAIL" Then
         AbandonTail = "«Отложить хвост журнала» не требуется: " & StateLine()
@@ -309,6 +311,7 @@ Function AbandonTail() As String
     For i = 0 To gJR_N - 1
         If i < 20 Then lst = lst & IIf(lst <> "", ", ", "") & gJR_Seq(i) & ":" & gJR_Type(i)
         TailCounters(gJR_Fields(i), maxEI, maxNo, maxRet)
+        TailSpecialCounters(gJR_Fields(i), maxSpl, maxEv)
     Next i
     ' numbers the abandoned operations handed out (an EI label, an issue №, a return №) are never issued again
     nextEI = SysNum(SK_NEXT_EI)
@@ -317,8 +320,18 @@ Function AbandonTail() As String
     If maxNo + 1 > nextNo Then nextNo = maxNo + 1
     nextRet = SysNum(SK_NEXT_RET)
     If maxRet + 1 > nextRet Then nextRet = maxRet + 1
-    sLine = WmsJournal.BuildLine(toSeq + 1, "ABANDON", Array("FROM=" & fromSeq, "TO=" & toSeq, "NEXT_EI=" & NumStr(nextEI), _
-        "NEXT_NO=" & NumStr(nextNo), "NEXT_RET=" & NumStr(nextRet), "REASON=" & Esc("решение пользователя: хвост журнала не применён")))
+    ' Phase 5: the line № of «Иной приход» and the event numbers (OFF-…, PROD-…) may be on a label or a document too
+    nextSpl = SysNum(SK_NEXT_SPL)
+    If maxSpl + 1 > nextSpl Then nextSpl = maxSpl + 1
+    fl = "NEXT_SPL=" & NumStr(nextSpl)
+    For k = 0 To 4
+        nextEv(k) = SysNum(SK_NEXT_OFF + k)
+        If maxEv(k) + 1 > nextEv(k) Then nextEv(k) = maxEv(k) + 1
+        fl = fl & Chr(9) & SysKeyNames()(SK_NEXT_OFF + k) & "=" & NumStr(nextEv(k))
+    Next k
+    sLine = WmsJournal.BuildLine(toSeq + 1, "ABANDON", Split("FROM=" & fromSeq & Chr(9) & "TO=" & toSeq & Chr(9) & "NEXT_EI=" & NumStr(nextEI) _
+        & Chr(9) & "NEXT_NO=" & NumStr(nextNo) & Chr(9) & "NEXT_RET=" & NumStr(nextRet) & Chr(9) & fl & Chr(9) & "REASON=" _
+        & Esc("решение пользователя: хвост журнала не применён"), Chr(9)))
     rc = WmsJournal.AppendLine(sLine, toSeq + 1, why)
     If rc <> 1 Then
         AbandonTail = "ОШИБКА: запись в журнал не удалась: " & why
@@ -326,7 +339,8 @@ Function AbandonTail() As String
         WmsStartup()
         Exit Function
     End If
-    ApplyAbandonCounters(Array("NEXT_EI=" & NumStr(nextEI), "NEXT_NO=" & NumStr(nextNo), "NEXT_RET=" & NumStr(nextRet)))
+    ApplyAbandonCounters(Split("NEXT_EI=" & NumStr(nextEI) & Chr(9) & "NEXT_NO=" & NumStr(nextNo) & Chr(9) & "NEXT_RET=" & NumStr(nextRet) _
+        & Chr(9) & fl, Chr(9)))
     CommitSeq(toSeq + 1)
     gState = ""
     WmsStartup()
@@ -353,10 +367,25 @@ Private Sub TailCounters(fields As Variant, ByRef maxEI As Double, ByRef maxNo A
     End If
 End Sub
 
+' Phase 5: the largest line № (SPL) and event number per source (EVENT = OFF-00000012 …) named by one journal entry
+Private Sub TailSpecialCounters(fields As Variant, ByRef maxSpl As Double, maxEv() As Double)
+    Dim v As String, i As Integer, num As Long
+    v = FieldValue(fields, "SPL")
+    If IsDigits(v) And Len(v) <= 9 Then
+        If CDbl(v) > maxSpl Then maxSpl = CDbl(v)
+    End If
+    v = FieldValue(fields, "EVENT")
+    If v <> "" Then
+        If WmsSpecial.ParseEvent(v, i, num) Then
+            If num > maxEv(i) Then maxEv(i) = num
+        End If
+    End If
+End Sub
+
 ' an ABANDON record raises NEXT_EI / NEXT_NO / NEXT_RET past the numbers of the abandoned operations (never lowers them); repeated
 ' application is harmless, so a crash between the journal line and the book is covered by «Восстановить»
 Private Sub ApplyAbandonCounters(fields As Variant)
-    Dim v As String
+    Dim v As String, k As Integer
     v = FieldValue(fields, "NEXT_EI")
     If IsDigits(v) And Len(v) <= 9 Then
         If CDbl(v) > SysNum(SK_NEXT_EI) Then SysPutNum(SK_NEXT_EI, CDbl(v))
@@ -369,6 +398,13 @@ Private Sub ApplyAbandonCounters(fields As Variant)
     If IsDigits(v) And Len(v) <= 9 Then
         If CDbl(v) > SysNum(SK_NEXT_RET) Then SysPutNum(SK_NEXT_RET, CDbl(v))
     End If
+    ' Phase 5: NEXT_SPL and the event counters of the special receipts
+    For k = SK_NEXT_SPL To SK_NEXT_OTH
+        v = FieldValue(fields, SysKeyNames()(k))
+        If IsDigits(v) And Len(v) <= 9 Then
+            If CDbl(v) > SysNum(k) Then SysPutNum(k, CDbl(v))
+        End If
+    Next k
 End Sub
 
 ' «Сделать рабочим файлом»: this file becomes the working WMS (after a deliberate move or restore).

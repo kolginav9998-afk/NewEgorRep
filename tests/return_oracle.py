@@ -45,8 +45,9 @@ def recipient_history(issues, returns):
     return h
 
 
-def check(doc, jdir, initial, expect_tail=0, today=None, base=None, legacy_mn_empty=True):
-    st = {}
+def check(doc, jdir, initial, expect_tail=0, today=None, base=None, legacy_mn_empty=True, out=None):
+    """out (a dict): receives the replayed state of tests/receipt_oracle.py (tests/special_oracle.py continues from it)"""
+    st = {} if out is None else out
     P, info = ro.check(doc, jdir, initial, expect_tail, today=today, base=base, out=st)
     P = list(P)
 

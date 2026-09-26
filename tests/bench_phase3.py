@@ -100,7 +100,8 @@ def generate(n):
     n_rcpt = int(n * 0.4)
     n_iss = n - n_rcpt
     synth = synthetic_registry()
-    reg = [list(r) for r in synth]                     # EIs 1..200 of the test book stay
+    # EIs 1..200 of the test book stay; columns A..I only (since Core Phase 5 the registry has J «Тип источника», empty for them)
+    reg = [list(r)[:9] for r in synth]
     rcv_rows, ord_rows, orders, row_kind = [], [], [], []
     receipts = []                                      # (ei, row index, qty)
     first = TODAY - datetime.timedelta(days=400)
