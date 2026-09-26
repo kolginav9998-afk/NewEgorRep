@@ -745,7 +745,7 @@ End Sub
 
 Function IssueFixRow(r As Long, vEI As Variant, vQty As Variant, vWho As Variant, vDate As Variant) As String
     Dim why As String, sh As Object, k As Long, n1 As Long, canon1 As String, msg As String, q1 As Double, s1 As Double
-    Dim who1 As String, d1 As Double, res As String, pNew As Double, qNew As Double, oldCtl As String, p As String
+    Dim who1 As String, d1 As Double, res As String, pNew As Double, qNew As Double, oldCtl As String, p As String, qRet As Double, nRet As Long
     WmsInit()
     If r < 1 Or r > MAX_SHEET_ROW Then
         IssueFixRow = "ERR:выберите строку выдачи (не заголовок)"
@@ -790,6 +790,28 @@ Function IssueFixRow(r As Long, vEI As Variant, vQty As Variant, vWho As Variant
     If mCn = n1 And Abs(mCqty - q1) < 0.0000001 And mCwho = who1 And mCdate = d1 Then
         IssueFixRow = "SKIP:ничего не изменилось"
         Exit Function
+    End If
+    ' Phase 4: the live returns of this issue stay tied to it — its EI, recipient and date stay, its quantity may not
+    ' go below what was returned by it (more is possible when the stock allows)
+    If WmsReturn.IssueReturns(k, qRet, nRet) Then
+        why = ""
+        If mCn <> n1 Then
+            why = "ЕИ"
+        ElseIf mCwho <> who1 Then
+            why = "получателя"
+        ElseIf mCdate <> d1 Then
+            why = "дату"
+        End If
+        If why <> "" Then
+            IssueFixRow = "ERR:по выдаче № " & k & " уже возвращено " & QtyText(qRet) & " (возвратов: " & nRet & ") — " & why _
+                & " выдачи менять нельзя, возвраты привязаны к ней; сначала удалите (сторно) эти возвраты на листе «" & SH_RETURNS & "»"
+            Exit Function
+        End If
+        If mCqty < qRet - 0.0000001 Then
+            IssueFixRow = "ERR:по выдаче № " & k & " уже возвращено " & QtyText(qRet) & " (возвратов: " & nRet & ") — количество выдачи " _
+                & "не может быть меньше возвращённого"
+            Exit Function
+        End If
     End If
     If mCn = n1 Then
         pNew = Round3(s1 + q1)
@@ -858,6 +880,7 @@ End Function
 
 Function IssueDeleteRow(r As Long) As String
     Dim why As String, sh As Object, k As Long, n1 As Long, canon1 As String, msg As String, q1 As Double, s1 As Double, p As String
+    Dim qRet As Double, nRet As Long
     WmsInit()
     If r < 1 Or r > MAX_SHEET_ROW Then
         IssueDeleteRow = "ERR:выберите строку выдачи (не заголовок)"
@@ -880,6 +903,12 @@ Function IssueDeleteRow(r As Long) As String
         Exit Function
     End If
     k = RowKey(r)
+    ' Phase 4: an issue with live returns is not cancelled (no automatic reverse returns): storno the returns first
+    If WmsReturn.IssueReturns(k, qRet, nRet) Then
+        IssueDeleteRow = "ERR:по выдаче № " & k & " уже возвращено " & QtyText(qRet) & " (возвратов: " & nRet & ") — сначала удалите (сторно) " _
+            & "эти возвраты на листе «" & SH_RETURNS & "»"
+        Exit Function
+    End If
     If Not NormalizeEI(sh.getCellByPosition(IC_EI, r).getString(), n1, canon1, msg) Then
         IssueDeleteRow = "ERR:строка № " & k & ": " & msg
         Exit Function

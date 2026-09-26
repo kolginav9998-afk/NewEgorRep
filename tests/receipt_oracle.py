@@ -14,6 +14,10 @@ the result with every view of the book:
   «Выдачи»    — posted / cancelled issues against the journal (as tests/issue_oracle.py);
   counters    — NEXT_EI above every EI, NEXT_OL above every position, no EI created twice.
 The ten invariants of the task are checked explicitly (see INVARIANTS).
+
+Core Phase 4: the returns (RETURN, RETURN_FIX, RETURN_DEL) are replayed here too — they change the balance and the
+current place of their EI, and the rules of ISSUE_FIX / ISSUE_DEL depend on them. With `out` (a dict) the replayed
+state is handed to tests/return_oracle.py, which compares the returns with «Возврат», _RET and _ISS.
 """
 import datetime
 
@@ -21,6 +25,7 @@ import journal_oracle
 
 RECEIPT_TYPES = ("RECEIPT", "RECEIPT_ADD", "RECEIPT_FIX", "RECEIPT_DEL", "ORDER_CANCEL", "ORDER_CANCEL_REST")
 ISSUE_TYPES = ("ISSUE", "ISSUE_FIX", "ISSUE_DEL")
+RETURN_TYPES = ("RETURN", "RETURN_FIX", "RETURN_DEL")
 EPS = 1e-6
 NULL_DATE = datetime.date(1899, 12, 30)
 ORDER_COLS = [chr(65 + i) for i in range(26)] + ["AA", "AB"]
@@ -133,11 +138,12 @@ def fingerprint(row):
 
 def snapshot_base(doc, initial):
     """the state of a book taken as trusted (benchmark: a generated history without a journal)"""
-    base = dict(bal=dict(initial), receipts={}, positions={}, issues={}, cancelled_rows=0)
+    base = dict(bal=dict(initial), receipts={}, positions={}, issues={}, cancelled_rows=0, place={})
     stock = read(doc, "Наличие", 9)
     for n, row in enumerate(stock):
         if n and row[0]:
             base["bal"][row[0]] = row[4]
+            base["place"][row[0]] = row[5]
     rcv = read(doc, "_RCV", 9)
     for n, row in enumerate(rcv):
         if n and row[0]:
@@ -149,11 +155,23 @@ def snapshot_base(doc, initial):
     iss = read(doc, "Выдачи", 18)
     for r, row in enumerate(iss):
         if r and isinstance(row[0], float) and not str(row[17]).startswith("КОПИЯ"):
-            base["issues"][int(row[0])] = dict(ei=row[11], qty=row[4], deleted=row[17] == "Удалено (сторно)")
+            base["issues"][int(row[0])] = dict(ei=row[11], qty=row[4], deleted=row[17] == "Удалено (сторно)", who=row[8],
+                                               date=(NULL_DATE + datetime.timedelta(days=int(row[7]))).isoformat() if isinstance(row[7], float) else "")
+    # Phase 4: the returns and their totals per issue, as the service tables hold them (taken as trusted)
+    base["returns"], base["ret_sum"], base["ret_cnt"] = {}, {}, {}
+    if doc.Sheets.hasByName("_RET"):
+        for n, row in enumerate(read(doc, "_RET", 6)):
+            if n and isinstance(row[0], float):
+                base["returns"][n] = dict(issue=int(row[1]), ei=row[2], qty=row[3], state=row[4], date=None, place=None, who=None, fixed=False,
+                                          L=None, M=None)
+        for k, row in enumerate(read(doc, "_ISS", 4)):
+            if k and isinstance(row[0], float):
+                base["ret_sum"][k] = row[2]
+                base["ret_cnt"][k] = int(row[3])
     return base
 
 
-def check(doc, jdir, initial, expect_tail=0, today=None, base=None):
+def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
     P = []
     inv_fail = set()
 
@@ -182,21 +200,36 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None):
         bad("снимок до изменения не очищен")
     applied = [e for e in ours if e["seq"] <= last]
     abandoned = journal_oracle.abandoned_seqs(applied)
-    ops = [e for e in applied if e["seq"] not in abandoned and e["type"] in RECEIPT_TYPES + ISSUE_TYPES]
+    ops = [e for e in applied if e["seq"] not in abandoned and e["type"] in RECEIPT_TYPES + ISSUE_TYPES + RETURN_TYPES]
     min_next_ei = 1
+    min_next_ret = 1
     for e in applied:
         if e["type"] == "ABANDON" and e["fields"].get("NEXT_EI"):
             min_next_ei = max(min_next_ei, int(e["fields"]["NEXT_EI"]))
+        if e["type"] == "ABANDON" and e["fields"].get("NEXT_RET"):
+            min_next_ret = max(min_next_ret, int(e["fields"]["NEXT_RET"]))
+    # numbers an abandoned return took are never issued again either
+    for e in applied:
+        if e["seq"] in abandoned and e["type"] == "RETURN":
+            min_next_ret = max(min_next_ret, int(e["fields"]["RET"]) + 1)
 
     # ------------------------------------------------------------ 1. replay
     if base is None:
         bal = dict(initial)
         receipts, positions, issues = {}, {}, {}
+        place = {}
+        returns, ret_sum, ret_cnt = {}, {}, {}
     else:
         bal = dict(base["bal"])
         receipts = {k: dict(v) for k, v in base["receipts"].items()}
         positions = {k: dict(v) for k, v in base["positions"].items()}
         issues = {k: dict(v) for k, v in base["issues"].items()}
+        place = dict(base.get("place", {}))
+        returns = {k: dict(v) for k, v in base.get("returns", {}).items()}
+        ret_sum = dict(base.get("ret_sum", {}))
+        ret_cnt = dict(base.get("ret_cnt", {}))
+    touched_place = set()                               # EIs whose current place a movement set (checked in «Наличие».F)
+    n_ret_ops = 0
     created = []                                        # every EI a receipt created, in order
     n_rcpt_ops = 0
 
@@ -218,6 +251,7 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None):
                        price=f_num(f, "PRICE"), supplier=f.get("SUPPLIER"))
             receipts[ei] = rec
             bal[ei] = q
+            place[ei] = f.get("PLACE")
             if abs(float(f["BAL_AFTER"]) - q) > EPS:
                 bad(f"seq {sq} {t}: BAL_AFTER {f['BAL_AFTER']} ≠ {q}", 3)
             if t == "RECEIPT":
@@ -258,6 +292,8 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None):
             p["nodoc"] += nodoc - rec["nodoc"]
             rec.update(qty=q, nodoc=nodoc, doc=f.get("DOC", ""), ddate=iso_serial(f.get("DOC_DATE")), rdate=iso_serial(f.get("DATE")),
                        docqty=f_num(f, "DOC_QTY"), price=f_num(f, "PRICE"), place=f.get("PLACE"))
+            if f.get("PLACE") != f.get("OLD_PLACE"):
+                place[ei] = f.get("PLACE")          # the receipt's place was changed: it becomes the current place of the EI
             if abs(float(f["BAL_AFTER"]) - bal[ei]) > EPS:
                 bad(f"seq {sq} RECEIPT_FIX {ei}: BAL_AFTER {f['BAL_AFTER']} ≠ {bal[ei]}", 3)
             if abs(float(f["POS_RCV"]) - p["rcv"]) > EPS:
@@ -271,6 +307,11 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None):
                 continue
             if bal[ei] < rec["qty"] - EPS:
                 bad(f"seq {sq} RECEIPT_DEL {ei}: сторно при выданных {rec['qty'] - bal[ei]} — остаток стал бы отрицательным", 6)
+            # D-069: no live issue and no live return of the EI may remain behind a cancelled receipt
+            live_iss = [k for k, v in issues.items() if not v["deleted"] and v["ei"] == ei]
+            live_ret = [n for n, v in returns.items() if v["state"] == "LIVE" and v["ei"] == ei]
+            if live_iss or live_ret:
+                bad(f"seq {sq} RECEIPT_DEL {ei}: сторно прихода при действующих выдачах {live_iss[:5]} / возвратах {live_ret[:5]} (D-069)", "R")
             bal[ei] -= rec["qty"]
             rec["state"] = "STORNO"
             p = positions[rec["ol"]]
@@ -297,6 +338,9 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None):
                 bad(f"seq {sq} ORDER_CANCEL_REST: позиция OLID {ol} не частично получена ({p})", 8)
                 continue
             p["cancel"] = "REST"
+        elif t in RETURN_TYPES:
+            n_ret_ops += 1
+            replay_return(t, f, sq, bal, issues, returns, ret_sum, ret_cnt, place, touched_place, bad)
         else:
             # Phase 2 issues
             no = int(float(f["NO"]))
@@ -314,6 +358,14 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None):
                 if prev is None or prev["deleted"]:
                     bad(f"seq {sq} {t} №{no}: нет действующей выдачи")
                     continue
+                # Phase 4: the live returns of an issue stay tied to it
+                if ret_cnt.get(no, 0) > 0:
+                    if t == "ISSUE_DEL":
+                        bad(f"seq {sq} ISSUE_DEL №{no}: сторно выдачи при действующих возвратах ({ret_cnt[no]}, {ret_sum[no]})", "R")
+                    elif (f["EI"] != prev["ei"] or f.get("WHO") != prev.get("who") or f.get("DATE") != prev.get("date")
+                          or float(f["QTY"]) < ret_sum[no] - EPS):
+                        bad(f"seq {sq} ISSUE_FIX №{no}: при действующих возвратах ({ret_sum[no]}) изменены ЕИ/получатель/дата или количество "
+                            f"стало меньше возвращённого: {f['EI']} {f.get('WHO')} {f.get('DATE')} {f['QTY']}", "R")
                 bal[prev["ei"]] += prev["qty"]
                 if t == "ISSUE_FIX":
                     ei, q = f["EI"], float(f["QTY"])
@@ -377,7 +429,7 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None):
             bad(f"{ei}: у сторнированного прихода остался ключ антидубля")
         srow = book_ei.get(ei)
         if srow is not None and rec.get("name") is not None:
-            want_s = (rec["name"], rec["art"] or "", rec["unit"], rec["place"], "Активен" if rec["state"] == "LIVE" else "Приход удалён (сторно)",
+            want_s = (rec["name"], rec["art"] or "", rec["unit"], place.get(ei, rec["place"]), "Активен" if rec["state"] == "LIVE" else "Приход удалён (сторно)",
                       f"Заказ {rec['order']}")
             got_s = (srow[1], srow[2], srow[3], srow[5], srow[7], srow[8])
             if got_s != want_s:
@@ -541,7 +593,88 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None):
     if created and base is None and next_ei != max(max(ei_num(x) for x in created) + 1, min_next_ei, len(initial) + 1):
         bad(f"NEXT_EI {next_ei}: ожидалось {max(ei_num(x) for x in created) + 1}")
 
+    # ------------------------------------------------------------ 7. the current place of the EIs (Phase 4: a return may move an EI)
+    for ei in touched_place:
+        row = book_ei.get(ei)
+        if row is not None and row[5] != place.get(ei):
+            bad(f"{ei}: место в «Наличие» {row[5]!r}, по движениям {place.get(ei)!r}", "R")
+
     info.update(dict(ops=len(ops), receipt_ops=n_rcpt_ops, receipts=len(receipts), live=sum(1 for x in receipts.values() if x["state"] == "LIVE"),
-                     positions=len(positions), open_rows=open_rows, copies=copies, last_seq=last, journal_max=mx,
-                     invariants_failed=sorted(inv_fail)))
+                     positions=len(positions), open_rows=open_rows, copies=copies, last_seq=last, journal_max=mx, return_ops=n_ret_ops,
+                     invariants_failed=sorted(inv_fail, key=str)))
+    if out is not None:
+        out.update(bal=bal, issues=issues, returns=returns, ret_sum=ret_sum, ret_cnt=ret_cnt, place=place, min_next_ret=min_next_ret,
+                   sysv=sysv, ops=ops, book_ei=book_ei)
     return P, info
+
+
+def replay_return(t, f, sq, bal, issues, returns, ret_sum, ret_cnt, place, touched_place, bad):
+    """one return operation of the journal, checked against the rules of the task of Phase 4 (written independently):
+    a return belongs to a live issue, the same EI and recipient, a date not before the issue, 0 < quantity ≤ what can
+    still be returned; a correction keeps the returns of the issue within the issued quantity and the balance ≥ 0; a
+    storno never makes the balance negative"""
+    n, k, ei = int(f["RET"]), int(f["ISSUE"]), f["EI"]
+    iss = issues.get(k)
+    if t == "RETURN":
+        q = float(f["QTY"])
+        if n in returns:
+            bad(f"seq {sq} RETURN: № возврата {n} выдан повторно", "R")
+            return
+        if returns and n <= max(returns):
+            bad(f"seq {sq} RETURN: № возврата {n} не больше предыдущего {max(returns)} (нумерация не монотонна)", "R")
+        if iss is None or iss["deleted"]:
+            bad(f"seq {sq} RETURN №{n}: выдача № {k} {'удалена' if iss else 'не существует'} — возврат запрещён", "R")
+            return
+        if ei != iss["ei"]:
+            bad(f"seq {sq} RETURN №{n}: ЕИ {ei} ≠ ЕИ выдачи № {k} {iss['ei']}", "R")
+        if f.get("WHO") != iss.get("who"):
+            bad(f"seq {sq} RETURN №{n}: получатель {f.get('WHO')!r} ≠ получатель выдачи {iss.get('who')!r}", "R")
+        if iss.get("date") and f.get("DATE", "") < iss["date"]:
+            bad(f"seq {sq} RETURN №{n}: дата {f.get('DATE')} раньше даты выдачи {iss['date']}", "R")
+        avail = iss["qty"] - ret_sum.get(k, 0.0)
+        if not (q > EPS and q <= avail + EPS):
+            bad(f"seq {sq} RETURN №{n}: количество {q}, а можно вернуть {avail}", "R")
+        if abs(bal.get(ei, float("nan")) - float(f["BAL_BEFORE"])) > EPS:
+            bad(f"seq {sq} RETURN №{n}: BAL_BEFORE {f['BAL_BEFORE']} ≠ расчётный {bal.get(ei)}", 3)
+        bal[ei] = bal.get(ei, 0.0) + q
+        ret_sum[k] = ret_sum.get(k, 0.0) + q
+        ret_cnt[k] = ret_cnt.get(k, 0) + 1
+        returns[n] = dict(issue=k, ei=ei, qty=q, state="LIVE", date=f.get("DATE"), place=f.get("PLACE"), who=f.get("WHO"), fixed=False,
+                          L=float(f["BAL_BEFORE"]), M=float(f["BAL_AFTER"]), unit=f.get("UNIT"))
+    else:
+        r = returns.get(n)
+        if r is None or r["state"] != "LIVE":
+            bad(f"seq {sq} {t}: нет действующего возврата № {n}", "R")
+            return
+        if r["issue"] != k or r["ei"] != ei:
+            bad(f"seq {sq} {t} №{n}: выдача/ЕИ {k} {ei} ≠ возврата {r['issue']} {r['ei']}", "R")
+        if abs(bal.get(ei, float("nan")) - float(f["BAL_BEFORE"])) > EPS:
+            bad(f"seq {sq} {t} №{n}: BAL_BEFORE {f['BAL_BEFORE']} ≠ расчётный {bal.get(ei)}", 3)
+        if t == "RETURN_FIX":
+            old, q = float(f["OLD_QTY"]), float(f["QTY"])
+            if abs(old - r["qty"]) > EPS:
+                bad(f"seq {sq} RETURN_FIX №{n}: OLD_QTY {old} ≠ расчётный {r['qty']}", "R")
+            if iss is None or iss["deleted"]:
+                bad(f"seq {sq} RETURN_FIX №{n}: выдача № {k} не действует", "R")
+            elif ret_sum.get(k, 0.0) - r["qty"] + q > iss["qty"] + EPS:
+                bad(f"seq {sq} RETURN_FIX №{n}: возвраты выдачи {ret_sum.get(k, 0.0) - r['qty'] + q} больше выданного {iss['qty']}", "R")
+            if q <= EPS:
+                bad(f"seq {sq} RETURN_FIX №{n}: количество {q} не больше 0", "R")
+            if iss and iss.get("date") and f.get("DATE", "") < iss["date"]:
+                bad(f"seq {sq} RETURN_FIX №{n}: дата {f.get('DATE')} раньше даты выдачи {iss['date']}", "R")
+            bal[ei] += q - r["qty"]
+            ret_sum[k] = ret_sum.get(k, 0.0) + q - r["qty"]
+            r.update(qty=q, date=f.get("DATE"), place=f.get("PLACE"), who=f.get("WHO"), fixed=True, L=float(f["BAL_BEFORE"]) - old,
+                     M=float(f["BAL_AFTER"]))
+        else:
+            if bal.get(ei, 0.0) < r["qty"] - EPS:
+                bad(f"seq {sq} RETURN_DEL №{n}: остаток {bal.get(ei)} меньше возврата {r['qty']} — стал бы отрицательным", 6)
+            bal[ei] -= r["qty"]
+            ret_sum[k] = ret_sum.get(k, 0.0) - r["qty"]
+            ret_cnt[k] = ret_cnt.get(k, 0) - 1
+            r["state"] = "STORNO"
+    if t != "RETURN_DEL":
+        place[ei] = f.get("PLACE")
+        touched_place.add(ei)
+    if abs(bal[ei] - float(f["BAL_AFTER"])) > EPS:
+        bad(f"seq {sq} {t} №{n}: BAL_AFTER {f['BAL_AFTER']} ≠ {bal[ei]}", 3)

@@ -95,8 +95,8 @@ Function SheetsProblem() As String
         Exit Function
     End If
     sh = IdxSheet()
-    For i = IX_ECHO To IX_W_MATCH
-        If sh.getCellByPosition(1, i).getType() <> com.sun.star.table.CellContentType.FORMULA Then
+    For i = IX_ECHO To IX_RA_COUNT
+        If i <> IX_LIST And sh.getCellByPosition(1, i).getType() <> com.sun.star.table.CellContentType.FORMULA Then
             SheetsProblem = "служебный лист " & SH_IDX & " повреждён: нет формулы поиска в строке " & (i + 1)
             Exit Function
         End If
@@ -210,11 +210,17 @@ Private Function FaLookup(ixRow As Integer, key As Variant, start As Long) As Do
     Case IX_W_MATCH
         sh = OrdersSheet()
         col = OC_STATUS
+    Case IX_I_MATCH
+        sh = gDoc.Sheets.getByName(SH_ISSUES)
+        col = IC_NO
+    Case IX_RA_MATCH, IX_RA_COUNT
+        sh = gDoc.Sheets.getByName(SH_RETURNS)
+        col = RC_NO
     Case Else
         sh = RcvSheet()
         col = RV_DUP
     End Select
-    If ixRow = IX_V_COUNT Or ixRow = IX_DUP_COUNT Then
+    If ixRow = IX_V_COUNT Or ixRow = IX_DUP_COUNT Or ixRow = IX_RA_COUNT Then
         FaLookup = fa.callFunction("COUNTIF", Array(sh.getCellRangeByPosition(col, 1, col, MAX_SHEET_ROW), key))
         Exit Function
     End If
@@ -253,6 +259,64 @@ End Function
 
 Function CountEI(canon As String) As Long
     CountEI = CLng(IdxLookup(IX_V_COUNT, canon, 0))
+End Function
+
+' Phase 4: 0-based «Выдачи» row of the first issue № k (A), from data row start + 1; -1 when none
+Function FindIssueNoRow(k As Long, start As Long) As Long
+    Dim x As Double
+    x = IdxLookup(IX_I_MATCH, CDbl(k), start)
+    If x < 1 Then FindIssueNoRow = -1 Else FindIssueNoRow = CLng(x)
+End Function
+
+' Phase 4: 0-based «Возврат» row of the first return № n (A), from data row start + 1; -1 when none
+Function FindReturnNoRow(n As Long, start As Long) As Long
+    Dim x As Double
+    x = IdxLookup(IX_RA_MATCH, CDbl(n), start)
+    If x < 1 Then FindReturnNoRow = -1 Else FindReturnNoRow = CLng(x)
+End Function
+
+Function CountReturnNo(n As Long) As Long
+    CountReturnNo = CLng(IdxLookup(IX_RA_COUNT, CDbl(n), 0))
+End Function
+
+' One array formula of the Calc engine, evaluated at once in the unlocked scratch cell _IDX!B<IX_LIST> (written, read and
+' cleared; no Undo, the book does not become «modified»): its text result, or ok = False when it could not be used
+' (then the caller takes a slower path). A tag proves the value was calculated for this call (automatic calculation
+' may be off). Used where the answer is a list (TEXTJOIN) — rows of «Заказы» to refresh, issues of one EI.
+Function ScratchEval(body As String, ByRef ok As Boolean) As String
+    Dim ix As Object, c As Object, um As Object, wasMod As Boolean, locked As Boolean, tag As String, s As String, flags As Long
+    On Error GoTo EH
+    ok = False
+    flags = com.sun.star.sheet.CellFlags.VALUE + com.sun.star.sheet.CellFlags.DATETIME + com.sun.star.sheet.CellFlags.STRING _
+        + com.sun.star.sheet.CellFlags.FORMULA
+    ix = IdxSheet()
+    c = ix.getCellRangeByPosition(1, IX_LIST, 1, IX_LIST)
+    um = gDoc.getUndoManager()
+    wasMod = gDoc.isModified()
+    um.lock()
+    locked = True
+    If gIdxNonce < 1 Then gIdxNonce = Int(CDbl(Now()) * 86400) * 1000 + Int(Rnd() * 1000)
+    gIdxNonce = gIdxNonce + 1
+    tag = "T" & Format(gIdxNonce, "0") & "|"
+    c.setArrayFormula("=""" & tag & """&" & body)
+    s = ix.getCellByPosition(1, IX_LIST).getString()
+    If Left(s, Len(tag)) <> tag Then
+        gDoc.calculate()
+        s = ix.getCellByPosition(1, IX_LIST).getString()
+    End If
+    c.clearContents(flags)
+    um.unlock()
+    locked = False
+    If Not wasMod Then gDoc.setModified(False)
+    If Left(s, Len(tag)) <> tag Then Exit Function
+    ScratchEval = Mid(s, Len(tag) + 1)
+    ok = True
+    Exit Function
+EH:
+    On Error Resume Next
+    If Not IsNull(c) And Not IsEmpty(c) Then c.clearContents(flags)
+    If locked Then um.unlock()
+    If Not wasMod Then gDoc.setModified(False)
 End Function
 
 ' EI number of the first _RCV row with antidubl hash h after EI start; -1 when none
@@ -1141,43 +1205,20 @@ End Function
 ' book does not become «modified»); a tag proves the value was calculated for this call. nPO: the rows shown «Частично
 ' получено / просрочено» now. False when the formula could not be used.
 Private Function PartialDueRows(last As Long, tday As Double, rows() As Long, ByRef nr As Long, ByRef nPO As Long) As Boolean
-    Dim ix As Object, c As Object, um As Object, wasMod As Boolean, locked As Boolean, f As String, w As String, q As String
-    Dim tag As String, s As String, a As Variant, i As Long, cond As String, p As Long, k As Long, n0 As Long
-    Dim flags As Long
+    Dim f As String, w As String, q As String, s As String, a As Variant, cond As String, p As Long, k As Long, ok As Boolean
     On Error GoTo EH
-    flags = com.sun.star.sheet.CellFlags.VALUE + com.sun.star.sheet.CellFlags.DATETIME + com.sun.star.sheet.CellFlags.STRING _
-        + com.sun.star.sheet.CellFlags.FORMULA
-    ix = IdxSheet()
-    c = ix.getCellRangeByPosition(1, IX_LIST, 1, IX_LIST)
-    um = gDoc.getUndoManager()
-    wasMod = gDoc.isModified()
-    um.lock()
-    locked = True
-    If gIdxNonce < 1 Then gIdxNonce = Int(CDbl(Now()) * 86400) * 1000 + Int(Rnd() * 1000)
-    gIdxNonce = gIdxNonce + 1
-    tag = "T" & Format(gIdxNonce, "0") & "|"
     w = "$'" & SH_ORDERS & "'.$W$2:$W$" & (last + 1)
     q = "$'" & SH_ORDERS & "'.$Q$2:$Q$" & (last + 1)
     ' a valid date of 2000–2099 before today, as QSerial reads a number
     cond = "ISNUMBER(" & q & ")*(" & q & ">=" & Format(CDbl(DateSerial(2000, 1, 1)), "0") & ")*(" & q & "<=" _
         & Format(CDbl(DateSerial(2099, 12, 31)), "0") & ")*(" & q & "<" & Format(tday, "0") & ")"
-    f = "=""" & tag & """&COUNTIF(" & w & ";""" & OS_PARTIAL_OVERDUE & """)&""|""&TEXTJOIN("";"";1;IF((" & w & "=""" & OS_PARTIAL _
+    f = "COUNTIF(" & w & ";""" & OS_PARTIAL_OVERDUE & """)&""|""&TEXTJOIN("";"";1;IF((" & w & "=""" & OS_PARTIAL _
         & """)*(" & cond & "+ISTEXT(" & q & "))+(" & w & "=""" & OS_PARTIAL_OVERDUE & """)*(1-" & cond & ");ROW(" & w & ")-1;""""))"
-    c.setArrayFormula(f)
-    s = ix.getCellByPosition(1, IX_LIST).getString()
-    If Left(s, Len(tag)) <> tag Then
-        gDoc.calculate()
-        s = ix.getCellByPosition(1, IX_LIST).getString()
-    End If
-    c.clearContents(flags)
-    um.unlock()
-    locked = False
-    If Not wasMod Then gDoc.setModified(False)
-    If Left(s, Len(tag)) <> tag Then Exit Function
-    s = Mid(s, Len(tag) + 1)
+    s = ScratchEval(f, ok)
+    If Not ok Then Exit Function
     p = InStr(s, "|")
     If p < 2 Then Exit Function
-    n0 = CLng(Left(s, p - 1))
+    nPO = CLng(Left(s, p - 1))
     s = Mid(s, p + 1)
     If s <> "" Then
         a = Split(s, ";")
@@ -1185,14 +1226,10 @@ Private Function PartialDueRows(last As Long, tday As Double, rows() As Long, By
             AddRow(rows, nr, CLng(a(k)))
         Next k
     End If
-    nPO = n0
     PartialDueRows = True
     Exit Function
 EH:
-    On Error Resume Next
-    If Not IsNull(c) And Not IsEmpty(c) Then c.clearContents(flags)
-    If locked Then um.unlock()
-    If Not wasMod Then gDoc.setModified(False)
+    PartialDueRows = False
 End Function
 
 ' the blocks of rows 1..last whose W equals s (one MATCH for the first such row, then one query of the W cells that differ

@@ -623,14 +623,16 @@ def r17_storno_without_issues():
         order(s, 1, h="10", q=FUTURE)
         fact(s, 1, "10")
         post(s, 1)
+        k0 = s.U("TestUiConfirmCount")
         dl = s.click_ord("BtnRcvDelete", 1)
+        k1 = s.U("TestUiConfirmCount")
         row = s.ords(1)
         reg = s.stock_row(201)
-        ok = (dl.startswith("OK") and row[21] == ei(201) and row[22] == "Ожидается" and row[23] == 0.0 and row[24].startswith("Приход удалён (сторно)")
+        ok = (dl.startswith("OK") and k1 == k0 + 1 and row[21] == ei(201) and row[22] == "Ожидается" and row[23] == 0.0 and row[24].startswith("Приход удалён (сторно)")
               and reg[4] == 0.0 and reg[7] == "Приход удалён (сторно)" and s.rcv(201)[4] == "STORNO" and s.journal()[0][-1]["type"] == "RECEIPT_DEL"
               and s.ord_locks(1) == POSTED)
-        R.add(c, "«Удалить» = сторно прихода без выдач: остаток 0, запись ЕИ осталась в реестре со статусом «Приход удалён (сторно)», "
-                 "строка — история, позиция снова ожидается", ok, f"{dl}; {row[20:25]}; {reg}")
+        R.add(c, "«Удалить» = сторно прихода без выдач (после подтверждения): остаток 0, запись ЕИ осталась в реестре со статусом «Приход удалён "
+                 "(сторно)», строка — история, позиция снова ожидается", ok, f"{dl}; подтверждений {k1 - k0}; {row[20:25]}; {reg}")
         again = s.click_ord("BtnRcvDelete", 1)
         rp = post(s, 1)
         m = more(s, 1, "10", c="УПД-2", o=D0)
@@ -655,9 +657,11 @@ def r18_storno_after_issue():
         post(s, 1)
         issue(s, 1, "201", "3")
         snap0 = snap(s)
+        k0 = s.U("TestUiConfirmCount")
         dl = s.click_ord("BtnRcvDelete", 1)
-        R.add(c, "сторно после выдачи 3 из 10 — отказ (остаток стал бы отрицательным), ничего не изменилось",
-              dl.startswith("ERR") and "уже выдано 3" in s.U("TestUiLastMessage") and snap(s) == snap0, dl)
+        k1 = s.U("TestUiConfirmCount")
+        R.add(c, "сторно после выдачи 3 из 10 — отказ сразу, без окна подтверждения (действующая выдача, D-069; уже выдано 3), ничего не изменилось",
+              dl.startswith("ERR") and "уже выдано 3" in s.U("TestUiLastMessage") and k1 == k0 and snap(s) == snap0, f"{dl}; подтверждений {k1 - k0}")
         di = s.I("IssueDeleteRow", 1)
         x = s.ord(1, "X")
         dl2 = s.Rc("ReceiptDeleteRow", 1)
@@ -934,7 +938,8 @@ def r28_save_reopen():
         checks = {"CLEAN": st(s)[0] == "CLEAN", "не «изменена» после открытия": not s.doc.isModified(),
                   "W": [W(s, r) for r in (1, 2, 3, 4)] == ["Частично получено", "Дополнительное поступление", "Отменено", "Ожидается"],
                   "защита": [s.ord_locks(r) for r in (1, 2, 3, 4)] == [POSTED, POSTED, POSTED, OPEN],
-                  "вставка строк": xml.count('loext:insert-rows="true"') == 2, "автофильтр": s.doc.DatabaseRanges.hasByName("WMS_ORDERS"),
+                  # «Выдачи», «Заказы» and, since Core Phase 4, «Возврат» allow inserting rows
+                  "вставка строк": xml.count('loext:insert-rows="true"') == 3, "автофильтр": s.doc.DatabaseRanges.hasByName("WMS_ORDERS"),
                   "NEXT_EI": s.sysv("NEXT_EI") == 203, "NEXT_OL": s.next_ol() == 3.0}
         fact(s, 4, "7")
         nxt = post(s, 4)

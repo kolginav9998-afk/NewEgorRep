@@ -1,9 +1,9 @@
 ' WmsConfig — constants, _SYS layout, settings, LibreOffice settings management (AutoInput).
 ' MASTER SPEC v0.3: §3 sources as text, §10/§29 AutoInput, §16 protection, §20 journal, §22 lock, §24 chunks, §26 backups,
-' §2 and §14 fixed sheets «Выдачи», «Заказы» and their service structures.
+' §2 and §14 fixed sheets «Выдачи», «Заказы», «Возврат» and their service structures.
 Option Explicit
 
-Public Const WMS_CORE_VERSION = "0.3.0-phase3"
+Public Const WMS_CORE_VERSION = "0.4.0-phase4"
 Public Const WMS_SYS_SCHEMA = "WMS-SYS-1"
 
 Public Const SYS_SHEET = "_SYS"
@@ -216,8 +216,60 @@ Public Const IX_DUP_MATCH = 6
 Public Const IX_DUP_COUNT = 7
 Public Const IX_A_MATCH = 8
 Public Const IX_W_MATCH = 9
-' the scratch cell (unlocked) for one-shot array formulas: rows of «Заказы» whose date-dependent status must be checked
+' the scratch cell (unlocked) for one-shot array formulas: rows of «Заказы» whose date-dependent status must be checked,
+' issues of one EI for «Найти выдачу»
 Public Const IX_LIST = 10
+' Phase 4: «Выдачи».A (issue №) MATCH, «Возврат».A (return №) MATCH and COUNTIF
+Public Const IX_I_MATCH = 11
+Public Const IX_RA_MATCH = 12
+Public Const IX_RA_COUNT = 13
+
+' ---------------------------------------------------------------- Phase 4: returns of issued goods (spec §11, §14, D-004, D-011)
+Public Const SH_RETURNS = "Возврат"
+Public Const SH_RET = "_RET"
+Public Const SH_ISS = "_ISS"
+
+' «Возврат» A:O (spec §11 lists the fields, the task of Phase 4 fixes the columns): 0-based column indices
+Public Const RC_NO = 0
+Public Const RC_ISSUE = 1
+Public Const RC_EI = 2
+Public Const RC_NAME = 3
+Public Const RC_ART = 4
+Public Const RC_QTY = 5
+Public Const RC_UNIT = 6
+Public Const RC_DATE = 7
+Public Const RC_WHO = 8
+Public Const RC_PLACE = 9
+Public Const RC_CAT = 10
+Public Const RC_BEFORE = 11
+Public Const RC_AFTER = 12
+Public Const RC_CTL = 13
+Public Const RC_NOTE = 14
+Public Const RC_LAST = 14
+
+' cell protection of a «Возврат» row, one character per column A..O ("1" = locked). Unposted: the inputs B C F H I J and
+' the comment O are open, everything WMS fills (A D E G K L M N) is locked. Posted or cancelled: only O stays open.
+Public Const RETURN_LOCKS_OPEN = "100110100011110"
+Public Const RETURN_LOCKS_POSTED = "111111111111110"
+
+' _RET — returns, one row per return № (row index = return №, dense like «Наличие»)
+Public Const RT_NO = 0
+Public Const RT_ISSUE = 1
+Public Const RT_EI = 2
+Public Const RT_QTY = 3
+Public Const RT_STATE = 4
+Public Const RT_ROW = 5
+Public Const RT_LAST = 5
+
+' _ISS — the returns of one issue (row index = issue №, dense; a row appears with the first return of the issue):
+' № выдачи, row hint of the issue on «Выдачи», returned (sum of the live returns), number of live returns
+Public Const IS_NO = 0
+Public Const IS_ROW = 1
+Public Const IS_RET = 2
+Public Const IS_CNT = 3
+Public Const IS_LAST = 3
+' «Найти выдачу»: at most this many of the latest returnable issues of one EI are listed
+Public Const ISSUE_LIST_MAX = 100
 
 ' «Площадка / Поставщик» values that start a special receipt (spec §7) — not an ordinary receipt, next stage
 Public Const SPECIAL_SUPPLIERS = "офис|производство|детали|старый склад"

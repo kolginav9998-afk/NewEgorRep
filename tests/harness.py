@@ -19,6 +19,7 @@ import issue_oracle  # noqa: E402
 
 ISSUE_COLS = "ABCDEFGHIJKLMNOPQR"
 ORDER_COLS = [chr(65 + i) for i in range(26)] + ["AA", "AB"]
+RETURN_COLS = "ABCDEFGHIJKLMNO"
 # initial balances of the synthetic EIs of a test book (tools/build_ods.synthetic_registry)
 INITIAL_STOCK = {row[0]: row[4] for row in synthetic_registry()}
 
@@ -253,6 +254,54 @@ class Session:
     def rcheck(self, expect_tail=0, initial=None, today=None, base=None):
         import receipt_oracle
         return receipt_oracle.check(self.doc, self.jdir, INITIAL_STOCK if initial is None else initial, expect_tail, today=today, base=base)
+
+    # «Возврат» (Phase 4)
+    def Rt(self, func, *a):
+        return self.B(func, *a, module="WmsReturn")
+
+    def RU(self, func, *a):
+        return self.B(func, *a, module="WmsReturnUi")
+
+    def ret(self, r):
+        """values of «Возврат» row r (0-based; row 1 is the first data row), A..O"""
+        return tuple(self.doc.Sheets.getByName("Возврат").getCellRangeByPosition(0, r, 14, r).getDataArray()[0])
+
+    def ret_cell(self, col, r):
+        cell = self.doc.Sheets.getByName("Возврат").getCellByPosition(RETURN_COLS.index(col), r)
+        return cell.getType().value, cell.getString(), cell.getValue()
+
+    def ret_locks(self, r):
+        sh = self.doc.Sheets.getByName("Возврат")
+        return "".join("1" if sh.getCellByPosition(c, r).CellProtection.IsLocked else "0" for c in range(15))
+
+    def type_ret(self, col, r, text):
+        """enter text into «Возврат» like a user (GoToCell + EnterString): the sheet's change handler runs"""
+        self.goto("Возврат", f"${col}${r + 1}")
+        self.o.dispatch(self.doc, ".uno:EnterString", StringName=text)
+
+    def return_input(self, r, issue=None, ei=None, qty=None, date=None, who=None, place=None, note=None):
+        for col, v in (("B", issue), ("C", ei), ("F", qty), ("H", date), ("I", who), ("J", place), ("O", note)):
+            if v is not None:
+                self.type_ret(col, r, v)
+
+    def click_ret(self, button, r=None, col="B", r1=None):
+        """a button of «Возврат» for the row (or rows r..r1) under the cursor — the macro the button is bound to"""
+        if r is not None:
+            ref = f"${col}${r + 1}" if r1 is None else f"$A${r + 1}:$O${r1 + 1}"
+            self.goto("Возврат", ref)
+        self.RU(button)
+        return self.U("TestUiLastMessage")
+
+    def retrec(self, n):
+        return tuple(self.doc.Sheets.getByName("_RET").getCellRangeByPosition(0, n, 5, n).getDataArray()[0])
+
+    def issrec(self, k):
+        return tuple(self.doc.Sheets.getByName("_ISS").getCellRangeByPosition(0, k, 3, k).getDataArray()[0])
+
+    def retcheck(self, expect_tail=0, initial=None, today=None, base=None, legacy_mn_empty=True):
+        import return_oracle
+        return return_oracle.check(self.doc, self.jdir, INITIAL_STOCK if initial is None else initial, expect_tail, today=today, base=base,
+                                   legacy_mn_empty=legacy_mn_empty)
 
     def journal(self):
         return journal_oracle.read_journal(self.jdir)

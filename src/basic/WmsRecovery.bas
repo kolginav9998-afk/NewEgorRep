@@ -25,6 +25,9 @@ Sub Analyze()
     ' 2. service data
     p = SysLayoutProblem()
     If p = "" Then p = WmsIssue.SheetsProblem()
+    ' the sheets of the returns before the lookup formulas: a book of an earlier core (no «Возврат») is named as such, not as a
+    ' damaged _IDX
+    If p = "" Then p = WmsReturn.SheetsProblem()
     If p = "" Then p = WmsOrders.SheetsProblem()
     If p <> "" Then
         SetBlocked("SYS_CORRUPT", p)
@@ -288,7 +291,7 @@ End Function
 ' after it. The abandoned operations stay in the journal for manual reconciliation.
 Function AbandonTail() As String
     Dim lastSeq As Long, fromSeq As Long, toSeq As Long, p As String, sLine As String, why As String, rc As Integer
-    Dim i As Long, lst As String, maxEI As Double, maxNo As Double, nextEI As Double, nextNo As Double
+    Dim i As Long, lst As String, maxEI As Double, maxNo As Double, nextEI As Double, nextNo As Double, maxRet As Double, nextRet As Double
     WmsInit()
     If gBlock <> "TAIL" Then
         AbandonTail = "«Отложить хвост журнала» не требуется: " & StateLine()
@@ -305,15 +308,17 @@ Function AbandonTail() As String
     toSeq = gJR_Seq(gJR_N - 1)
     For i = 0 To gJR_N - 1
         If i < 20 Then lst = lst & IIf(lst <> "", ", ", "") & gJR_Seq(i) & ":" & gJR_Type(i)
-        TailCounters(gJR_Fields(i), maxEI, maxNo)
+        TailCounters(gJR_Fields(i), maxEI, maxNo, maxRet)
     Next i
-    ' numbers the abandoned operations handed out (an EI label, an issue №) are never issued again
+    ' numbers the abandoned operations handed out (an EI label, an issue №, a return №) are never issued again
     nextEI = SysNum(SK_NEXT_EI)
     If maxEI + 1 > nextEI Then nextEI = maxEI + 1
     nextNo = SysNum(SK_NEXT_NO)
     If maxNo + 1 > nextNo Then nextNo = maxNo + 1
+    nextRet = SysNum(SK_NEXT_RET)
+    If maxRet + 1 > nextRet Then nextRet = maxRet + 1
     sLine = WmsJournal.BuildLine(toSeq + 1, "ABANDON", Array("FROM=" & fromSeq, "TO=" & toSeq, "NEXT_EI=" & NumStr(nextEI), _
-        "NEXT_NO=" & NumStr(nextNo), "REASON=" & Esc("решение пользователя: хвост журнала не применён")))
+        "NEXT_NO=" & NumStr(nextNo), "NEXT_RET=" & NumStr(nextRet), "REASON=" & Esc("решение пользователя: хвост журнала не применён")))
     rc = WmsJournal.AppendLine(sLine, toSeq + 1, why)
     If rc <> 1 Then
         AbandonTail = "ОШИБКА: запись в журнал не удалась: " & why
@@ -321,15 +326,16 @@ Function AbandonTail() As String
         WmsStartup()
         Exit Function
     End If
-    ApplyAbandonCounters(Array("NEXT_EI=" & NumStr(nextEI), "NEXT_NO=" & NumStr(nextNo)))
+    ApplyAbandonCounters(Array("NEXT_EI=" & NumStr(nextEI), "NEXT_NO=" & NumStr(nextNo), "NEXT_RET=" & NumStr(nextRet)))
     CommitSeq(toSeq + 1)
     gState = ""
     WmsStartup()
     AbandonTail = "отложено операций: " & (toSeq - fromSeq + 1) & " (seq " & fromSeq & ".." & toSeq & "), они остаются в журнале для ручной сверки: " & lst
 End Function
 
-' largest EI and issue № named by the fields of one journal entry (0 when none)
-Private Sub TailCounters(fields As Variant, ByRef maxEI As Double, ByRef maxNo As Double)
+' largest EI, issue № and return № named by the fields of one journal entry (0 when none). A return names its issue
+' in ISSUE (an existing issue) and its own № in RET.
+Private Sub TailCounters(fields As Variant, ByRef maxEI As Double, ByRef maxNo As Double, ByRef maxRet As Double)
     Dim v As String, n As Long, canon As String, msg As String
     v = FieldValue(fields, "EI")
     If v <> "" Then
@@ -341,9 +347,13 @@ Private Sub TailCounters(fields As Variant, ByRef maxEI As Double, ByRef maxNo A
     If IsDigits(v) And Len(v) <= 9 Then
         If CDbl(v) > maxNo Then maxNo = CDbl(v)
     End If
+    v = FieldValue(fields, "RET")
+    If IsDigits(v) And Len(v) <= 9 Then
+        If CDbl(v) > maxRet Then maxRet = CDbl(v)
+    End If
 End Sub
 
-' an ABANDON record raises NEXT_EI / NEXT_NO past the numbers of the abandoned operations (never lowers them); repeated
+' an ABANDON record raises NEXT_EI / NEXT_NO / NEXT_RET past the numbers of the abandoned operations (never lowers them); repeated
 ' application is harmless, so a crash between the journal line and the book is covered by «Восстановить»
 Private Sub ApplyAbandonCounters(fields As Variant)
     Dim v As String
@@ -354,6 +364,10 @@ Private Sub ApplyAbandonCounters(fields As Variant)
     v = FieldValue(fields, "NEXT_NO")
     If IsDigits(v) And Len(v) <= 9 Then
         If CDbl(v) > SysNum(SK_NEXT_NO) Then SysPutNum(SK_NEXT_NO, CDbl(v))
+    End If
+    v = FieldValue(fields, "NEXT_RET")
+    If IsDigits(v) And Len(v) <= 9 Then
+        If CDbl(v) > SysNum(SK_NEXT_RET) Then SysPutNum(SK_NEXT_RET, CDbl(v))
     End If
 End Sub
 

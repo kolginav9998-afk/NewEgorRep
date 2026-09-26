@@ -6,6 +6,10 @@ Private mKeyProblems As Long
 ' _RCV rows read in chunks while the sorted EI keys are walked (each chunk at most once): EI, OLID, row hint
 Private mRcvChunk As Long
 Private mRcvData As Variant
+' the same for _RET while the sorted return № keys are walked: №, issue, EI, quantity, state, row hint (only its used rows)
+Private mRetChunk As Long
+Private mRetData As Variant
+Private mRetLast As Long
 
 Private Function Ln(sStatus As String, sItem As String, sDetail As String) As String
     Ln = sStatus & " " & sItem & IIf(sDetail <> "", ": " & sDetail, "") & Chr(10)
@@ -104,15 +108,21 @@ Function SelfCheck() As String
     End If
     s = RegistryCheck()
     If Left(s, 6) = "ОШИБКА" Then
-        out = out & Ln("FAIL", "реестр «" & SH_STOCK & "»", Mid(s, 8))
+        out = out & Ln("FAIL", "реестр «" & SH_STOCK & "»", Mid(s, 9))
     Else
         out = out & Ln("OK", "реестр «" & SH_STOCK & "»", s)
     End If
     s = ReceiptsCheck()
     If Left(s, 6) = "ОШИБКА" Then
-        out = out & Ln("FAIL", "приходы и заказы", Mid(s, 8))
+        out = out & Ln("FAIL", "приходы и заказы", Mid(s, 9))
     Else
         out = out & Ln("OK", "приходы и заказы", s)
+    End If
+    s = WmsReturn.ReturnsCheck()
+    If Left(s, 6) = "ОШИБКА" Then
+        out = out & Ln("FAIL", "возвраты", Mid(s, 9))
+    Else
+        out = out & Ln("OK", "возвраты", s)
     End If
     s = WmsIssue.RecipientsDuplicates()
     If s <> "" Then
@@ -344,10 +354,11 @@ Private Sub Bad(ByRef nBad As Long, ByRef first As String, s As String)
 End Sub
 
 ' ---------------------------------------------------------------- full key check
-' _SYS KEY_SHEETS = "sheet|keyCol|ctlCol|counterRow|inputCol[|EI];..." (0-based columns; counterRow = _SYS row of NEXT_*).
-' A key the WMS never issued (≥ NEXT_*), an invalid key or a repeated key marks the row «КОПИЯ» (never posted);
+' _SYS KEY_SHEETS = "sheet|keyCol|ctlCol|counterRow|inputCol[|EI|RET];..." (0-based columns; counterRow = _SYS row of
+' NEXT_*). A key the WMS never issued (≥ NEXT_*), an invalid key or a repeated key marks the row «КОПИЯ» (never posted);
 ' of repeated keys the first row in sheet order is kept as the original. Type EI («Заказы».V): the key is the canonical
 ' EI text; it must also be a receipt of this WMS (_RCV), and of repeated keys the row its receipt is registered at wins.
+' Type RET («Возврат».A): the key is the return №; it must be registered in _RET, of repeated keys the row _RET names wins.
 
 Function FullKeyCheck(bMark As Boolean) As String
     Dim specs As Variant, i As Long, res As String
@@ -382,6 +393,36 @@ Private Function RcvKeyInfo(n As Long, ByRef hintRow As Long) As Boolean
     RcvKeyInfo = True
 End Function
 
+' True when return № n is registered in _RET; hintRow = the row of «Возврат» it is registered at
+Private Function RetKeyInfo(n As Long, ByRef hintRow As Long) As Boolean
+    Dim c0 As Long, c1 As Long, row As Variant
+    hintRow = -1
+    If mRetLast < 0 Then mRetLast = LastUsedRow(gDoc.Sheets.getByName(SH_RET))
+    If n < 1 Or n > mRetLast Then Exit Function
+    c0 = ((n - 1) \ CHECK_CHUNK_ROWS) * CHECK_CHUNK_ROWS + 1
+    If c0 <> mRetChunk Then
+        c1 = c0 + CHECK_CHUNK_ROWS - 1
+        If c1 > mRetLast Then c1 = mRetLast
+        mRetData = gDoc.Sheets.getByName(SH_RET).getCellRangeByPosition(0, c0, RT_LAST, c1).getDataArray()
+        mRetChunk = c0
+    End If
+    row = mRetData(n - c0)
+    If VarType(row(RT_NO)) <> 5 Then Exit Function
+    If row(RT_NO) <> n Then Exit Function
+    If VarType(row(RT_ROW)) = 5 Then hintRow = CLng(row(RT_ROW))
+    RetKeyInfo = True
+End Function
+
+' a key of a registered type: registered by WMS (receipt of the EI / return №) and the row it is registered at
+Private Function KeyInfo(isEI As Boolean, n As Long, ByRef hintRow As Long) As Boolean
+    If isEI Then KeyInfo = RcvKeyInfo(n, hintRow) Else KeyInfo = RetKeyInfo(n, hintRow)
+End Function
+
+' «ЕИ-00000012 не создан приходом WMS» / «возврат № 5 не зарегистрирован WMS»
+Private Function NotRegText(isEI As Boolean, n As Long) As String
+    If isEI Then NotRegText = WmsIssue.EiCanon(n) & " не создан приходом WMS" Else NotRegText = "возврат № " & n & " не зарегистрирован WMS"
+End Function
+
 Private Function LastUsedRow(sh As Object) As Long
     Dim cur As Object
     cur = sh.createCursor()
@@ -399,7 +440,7 @@ Private Function CheckKeySheet(spec As String, bMark As Boolean) As String
     Dim dKey As Variant, dCtl As Variant, dIn As Variant, buf() As Variant, nb As Long, nK As Long
     Dim nNever As Long, nBad As Long, nUnposted As Long, nDup As Long, t0 As Long, scr As Object, wasProt As Boolean
     Dim prevKey As Double, prevRow As Long, d As Variant, desc As Variant, fld(1) As New com.sun.star.table.TableSortField
-    Dim isEI As Boolean, n As Long, reg As Boolean, hintRow As Long, origIsHint As Boolean, x As Long, kShow As String
+    Dim isEI As Boolean, n As Long, reg As Boolean, hintRow As Long, origIsHint As Boolean, x As Long, kShow As String, isReg As Boolean
     On Error GoTo EH
     t0 = GetSystemTicks()
     a = Split(spec, "|")
@@ -408,8 +449,13 @@ Private Function CheckKeySheet(spec As String, bMark As Boolean) As String
     ctlCol = CInt(a(2))
     cntRow = CInt(a(3))
     inCol = CInt(a(4))
-    If UBound(a) >= 5 Then isEI = (a(5) = "EI")
+    If UBound(a) >= 5 Then
+        isEI = (a(5) = "EI")
+        isReg = (a(5) = "EI" Or a(5) = "RET")
+    End If
     mRcvChunk = -1
+    mRetChunk = -1
+    mRetLast = -1
     sh = SheetByName(sName)
     last = LastUsedRow(sh)
     nextKey = SysNum(cntRow)
@@ -479,11 +525,11 @@ Private Function CheckKeySheet(spec As String, bMark As Boolean) As String
                 If d(j)(0) = prevKey Then
                     If isEI Then kShow = WmsIssue.EiCanon(CLng(d(j)(0))) Else kShow = CStr(d(j)(0))
                     x = CLng(d(j)(1))
-                    If isEI And Not reg Then
+                    If isReg And Not reg Then
                         nNever = nNever + 1
-                        If bMark Then MarkCopy(sh, ctlCol, x, kShow & " не создан приходом WMS")
-                    ElseIf isEI And Not origIsHint And x = hintRow Then
-                        ' the row the receipt is registered at is the original, the row seen first is the copy
+                        If bMark Then MarkCopy(sh, ctlCol, x, NotRegText(isEI, CLng(d(j)(0))))
+                    ElseIf isReg And Not origIsHint And x = hintRow Then
+                        ' the row the receipt / return is registered at is the original, the row seen first is the copy
                         nDup = nDup + 1
                         If bMark Then MarkCopy(sh, ctlCol, prevRow, kShow & " повторяет строку " & (x + 1))
                         prevRow = x
@@ -495,22 +541,22 @@ Private Function CheckKeySheet(spec As String, bMark As Boolean) As String
                 Else
                     prevKey = d(j)(0)
                     prevRow = CLng(d(j)(1))
-                    If isEI Then
-                        reg = RcvKeyInfo(CLng(prevKey), hintRow)
+                    If isReg Then
+                        reg = KeyInfo(isEI, CLng(prevKey), hintRow)
                         origIsHint = (prevRow = hintRow)
                         If Not reg Then
                             nNever = nNever + 1
-                            If bMark Then MarkCopy(sh, ctlCol, prevRow, WmsIssue.EiCanon(CLng(prevKey)) & " не создан приходом WMS")
+                            If bMark Then MarkCopy(sh, ctlCol, prevRow, NotRegText(isEI, CLng(prevKey)))
                         End If
                     End If
                 End If
             Next j
         Next r0
-    ElseIf nK = 1 And isEI Then
+    ElseIf nK = 1 And isReg Then
         d = gSysSh.getCellRangeByPosition(3, 0, 4, 0).getDataArray()
-        If Not RcvKeyInfo(CLng(d(0)(0)), hintRow) Then
+        If Not KeyInfo(isEI, CLng(d(0)(0)), hintRow) Then
             nNever = nNever + 1
-            If bMark Then MarkCopy(sh, ctlCol, CLng(d(0)(1)), WmsIssue.EiCanon(CLng(d(0)(0))) & " не создан приходом WMS")
+            If bMark Then MarkCopy(sh, ctlCol, CLng(d(0)(1)), NotRegText(isEI, CLng(d(0)(0))))
         End If
     End If
     gSysSh.getCellRangeByPosition(3, 0, 4, nK + 1).clearContents(com.sun.star.sheet.CellFlags.VALUE + com.sun.star.sheet.CellFlags.STRING)

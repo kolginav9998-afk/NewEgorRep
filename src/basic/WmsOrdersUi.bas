@@ -315,6 +315,19 @@ Sub BtnRcvDelete(Optional oEvent As Variant)
         Refuse("Строка — КОПИЯ, её можно только очистить кнопкой «Очистить».")
         Exit Sub
     End Select
+    ' every check of the storno first (D-069: live issues / returns of the EI, the balance, the WMS state): a storno that is
+    ' not allowed is refused at once, the confirmation is asked only for a storno that can be done
+    res = WmsReceipt.ReceiptDeleteCheck(r)
+    If Left(res, 3) <> "OK:" Then
+        AfterOperation("«Удалить»", res)
+        If Left(res, 5) = "SKIP:" Then
+            UiMessage(Payload(res))
+        Else
+            UiMessage("Удалить приход нельзя: " & Payload(res))
+        End If
+        gUiLastMsg = res
+        Exit Sub
+    End If
     sh = gDoc.Sheets.getByName(SH_ORDERS)
     If Not UiConfirm("Удалить приход " & gKcanon & "?" & Chr(10) & Chr(10) & sh.getCellByPosition(OC_NAME, r).getString() & ", " _
         & sh.getCellByPosition(OC_FACT, r).getString() & " " & sh.getCellByPosition(OC_UNIT, r).getString() & Chr(10) & Chr(10) _

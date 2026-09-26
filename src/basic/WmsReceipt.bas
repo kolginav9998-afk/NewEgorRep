@@ -753,26 +753,37 @@ End Function
 
 ' ================================================================ «Удалить» — RECEIPT_DEL: storno of a receipt
 ' The balance of the EI goes back to 0 and the EI keeps its registry row with the state «Приход удалён (сторно)»; it is
-' never reused. Refused when something was already issued from it (the result would be negative).
+' never reused. Refused while the EI has live issues or live returns (D-069, even when everything issued was returned) —
+' and, as a safety net, when the balance is below the receipt (the result would be negative).
 
 Function ReceiptDeleteRow(r As Long) As String
+    ReceiptDeleteRow = RcvDelete(r, False)
+End Function
+
+' Every check of «Удалить» (D-069 and the rest) without the operation: "OK:" when the storno may be done — the button asks
+' for the confirmation only then; otherwise exactly the refusal ReceiptDeleteRow would give. Nothing is written.
+Function ReceiptDeleteCheck(r As Long) As String
+    ReceiptDeleteCheck = RcvDelete(r, True)
+End Function
+
+Private Function RcvDelete(r As Long, checkOnly As Boolean) As String
     Dim why As String, kind As String, n As Long, canon As String, olid As Long, isSrc As Boolean, moved As Boolean, rv As Variant
     Dim od As Variant, s As Double, f As Double, newBal As Double, rcv2 As Double, nodoc2 As Double, src As Long, srcMoved As Boolean
-    Dim st As String, ctl As String, cancel As String
+    Dim st As String, ctl As String, cancel As String, nIss As Long, nRet As Long
     WmsInit()
     If r < 1 Or r > MAX_SHEET_ROW Then
-        ReceiptDeleteRow = "ERR:выберите строку заказа (не заголовок)"
+        RcvDelete = "ERR:выберите строку заказа (не заголовок)"
         Exit Function
     End If
     On Error GoTo EH
     kind = WmsOrders.OrderRowKind(r)
     If kind = "STORNO" Then
-        ReceiptDeleteRow = "SKIP:приход " & gKcanon & " уже удалён (сторно)"
+        RcvDelete = "SKIP:приход " & gKcanon & " уже удалён (сторно)"
         Exit Function
     End If
     why = ReceiptRowProblem(kind, "Удалить")
     If why <> "" Then
-        ReceiptDeleteRow = "ERR:" & why
+        RcvDelete = "ERR:" & why
         Exit Function
     End If
     n = gKn
@@ -782,17 +793,31 @@ Function ReceiptDeleteRow(r As Long) As String
     moved = gKmoved
     why = PostingBlockReason()
     If why <> "" Then
-        ReceiptDeleteRow = why
+        RcvDelete = why
         Exit Function
     End If
     why = ReceiptStateProblem(r, n, canon, olid, rv, od, s)
     If why <> "" Then
-        ReceiptDeleteRow = "ERR:" & why
+        RcvDelete = "ERR:" & why
         Exit Function
     End If
     f = rv(RV_QTY)
+    ' D-069: while the EI has live dependent movements (issues, returns) its receipt is not cancelled — even when all that
+    ' was issued came back: first the returns of the EI, then its issues are cancelled (their rows stay as history, their
+    ' numbers are never reused); a live chain «issue → return» never refers to a cancelled receipt
+    If Not WmsReturn.LiveDependents(canon, nIss, nRet) Then
+        RcvDelete = "ERR-SYS:не удалось проверить связанные выдачи и возвраты " & canon & " (формула движка Calc) — сторно не выполнено"
+        Exit Function
+    End If
+    If nIss > 0 Or nRet > 0 Then
+        RcvDelete = "ERR:По этому ЕИ (" & canon & ") есть связанные выдачи/возвраты: действующих выдач " & nIss & ", возвратов " & nRet _
+            & IIf(s < f - 0.0000001, " (уже выдано " & WmsIssue.QtyText(WmsIssue.Round3(f - s)) & " " & Trim(Txt(r, OC_UNIT)) & ")", "") _
+            & ". Сначала выполните сторно зависимых операций: " & IIf(nRet > 0, "возвратов этого ЕИ (лист «" & SH_RETURNS & "»), затем ", "") _
+            & "выдач (лист «" & SH_ISSUES & "»)"
+        Exit Function
+    End If
     If s < f - 0.0000001 Then
-        ReceiptDeleteRow = "ERR:по " & canon & " уже выдано " & WmsIssue.QtyText(WmsIssue.Round3(f - s)) & " " & Trim(Txt(r, OC_UNIT)) _
+        RcvDelete = "ERR:по " & canon & " уже выдано " & WmsIssue.QtyText(WmsIssue.Round3(f - s)) & " " & Trim(Txt(r, OC_UNIT)) _
             & " — удаление прихода дало бы отрицательный остаток; сначала удалите (сторно) выдачи по этому ЕИ"
         Exit Function
     End If
@@ -807,9 +832,13 @@ Function ReceiptDeleteRow(r As Long) As String
         src = WmsOrders.SourceRowOf(od)
         srcMoved = gSmoved
         If src < 1 Then
-            ReceiptDeleteRow = "ERR:исходная строка позиции (OLID " & olid & ") не найдена на листе «" & SH_ORDERS & "» — нужна самопроверка"
+            RcvDelete = "ERR:исходная строка позиции (OLID " & olid & ") не найдена на листе «" & SH_ORDERS & "» — нужна самопроверка"
             Exit Function
         End If
+    End If
+    If checkOnly Then
+        RcvDelete = "OK:сторно прихода " & canon & " допустимо"
+        Exit Function
     End If
     PlanBegin("RECEIPT_DEL", canon)
     PlanField("EI", canon)
@@ -842,10 +871,10 @@ Function ReceiptDeleteRow(r As Long) As String
         PlanSourceStatus(src, od, rcv2, nodoc2, cancel)
     End If
     PlanLockBits(SH_ORDERS, r, 0, OC_LAST, ORDER_LOCKS_POSTED)
-    ReceiptDeleteRow = ApplyOperation(0, 0)
+    RcvDelete = ApplyOperation(0, 0)
     Exit Function
 EH:
-    ReceiptDeleteRow = "ERR:внутренняя ошибка проверки удаления: " & Error$ & " (код " & Err & ", строка " & Erl & ")"
+    RcvDelete = "ERR:внутренняя ошибка проверки удаления: " & Error$ & " (код " & Err & ", строка " & Erl & ")"
 End Function
 
 ' ================================================================ «Отменить заказ» — ORDER_CANCEL: no EI, NEXT_EI untouched

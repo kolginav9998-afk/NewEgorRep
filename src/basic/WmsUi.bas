@@ -1,5 +1,6 @@
 ' WmsUi — минимальный пользовательский слой (задание Core Phase 2): состояние WMS и причина блокировки на листе
-' «Главная», кнопки восстановления Phase 1 и кнопки «Провести», «Исправить», «Удалить», «Очистить» на листе «Выдачи».
+' «Главная», кнопки восстановления Phase 1 и кнопки «Провести», «Исправить», «Удалить», «Очистить» на листе «Выдачи»
+' (кнопки «Заказов» — WmsOrdersUi, «Возврата» — WmsReturnUi).
 ' Успешная работа окон не открывает: результат виден в «Контроль» строки. Окно появляется только для подтверждения
 ' опасного действия, для ввода исправления и когда действие невозможно.
 Option Explicit
@@ -17,6 +18,7 @@ Private Const MR_TIME = 8
 ' Global on purpose: LibreOffice Basic resets module-level Private variables at every new macro call.
 Global gUiAuto As Integer
 Global gUiLastMsg As String
+Global gUiConfirms As Long
 Global gUiFixSet As Boolean
 Global gUiFixEI As String
 Global gUiFixQty As String
@@ -25,7 +27,7 @@ Global gUiFixDate As String
 
 ' filtered WMS ranges whose rows were shown for a save (FiltersStash) and are filtered again after it (FiltersRestore)
 Global gFltN As Integer
-Global gFltName(2) As String
+Global gFltName(3) As String
 
 ' ================================================================ status panel «Главная»
 
@@ -104,6 +106,14 @@ Sub UiRefresh(sLast As String)
     Else
         s = s & Chr(10) & "приходы: не удалось посчитать — отфильтруйте «Внутренний код» = пусто"
     End If
+    n = WmsReturn.UnpostedReturns()
+    If n > 0 Then
+        s = s & Chr(10) & "возвраты: " & n & " строк(и) «Возврат» с количеством (F) без № — ещё не проведены"
+    ElseIf n = 0 Then
+        s = s & Chr(10) & "возвраты: нет"
+    Else
+        s = s & Chr(10) & "возвраты: не удалось посчитать — отфильтруйте «№ возврата» = пусто"
+    End If
     PutB(sh, MR_UNPOSTED, s)
     PutB(sh, MR_NOTES, Replace(gReport, " | ", Chr(10)))
     If sLast <> "" Then
@@ -134,6 +144,7 @@ End Sub
 
 Function UiConfirm(s As String) As Boolean
     gUiLastMsg = s
+    gUiConfirms = gUiConfirms + 1
     If gUiAuto = 1 Then
         UiConfirm = True
     ElseIf gUiAuto = 2 Then
@@ -420,6 +431,11 @@ Function TestUiLastMessage() As String
     TestUiLastMessage = gUiLastMsg
 End Function
 
+' how many confirmations were asked since the book was opened (an action that is refused must not ask)
+Function TestUiConfirmCount() As Long
+    TestUiConfirmCount = gUiConfirms
+End Function
+
 ' ================================================================ saving with an active filter (D-041)
 ' LibreOffice 24.2 opens a file with many rows hidden by a filter in quadratic time: it recalculates the page breaks for
 ' every run of hidden rows (40 000 rows with every fifth one shown: 55 s; 100 000: minutes). So before every save WMS
@@ -432,7 +448,7 @@ End Function
 ' names of the WMS database ranges that currently have filter conditions
 Private Function FilteredRanges() As Variant
     Dim names As Variant, i As Integer, out() As String, n As Integer, db As Object
-    names = Array("WMS_ORDERS", "WMS_ISSUES", "WMS_STOCK")
+    names = Array("WMS_ORDERS", "WMS_ISSUES", "WMS_RETURNS", "WMS_STOCK")
     ReDim out(UBound(names))
     For i = 0 To UBound(names)
         If gDoc.DatabaseRanges.hasByName(names(i)) Then
