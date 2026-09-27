@@ -1,6 +1,7 @@
 ' WmsExport — контракт WMS и внешних инструментов (задание «FINAL WMS MARATHON», §3; docs/EXPORT_CONTRACT.md).
 '  - «Экспорт для инструментов»: неизменяемый снимок вне книги — папка WMS_Export/WMS_SNAPSHOT_<дата-время>_seq<N>/:
-'    manifest.csv (формат, версии, экземпляр, время, LAST_SEQ, позиция журнала, счётчики, файлы: строк, байт, SHA-256),
+'    manifest.csv (формат, версии, экземпляр, время, LAST_SEQ, позиция журнала, счётчики, защиты листов и структуры
+'    книги — для WMS_DOCTOR, файлы: строк, байт, SHA-256),
 '    таблицы листов (UTF-8, «;», первая строка — английские имена колонок, строка k файла = строка k листа, даты
 '    ГГГГ-ММ-ДД, числа с точкой), service/ (служебные таблицы — для WMS_DOCTOR), journal/ (копия журнала). Листы копируются
 '    во временную скрытую книгу средствами LibreOffice (importSheet), там приводятся форматы, запись — фильтром CSV:
@@ -238,6 +239,12 @@ Function ExportSnapshot() As String
         & "last_seq;" & SysStr(SK_LAST_SEQ) & Chr(10) & "journal_pos;" & CsvField(SysStr(SK_JPOS), False) & Chr(10) _
         & "next_ei;" & SysStr(SK_NEXT_EI) & Chr(10) & "next_issue;" & SysStr(SK_NEXT_NO) & Chr(10) & "next_return;" & SysStr(SK_NEXT_RET) & Chr(10) _
         & "next_line;" & SysStr(SK_NEXT_SPL) & Chr(10) & "next_adj;" & SysStr(SK_NEXT_ADJ) & Chr(10) & "book_modified;" & IIf(gDoc.isModified(), "1", "0") & Chr(10)
+    ' the protections of the book (WMS_DOCTOR): every sheet — protected, visible; the structure of the book
+    For i = 0 To gDoc.Sheets.getCount() - 1
+        sh = gDoc.Sheets.getByIndex(i)
+        man = man & "sheet;" & CsvField(sh.Name, False) & ";" & IIf(sh.isProtected(), "1", "0") & ";" & IIf(sh.IsVisible, "1", "0") & Chr(10)
+    Next i
+    man = man & "structure;" & IIf(gDoc.isProtected(), "1", "0") & Chr(10)
     For i = 0 To nf - 1
         h = Sha256File(tmp & files(i), nb)
         If h = "" Then

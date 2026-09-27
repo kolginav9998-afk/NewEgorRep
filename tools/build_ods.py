@@ -11,6 +11,7 @@ Needs LibreOffice with Python-UNO on the developer machine. Nothing is installed
 import argparse
 import os
 import random
+import re
 import sys
 import tempfile
 import zipfile
@@ -36,7 +37,7 @@ SCHEMA = "WMS-SYS-3"                                                            
 SK_SAVE_STAMP = SYS_KEYS.index("SAVE_STAMP")
 MODULES = ["WmsConfig", "WmsCore", "WmsJournal", "WmsLock", "WmsBackup", "WmsRecovery", "WmsDiagnostics", "WmsIssue", "WmsUi",
            "WmsOrders", "WmsReceipt", "WmsOrdersUi", "WmsReturn", "WmsReturnUi", "WmsSpecial", "WmsSpecialUi", "WmsAdjust", "WmsAdjustUi",
-           "WmsExport", "WmsMigrate"]
+           "WmsExport", "WmsMigrate", "WmsStatus"]
 TEST_MODULES = ["WmsTestOps"]
 TEST_SHEET = "_TST"
 LAST_ROW = 1048575
@@ -54,6 +55,9 @@ STOCK_HEADERS = ["ЕИ", "Наименование", "Артикул", "Един
                  "Тип источника"]
 STOCK_WIDTHS = [3300, 6500, 3200, 2300, 2300, 2800, 3000, 2500, 3500, 3000]
 RCPT = "Получатели"
+HELP = "Справка"                  # release notes and the backup / recovery guide (docs/*.md), read-only
+HELP_DOCS = ["RELEASE_NOTES.md", "BACKUP_RECOVERY.md"]
+STATUS_ROW = 24                   # WmsStatus.STATUS_ROW
 MAIN = "Главная"
 # «Заказы» A:AB — the fixed user interface (MASTER SPEC v0.3 §2; WmsConfig OC_*)
 ORDERS = "Заказы"
@@ -424,6 +428,12 @@ def build_recipients(sh, rows):
         sh.getCellRangeByPosition(0, 1, 1, len(rows)).setDataArray(tuple(rows))
 
 
+def core_versions():
+    """WMS_PRODUCT_VERSION, WMS_CORE_VERSION, WMS_SYS_SCHEMA of src/basic/WmsConfig.bas"""
+    txt = read_source(os.path.join(SRC, "WmsConfig.bas"))
+    return {k: re.search(rf'Public Const {k} = "([^"]+)"', txt).group(1) for k in ("WMS_PRODUCT_VERSION", "WMS_CORE_VERSION", "WMS_SYS_SCHEMA")}
+
+
 def build_main(doc, sh):
     sh.getColumns().getByIndex(0).Width = 5200
     sh.getColumns().getByIndex(1).Width = 17500
@@ -431,6 +441,9 @@ def build_main(doc, sh):
     t.setString("WMS — состояние и восстановление")
     t.CharWeight = 150
     t.CharHeight = 16
+    v = core_versions()
+    sh.getCellByPosition(1, 0).setString(f"версия {v['WMS_PRODUCT_VERSION']} · ядро {v['WMS_CORE_VERSION']} · схема {v['WMS_SYS_SCHEMA']}")
+    sh.getCellByPosition(1, 0).VertJustify = 2      # centre, next to the title
     captions = ["Состояние", "Причина", "Что сделать", "Непроведённые строки", "Заметки запуска", "Последнее действие", "Обновлено"]
     for i, cap in enumerate(captions):
         c = sh.getCellByPosition(0, 2 + i)
@@ -444,10 +457,11 @@ def build_main(doc, sh):
     buttons = (("btnRecover", "Восстановить", "WmsUi.BtnRecover"), ("btnAbandon", "Отложить хвост журнала", "WmsUi.BtnAbandon"),
                ("btnUnlock", "Снять блокировку WMS", "WmsUi.BtnUnlock"), ("btnRegister", "Сделать рабочим файлом", "WmsUi.BtnRegister"),
                ("btnSelfCheck", "Самопроверка", "WmsUi.BtnSelfCheck"), ("btnBackup", "Резервная копия", "WmsUi.BtnBackup"),
-               ("btnExport", "Экспорт для инструментов", "WmsExport.BtnExport"), ("btnLoadBatch", "Загрузить пакет", "WmsExport.BtnLoadBatch"))
+               ("btnExport", "Экспорт для инструментов", "WmsExport.BtnExport"), ("btnLoadBatch", "Загрузить пакет", "WmsExport.BtnLoadBatch"),
+               ("btnStatus", "Состояние системы", "WmsStatus.BtnSystemStatus"), ("btnPreWork", "Проверка перед работой", "WmsStatus.BtnPreWorkCheck"))
     for i, (name, label, macro) in enumerate(buttons):
         add_button(doc, sh, name, label, macro, 200 + (i % 2) * 6700, y + (i // 2) * 1000, 6400, 800)
-    help_row = 20
+    help_row = 22
     sh.getCellByPosition(0, help_row).setString(
         "Приход: на листе «Заказы» в строке заказа укажите фактическое количество (F), дату поступления (N), место хранения (U), "
         "при наличии — документ (C, G, O) и нажмите «Провести приход»: будет создан новый ЕИ. Следующая поставка той же позиции — "
@@ -461,10 +475,50 @@ def build_main(doc, sh):
         "инвентаризации фактический остаток (H), для перемещения новое место (J), дата (K), причина (L) и «Провести». "
         "«Экспорт для инструментов» создаёт снимок для WMS_TOOLBOX в папке WMS_Export рядом с книгой; «Загрузить пакет» — "
         "строки из файла инструмента (они проводятся обычными проверками). "
-        "«Исправить» и «Удалить» работают для проведённой строки под курсором, «Очистить» — для непроведённой строки или копии.")
+        "«Исправить» и «Удалить» работают для проведённой строки под курсором, «Очистить» — для непроведённой строки или копии. "
+        "Перед началом рабочего дня — «Проверка перед работой»; версии, журнал и резервные копии — «Состояние системы»; "
+        "что нового в версии и как восстановить WMS из резервной копии — лист «Справка».")
     sh.getCellRangeByPosition(0, help_row, 1, help_row).merge(True)
     sh.getCellByPosition(0, help_row).IsTextWrapped = True
-    sh.getRows().getByIndex(help_row).Height = 5800
+    sh.getRows().getByIndex(help_row).Height = 6300
+    t = sh.getCellByPosition(0, STATUS_ROW)
+    t.setString("СОСТОЯНИЕ СИСТЕМЫ")
+    t.CharWeight = 150
+    sh.getCellByPosition(1, STATUS_ROW).setString("нажмите «Состояние системы» или «Проверка перед работой»")
+    sh.getCellRangeByPosition(0, STATUS_ROW + 1, 1, STATUS_ROW + 31).IsTextWrapped = True
+
+
+def md_plain(s):
+    """a line of the guides without the Markdown marks: **bold**, `code`, links"""
+    s = s.replace("**", "").replace("`", "")
+    return re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", s)
+
+
+def build_help(sh):
+    """«Справка»: docs/RELEASE_NOTES.md and docs/BACKUP_RECOVERY.md as text (headings bold, a table row per line)"""
+    sh.getColumns().getByIndex(0).Width = 26000
+    r = 0
+    for name in HELP_DOCS:
+        for raw in open(os.path.join(ROOT, "docs", name), encoding="utf-8").read().splitlines():
+            line = raw.rstrip()
+            if re.fullmatch(r"\|?[\s:|-]+\|?", line) and "-" in line:
+                continue                                   # the separator row of a Markdown table
+            head = re.match(r"(#+)\s+(.*)", line)
+            if line.startswith("|"):
+                line = " — ".join(md_plain(c.strip()) for c in line.strip("|").split("|"))
+            elif head:
+                line = md_plain(head.group(2))
+            else:
+                line = md_plain(line)
+            c = sh.getCellByPosition(0, r)
+            if line:
+                c.setString(line)
+            if head:
+                c.CharWeight = 150
+                c.CharHeight = {1: 15, 2: 13}.get(len(head.group(1)), 11)
+            r += 1
+        r += 2
+    sh.getCellRangeByPosition(0, 0, 0, r).IsTextWrapped = True
 
 
 def patch_content(path, fn):
@@ -497,7 +551,7 @@ def build(office, out_path, test=False, instance_id=None):
     sheets = doc.Sheets
     main = sheets.getByIndex(0)
     main.Name = MAIN
-    for i, name in enumerate((ORDERS, SPECIAL, ISSUES, RETURNS, ADJUST, STOCK, RCPT, ORD, RCV, SPR, ART, RET, ISS, ADJ, IDX, "_SYS"), start=1):
+    for i, name in enumerate((ORDERS, SPECIAL, ISSUES, RETURNS, ADJUST, STOCK, RCPT, HELP, ORD, RCV, SPR, ART, RET, ISS, ADJ, IDX, "_SYS"), start=1):
         sheets.insertNewByName(name, i)
     sys_sh = sheets.getByName("_SYS")
     values = {
@@ -527,6 +581,7 @@ def build(office, out_path, test=False, instance_id=None):
     build_adjust(doc, sheets.getByName(ADJUST))
     build_stock(doc, sheets.getByName(STOCK), registry)
     build_recipients(sheets.getByName(RCPT), TEST_RECIPIENTS if test else [])
+    build_help(sheets.getByName(HELP))
     build_service(doc, sheets)
     order = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
     autofilter(doc, order.index(ORDERS), "WMS_ORDERS", len(ORDER_HEADERS))
@@ -571,7 +626,7 @@ def build(office, out_path, test=False, instance_id=None):
     ctl.select(sheets.getByName(ISSUES).getCellByPosition(11, 1))
     for name in (ORD, RCV, SPR, ART, RET, ISS, ADJ, IDX, "_SYS"):
         sheets.getByName(name).IsVisible = False
-    for name in (MAIN, ORDERS, SPECIAL, ISSUES, RETURNS, ADJUST, STOCK, ORD, RCV, SPR, ART, RET, ISS, ADJ, IDX, "_SYS"):
+    for name in (MAIN, ORDERS, SPECIAL, ISSUES, RETURNS, ADJUST, STOCK, HELP, ORD, RCV, SPR, ART, RET, ISS, ADJ, IDX, "_SYS"):
         sheets.getByName(name).protect(PWD)
     doc.protect(PWD)
     if os.path.exists(out_path):

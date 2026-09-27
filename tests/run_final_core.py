@@ -728,6 +728,13 @@ def y20_snapshot():
               and man.get("last_seq") == [str(int(seq0))] and man.get("next_adj") == ["4"] and hashes_ok and rows_ok
               and os.path.basename(snap.rstrip("/")).startswith(f"WMS_SNAPSHOT_") and snap.rstrip("/").endswith(f"_seq{int(seq0)}"),
               f"{res[:120]}; {man.get('format')}; hashes {hashes_ok}; rows {rows_ok}")
+        prot = {r[1]: (r[2], r[3]) for r in read_csv(os.path.join(snap, "manifest.csv"))[1:] if r[0] == "sheet"}
+        book = {sh.Name: ("1" if sh.isProtected() else "0", "1" if sh.IsVisible else "0")
+                for sh in (s.doc.Sheets.getByIndex(i) for i in range(s.doc.Sheets.getCount()))}
+        R.add(c, "manifest.csv — защиты книги для WMS_DOCTOR: у каждого листа «защищён» и «виден» как в книге («Получатели» — без защиты, "
+                 "служебные — скрыты), структура книги защищена",
+              prot == book and man.get("structure") == ["1"] and prot.get("Выдачи") == ("1", "1") and prot.get("_SYS") == ("1", "0")
+              and prot.get("Получатели") == ("0", "1"), f"{prot}; {man.get('structure')}")
         stock = read_csv(os.path.join(snap, "stock.csv"))
         hdr = stock[0]
         by = {r[0]: r for r in stock[1:] if r and r[0]}

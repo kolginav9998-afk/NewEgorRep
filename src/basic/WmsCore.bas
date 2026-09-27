@@ -359,7 +359,7 @@ Sub OnDocLoad(Optional oEvent As Variant)
 End Sub
 
 Function WmsStartup() As String
-    Dim t0 As Long
+    Dim t0 As Long, sCompat As String
     WmsInit()
     t0 = GetSystemTicks()
     gState = ""
@@ -375,6 +375,8 @@ Function WmsStartup() As String
     WmsUi.FiltersAtStart()
     ' order statuses that depend on the date («Просрочено») are recalculated at the opening
     WmsOrders.RefreshAtStartup()
+    ' the compatibility of LibreOffice (FINAL WMS MARATHON §5): a version WMS was not verified on is named, never blocking
+    If WmsStatus.LoCompat(sCompat) > 0 Then AddNote("ВНИМАНИЕ: " & sCompat)
     WmsUi.UiAfterStartup()
     UndoEnd()
     AddNote("запуск WMS " & (GetSystemTicks() - t0) & " мс")

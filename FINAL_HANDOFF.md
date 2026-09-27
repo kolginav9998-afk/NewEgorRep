@@ -2,12 +2,12 @@
 
 Компактное состояние для продолжения работы после сжатия контекста или в новой сессии. Не отчёт: подробности — в `WMS_DECISIONS.md`, `WMS_MASTER_SPEC.md`, отчётах этапов. Обновляется на каждой крупной контрольной точке «FINAL WMS MARATHON» (`CLAUDE_TASK.md`).
 
-**Обновлено:** 26.09.2026, контрольная точка **M2 — Final Core** (ядро feature-frozen; правила П-1…П-12 — на утверждении, `CLAUDE_REPORT_FINAL_CORE.md` §9).
+**Обновлено:** 27.09.2026, контрольная точка **M3 — Migration + Production Candidate** (ядро feature-frozen с M2; правила П-1…П-20 — на утверждении: `CLAUDE_REPORT_FINAL_CORE.md` §9, `CLAUDE_REPORT_MIGRATION_CANDIDATE.md` §4).
 
 ## 1. Git
 
 - Ветка работы — только `claude/festive-lamport-l4f8f1`. Разрешено: обычный commit + push после каждого полностью зелёного milestone марафона (Phase 5 accepted; Final Core; Migration + Production Candidate; Toolbox; Final Release preparation). Запрещено: force push, merge в `main`, новый PR, новая ветка.
-- Commits: Phase 1 `7e6d280`, Phase 2 `561be9e` (PR #1 слит пользователем в `main`, merge `defb278`), Phase 3 `0125af3`, Phase 4 `17774f9`, Phase 5 (M1) `bff146e`, Final Core — commit milestone M2 поверх `bff146e` (`git log -1`).
+- Commits: Phase 1 `7e6d280`, Phase 2 `561be9e` (PR #1 слит пользователем в `main`, merge `defb278`), Phase 3 `0125af3`, Phase 4 `17774f9`, Phase 5 (M1) `bff146e`, Final Core (M2) `8f4be2c`, Migration + Production Candidate — commit milestone M3 поверх `8f4be2c` (`git log -1`).
 - Перед commit: тесты milestone зелёные; в дереве нет реальных складских данных, временных книг и журналов; commit содержит только свой milestone. Бинарные книги в Git не хранятся (D-009): книга собирается `tools/build_ods.py`.
 - Реальная миграция — только с файлом пользователя (остановиться и запросить файл с точным списком колонок).
 
@@ -84,20 +84,29 @@
 - **D-060…D-070 — этап 4 «Возвраты»:** D-060 Номер возврата; D-061 Кто возвращает; D-062 Дата возврата; D-063 Исправление выдачи с действующими возвратами; D-064 Сторно возврата и место; D-065 Место при возврате; D-066 Исправление возврата; D-067 Список «Найти выдачу»; D-068 Книга Phase 3 не обновляется; D-069 Сторно прихода и зависимые движения; D-070 Единица возврата.
 - **D-071…D-088 — этап 5 «Специальные приходы»:** D-071 Один лист «Иной приход»; D-072 Книга этапа 4 не обновляется; D-073 Номера событий специальных приходов; D-074 Одно поступление из нескольких строк; D-075 Нормализация артикула детали; D-076 Карточка при повторном приходе детали; D-077 Место при пополнении детали; D-078 Сторно строк детали; D-079 Исправление строки иного прихода; D-080 Разделение (split) не делается; D-081 «Разобрать»: тип выбирается явно (в редакции пользователя); D-082 Колонка «Тип источника»; D-083 Перестройка индекса деталей; D-084 Старая маркировка; D-085 Антидубль иного прихода; D-086 Колонки O/P листа «Иной приход»; D-087 Пустой тип источника при миграции (в редакции пользователя); D-088 Статусы строки иного прихода.
 - **П-1…П-12 — Final Core, на утверждении** (`CLAUDE_REPORT_FINAL_CORE.md` §9): один лист «Корректировки»; перемещение ЕИ целиком; списание не ниже 0; инвентаризация (учётный остаток, разница ≠ 0); правила «Исправить»/«Удалить»; D-069 для корректировок; ЕИ «Сторно» не корректируется; снимок; пакеты; MIGRATE; книга этапа 5 не открывается.
+- **П-13…П-20 — перенос и кандидат, на утверждении** (`CLAUDE_REPORT_MIGRATION_CANDIDATE.md` §4): неизвестные единица и место при переносе — стоп; пустое место и нулевое количество — предупреждения; строка без ЕИ — новый номер выше всех; PROMOTE — только после VERIFY без расхождений; совместимость LibreOffice (24.2, 26.2; ≥ 7 — предупреждение); снятые защиты — предупреждение проверки; снимок сообщает защиты; папка выпуска самодостаточна (перенос с оракулом).
 
 ## 7. Код и тесты
 
 - `src/basic/`: WmsConfig, WmsCore (ApplyOperation, план, швы), WmsJournal, WmsLock, WmsBackup, WmsRecovery, WmsDiagnostics, WmsUi (кнопки «Главной», окна), WmsIssue, WmsOrders/WmsOrdersUi, WmsReceipt, WmsReturn/WmsReturnUi, WmsSpecial/WmsSpecialUi, WmsAdjust/WmsAdjustUi (корректировки), WmsExport (снимок, пакеты, SHA-256), WmsMigrate (`MIGRATE`); тестовый модуль — `tests/basic/`.
-- Контракт с инструментами — `docs/EXPORT_CONTRACT.md` (`WMS-SNAPSHOT-1`, `WMS-BATCH-1`).
+- Контракт с инструментами — `docs/EXPORT_CONTRACT.md` (`WMS-SNAPSHOT-1`, `WMS-BATCH-1`); manifest снимка сообщает защиты (`sheet;лист;защищён;виден`, `structure;1`), незнакомые строки manifest инструменты пропускают.
+- WmsStatus — «Состояние системы», «Проверка перед работой» (в том числе `Protections`: листы кроме «Получатели» защищены, служебные — `SH_ORD…SYS_SHEET` — скрыты, структура защищена; иначе WARN), совместимость LibreOffice (`LoCompat`: 24.2 и 26.2 — проверены, ≥ 7 — предупреждение, < 7 — ошибка проверки; заметка запуска, не блокировка). Раздел на «Главной» с `WmsStatus.STATUS_ROW` (24).
+- `tools/migrate.py` — перенос: DRY RUN → MIGRATE COPY → VERIFY → PROMOTE.
+  - Стоп-условия задания §4; неизвестные единица и место — стоп (П-13); места — `--places` или явно `--accept-table-places`.
+  - Перенос в копию целиком или никак; VERIFY — таблица, журнал (SHA-256 таблицы), самопроверка, оракул.
+  - PROMOTE — только проверенная и не изменённая копия (SHA-256).
+- `tools/build_release.py` — папка выпуска: `WMS_PROD_CANDIDATE.ods`, docs, инструменты переноса вместе с оракулом (`ORACLES` — модули `tests/*_oracle.py`, которые импортирует VERIFY; C06 переносит таблицу из одной папки выпуска), `RELEASE_MANIFEST.csv`. Лист «Справка» собирается из `docs/RELEASE_NOTES.md` и `docs/BACKUP_RECOVERY.md`.
 - `tools/`: `build_ods.py` (сборка книги), `wmslo.py` (Python-UNO: Office, props), `basic_compile_check.py`, `migration_dryrun.py` (dry-run переноса, `--default-source`).
-- `tests/`: `run_phase1..5.py`, `run_final_core.py` (Y01–Y25) — сценарии с оракулом; `gui_phase2..5.py`, `gui_final_core.py` (окна на Xvfb; список и поля Basic-диалога — через дерево accessibility: роль LIST — `selectAccessibleChild`, роль TEXT — `setText`); `bench_phase*.py`, `bench_final_core.py`; оракулы `journal_oracle.py`, `receipt_oracle.py` (+ `replay_adjust`, `replay_migrate`), `return_oracle.py`, `special_oracle.py`, `adjust_oracle.py`; `harness.py`.
+- `tests/`: `run_phase1..5.py`, `run_final_core.py` (Y01–Y25), `run_migration.py` (MG01–MG07), `run_candidate.py` (C01–C06), `gui_candidate.py` — сценарии с оракулом; `gui_phase2..5.py`, `gui_final_core.py` (окна на Xvfb; список и поля Basic-диалога — через дерево accessibility: роль LIST — `selectAccessibleChild`, роль TEXT — `setText`); `bench_phase*.py`, `bench_final_core.py`; оракулы `journal_oracle.py`, `receipt_oracle.py` (+ `replay_adjust`, `replay_migrate`), `return_oracle.py`, `special_oracle.py`, `adjust_oracle.py`; `harness.py`.
 
 Команды (машина разработчика, LibreOffice + Python-UNO; `Xvfb :99` для окон и компиляции):
 
 ```
 python3 tools/build_ods.py WMS.ods [--test]
 python3 tools/basic_compile_check.py --display :99
-WMS_TEST_OUT=/tmp/wms_fc python3 tests/run_final_core.py [y01 y24 ...]
+WMS_TEST_OUT=/tmp/wms_fc python3 tests/run_final_core.py [y01 y25 ...]
+WMS_TEST_OUT=/tmp/wms_mg python3 tests/run_migration.py; WMS_TEST_OUT=/tmp/wms_c python3 tests/run_candidate.py
+python3 tools/migrate.py dry-run|copy|verify|promote …; python3 tools/build_release.py ПАПКА
 WMS_TEST_OUT=/tmp/wms_p5 python3 tests/run_phase5.py [x01 x16 ...]      # так же run_phase4 (w..), 3 (r..), 2 (v..), 1 (t..)
 WMS_TEST_OUT=/tmp/wms_gfc python3 tests/gui_final_core.py --display :99
 WMS_TEST_OUT=/tmp/wms_bfc python3 tests/bench_final_core.py 100000 250000
@@ -123,9 +132,9 @@ python3 tools/migration_dryrun.py table.csv --book WMS.ods --report dryrun.md [-
 | Milestone | Содержание | Состояние |
 |---|---|---|
 | M1 Phase 5 accepted | D-071…D-088, пункты 11 и 17, регресс ×1, commit + push | готово, `bff146e` |
-| M2 Final Core | `MOVE`, `WRITE_OFF`, `INV_ADJ` (лёгкий лист «Корректировки» + служебная история), recovery/oracle/тесты/benchmark; «Экспорт для инструментов» (версионированный snapshot вне книги); приём batch-файлов (валидация и проведение самой WMS); `MIGRATE`; регресс ×1 + oracle + benchmark; ядро — feature-frozen | эта контрольная точка |
-| M3 Migration + Production Candidate | importer DRY RUN → MIGRATE COPY → VERIFY → PROMOTE, oracle миграции, `WMS_PROD_CANDIDATE.ods` (версия продукта, схема, совместимость, release notes, backup/recovery guide, состояние системы) | следующий |
-| M4 Toolbox | `WMS_TOOLBOX/`: INVENTORY, ANALYTICS, MANAGER, SEARCH, DOCTOR, RECONCILE, LABELS, DOCS, ARCHIVE, BACKUP + HEALTHCHECK, IMPORTER; launcher `WMS_TOOLBOX.ods`; тесты на фиксированных snapshot | — |
+| M2 Final Core | `MOVE`, `WRITE_OFF`, `INV_ADJ` (лёгкий лист «Корректировки» + служебная история), recovery/oracle/тесты/benchmark; «Экспорт для инструментов» (версионированный snapshot вне книги); приём batch-файлов (валидация и проведение самой WMS); `MIGRATE`; регресс ×1 + oracle + benchmark; ядро — feature-frozen | готово, `8f4be2c` |
+| M3 Migration + Production Candidate | importer DRY RUN → MIGRATE COPY → VERIFY → PROMOTE, oracle миграции, `WMS_PROD_CANDIDATE.ods` (версия продукта, схема, совместимость, release notes, backup/recovery guide, состояние системы) | эта контрольная точка |
+| M4 Toolbox | `WMS_TOOLBOX/`: INVENTORY, ANALYTICS, MANAGER, SEARCH, DOCTOR, RECONCILE, LABELS, DOCS, ARCHIVE, BACKUP + HEALTHCHECK, IMPORTER; launcher `WMS_TOOLBOX.ods`; тесты на фиксированных snapshot | следующий |
 | M5 Final Release preparation | документация кладовщика, финальный end-to-end, пакет проверки Ubuntu/принтера; запрос реального файла остатков | — |
 
-**Следующий шаг:** M3 — `tools/migrate.py` (DRY RUN → MIGRATE COPY → VERIFY → PROMOTE на основе `migration_dryrun.py` и `WmsMigrate.MigrateEI`), оракул миграции, `WMS_PROD_CANDIDATE.ods`.
+**Следующий шаг:** M4 — `WMS_TOOLBOX/`: исходники `src/toolbox/*.bas` (общий модуль TbCommon + по модулю на инструмент) и `src/toolbox/scripts/` (python3), сборка `tools/build_toolbox.py`, фикстура снимка `tests/fixtures/WMS_SNAPSHOT_FIXTURE` (`tests/make_fixture_snapshot.py`), тесты `tests/run_toolbox.py`, компиляция книг инструментов `tools/tb_compile_check.py`. Ловушки Basic для инструментов: `InStrRev` и `Round` есть только в режиме VBA; `DateSerial` не принимает месяц вне 1…12; каждый модуль компилируется отдельно — функция другого модуля должна быть в общем модуле книги; `IIf` вычисляет обе ветви.
