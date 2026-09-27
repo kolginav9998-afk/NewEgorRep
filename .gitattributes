@@ -1,0 +1,2 @@
+# the files of the snapshot fixture are checked by their SHA-256 (manifest.csv): never convert line endings
+tests/fixtures/** -text

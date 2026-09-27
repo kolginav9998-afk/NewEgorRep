@@ -1,13 +1,13 @@
 # WMS_STATE — состояние проекта
 
-**Обновлено:** 27.09.2026, идёт **«FINAL WMS MARATHON»** (`CLAUDE_TASK.md`). Контрольная точка **M3 «Migration + Production Candidate»** — импортёр переноса `tools/migrate.py`, кандидат в рабочую версию `WMS_PROD_CANDIDATE` (`tools/build_release.py`); M2 «Final Core» — `8f4be2c` (ядро feature-frozen). Правила П-1…П-20 — на утверждении (`CLAUDE_REPORT_FINAL_CORE.md` §9, `CLAUDE_REPORT_MIGRATION_CANDIDATE.md` §4). Компактное техническое состояние — `FINAL_HANDOFF.md`.
+**Обновлено:** 27.09.2026, идёт **«FINAL WMS MARATHON»** (`CLAUDE_TASK.md`). Контрольная точка **M4 «Toolbox»** — `WMS_TOOLBOX/` (9 книг инструментов, скрипты, launcher; `tools/build_toolbox.py`); M3 «Migration + Production Candidate» — `21f4bcb`; M2 «Final Core» — `8f4be2c` (ядро feature-frozen). Правила П-1…П-30 — на утверждении (`CLAUDE_REPORT_FINAL_CORE.md` §9, `CLAUDE_REPORT_MIGRATION_CANDIDATE.md` §4, `CLAUDE_REPORT_TOOLBOX.md` §4). Компактное техническое состояние — `FINAL_HANDOFF.md`.
 
 ## Версии и документы
 
 | Что | Где |
 |---|---|
 | Спецификация | **v0.3** — `WMS_MASTER_SPEC.md`, дополнена решениями D-039…D-044 (§9, §16, §20, §21), D-045…D-059 (§5, §6, §21, §23, §31), D-060…D-070 (§6, §9, §11, §14, §21, §23, §31) и D-071…D-088 (§7, §8, §31). Прежняя v0.1 — `docs/history/WMS_MASTER_SPEC_v0.1.md` |
-| Решения | `WMS_DECISIONS.md`: D-001…D-088 (D-071…D-088 — приёмка этапа 5; D-081, D-087 — в редакции пользователя). На утверждении: П-1…П-12 (Final Core, `CLAUDE_REPORT_FINAL_CORE.md` §9), П-13…П-20 (перенос и кандидат, `CLAUDE_REPORT_MIGRATION_CANDIDATE.md` §4) |
+| Решения | `WMS_DECISIONS.md`: D-001…D-088 (D-071…D-088 — приёмка этапа 5; D-081, D-087 — в редакции пользователя). На утверждении: П-1…П-12 (Final Core, `CLAUDE_REPORT_FINAL_CORE.md` §9), П-13…П-20 (перенос и кандидат, `CLAUDE_REPORT_MIGRATION_CANDIDATE.md` §4), П-21…П-30 (инструменты, `CLAUDE_REPORT_TOOLBOX.md` §4) |
 | Текущее задание | `CLAUDE_TASK.md` — «FINAL WMS MARATHON — ОТ PHASE 5 ДО PRODUCTION 1.0» (выполняется; milestone M1…M5). Прежние: Phase 5 — `docs/history/CLAUDE_TASK_CORE_PHASE5.md`, Phase 4 — `docs/history/CLAUDE_TASK_CORE_PHASE4.md`, Phase 3 — `docs/history/CLAUDE_TASK_CORE_PHASE3.md`, Phase 2 — `docs/history/CLAUDE_TASK_CORE_PHASE2.md`, Phase 1 — `docs/history/CLAUDE_TASK_CORE_PHASE1.md` |
 | Техническое состояние | `FINAL_HANDOFF.md` — листы и колонки, служебные таблицы, счётчики, операции журнала, инварианты, решения, команды тестов, план марафона |
 | Отчёты этапов | `CLAUDE_REPORT_MIGRATION_CANDIDATE.md` (M3 перенос и кандидат), `CLAUDE_REPORT_FINAL_CORE.md` (M2 Final Core), `CLAUDE_REPORT_CORE_PHASE5_SPECIAL_RECEIPTS.md` (этап 5, принят), `CLAUDE_REPORT_CORE_PHASE4_RETURNS.md` (этап 4), `CLAUDE_REPORT_CORE_PHASE3_RECEIPTS.md` (этап 3), `CLAUDE_REPORT_CORE_PHASE2_ISSUES.md` (этап 2), `CLAUDE_REPORT_CORE_PHASE1.md` (этап 1) |
@@ -67,11 +67,17 @@
   - папка выпуска самодостаточна: перенос вместе с оракулом сверки.
 - Снимок для инструментов сообщает защиты книги (manifest `sheet`, `structure`) — для WMS_DOCTOR.
 
+**M4 — WMS_TOOLBOX** (`CLAUDE_REPORT_TOOLBOX.md`, `docs/TOOLBOX.md`; П-21…П-30 — на утверждении):
+- 9 книг инструментов (INVENTORY, ANALYTICS, MANAGER, SEARCH, DOCTOR, LABELS, DOCS, ARCHIVE, IMPORTER), скрипты RECONCILE, BACKUP, HEALTHCHECK, TSPL, launcher `WMS_TOOLBOX.ods`.
+- Инструменты читают только снимок (проверка SHA-256) и никогда не открывают рабочую книгу; изменения — только пакетами, которые проводит WMS.
+- Сборка `tools/build_toolbox.py` из `src/toolbox/` (бинарные книги в Git не хранятся), только в новую папку.
+
 Всё пишется только через `ApplyOperation`.
 
 ## Что работает
 
-- **M3 (один полный набор на одном коде, `TEST_REPORT.md`):** перенос — `tests/run_migration.py`, MG01–MG07, **20 PASS**; кандидат — `tests/run_candidate.py`, C01–C06, **15 PASS**; Final Core — **83**, этап 5 — **156**, этап 4 — **169**, этап 3 — **148**, этап 2 — **77**, этап 1 — **80** PASS (0 FAIL, 0 SKIP); окна: кандидат — **4 из 4**, Final Core — **8 из 8**, этап 5 — **16 из 16**, этап 4 — **15 из 15**, этап 3 — **10 из 10**, этап 2 — **7 из 7**; компиляция — OK; оракул — без расхождений.
+- **M4 (набор инструментов на одном коде, `TEST_REPORT.md`):** `tests/run_toolbox.py` на фикстуре снимка, K01–K13, **45 PASS / 0 FAIL / 0 SKIP**; сборка и компиляция всех книг инструментов — OK; ядро не менялось.
+- **M3 (один полный набор на одном коде, `21f4bcb`):** перенос — `tests/run_migration.py`, MG01–MG07, **20 PASS**; кандидат — `tests/run_candidate.py`, C01–C06, **15 PASS**; Final Core — **83**, этап 5 — **156**, этап 4 — **169**, этап 3 — **148**, этап 2 — **77**, этап 1 — **80** PASS (0 FAIL, 0 SKIP); окна: кандидат — **4 из 4**, Final Core — **8 из 8**, этап 5 — **16 из 16**, этап 4 — **15 из 15**, этап 3 — **10 из 10**, этап 2 — **7 из 7**; компиляция — OK; оракул — без расхождений.
 - **M2 (Final Core, один полный набор на одном коде, `8f4be2c`):** Final Core — `tests/run_final_core.py`, 25 сценариев (Y01–Y25), **82 PASS / 0 FAIL / 0 SKIP**; этап 5 — **156**, этап 4 — **169**, этап 3 — **148**, этап 2 — **77**, этап 1 — **80** PASS (0 FAIL, 0 SKIP); окна: Final Core — **8 из 8**, этап 5 — **16 из 16**, этап 4 — **15 из 15**, этап 3 — **10 из 10**, этап 2 — **7 из 7**; компиляция — OK; оракул — без расхождений во всех сценариях.
 - **Бенчмарк M2** (`tests/bench_final_core.py`): на 100 000 / 250 000 движений перемещение, списание, инвентаризация — 65–77 мс в среднем, максимум любой операции 187 / 409 мс; исправление ~40–48, сторно ~32–35 мс; «Экспорт для инструментов» — 16 / 38 с (34 / 85 МБ); самопроверка — 37 / 98 с, ошибок 0; сохранение — 9,9 / 22,9 с; открытие — 5,8 / 14,0 с; оракул — 0 / 0 расхождений.
 - **M1 (приёмка этапа 5, один полный набор на одном коде):** этап 5 — `tests/run_phase5.py`, 32 сценария (X01–X32), **156 PASS / 0 FAIL / 0 SKIP**; этап 4 — **169**, этап 3 — **148**, этап 2 — **77**, этап 1 — **80** PASS (0 FAIL, 0 SKIP); окна этапа 5 — **16 из 16**; компиляция — OK.
