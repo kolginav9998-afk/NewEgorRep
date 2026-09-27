@@ -5,12 +5,14 @@
 OUT_DIR (it must not exist) gets:
   WMS_PROD_CANDIDATE.ods   the production book (tools/build_ods.py without --test: empty registry, no test seams active,
                            MODE PROD) with «Главная» (version, «Состояние системы», «Проверка перед работой») and «Справка»
-                           (these release notes and the backup / recovery guide);
-  docs/                    RELEASE_NOTES.md, BACKUP_RECOVERY.md, EXPORT_CONTRACT.md;
+                           (the guide of the storekeeper, these release notes and the backup / recovery guide);
+  WMS_TOOLBOX/             the separate tools (tools/build_toolbox.py): it goes next to the working book;
+  docs/                    OPERATOR_GUIDE.md, RELEASE_NOTES.md, BACKUP_RECOVERY.md, EXPORT_CONTRACT.md, TOOLBOX.md,
+                           PC_VALIDATION.md;
   tools/                   migrate.py, migration_dryrun.py, wmslo.py — the transfer of the old warehouse (tools/migrate.py),
                            with the independent oracle its VERIFY replays the journal by (tests/*_oracle.py it imports): the
                            folder alone is enough to transfer, nothing of the repository is needed;
-  RELEASE_MANIFEST.csv     versions and every file with its size and SHA-256.
+  RELEASE_MANIFEST.csv     versions and every file of the folder with its size and SHA-256.
 The book is built, never opened with WMS: its first start registers it where it is put (a new WMS). Binary books are not
 kept in Git (D-009) — a release is always built from the sources.
 """
@@ -26,7 +28,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
-DOCS = ["RELEASE_NOTES.md", "BACKUP_RECOVERY.md", "EXPORT_CONTRACT.md"]
+DOCS = ["OPERATOR_GUIDE.md", "RELEASE_NOTES.md", "BACKUP_RECOVERY.md", "EXPORT_CONTRACT.md", "TOOLBOX.md", "PC_VALIDATION.md"]
 TOOLS = ["migrate.py", "migration_dryrun.py", "wmslo.py"]
 # the oracle of `migrate.py verify` (tests/adjust_oracle.py) and the modules it imports
 ORACLES = ["adjust_oracle.py", "journal_oracle.py", "receipt_oracle.py", "special_oracle.py", "return_oracle.py"]
@@ -53,6 +55,7 @@ def sha256(p):
 def build_release(out, name="WMS_PROD_CANDIDATE.ods"):
     from wmslo import Office
     import build_ods
+    import build_toolbox
     out = os.path.abspath(out)
     if os.path.exists(out):
         raise ValueError(f"{out} уже существует — выпуск собирается в новую папку")
@@ -62,6 +65,7 @@ def build_release(out, name="WMS_PROD_CANDIDATE.ods"):
     o = Office(f"release{os.getpid()}", prof)
     try:
         build_ods.build(o, os.path.join(out, name), test=False)
+        build_toolbox.build(o, out)
     finally:
         o.terminate()
         shutil.rmtree(prof, ignore_errors=True)
@@ -73,7 +77,11 @@ def build_release(out, name="WMS_PROD_CANDIDATE.ods"):
         shutil.copy2(os.path.join(ROOT, "tests", t), os.path.join(out, "tools", t))
     v = versions()
     lines = ["key;value", f"product;{v['WMS_PRODUCT_VERSION']}", f"core;{v['WMS_CORE_VERSION']}", f"schema;{v['WMS_SYS_SCHEMA']}", f"book;{name}"]
-    for rel in [name] + [f"docs/{d}" for d in DOCS] + [f"tools/{t}" for t in TOOLS + ORACLES]:
+    files = []
+    for base, dirs, names in os.walk(out):
+        dirs[:] = sorted(d for d in dirs if d != "__pycache__")
+        files += [os.path.relpath(os.path.join(base, n), out).replace(os.sep, "/") for n in sorted(names)]
+    for rel in sorted(files):
         p = os.path.join(out, rel)
         lines.append(f"file;{rel};{os.path.getsize(p)};{sha256(p)}")
     with open(os.path.join(out, "RELEASE_MANIFEST.csv"), "w", encoding="utf-8", newline="\n") as f:

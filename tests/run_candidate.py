@@ -78,10 +78,18 @@ def c01_release_folder():
     bad = [f[0] for f in files if not os.path.exists(os.path.join(rel, f[0])) or sha(os.path.join(rel, f[0])) != f[2]
            or os.path.getsize(os.path.join(rel, f[0])) != int(f[1])]
     cfg = open(os.path.join(ROOT, "src", "basic", "WmsConfig.bas"), encoding="utf-8").read()
-    R.add(c, "папка выпуска: книга WMS_PROD_CANDIDATE.ods, docs (примечания к выпуску, резервные копии и восстановление, контракт), tools "
-             "(перенос и его оракул), RELEASE_MANIFEST.csv — версии как в исходниках, размер и SHA-256 каждого файла совпадают",
-          len(files) == 1 + len(build_release.DOCS) + len(build_release.TOOLS) + len(build_release.ORACLES) and not bad and man.get("product") and f'WMS_PRODUCT_VERSION = "{man.get("product")}"' in cfg
-          and f'WMS_CORE_VERSION = "{man.get("core")}"' in cfg and man.get("schema") == "WMS-SYS-3", f"{man}; файлов {len(files)}; не совпали {bad}")
+    on_disk = sorted(os.path.relpath(os.path.join(b_, n), rel).replace(os.sep, "/") for b_, _, ns in os.walk(rel) for n in ns
+                     if n != "RELEASE_MANIFEST.csv" and "__pycache__" not in b_)
+    need = [BOOK] + [f"docs/{d}" for d in build_release.DOCS] + [f"tools/{t}" for t in build_release.TOOLS + build_release.ORACLES] + \
+        [f"WMS_TOOLBOX/{b_}.ods" for b_ in ("WMS_TOOLBOX", "WMS_INVENTORY", "WMS_ANALYTICS", "WMS_MANAGER", "WMS_SEARCH", "WMS_DOCTOR",
+                                             "WMS_LABELS", "WMS_DOCS", "WMS_ARCHIVE", "WMS_IMPORTER")]
+    R.add(c, "папка выпуска: книга WMS_PROD_CANDIDATE.ods, WMS_TOOLBOX (9 инструментов, launcher, скрипты), docs (руководство кладовщика, "
+             "примечания к выпуску, резервные копии и восстановление, контракт, инструменты, проверка ПК), tools (перенос и его оракул), "
+             "RELEASE_MANIFEST.csv — версии как в исходниках; в манифесте каждый файл папки, размер и SHA-256 совпадают",
+          sorted(f[0] for f in files) == on_disk and all(n in on_disk for n in need) and not bad and man.get("product")
+          and f'WMS_PRODUCT_VERSION = "{man.get("product")}"' in cfg and f'WMS_CORE_VERSION = "{man.get("core")}"' in cfg
+          and man.get("schema") == "WMS-SYS-3",
+          f"{man}; файлов {len(files)} (на диске {len(on_disk)}); нет {[n for n in need if n not in on_disk]}; не совпали {bad}")
     rc = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "build_release.py"), rel], capture_output=True, text=True).returncode
     R.add(c, "повторная сборка в существующую папку — отказ (выпуск собирается заново)", rc == 2, str(rc))
 
@@ -112,8 +120,10 @@ def c02_candidate_book():
               st.get("STATE") == "CLEAN" and st.get("REG") == "own" and sys_mode == "PROD" and "версия 0.6.0" in ver and "WMS-SYS-3" in ver
               and names == ["Главная", "Заказы", "Иной приход", "Выдачи", "Возврат", "Корректировки", "Наличие", "Получатели", "Справка"]
               and s.sysv("NEXT_EI") == 1.0, f"{st}; {sys_mode}; «{ver}»; {names}")
-        R.add(c, "«Справка»: примечания к выпуску и руководство по резервным копиям и восстановлению (без разметки Markdown); лист защищён",
-              "примечания к выпуску" in text and "резервные копии и восстановление" in text and "Восстановление из резервной копии" in text
+        R.add(c, "«Справка»: руководство кладовщика, примечания к выпуску и руководство по резервным копиям и восстановлению (без разметки "
+                 "Markdown); лист защищён",
+              text.startswith("WMS — руководство кладовщика") and "примечания к выпуску" in text and "резервные копии и восстановление" in text
+              and "Восстановление из резервной копии" in text
               and "**" not in text and "`" not in text and hlp.isProtected(), text[:200])
         R.add(c, "кнопки «Состояние системы» и «Проверка перед работой» на «Главной» привязаны к макросам",
               btn.get("Состояние системы") == "WmsStatus.BtnSystemStatus" and btn.get("Проверка перед работой") == "WmsStatus.BtnPreWorkCheck", str(btn))

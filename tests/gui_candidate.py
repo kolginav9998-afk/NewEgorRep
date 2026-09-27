@@ -7,7 +7,7 @@ A production book (MODE PROD, never opened) opened with WMS in a real window:
 2. «Проверка перед работой»: a window «WMS» with only «OK» names the result («ошибок 0»); the section of «Главная» lists the
    checks.
 3. «Состояние системы»: no window; the section shows the versions, the working file, LibreOffice, the journal, the backups.
-4. «Справка»: a visible protected sheet with the release notes and the backup / recovery guide.
+4. «Справка»: a visible protected sheet with the guide of the storekeeper, the release notes and the backup / recovery guide.
 Prints one line per step; exits 0 when every step passed.
 """
 import argparse
@@ -59,9 +59,13 @@ def main():
              and "LibreOffice" in sec and "журнал" in sec and "резервные копии" in sec, f"{head}; {list(sec)}")
         hlp = doc.Sheets.getByName("Справка")
         doc.getCurrentController().setActiveSheet(hlp)
-        first = hlp.getCellByPosition(0, 0).getString()
-        step("«Справка»: видимый защищённый лист — примечания к выпуску и руководство по восстановлению",
-             hlp.IsVisible and hlp.isProtected() and first.startswith("WMS — примечания к выпуску"), first)
+        cur = hlp.createCursor()
+        cur.gotoEndOfUsedArea(False)
+        col = [r[0] for r in hlp.getCellRangeByPosition(0, 0, 0, cur.getRangeAddress().EndRow).getDataArray()]
+        heads = [x for x in col if x.startswith("WMS — ")]
+        step("«Справка»: видимый защищённый лист — руководство кладовщика, примечания к выпуску, резервные копии и восстановление",
+             hlp.IsVisible and hlp.isProtected() and heads == ["WMS — руководство кладовщика", "WMS — примечания к выпуску",
+                                                               "WMS — резервные копии и восстановление"], str(heads))
         doc.setModified(False)
         o.dispatch(doc, ".uno:CloseDoc")
     finally:

@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """WMS_BACKUP — копия рабочей папки WMS на другой носитель (FINAL WMS MARATHON §6: WMS_BACKUP / HEALTHCHECK).
 
-    python3 wms_backup.py --wms WMS_DIR --to DEST_DIR [--keep 8] [--no-backups]
+    python3 wms_backup.py --wms WMS_DIR --to DEST_DIR [--keep 8] [--no-backups] [--no-tools]
 
 В DEST_DIR создаётся папка WMS_BACKUP_<ГГГГММДД-ЧЧММСС>/: рабочая книга (все .ods папки WMS), журнал WMS_Journal/ (без
-файла блокировки) и, если не задано --no-backups, копии WMS_Backups/; MANIFEST.csv — размер и SHA-256 каждого файла.
+файла блокировки), если не задано --no-backups, копии WMS_Backups/, и, если не задано --no-tools, данные людей в
+инструментах — книги WMS_TOOLBOX/*.ods (журнал работы, история и номер актов, настройки) и созданные акты WMS_Docs/
+(скрипты набора не копируются: они есть в выпуске); MANIFEST.csv — размер и SHA-256 каждого файла.
 После записи каждый файл перечитывается и сверяется с манифестом; папка появляется под своим именем только проверенной
 (пишется во временную .part). Хранятся --keep последних копий этого вида в DEST_DIR (старые удаляются, другие файлы
 не трогаются). Если WMS открыта (есть wms.lock), копия всё равно делается: в ней книга на момент последнего сохранения и
@@ -31,22 +33,25 @@ def sha256(p):
     return h.hexdigest()
 
 
-def files_to_copy(wms, with_backups):
+def files_to_copy(wms, with_backups, with_tools=True):
     out = [f for f in sorted(os.listdir(wms)) if f.lower().endswith(".ods") and not f.startswith(".~lock") and os.path.isfile(os.path.join(wms, f))]
-    for sub in ("WMS_Journal",) + (("WMS_Backups",) if with_backups else ()):
+    for sub in ("WMS_Journal",) + (("WMS_Backups",) if with_backups else ()) + (("WMS_Docs",) if with_tools else ()):
         d = os.path.join(wms, sub)
         if os.path.isdir(d):
-            out += [f"{sub}/{f}" for f in sorted(os.listdir(d)) if f != "wms.lock" and os.path.isfile(os.path.join(d, f))]
+            out += [f"{sub}/{f}" for f in sorted(os.listdir(d)) if f != "wms.lock" and not f.startswith(".~lock") and os.path.isfile(os.path.join(d, f))]
+    tb = os.path.join(wms, "WMS_TOOLBOX")
+    if with_tools and os.path.isdir(tb):
+        out += [f"WMS_TOOLBOX/{f}" for f in sorted(os.listdir(tb)) if f.lower().endswith(".ods") and not f.startswith(".~lock")]
     return out
 
 
-def backup(wms, dest, keep=8, with_backups=True):
+def backup(wms, dest, keep=8, with_backups=True, with_tools=True):
     wms, dest = os.path.abspath(wms), os.path.abspath(dest)
     if not os.path.isdir(wms):
         raise ValueError(f"папка WMS {wms} не найдена")
     if dest == wms or dest.startswith(wms + os.sep):
         raise ValueError("копию нельзя класть внутрь рабочей папки WMS — выберите другой носитель")
-    files = files_to_copy(wms, with_backups)
+    files = files_to_copy(wms, with_backups, with_tools)
     if not any(f.lower().endswith(".ods") and "/" not in f for f in files):
         raise ValueError(f"в {wms} нет книги WMS (.ods)")
     os.makedirs(dest, exist_ok=True)
@@ -100,6 +105,7 @@ def main(argv=None):
     ap.add_argument("--to", required=True)
     ap.add_argument("--keep", type=int, default=8)
     ap.add_argument("--no-backups", action="store_true")
+    ap.add_argument("--no-tools", action="store_true", help="без книг WMS_TOOLBOX и актов WMS_Docs")
     ap.add_argument("--verify", help="только проверить готовую копию (папку WMS_BACKUP_…)")
     a = ap.parse_args(argv)
     if a.verify:
@@ -107,7 +113,7 @@ def main(argv=None):
         print("OK: копия цела" if not why else f"ОШИБКА: {why}")
         return 0 if not why else 2
     try:
-        final, n, removed, locked = backup(a.wms, a.to, a.keep, not a.no_backups)
+        final, n, removed, locked = backup(a.wms, a.to, a.keep, not a.no_backups, not a.no_tools)
     except (OSError, ValueError) as e:
         print(f"ОШИБКА: {e}", file=sys.stderr)
         return 2

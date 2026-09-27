@@ -55,8 +55,8 @@ STOCK_HEADERS = ["ЕИ", "Наименование", "Артикул", "Един
                  "Тип источника"]
 STOCK_WIDTHS = [3300, 6500, 3200, 2300, 2300, 2800, 3000, 2500, 3500, 3000]
 RCPT = "Получатели"
-HELP = "Справка"                  # release notes and the backup / recovery guide (docs/*.md), read-only
-HELP_DOCS = ["RELEASE_NOTES.md", "BACKUP_RECOVERY.md"]
+HELP = "Справка"                  # the guide of the storekeeper, release notes, backup / recovery (docs/*.md), read-only
+HELP_DOCS = ["OPERATOR_GUIDE.md", "RELEASE_NOTES.md", "BACKUP_RECOVERY.md"]
 STATUS_ROW = 24                   # WmsStatus.STATUS_ROW
 MAIN = "Главная"
 # «Заказы» A:AB — the fixed user interface (MASTER SPEC v0.3 §2; WmsConfig OC_*)
@@ -477,7 +477,7 @@ def build_main(doc, sh):
         "строки из файла инструмента (они проводятся обычными проверками). "
         "«Исправить» и «Удалить» работают для проведённой строки под курсором, «Очистить» — для непроведённой строки или копии. "
         "Перед началом рабочего дня — «Проверка перед работой»; версии, журнал и резервные копии — «Состояние системы»; "
-        "что нового в версии и как восстановить WMS из резервной копии — лист «Справка».")
+        "руководство кладовщика, что нового в версии и как восстановить WMS из резервной копии — лист «Справка».")
     sh.getCellRangeByPosition(0, help_row, 1, help_row).merge(True)
     sh.getCellByPosition(0, help_row).IsTextWrapped = True
     sh.getRows().getByIndex(help_row).Height = 6300
@@ -495,7 +495,7 @@ def md_plain(s):
 
 
 def build_help(sh):
-    """«Справка»: docs/RELEASE_NOTES.md and docs/BACKUP_RECOVERY.md as text (headings bold, a table row per line)"""
+    """«Справка»: docs/OPERATOR_GUIDE.md, RELEASE_NOTES.md and BACKUP_RECOVERY.md as text (headings bold, a table row per line)"""
     sh.getColumns().getByIndex(0).Width = 26000
     r = 0
     for name in HELP_DOCS:
