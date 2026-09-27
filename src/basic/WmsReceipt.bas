@@ -44,6 +44,75 @@ Private Function IsoDate(d As Double) As String
     IsoDate = Format(d, "YYYY-MM-DD")
 End Function
 
+' ================================================================ the row of «Ещё поступление» inside the block of its order (M6 §18)
+' The new delivery row is placed right under its source row and the earlier delivery rows of the same position, so the
+' order stays one visual block. A row is inserted there before the operation starts (operations themselves only write
+' cells); the journal names it (INSROW) and the recovery inserts it again before the writes are replayed
+' (WmsRecovery.ReplayInsertRow). When the operation does not happen, the inserted row is removed again.
+
+' True when row r of «Заказы» holds nothing in A..AC
+Function OrderRowEmpty(r As Long) As Boolean
+    Dim d As Variant, i As Integer
+    d = OSh().getCellRangeByPosition(0, r, OC_BLOCK, r).getDataArray()(0)
+    For i = 0 To OC_BLOCK
+        If CStr(d(i)) <> "" Then Exit Function
+    Next i
+    OrderRowEmpty = True
+End Function
+
+' the row under the source row src (0-based) and the delivery rows of position olid that follow it: where the next
+' delivery row of the position goes
+Function DeliveryRowAfter(src As Long, olid As Long) As Long
+    Dim r As Long, sh As Object, mark As String
+    sh = OSh()
+    mark = "OL" & olid
+    r = src + 1
+    Do While r < MAX_SHEET_ROW
+        If sh.getCellByPosition(OC_BLOCK, r).getString() <> mark Then Exit Do
+        r = r + 1
+    Loop
+    DeliveryRowAfter = r
+End Function
+
+' inserts an empty row at r of «Заказы» (the rows from r move down); "" or the error. The sheet allows the user to insert
+' rows too; the protection is lifted only for the moment of the insertion.
+Function InsertOrderRow(r As Long) As String
+    Dim sh As Object, wasProt As Boolean
+    On Error GoTo EH
+    sh = OSh()
+    If Not OrderRowEmpty(MAX_SHEET_ROW) Then
+        InsertOrderRow = "на листе «" & SH_ORDERS & "» нет места для новой строки (последняя строка листа занята)"
+        Exit Function
+    End If
+    wasProt = sh.isProtected()
+    If wasProt Then sh.unprotect(PROTECT_PWD)
+    sh.getRows().insertByIndex(r, 1)
+    If wasProt Then sh.protect(PROTECT_PWD)
+    InsertOrderRow = ""
+    Exit Function
+EH:
+    InsertOrderRow = "не удалось вставить строку в «" & SH_ORDERS & "»: " & Error$
+    On Error Resume Next
+    If wasProt Then sh.protect(PROTECT_PWD)
+End Function
+
+' removes row r of «Заказы» when it is still empty (a delivery that did not happen); True when removed
+Private Function RemoveEmptyOrderRow(r As Long) As Boolean
+    Dim sh As Object, wasProt As Boolean
+    On Error GoTo EH
+    If Not OrderRowEmpty(r) Then Exit Function
+    sh = OSh()
+    wasProt = sh.isProtected()
+    If wasProt Then sh.unprotect(PROTECT_PWD)
+    sh.getRows().removeByIndex(r, 1)
+    If wasProt Then sh.protect(PROTECT_PWD)
+    RemoveEmptyOrderRow = True
+    Exit Function
+EH:
+    On Error Resume Next
+    If wasProt Then sh.protect(PROTECT_PWD)
+End Function
+
 ' «Контроль» of an open row (a result or a problem); rows with a receipt are written only by operations
 Private Sub SetCtl(r As Long, s As String)
     WmsOrders.SetIfDiff(OSh().getCellByPosition(OC_CTL, r), s)
@@ -463,7 +532,7 @@ Function ReceiptAddRow(r As Long, vFact As Variant, vDocQty As Variant, vDoc As 
     vPlace As Variant, vPrice As Variant) As String
     Dim why As String, kind As String, olid As Long, od As Variant, src As Long, srcMoved As Boolean, sd As Variant, newRow As Long
     Dim n As Long, canon As String, sKey As String, dup As String, nodoc As Integer, rcv2 As Double, nodoc2 As Double, res As String
-    Dim cols As Variant, i As Integer, own As String, curN As Long, curMoved As Boolean
+    Dim cols As Variant, i As Integer, own As String, curN As Long, curMoved As Boolean, bIns As Boolean
     WmsInit()
     If r < 1 Or r > MAX_SHEET_ROW Then
         ReceiptAddRow = "ERR:выберите строку заказа (не заголовок)"
@@ -509,7 +578,8 @@ Function ReceiptAddRow(r As Long, vFact As Variant, vDocQty As Variant, vDoc As 
         Exit Function
     End If
     why = CheckReceiptValues(vFact, vDocQty, vDoc, vDdate, vRdate, vPlace, vPrice)
-    newRow = WmsOrders.LastRow(OSh()) + 1
+    ' the new row: inside the block of the order, under the source row and its earlier deliveries (M6 §18)
+    newRow = DeliveryRowAfter(src, olid)
     If why = "" And newRow > MAX_SHEET_ROW Then why = "на листе «" & SH_ORDERS & "» нет свободной строки"
     If why <> "" Then
         ReceiptAddRow = "ERR:" & why
@@ -521,6 +591,19 @@ Function ReceiptAddRow(r As Long, vFact As Variant, vDocQty As Variant, vDoc As 
     If why <> "" Then
         ReceiptAddRow = "ERR-SYS:" & why
         Exit Function
+    End If
+    ' the row is inserted (unless it is free) before the plan reads the cells: the plan describes the book after the
+    ' insertion, exactly as the recovery rebuilds it. Nothing WMS does here stays in the undo stack.
+    bIns = Not OrderRowEmpty(newRow)
+    If bIns Then
+        UndoBegin()
+        why = InsertOrderRow(newRow)
+        If why <> "" Then
+            UndoEnd()
+            ReceiptAddRow = "ERR-SYS:" & why
+            Exit Function
+        End If
+        If r >= newRow Then r = r + 1
     End If
     canon = WmsIssue.EiCanon(n)
     sd = OSh().getCellRangeByPosition(0, src, OC_LAST, src).getDataArray()(0)
@@ -534,6 +617,7 @@ Function ReceiptAddRow(r As Long, vFact As Variant, vDocQty As Variant, vDoc As 
     PlanField("EI", canon)
     PlanField("OL", olid)
     PlanField("ROW", newRow + 1)
+    If bIns Then PlanField("INSROW", newRow + 1)
     PlanField("SRC_ROW", src + 1)
     PlanReceiptFields(Trim(CStr(sd(OC_ORDER))), Trim(CStr(sd(OC_NAME))), Trim(CStr(sd(OC_ART))), Trim(CStr(sd(OC_UNIT))), Trim(CStr(sd(OC_SUPPLIER))))
     PlanField("BAL_AFTER", mFact)
@@ -558,6 +642,7 @@ Function ReceiptAddRow(r As Long, vFact As Variant, vDocQty As Variant, vDoc As 
     PlanReceiptValues(newRow, False, False)
     PlanSetValue(SH_ORDERS, newRow, OC_PLACE, mPlace, False)
     PlanSetValue(SH_ORDERS, newRow, OC_EI, canon, False)
+    PlanSetValue(SH_ORDERS, newRow, OC_BLOCK, "OL" & olid, False)
     PlanDerived(SH_ORDERS, newRow, OC_STATUS, OS_ADD)
     PlanDerived(SH_ORDERS, newRow, OC_STOCK, mFact)
     PlanDerived(SH_ORDERS, newRow, OC_CTL, own)
@@ -566,11 +651,23 @@ Function ReceiptAddRow(r As Long, vFact As Variant, vDocQty As Variant, vDoc As 
     ' the source row shows the status of the whole position
     PlanSourceStatus(src, od, rcv2, nodoc2, CStr(od(OD_CANCEL)))
     res = ApplyOperation(0, 0)
-    If Left(res, 3) = "OK:" Then res = res & "|строка " & (newRow + 1) & "|" & canon
+    If Left(res, 3) = "OK:" Then
+        res = res & "|строка " & (newRow + 1) & "|" & canon
+    ElseIf bIns And (Left(res, 7) = "ERR-RB:" Or Left(res, 8) = "BLOCKED:" Or Left(res, 5) = "BUSY:") Then
+        ' the delivery did not happen (rolled back or refused): the inserted row goes away again. After ERR-CRITICAL the
+        ' operation may be in the journal — the row stays for the recovery
+        RemoveEmptyOrderRow(newRow)
+        UndoEnd()
+    End If
     ReceiptAddRow = res
     Exit Function
 EH:
     ReceiptAddRow = "ERR-SYS:внутренняя ошибка проверки поступления: " & Error$ & " (код " & Err & ", строка " & Erl & ")"
+    On Error Resume Next
+    If bIns Then
+        RemoveEmptyOrderRow(newRow)
+        UndoEnd()
+    End If
 End Function
 
 ' ================================================================ «Исправить» — RECEIPT_FIX: the same EI, the same physical batch

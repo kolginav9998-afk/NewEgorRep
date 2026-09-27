@@ -3,7 +3,8 @@
 ' «Инструменты»: что есть в папке, последний снимок WMS (имя, время, возраст), пакеты для WMS; скрипты запускаются
 ' отсюда же, если на ПК есть python3: «Проверка перед сменой»; «Сверка названий» (WMS_RECONCILE: файл старых названий →
 ' отчёт с кандидатами-ЕИ открывается для отметок «да») и «Соответствие по сверке» (отмеченный отчёт → соответствие
-' старых названий и ЕИ).
+' старых названий и ЕИ; подтверждённое копится в словаре WMS_Reconcile/dictionary.csv и предлагается снова). «Контроль
+' дня» открывает WMS_MANAGER и сразу выполняет его «Контроль дня» (M6 PRIME §6).
 Option Explicit
 
 Private Const SH_LIST = "Инструменты"
@@ -15,11 +16,11 @@ Global gLnFile As String              ' test seam: the file «Сверка на�
 Function ToolList() As Variant
     ToolList = Array( _
         "WMS_INVENTORY|Инвентаризация|снимок → пересчёт → разница → пакет корректировок для WMS", _
-        "WMS_ANALYTICS|Аналитика|остатки, приходы, выдачи, возвраты, просрочка, поставщики, категории, места, получатели", _
-        "WMS_MANAGER|Отчёт руководителю|показатели за день / неделю / месяц и журнал работы кладовщика", _
-        "WMS_SEARCH|Поиск и история|ЕИ, артикул, наименование, место, получатель; история ЕИ", _
-        "WMS_DOCTOR|Диагностика|аудит журнала, остатков, ЕИ, связей, дублей; только отчёт и план", _
-        "WMS_LABELS|Этикетки|ЕИ крупно, наименование, артикул, место, штрихкод; печать через системный принтер", _
+        "WMS_ANALYTICS|Аналитика|сводка, графики, транспорт, найденные закономерности и расход (дни запаса)", _
+        "WMS_MANAGER|Отчёт руководителю|сегодня / неделя / месяц, машины, журнал работы, документ руководителю, «Контроль дня»", _
+        "WMS_SEARCH|Поиск и история|ЕИ, артикул, наименование, место, получатель, поставщик, госномер; история ЕИ и машины", _
+        "WMS_DOCTOR|Диагностика|аудит журнала, остатков, ЕИ, связей, машин, пакетов, комплекта; только отчёт и план", _
+        "WMS_LABELS|Этикетки|подбор ЕИ из снимка, предпросмотр, печать, повтор задания; ЕИ крупно, штрихкод", _
         "WMS_DOCS|Акты|акты передачи (ODT, PDF) из выдач WMS", _
         "WMS_ARCHIVE|Архив|месяцы истории, архивные пакеты, контроль размера рабочей книги", _
         "WMS_IMPORTER|Массовый приход|таблица поставщика → проверка → пакет «Иной приход» / «Заказы» для WMS")
@@ -31,7 +32,8 @@ Function ScriptList() As Variant
         "reconcile/wms_reconcile.py|Сверка старых названий|НАЗВАНИЯ.csv --snapshot <снимок> --out <отчёт.csv>", _
         "backup/wms_healthcheck.py|Проверка перед сменой|--wms <папка WMS>", _
         "backup/wms_backup.py|Резервная копия на носитель|--wms <папка WMS> --to <папка носителя>", _
-        "labels/tspl_labels.py|Этикетки на термопринтер (TSPL)|--snapshot <снимок> --ei 1,2,3 --out labels.prn")
+        "labels/tspl_labels.py|Этикетки на термопринтер (TSPL)|--snapshot <снимок> --ei 1,2,3 --out labels.prn", _
+        "insights/wms_insights.py|Закономерности склада|--export <папка снимков> --out <папка отчёта>")
 End Function
 
 Sub BtnLnRefresh(Optional oEvent As Variant)
@@ -216,7 +218,7 @@ Private Sub OpenCsv(url As String)
     args(0).Name = "FilterName"
     args(0).Value = "Text - txt - csv (StarCalc)"
     args(1).Name = "FilterOptions"
-    args(1).Value = "59,34,76,1,1/2/2/2/3/2/4/2/5/2/6/2/7/2/8/2/9/2/10/2/11/2/12/2"
+    args(1).Value = "59,34,76,1,1/2/2/2/3/2/4/2/5/2/6/2/7/2/8/2/9/2/10/2/11/2/12/2/13/2/14/2"
     StarDesktop.loadComponentFromURL(url, "_blank", 0, args())
 End Sub
 
@@ -292,6 +294,35 @@ Function LnConfirm(sReport As String) As String
     Exit Function
 EH:
     LnConfirm = "ERR:внутренняя ошибка инструмента: " & Error$ & " (код " & Err & ", строка " & Erl & ")"
+End Function
+
+' ================================================================ «Контроль дня»
+
+Sub BtnLnControl(Optional oEvent As Variant)
+    TbMsg(LnControl())
+End Sub
+
+' WMS_MANAGER of this folder opened and its «Контроль дня» run (the result on its sheet «Контроль дня»)
+Function LnControl() As String
+    Dim url As String, doc As Object, args(0) As New com.sun.star.beans.PropertyValue, scr As Object, oi() As Variant, ov() As Variant
+    On Error GoTo EH
+    url = TbFolder() & "WMS_MANAGER.ods"
+    If Not CreateUnoService("com.sun.star.ucb.SimpleFileAccess").exists(url) Then
+        LnControl = "ERR:нет файла " & ConvertFromURL(url)
+        Exit Function
+    End If
+    args(0).Name = "MacroExecutionMode"
+    args(0).Value = 4
+    doc = StarDesktop.loadComponentFromURL(url, "_blank", 0, args())
+    If IsNull(doc) Then
+        LnControl = "ERR:не открылся " & ConvertFromURL(url)
+        Exit Function
+    End If
+    scr = doc.getScriptProvider().getScript("vnd.sun.star.script:Standard.TbManager.MgrControl?language=Basic&location=document")
+    LnControl = CStr(scr.invoke(Array(CDbl(0)), oi, ov))
+    Exit Function
+EH:
+    LnControl = "ERR:внутренняя ошибка инструмента: " & Error$ & " (код " & Err & ", строка " & Erl & ")"
 End Function
 
 Function TestLnFile(url As String) As String

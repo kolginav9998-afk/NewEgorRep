@@ -30,6 +30,7 @@ Sub Analyze()
     If p = "" Then p = WmsReturn.SheetsProblem()
     If p = "" Then p = WmsSpecial.SpecialSheetsProblem()
     If p = "" Then p = WmsAdjust.AdjustSheetsProblem()
+    If p = "" Then p = WmsCar.CarSheetsProblem()
     If p = "" Then p = WmsOrders.SheetsProblem()
     If p <> "" Then
         SetBlocked("SYS_CORRUPT", p)
@@ -230,6 +231,28 @@ Private Function ClassifyReplay() As String
     End If
 End Function
 
+' M6 §18: «Ещё поступление» inserted its row inside the block of its order before the operation (journal field INSROW,
+' 1-based). The book the operation is replayed on lacks that row when the insertion was not saved: the row is inserted
+' again — unless it is there already (empty after a rollback by the before-image, or holding this receipt: saved with
+' the operation). "" or the problem.
+Private Function ReplayInsertRow(fields As Variant) As String
+    Dim v As String, ins As Long
+    v = FieldValue(fields, "INSROW")
+    If v = "" Then Exit Function
+    If Not IsDigits(v) Or Len(v) > 7 Then
+        ReplayInsertRow = "неверная строка вставки «" & v & "» в записи журнала"
+        Exit Function
+    End If
+    ins = CLng(v) - 1
+    If ins < 1 Or ins > MAX_SHEET_ROW Then
+        ReplayInsertRow = "строка вставки " & v & " вне листа"
+        Exit Function
+    End If
+    If WmsReceipt.OrderRowEmpty(ins) Then Exit Function
+    If SheetByName(SH_ORDERS).getCellByPosition(OC_EI, ins).getString() = FieldValue(fields, "EI") Then Exit Function
+    ReplayInsertRow = WmsReceipt.InsertOrderRow(ins)
+End Function
+
 ' «Восстановить»: replays the journal tail strictly in seq order through ApplyOperation; stops at the first problem
 Function Recover() As String
     Dim lastSeq As Long, i As Long, nOk As Long, nSkip As Long, nAlready As Long, seq As Long, p As String, r As String, cls As String
@@ -258,6 +281,7 @@ Function Recover() As String
             nSkip = nSkip + 1
         Else
             p = PlanFromJournalFields(gJR_Fields(i), gJR_Type(i))
+            If p = "" Then p = ReplayInsertRow(gJR_Fields(i))
             If p <> "" Then
                 r = "ОСТАНОВКА на seq " & seq & ": " & p
                 GoTo DONE
@@ -295,6 +319,7 @@ Function AbandonTail() As String
     Dim lastSeq As Long, fromSeq As Long, toSeq As Long, p As String, sLine As String, why As String, rc As Integer
     Dim i As Long, lst As String, maxEI As Double, maxNo As Double, nextEI As Double, nextNo As Double, maxRet As Double, nextRet As Double
     Dim maxSpl As Double, nextSpl As Double, maxEv(4) As Double, nextEv(4) As Double, k As Integer, fl As String, maxAdj As Double, nextAdj As Double
+    Dim maxCar As Double, nextCar As Double
     WmsInit()
     If gBlock <> "TAIL" Then
         AbandonTail = "«Отложить хвост журнала» не требуется: " & StateLine()
@@ -314,6 +339,7 @@ Function AbandonTail() As String
         TailCounters(gJR_Fields(i), maxEI, maxNo, maxRet)
         TailSpecialCounters(gJR_Fields(i), maxSpl, maxEv)
         TailAdjustCounter(gJR_Fields(i), maxAdj)
+        TailCarCounter(gJR_Fields(i), maxCar)
     Next i
     ' numbers the abandoned operations handed out (an EI label, an issue №, a return №) are never issued again
     nextEI = SysNum(SK_NEXT_EI)
@@ -335,6 +361,10 @@ Function AbandonTail() As String
     nextAdj = SysNum(SK_NEXT_ADJ)
     If maxAdj + 1 > nextAdj Then nextAdj = maxAdj + 1
     fl = fl & Chr(9) & "NEXT_ADJ=" & NumStr(nextAdj)
+    ' M6: a visit № is not reused either (it may be written on a pass or in a report)
+    nextCar = SysNum(SK_NEXT_CAR)
+    If maxCar + 1 > nextCar Then nextCar = maxCar + 1
+    fl = fl & Chr(9) & "NEXT_CAR=" & NumStr(nextCar)
     sLine = WmsJournal.BuildLine(toSeq + 1, "ABANDON", Split("FROM=" & fromSeq & Chr(9) & "TO=" & toSeq & Chr(9) & "NEXT_EI=" & NumStr(nextEI) _
         & Chr(9) & "NEXT_NO=" & NumStr(nextNo) & Chr(9) & "NEXT_RET=" & NumStr(nextRet) & Chr(9) & fl & Chr(9) & "REASON=" _
         & Esc("решение пользователя: хвост журнала не применён"), Chr(9)))
@@ -397,6 +427,15 @@ Private Sub TailAdjustCounter(fields As Variant, ByRef maxAdj As Double)
     End If
 End Sub
 
+' M6: the largest visit № (CAR) named by one journal entry
+Private Sub TailCarCounter(fields As Variant, ByRef maxCar As Double)
+    Dim v As String
+    v = FieldValue(fields, "CAR")
+    If IsDigits(v) And Len(v) <= 9 Then
+        If CDbl(v) > maxCar Then maxCar = CDbl(v)
+    End If
+End Sub
+
 ' an ABANDON record raises NEXT_EI / NEXT_NO / NEXT_RET past the numbers of the abandoned operations (never lowers them); repeated
 ' application is harmless, so a crash between the journal line and the book is covered by «Восстановить»
 Private Sub ApplyAbandonCounters(fields As Variant)
@@ -413,8 +452,8 @@ Private Sub ApplyAbandonCounters(fields As Variant)
     If IsDigits(v) And Len(v) <= 9 Then
         If CDbl(v) > SysNum(SK_NEXT_RET) Then SysPutNum(SK_NEXT_RET, CDbl(v))
     End If
-    ' Phase 5: NEXT_SPL and the event counters of the special receipts; Final Core: NEXT_ADJ
-    For k = SK_NEXT_SPL To SK_NEXT_ADJ
+    ' Phase 5: NEXT_SPL and the event counters of the special receipts; Final Core: NEXT_ADJ; M6: NEXT_CAR
+    For k = SK_NEXT_SPL To SK_NEXT_CAR
         v = FieldValue(fields, SysKeyNames()(k))
         If IsDigits(v) And Len(v) <= 9 Then
             If CDbl(v) > SysNum(k) Then SysPutNum(k, CDbl(v))

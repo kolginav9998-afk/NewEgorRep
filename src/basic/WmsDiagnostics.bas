@@ -38,7 +38,7 @@ Function SelfCheck() As String
     lastSeq = CLng(SysNum(SK_LAST_SEQ))
     out = out & Ln("OK", "счётчики", "LAST_SEQ " & lastSeq & ", NEXT_EI " & SysStr(SK_NEXT_EI) & ", NEXT_NO " & SysStr(SK_NEXT_NO) & ", NEXT_RET " & SysStr(SK_NEXT_RET) _
         & ", NEXT_SPL " & SysStr(SK_NEXT_SPL) & ", NEXT_OFF " & SysStr(SK_NEXT_OFF) & ", NEXT_PROD " & SysStr(SK_NEXT_PROD) & ", NEXT_DET " & SysStr(SK_NEXT_DET) _
-        & ", NEXT_OLD " & SysStr(SK_NEXT_OLD) & ", NEXT_OTH " & SysStr(SK_NEXT_OTH) & ", NEXT_ADJ " & SysStr(SK_NEXT_ADJ))
+        & ", NEXT_OLD " & SysStr(SK_NEXT_OLD) & ", NEXT_OTH " & SysStr(SK_NEXT_OTH) & ", NEXT_ADJ " & SysStr(SK_NEXT_ADJ) & ", NEXT_CAR " & SysStr(SK_NEXT_CAR))
     st = SysStr(SK_TX_STATE)
     bi = SysStr(SK_TX_BI)
     If st = TX_STARTED Then
@@ -141,6 +141,12 @@ Function SelfCheck() As String
         out = out & Ln("FAIL", "корректировки", Mid(s, 9))
     Else
         out = out & Ln("OK", "корректировки", s)
+    End If
+    s = WmsCar.CarCheck()
+    If Left(s, 6) = "ОШИБКА" Then
+        out = out & Ln("FAIL", "приход авто", Mid(s, 9))
+    Else
+        out = out & Ln("OK", "приход авто", s)
     End If
     s = WmsIssue.RecipientsDuplicates()
     If s <> "" Then

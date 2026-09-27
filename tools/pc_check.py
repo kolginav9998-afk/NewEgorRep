@@ -10,8 +10,8 @@
 1. Среда: система, Python, LibreOffice (версия; проверена ли с WMS), Python-UNO, Writer, шрифты с кириллицей, локаль
    ru_RU.UTF-8, свободное место, Xvfb, CUPS (служба, принтеры, принтер по умолчанию), устройства /dev/usb/lp*.
 2. Компиляция всех модулей WMS и всех книг WMS_TOOLBOX — в своём невидимом дисплее (Xvfb).
-3. Тесты: книга-кандидат (C), перенос (MG), Final Core (Y), инструменты (K), сквозной тест (E); с --full ещё этапы 5…1
-   и проверки окон (≈ 40 минут). --env-only — только шаг 1.
+3. Тесты: книга-кандидат (C), перенос (MG), Final Core (Y), «Приход авто» и разделители заказов (M, S, U), закономерности
+   (I), инструменты (K), сквозной тест (E); с --full ещё этапы 5…1 и проверки окон (≈ час). --env-only — только шаг 1.
 4. PC_CHECK_REPORT.md, pc_check.json и архив <папка>.tar.gz (отчёты и журналы тестов, без книг) — прислать разработчику.
 
 Код выхода: 0 — всё прошло; 1 — есть провалы тестов или ошибки среды; 2 — проверка не запустилась.
@@ -39,12 +39,15 @@ TESTED_LO = ("24.2", "26.2")
 QUICK = [("candidate", "tests/run_candidate.py", "Книга-кандидат (C)", False),
          ("migration", "tests/run_migration.py", "Перенос (MG)", False),
          ("final_core", "tests/run_final_core.py", "Final Core (Y)", False),
+         ("m6", "tests/run_m6.py", "Приход авто, разделители заказов, обновление 0.6 (M, S, U)", False),
+         ("insights", "tests/run_insights.py", "Закономерности (I)", False),
          ("toolbox", "tests/run_toolbox.py", "Инструменты (K)", False),
          ("e2e", "tests/run_e2e.py", "Сквозной тест (E)", False),
          ("pc_tools", "tests/run_pc_tools.py", "Пакет проверки ПК и принтера (P)", False)]
 FULL = [("phase5", "tests/run_phase5.py", "Этап 5 (X)", False), ("phase4", "tests/run_phase4.py", "Этап 4 (W)", False),
         ("phase3", "tests/run_phase3.py", "Этап 3 (R)", False), ("phase2", "tests/run_phase2.py", "Этап 2 (V)", False),
         ("phase1", "tests/run_phase1.py", "Этап 1 (T)", False),
+        ("gui_m6", "tests/gui_m6.py", "Окна: M6 («Приход авто», «Заказы»)", True),
         ("gui_candidate", "tests/gui_candidate.py", "Окна: кандидат", True), ("gui_final_core", "tests/gui_final_core.py", "Окна: Final Core", True),
         ("gui_phase5", "tests/gui_phase5.py", "Окна: этап 5", True), ("gui_phase4", "tests/gui_phase4.py", "Окна: этап 4", True),
         ("gui_phase3", "tests/gui_phase3.py", "Окна: этап 3", True), ("gui_phase2", "tests/gui_phase2.py", "Окна: этап 2", True)]
@@ -273,7 +276,7 @@ def pack(out):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="проверка складского ПК перед вводом WMS в работу")
-    ap.add_argument("--full", action="store_true", help="ещё этапы 5…1 и проверки окон (≈ 40 минут)")
+    ap.add_argument("--full", action="store_true", help="ещё этапы 5…1 и проверки окон (≈ час)")
     ap.add_argument("--env-only", action="store_true", help="только проверка среды (секунды)")
     ap.add_argument("--out", help="папка результатов (по умолчанию pc_check_results/<время>)")
     ap.add_argument("--display", help="готовый дисплей X для компиляции и окон (по умолчанию — свой Xvfb)")

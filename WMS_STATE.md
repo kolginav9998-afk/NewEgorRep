@@ -1,21 +1,21 @@
 # WMS_STATE — состояние проекта
 
-**Обновлено:** 27.09.2026, идёт **«FINAL WMS MARATHON»** (`CLAUDE_TASK.md`). Контрольная точка **M5 «Final Release preparation»** — документация кладовщика, финальный end-to-end, пакет проверки складского ПК и принтера (`CLAUDE_REPORT_FINAL_RELEASE.md`); M4 «Toolbox» — `a041973`; M3 — `21f4bcb`; M2 — `8f4be2c` (ядро feature-frozen). **Проект не завершён:** нужны проверка на складском ПК с принтером и настоящий файл остатков (`CLAUDE_REPORT_FINAL_RELEASE.md` §6). Правила П-1…П-35 — на утверждении (`CLAUDE_REPORT_FINAL_CORE.md` §9, `CLAUDE_REPORT_MIGRATION_CANDIDATE.md` §4, `CLAUDE_REPORT_TOOLBOX.md` §4, `CLAUDE_REPORT_FINAL_RELEASE.md` §7). Компактное техническое состояние — `FINAL_HANDOFF.md`.
+**Обновлено:** 27.09.2026. Задание **«M6 PRIME»** (`CLAUDE_TASK.md`) выполнено — **выпуск 0.7.0**: журнал машин «Приход авто», блоки заказов, аналитика с закономерностями, «Контроль дня», обновление книги 0.6.0 на месте (`CLAUDE_REPORT_M6_PRIME.md`). Прежнее задание «FINAL WMS MARATHON» — M1…M5 (`bff146e` … `939929a`). **Проект не завершён:** нужны проверка на складском ПК с принтером и настоящий файл остатков (`CLAUDE_REPORT_FINAL_RELEASE.md` §6). Правила П-1…П-48 — на утверждении (`CLAUDE_REPORT_FINAL_CORE.md` §9, `CLAUDE_REPORT_MIGRATION_CANDIDATE.md` §4, `CLAUDE_REPORT_TOOLBOX.md` §4, `CLAUDE_REPORT_FINAL_RELEASE.md` §7, `CLAUDE_REPORT_M6_PRIME.md` §12). Компактное техническое состояние — `FINAL_HANDOFF.md`.
 
 ## Версии и документы
 
 | Что | Где |
 |---|---|
 | Спецификация | **v0.3** — `WMS_MASTER_SPEC.md`, дополнена решениями D-039…D-044 (§9, §16, §20, §21), D-045…D-059 (§5, §6, §21, §23, §31), D-060…D-070 (§6, §9, §11, §14, §21, §23, §31) и D-071…D-088 (§7, §8, §31). Прежняя v0.1 — `docs/history/WMS_MASTER_SPEC_v0.1.md` |
-| Решения | `WMS_DECISIONS.md`: D-001…D-088 (D-071…D-088 — приёмка этапа 5; D-081, D-087 — в редакции пользователя). На утверждении: П-1…П-12 (Final Core, `CLAUDE_REPORT_FINAL_CORE.md` §9), П-13…П-20 (перенос и кандидат, `CLAUDE_REPORT_MIGRATION_CANDIDATE.md` §4), П-21…П-30 (инструменты, `CLAUDE_REPORT_TOOLBOX.md` §4), П-31…П-35 (выпуск, `CLAUDE_REPORT_FINAL_RELEASE.md` §7) |
-| Текущее задание | `CLAUDE_TASK.md` — «FINAL WMS MARATHON — ОТ PHASE 5 ДО PRODUCTION 1.0» (выполняется; milestone M1…M5). Прежние: Phase 5 — `docs/history/CLAUDE_TASK_CORE_PHASE5.md`, Phase 4 — `docs/history/CLAUDE_TASK_CORE_PHASE4.md`, Phase 3 — `docs/history/CLAUDE_TASK_CORE_PHASE3.md`, Phase 2 — `docs/history/CLAUDE_TASK_CORE_PHASE2.md`, Phase 1 — `docs/history/CLAUDE_TASK_CORE_PHASE1.md` |
+| Решения | `WMS_DECISIONS.md`: D-001…D-088 (D-071…D-088 — приёмка этапа 5; D-081, D-087 — в редакции пользователя). На утверждении: П-1…П-12 (Final Core, `CLAUDE_REPORT_FINAL_CORE.md` §9), П-13…П-20 (перенос и кандидат, `CLAUDE_REPORT_MIGRATION_CANDIDATE.md` §4), П-21…П-30 (инструменты, `CLAUDE_REPORT_TOOLBOX.md` §4), П-31…П-35 (выпуск, `CLAUDE_REPORT_FINAL_RELEASE.md` §7), П-36…П-48 (M6, `CLAUDE_REPORT_M6_PRIME.md` §12) |
+| Текущее задание | `CLAUDE_TASK.md` — «M6 PRIME — TRANSPORT + ANALYTICS/INSIGHTS + FINAL PRODUCT POLISH» (выполнено, выпуск 0.7.0). Прежние: «FINAL WMS MARATHON» — `docs/history/CLAUDE_TASK_FINAL_MARATHON.md`, Phase 5 — `docs/history/CLAUDE_TASK_CORE_PHASE5.md`, Phase 4 — `docs/history/CLAUDE_TASK_CORE_PHASE4.md`, Phase 3 — `docs/history/CLAUDE_TASK_CORE_PHASE3.md`, Phase 2 — `docs/history/CLAUDE_TASK_CORE_PHASE2.md`, Phase 1 — `docs/history/CLAUDE_TASK_CORE_PHASE1.md` |
 | Техническое состояние | `FINAL_HANDOFF.md` — листы и колонки, служебные таблицы, счётчики, операции журнала, инварианты, решения, команды тестов, план марафона |
-| Отчёты этапов | `CLAUDE_REPORT_MIGRATION_CANDIDATE.md` (M3 перенос и кандидат), `CLAUDE_REPORT_FINAL_CORE.md` (M2 Final Core), `CLAUDE_REPORT_CORE_PHASE5_SPECIAL_RECEIPTS.md` (этап 5, принят), `CLAUDE_REPORT_CORE_PHASE4_RETURNS.md` (этап 4), `CLAUDE_REPORT_CORE_PHASE3_RECEIPTS.md` (этап 3), `CLAUDE_REPORT_CORE_PHASE2_ISSUES.md` (этап 2), `CLAUDE_REPORT_CORE_PHASE1.md` (этап 1) |
+| Отчёты этапов | `CLAUDE_REPORT_M6_PRIME.md` (M6, выпуск 0.7.0), `CLAUDE_REPORT_FINAL_RELEASE.md` (M5 выпуск), `CLAUDE_REPORT_TOOLBOX.md` (M4 инструменты), `CLAUDE_REPORT_MIGRATION_CANDIDATE.md` (M3 перенос и кандидат), `CLAUDE_REPORT_FINAL_CORE.md` (M2 Final Core), `CLAUDE_REPORT_CORE_PHASE5_SPECIAL_RECEIPTS.md` (этап 5, принят), `CLAUDE_REPORT_CORE_PHASE4_RETURNS.md` (этап 4), `CLAUDE_REPORT_CORE_PHASE3_RECEIPTS.md` (этап 3), `CLAUDE_REPORT_CORE_PHASE2_ISSUES.md` (этап 2), `CLAUDE_REPORT_CORE_PHASE1.md` (этап 1) |
 | Результаты тестов | `TEST_REPORT.md` |
 | История ревью | `docs/reviews/CLAUDE_REPORT_ARCHITECTURE.md` (ревью v0.1), `docs/reviews/CLAUDE_REPORT_P1_P4.md` (прототипы) |
-| Ядро | `0.6.0-final-core` (продукт `0.6.0`), схема `_SYS` — **`WMS-SYS-3`** (+ `NEXT_ADJ`); книги этапов 1–5 (`WMS-SYS-1`, `WMS-SYS-2`) ядро не открывает — перенос импортёром |
-| Контракт с инструментами | `docs/EXPORT_CONTRACT.md` — снимок `WMS-SNAPSHOT-1`, пакет `WMS-BATCH-1` |
-| Выпуск | `tools/build_release.py` → `WMS_PROD_CANDIDATE.ods` + `docs/RELEASE_NOTES.md`, `docs/BACKUP_RECOVERY.md`, инструменты переноса, манифест SHA-256 (книга в Git не хранится, D-009) |
+| Ядро | `0.7.0-transport` (продукт `0.7.0`), схема `_SYS` — **`WMS-SYS-4`** (+ `NEXT_CAR`); книга 0.6.0 (`WMS-SYS-3`) обновляется на месте `tools/upgrade.py`; книги этапов 1–5 (`WMS-SYS-1`, `WMS-SYS-2`) — только перенос импортёром |
+| Контракт с инструментами | `docs/EXPORT_CONTRACT.md` — снимок `WMS-SNAPSHOT-1` версии **1.1** (визиты машин), пакет `WMS-BATCH-1`; WMS_TOOLBOX `1.1.0` читает снимки 1.0 и 1.1 |
+| Выпуск | `tools/build_release.py ПАПКА --zip` → `WMS_PROD_CANDIDATE.ods`, WMS_TOOLBOX, документы, инструменты переноса и обновления (`tools/upgrade.py` с модулями `src/basic`), манифест SHA-256, архив `WMS_RELEASE_0.7.0.zip` (книги в Git не хранятся, D-009) |
 | Среда проверки | LibreOffice 24.2.7 (Linux, облачный контейнер) |
 
 ## Контрольные точки Git
@@ -27,7 +27,9 @@
 - **Core Phase 4** — коммит `17774f98a70b12644b7637a2e5df02d34c83eb74` в той же ветке поверх `0125af3`; обычный push, без force; принят пользователем окончательно — **контрольная точка Core Phase 5**.
 - **Core Phase 5** — принят пользователем (D-071…D-088); commit `bff146e` (M1) в той же ветке поверх `17774f9`, обычный push, без force.
 - **M2 Final Core** — commit `8f4be2c` в той же ветке поверх `bff146e`, обычный push, без force.
-- **M3 Migration + Production Candidate** — commit контрольной точки в той же ветке поверх `8f4be2c`, обычный push, без force.
+- **M3 Migration + Production Candidate** — commit `21f4bcb` в той же ветке поверх `8f4be2c`, обычный push, без force.
+- **M4 Toolbox** — commit `a041973`; **M5 Final Release preparation** (выпуск 0.6.0) — commit `939929a`; оба в той же ветке, обычный push.
+- **M6 PRIME** (выпуск 0.7.0) — один commit в той же ветке поверх `939929a`, обычный push, без force.
 - Новых PR и веток Claude не создавал, `main` не менял и не сливал, force push не было.
 
 ## Что реализовано
@@ -74,6 +76,12 @@
 - Пакет проверки складского ПК: `tools/pc_check.py` (среда, компиляция, наборы тестов, отчёт и архив), `tools/printer_check.py` (CUPS, TSPL, PDF тестовых этикеток); тесты пакета — `tests/run_pc_tools.py`.
 - Копия на носитель включает книги инструментов и акты (П-33).
 
+**M6 PRIME — выпуск 0.7.0** (`CLAUDE_REPORT_M6_PRIME.md`; П-36…П-48 — на утверждении):
+- **«Приход авто»** — журнал машин, остатки не меняет: две ячейки (марка/госномер, поставщик) и ПРИЕХАЛ / УЕХАЛ, остальное пишет WMS; панель закреплена; показатели и порог долгой стоянки; «Найти», «Сегодня», «Все», «Исправить», «Отменить визит». Операции `CAR_ARRIVE`, `CAR_DEPART`, `CAR_FIX`, `CAR_CANCEL` через `ApplyOperation` и журнал; `_CAR`, `NEXT_CAR`; без просмотра истории на каждом нажатии.
+- **Блоки заказов** на «Заказах»: линия перед строкой с № позиции 1 (условное форматирование), «Ещё поступление» — под своей позицией, метка AC.
+- **Снимок 1.1** (`cars.csv`), инструменты: Analytics Prime (транспорт, графики, Pattern Engine `insights/wms_insights.py`), Manager Prime («Сегодня / Неделя / Месяц», отчёт руководителю ODT/PDF, «Контроль дня», «Что изменилось сегодня»), Search (поставщик, машины), Doctor (визиты, контракт, комплект, пакеты, копии, лишние файлы), Reconcile (группы, словарь), Labels (подбор, предпросмотр, повторная печать), «Все инструменты».
+- **«Главная»** — переходы на рабочие листы. **`tools/upgrade.py`** — обновление книги 0.6.0 на месте, всё или ничего.
+
 **M4 — WMS_TOOLBOX** (`CLAUDE_REPORT_TOOLBOX.md`, `docs/TOOLBOX.md`; П-21…П-30 — на утверждении):
 - 9 книг инструментов (INVENTORY, ANALYTICS, MANAGER, SEARCH, DOCTOR, LABELS, DOCS, ARCHIVE, IMPORTER), скрипты RECONCILE, BACKUP, HEALTHCHECK, TSPL, launcher `WMS_TOOLBOX.ods`.
 - Инструменты читают только снимок (проверка SHA-256) и никогда не открывают рабочую книгу; изменения — только пакетами, которые проводит WMS.
@@ -83,6 +91,7 @@
 
 ## Что работает
 
+- **M6 (итоговый полный набор пакетом проверки ПК, `TEST_REPORT.md`):** один прогон `tools/pc_check.py --full` на одном коде (`b3b71687d5ef7387`): компиляция WMS и книг инструментов — OK; кандидат 15, перенос 20, Final Core 83, «Приход авто» / блоки заказов / обновление 0.6 — 89, закономерности 28, инструменты 74, end-to-end 12, пакет проверки 6, этапы 5…1 — 156 / 169 / 148 / 77 / 80 PASS; окна: M6 13, кандидат 4, Final Core 8, этапы 16 / 15 / 10 / 7; всего **1032 PASS, 0 FAIL, 0 SKIP**. «Приход авто» на 30 000 визитов: ПРИЕХАЛ ≤ 0,08 с, УЕХАЛ ≤ 0,04 с, открытие книги 2,6 с.
 - **M5 (итоговый полный набор пакетом проверки ПК, `TEST_REPORT.md`):** один прогон `tools/pc_check.py --full` на одном коде: компиляция WMS и книг инструментов — OK; кандидат 15, перенос 20, Final Core 83, инструменты 45, end-to-end 10, пакет проверки 6, этапы 5…1 — 156 / 169 / 148 / 77 / 80 PASS; окна 4 / 8 / 16 / 15 / 10 / 7; 0 FAIL, 0 SKIP.
 - **M4 (набор инструментов на одном коде, `a041973`):** `tests/run_toolbox.py` на фикстуре снимка, K01–K13, **45 PASS / 0 FAIL / 0 SKIP**; сборка и компиляция всех книг инструментов — OK; ядро не менялось.
 - **M3 (один полный набор на одном коде, `21f4bcb`):** перенос — `tests/run_migration.py`, MG01–MG07, **20 PASS**; кандидат — `tests/run_candidate.py`, C01–C06, **15 PASS**; Final Core — **83**, этап 5 — **156**, этап 4 — **169**, этап 3 — **148**, этап 2 — **77**, этап 1 — **80** PASS (0 FAIL, 0 SKIP); окна: кандидат — **4 из 4**, Final Core — **8 из 8**, этап 5 — **16 из 16**, этап 4 — **15 из 15**, этап 3 — **10 из 10**, этап 2 — **7 из 7**; компиляция — OK; оракул — без расхождений.
@@ -100,7 +109,9 @@
 
 Полный список — `CLAUDE_REPORT_CORE_PHASE5_SPECIAL_RECEIPTS.md`, раздел 18; решения на утверждение — раздел 21. Главное:
 
-- **Книги этапов 1–5 ядром 0.6.0 не открываются** (схемы `WMS-SYS-1`, `WMS-SYS-2`): работа — с новой книги, данные — переносом.
+- **Книги этапов 1–5 не обновляются** (схемы `WMS-SYS-1`, `WMS-SYS-2`): работа — с новой книги, данные — переносом. Книга 0.6.0 — обновлением `tools/upgrade.py`.
+- **«Приход авто» не связан с приходом товара** (П-36): подсказка об открытых заказах — только информация.
+- **Закономерности** — только при достаточной истории (П-44); на новом складе первые недели будет «Недостаточно данных».
 - **Частичного перемещения и разделения ЕИ нет** (П-2, D-080).
 - **Split иного прихода не реализован**; пересчёта единиц нет.
 - **Не проверено на складском Ubuntu-ПК** (D-036). Нажатие кнопок мышью не автоматизировано.
@@ -110,6 +121,11 @@
 ## Как собрать и проверить (машина разработчика; нужны LibreOffice и Python-UNO)
 
 ```
+python3 tools/pc_check.py --full [--display :99] [--out ПАПКА]      # весь набор одним прогоном (≈ час)
+WMS_TEST_OUT=/tmp/wms_m6 python3 tests/run_m6.py [m01 s02 u01 ...]  # «Приход авто», блоки заказов, обновление 0.6
+WMS_TEST_OUT=/tmp/wms_ins python3 tests/run_insights.py            # Pattern Engine
+WMS_TEST_OUT=/tmp/wms_gm6 python3 tests/gui_m6.py --display :99
+python3 tools/upgrade.py WMS_PROD.ods [--check]                    # книга 0.6.0 → 0.7.0
 python3 tools/build_ods.py WMS.ods                   # производственная книга (реестр и справочник пустые)
 python3 tools/build_ods.py WMS_TEST.ods --test       # тестовая книга (+ WmsTestOps, _TST, 200 синтетических ЕИ, 5 получателей)
 Xvfb :99 &  python3 tools/basic_compile_check.py --display :99
@@ -134,8 +150,7 @@ python3 tools/migration_dryrun.py table.csv --book WMS.ods --report dryrun.md
 
 ## Что дальше
 
-План — `CLAUDE_TASK.md` («FINAL WMS MARATHON»), техническое состояние и следующий шаг — `FINAL_HANDOFF.md`:
-1. **M2 Final Core** — готово (`8f4be2c`).
-2. **M3** — эта контрольная точка.
-3. **M4:** `WMS_TOOLBOX/` и `WMS_TOOLBOX.ods`.
-4. **M5:** документация кладовщика, финальный end-to-end, пакет проверки на складском Ubuntu-ПК и принтере; затем — реальный файл остатков для миграции (от пользователя).
+Техническое состояние и следующий шаг — `FINAL_HANDOFF.md`. Программная часть M1…M6 готова; ждём шаги пользователя (`CLAUDE_REPORT_FINAL_RELEASE.md` §6, `CLAUDE_REPORT_M6_PRIME.md` §11):
+1. Проверка складского ПК и принтера — `docs/PC_VALIDATION.md` (теперь с «Приходом авто», закономерностями и обновлением 0.6.0).
+2. Файл остатков для переноса (или обновление уже работающей книги 0.6.0 — `tools/upgrade.py`).
+3. Решения по П-1…П-48.

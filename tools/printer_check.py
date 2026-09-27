@@ -80,9 +80,11 @@ def label_pdf(work, w, h):
         doc.close(True)
     finally:
         o.terminate()
-    if not str(built).startswith("OK") or not str(pdf).startswith("OK:"):
+    # «OK:<путь>.pdf» — and, since WMS_TOOLBOX 1.1.0, «; задание № N в «История печати»» after the path
+    m = re.match(r"OK:(.+?\.pdf)(?:;|$)", str(pdf))
+    if not str(built).startswith("OK") or not m:
         raise RuntimeError(f"этикетки не построены: {built}; {pdf}")
-    return pdf[3:]
+    return m.group(1)
 
 
 def ask(answer):

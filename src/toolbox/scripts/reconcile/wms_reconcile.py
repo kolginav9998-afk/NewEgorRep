@@ -22,11 +22,21 @@ old name (or types an EI in «ЕИ» of a row «нет кандидатов» an
 the mapping: every old name — its confirmed EI (checked against the snapshot: it exists, its receipt is not cancelled),
 «без решения» (nothing confirmed) or a problem («подтверждено несколько ЕИ», «ЕИ нет в снимке»). The mapping is a
 document for a person too: a decision becomes a WMS operation only by a person (an inventory correction, a move).
+
+Groups (M6 PRIME §9): the old names that are the same after the normalization form a group (column «группа»); a name that
+differs only a little (the same sizes and codes, similarity ≥ 0.9) joins the group as «почти то же» — the rows of a group
+stand together in the report. In --confirm the decision of a name goes to the unconfirmed names of its group that are the
+same after the normalization (never to a «почти то же» name: that stays a candidate for a person).
+The dictionary (--dict, default <folder of the snapshots>/../WMS_Reconcile/dictionary.csv) keeps every mapping a person
+confirmed (--confirm adds and updates it). A later report proposes the dictionary EI of a name that is the same after the
+normalization as «подтверждено ранее» with «да» already written in «подтвердить» (the person may remove it); a fuzzy match
+is only ever a candidate. --no-dict: neither read nor write the dictionary.
 Exit code: 0 done, 1 --confirm found problems (the mapping is written, the problem rows are marked), 2 the input could not
 be read.
 """
 import argparse
 import csv
+import datetime
 import difflib
 import hashlib
 import io
@@ -183,6 +193,63 @@ def score(old, cand, cw, compact):
     return max(0, min(100, round(s * 100)))
 
 
+def name_key(s):
+    return " ".join(norm(s))
+
+
+def groups(names):
+    """[(line, name, …)] → {index: (group no, kind)}: the same normalized name — one group («то же»); a name with the same
+    numbers and a similarity ≥ 0.9 to the first name of a group joins it («почти то же»)"""
+    out, heads = {}, []                      # heads: (key, numbers, words, group no)
+    for i, old in enumerate(names):
+        k = name_key(old[1])
+        w = norm(old[1])
+        nums = numbers(w)
+        hit = next((h for h in heads if h[0] == k), None)
+        if hit:
+            out[i] = (hit[3], "то же")
+            continue
+        near = None
+        for h in heads:
+            if h[1] == nums and h[2][:1] and w[:1] and h[2][0][:3] == w[0][:3] and difflib.SequenceMatcher(None, h[0], k).ratio() >= 0.9:
+                near = h
+                break
+        if near:
+            out[i] = (near[3], "почти то же")
+        else:
+            heads.append((k, nums, w, len(heads) + 1))
+            out[i] = (len(heads), "")
+    return out
+
+
+def dict_path(a, snap):
+    if a.no_dict:
+        return None
+    if a.dict:
+        return a.dict
+    exp = a.export or os.path.dirname(os.path.abspath(snap.rstrip("/")))
+    return os.path.join(os.path.dirname(os.path.abspath(exp)), "WMS_Reconcile", "dictionary.csv")
+
+
+def read_dict(path):
+    """key → [key, old name, EI, name, confirmed, source]"""
+    if not path or not os.path.exists(path):
+        return {}
+    rows = list(csv.reader(io.StringIO(read_text(path)), delimiter=";"))
+    return {r[0]: (r + [""] * len(DICT_HEAD))[:len(DICT_HEAD)] for r in rows[1:] if r and r[0]}
+
+
+def write_dict(path, d):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".part"
+    with open(tmp, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.writer(f, delimiter=";", lineterminator="\n")
+        w.writerow(DICT_HEAD)
+        for k in sorted(d):
+            w.writerow(d[k])
+    os.replace(tmp, path)
+
+
 def reconcile(names, stock, top=5):
     index = {}
     words, compacts = [], []
@@ -219,7 +286,9 @@ def reconcile(names, stock, top=5):
 
 
 HEAD = ["строка", "старое название", "вывод", "место кандидата", "ЕИ", "наименование", "артикул", "остаток", "место", "уверенность",
-        "способ", "подтвердить"]
+        "способ", "подтвердить", "группа", "в группе"]
+NBASE = 12                  # the columns a report of WMS_TOOLBOX 1.0 had (--confirm reads those too)
+DICT_HEAD = ["ключ", "старое название", "ЕИ", "наименование", "подтверждено", "источник"]
 YES = ("да", "+", "1", "x", "х", "yes")
 
 
@@ -265,7 +334,41 @@ def confirm(report, stock):
             else:
                 note = "" if not chosen[0][5].strip() or norm(chosen[0][5]) == norm(c["name"]) else f"в отчёте «{chosen[0][5].strip()}»"
                 out.append((key[0], key[1], "подтверждено", e, c, note))
-    return out, bad
+    # the same name after the normalization (one group «то же»): the decision goes to its unconfirmed names; different
+    # EIs confirmed for the same name — a problem of each of them
+    by_key = {}
+    for x in out:
+        if x[2] == "подтверждено":
+            by_key.setdefault(name_key(x[1]), []).append(x)
+    res = []
+    for x in out:
+        same = by_key.get(name_key(x[1]), [])
+        eis = {y[3] for y in same}
+        if len(eis) > 1:
+            bad += 1
+            res.append((x[0], x[1], "ошибка", x[3], None, "одинаковые названия подтверждены разными ЕИ: " + ", ".join(sorted(eis))))
+        elif x[2] == "без решения" and same:
+            y = same[0]
+            res.append((x[0], x[1], "подтверждено", y[3], y[4], f"как «{y[1]}» (то же название, строка {y[0]})"))
+        else:
+            res.append(x)
+    return res, bad
+
+
+def apply_dict(results, stock, dic):
+    """a name whose normalized form is in the dictionary with an EI of the snapshot: that EI first, «подтверждено ранее»"""
+    by_ei = {c["ei"]: c for c in stock}
+    out, used = [], 0
+    for old, verdict, cands in results:
+        hit = dic.get(name_key(old[1]))
+        c = by_ei.get(hit[2]) if hit else None
+        if c is None:
+            out.append((old, verdict, cands, ""))
+            continue
+        used += 1
+        rest = [(sc, x) for sc, x in cands if x["ei"] != c["ei"]][:4]
+        out.append((old, "подтверждено ранее", [(100, c)] + rest, f"словарь (подтверждено {hit[4]})"))
+    return out, used
 
 
 def main(argv=None):
@@ -277,6 +380,8 @@ def main(argv=None):
     ap.add_argument("--out")
     ap.add_argument("--top", type=int, default=5)
     ap.add_argument("--confirm", metavar="REPORT", help="отчёт сверки с отметками «да» → соответствие старых названий и ЕИ")
+    ap.add_argument("--dict", help="словарь подтверждённых соответствий (по умолчанию ../WMS_Reconcile/dictionary.csv рядом с папкой снимков)")
+    ap.add_argument("--no-dict", action="store_true", help="не читать и не пополнять словарь")
     a = ap.parse_args(argv)
     if bool(a.names) == bool(a.confirm):
         ap.error("нужен файл названий или --confirm ОТЧЁТ")
@@ -284,6 +389,8 @@ def main(argv=None):
         snap = a.snapshot or latest_snapshot(a.export)
         verify_snapshot(snap)
         stock = read_stock(snap)
+        dpath = dict_path(a, snap)
+        dic = read_dict(dpath)
         if a.confirm:
             res, bad = confirm(a.confirm, stock)
         else:
@@ -294,27 +401,64 @@ def main(argv=None):
     out = io.StringIO()
     w = csv.writer(out, delimiter=";", lineterminator="\n")
     counts = {}
+    extra = ""
     if a.confirm:
         w.writerow(["строка", "старое название", "решение", "ЕИ", "наименование", "артикул", "единица", "остаток", "место", "примечание"])
         for line, old, dec, e, c, note in res:
             counts[dec] = counts.get(dec, 0) + 1
             w.writerow([line, old, dec, e] + ([c["name"], c["article"], c["unit"], c["qty"], c["place"]] if c else [""] * 5) + [note])
+        if dpath:
+            added = changed = 0
+            today = datetime.date.today().isoformat()
+            for line, old, dec, e, c, note in res:
+                if dec != "подтверждено":
+                    continue
+                k = name_key(old)
+                prev = dic.get(k)
+                if prev and prev[2] == e:
+                    continue
+                changed += bool(prev)
+                added += not prev
+                dic[k] = [k, old, e, c["name"], today, os.path.basename(a.confirm)]
+            if added or changed:
+                try:
+                    write_dict(dpath, dic)
+                except OSError as ex:
+                    print(f"ОШИБКА: словарь не записан: {ex}", file=sys.stderr)
+                    return 2
+            extra = f"; словарь: добавлено {added}, изменено {changed}, всего {len(dic)}"
     else:
         res = reconcile(names, stock, a.top)
+        used = 0
+        if dic:
+            res, used = apply_dict(res, stock, dic)
+        else:
+            res = [(old, verdict, cands, "") for old, verdict, cands in res]
+        grp = groups([r[0] for r in res])
+        size = {}
+        for g, kind in grp.values():
+            size[g] = size.get(g, 0) + 1
+        order = sorted(range(len(res)), key=lambda i: (grp[i][0], i))
         w.writerow(HEAD)
-        for old, verdict, cands in res:
+        for i in order:
+            old, verdict, cands, how = res[i]
+            g, kind = grp[i]
+            gcol = [f"Г{g}" + (f" ({kind})" if kind else ""), size[g]] if size[g] > 1 else ["", ""]
             counts[verdict] = counts.get(verdict, 0) + 1
             if not cands:
-                w.writerow([old[0], old[1], verdict, "", "", "", "", "", "", "", "", ""])
+                w.writerow([old[0], old[1], verdict, "", "", "", "", "", "", "", "", ""] + gcol)
             for rank, (sc, c) in enumerate(cands, start=1):
+                fromdict = how and rank == 1
                 w.writerow([old[0], old[1], verdict if rank == 1 else "", rank, c["ei"], c["name"], c["article"], c["qty"], c["place"], sc,
-                            method(old, c), ""])
+                            how if fromdict else method(old, c), "да" if fromdict else ""] + gcol)
+        ng = sum(1 for g, n in size.items() if n > 1)
+        extra = (f"; групп одинаковых / похожих названий {ng}" if ng else "") + (f"; из словаря {used}" if used else "")
     text = out.getvalue()
     if a.out:
         open(a.out, "w", encoding="utf-8-sig", newline="").write(text)
     summary = ", ".join(f"{k}: {v}" for k, v in sorted(counts.items()))
     what = "соответствие" if a.confirm else "отчёт"
-    print(f"названий {len(res)}; {summary}; снимок {os.path.basename(snap.rstrip('/'))}" + (f"; {what} {a.out}" if a.out else ""))
+    print(f"названий {len(res)}; {summary}; снимок {os.path.basename(snap.rstrip('/'))}" + extra + (f"; {what} {a.out}" if a.out else ""))
     if not a.out:
         print(text)
     return 1 if a.confirm and bad else 0

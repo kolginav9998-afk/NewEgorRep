@@ -1,23 +1,26 @@
 key;value
 format;WMS-SNAPSHOT-1
-product_version;0.6.0
-core_version;0.6.0-final-core
-schema;WMS-SYS-3
-instance_id;FE4C1B39BF2C9F9B
+product_version;0.7.0
+core_version;0.7.0-transport
+schema;WMS-SYS-4
+instance_id;3A907DA3AFE9B645
 mode;TEST
-created;2026-09-27T04:03:56
+created;2026-09-27T09:38:28
 book;WMS.ods
-last_seq;25
-journal_pos;WMS_journal_2026-09.csv|36184|25
+last_seq;40
+journal_pos;WMS_journal_2026-09.csv|53461|40
 next_ei;209
 next_issue;10
 next_return;3
 next_line;7
 next_adj;5
+next_car;9
+contract;1.1
 book_modified;0
 sheet;Главная;1;1
 sheet;Заказы;1;1
 sheet;Иной приход;1;1
+sheet;Приход авто;1;1
 sheet;Выдачи;1;1
 sheet;Возврат;1;1
 sheet;Корректировки;1;1
@@ -31,6 +34,7 @@ sheet;_ART;1;0
 sheet;_RET;1;0
 sheet;_ISS;1;0
 sheet;_ADJ;1;0
+sheet;_CAR;1;0
 sheet;_IDX;1;0
 sheet;_SYS;1;0
 sheet;_TST;1;1
@@ -41,6 +45,7 @@ file;special.csv;6;1488;264b1fece9a3c4dbf55b47053023ea6c60f70db74f6dcfce9d957207
 file;issues.csv;9;1601;fea9810890727fe6d796b28cc6d8e96b3632cf22dc90328c40de348a16a13ce3
 file;returns.csv;2;414;62bb1cd61faf607fc67e7f028de41db63bfd5bbf8c37bb0176a10ed63d7f9f41
 file;adjustments.csv;4;799;cec80d122f8e3224fb2213d1e463ee011cb8f26f48c3164c18b533f556960cd4
+file;cars.csv;8;2937;eca5244bfbc9084aa9e2da0694c5d66a675bec2a4502b3b146373feeae143ebc
 file;recipients.csv;5;203;b6b0d15db04d969ce7008e5a7a243c1f0a36784955751c481b253b18f27406d8
 file;service/_ORD.csv;3;571;a18260eb2ee5c9333cc305a72db35f11953f0c24dd37ef3e3f1a37a75e3ff5db
 file;service/_RCV.csv;203;2249;a1b9bdc08795b87f038d486a7533a973af598341c710b74eb046151dac2a1105
@@ -49,5 +54,6 @@ file;service/_ART.csv;1;73;87609830dd7182900c1939f518b86f522d3a3c6fb99120ca75d83
 file;service/_RET.csv;2;166;8172e0292a6c6fdfa62743b7a8c7e48ea505181f9104097f3e80a6ab8a878392
 file;service/_ISS.csv;3;106;f76d42b0056e568f31ca589d80dd23ab4c4e43cdf388e15e3cb2cb274c973417
 file;service/_ADJ.csv;4;432;f0a578bca3a71c9115a00a47cf3317e58d65a84bd5f5894ab141896e1fd96de2
-file;service/_SYS.csv;25;600;93df1a08cf96d28bacd15138d3cdfe77c6912926937d4914d351dba3d20cf303
-file;journal/WMS_journal_2026-09.csv;-1;36184;c5b1d7078cc5ff9f95c8b0e9099f0a61d7f86df3e7b9af64f08eab85062e009d
+file;service/_CAR.csv;8;1833;439309703ff05fc68ea14522a9630ec7cd15dbd33112700891f5ec77a12bbaf8
+file;service/_SYS.csv;26;613;f2b8435d6a4746b927a9784ac14251abbedabe41289bc38193cdbb89d20443de
+file;journal/WMS_journal_2026-09.csv;-1;53461;b7599fc090bf9b99d30f2ec7d19cfb1d992c3cdf30e220481f2590424fefdefa

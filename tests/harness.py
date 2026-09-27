@@ -4,6 +4,7 @@ import glob
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -444,6 +445,29 @@ class Session:
 
 def journal_files(jdir):
     return sorted(glob.glob(os.path.join(jdir, "WMS_journal_*.csv")))
+
+
+def wms_versions():
+    """WMS_PRODUCT_VERSION, WMS_CORE_VERSION, WMS_SYS_SCHEMA of the sources (src/basic/WmsConfig.bas) — what a book built now carries"""
+    import re
+    txt = open(os.path.join(ROOT, "src", "basic", "WmsConfig.bas"), encoding="utf-8").read()
+    return {k: re.search(rf'Public Const {k} = "([^"]+)"', txt).group(1) for k in ("WMS_PRODUCT_VERSION", "WMS_CORE_VERSION", "WMS_SYS_SCHEMA")}
+
+
+def git_sources(commit, dest, parts=("tools", "src", "tests", "docs")):
+    """the sources of an earlier release (git archive of its commit) extracted into dest: "" when done, otherwise why not —
+    sources without the history of git (a ZIP of GitHub, a shallow clone) cannot build an earlier release"""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    try:
+        r = subprocess.run(["git", "-C", root, "archive", commit] + list(parts), capture_output=True)
+    except OSError as e:
+        return f"нет git ({e}) — книгу выпуска {commit} не собрать"
+    if r.returncode != 0:
+        return (f"в исходниках нет истории git с выпуском {commit} (скачаны ZIP или неполный клон) — книгу прежнего выпуска не собрать: "
+                + r.stderr.decode("utf-8", "replace").strip()[:160])
+    os.makedirs(dest, exist_ok=True)
+    subprocess.run(["tar", "-x", "-C", dest], input=r.stdout, check=True)
+    return ""
 
 
 class Results:

@@ -23,10 +23,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "tools"))
-from harness import OUT, Session, Results, new_wms  # noqa: E402
+from harness import OUT, Session, Results, new_wms, wms_versions  # noqa: E402
 import build_release  # noqa: E402
 
 R = Results()
+V = wms_versions()
 CASES = []
 REL = os.path.join(OUT, "release")
 BOOK = "WMS_PROD_CANDIDATE.ods"
@@ -82,13 +83,15 @@ def c01_release_folder():
                      if n != "RELEASE_MANIFEST.csv" and "__pycache__" not in b_)
     need = [BOOK] + [f"docs/{d}" for d in build_release.DOCS] + [f"tools/{t}" for t in build_release.TOOLS + build_release.ORACLES] + \
         [f"WMS_TOOLBOX/{b_}.ods" for b_ in ("WMS_TOOLBOX", "WMS_INVENTORY", "WMS_ANALYTICS", "WMS_MANAGER", "WMS_SEARCH", "WMS_DOCTOR",
-                                             "WMS_LABELS", "WMS_DOCS", "WMS_ARCHIVE", "WMS_IMPORTER")]
+                                             "WMS_LABELS", "WMS_DOCS", "WMS_ARCHIVE", "WMS_IMPORTER")] + \
+        [f"src/basic/{f}" for f in sorted(os.listdir(os.path.join(ROOT, "src", "basic"))) if f.endswith(".bas")]
     R.add(c, "папка выпуска: книга WMS_PROD_CANDIDATE.ods, WMS_TOOLBOX (9 инструментов, launcher, скрипты), docs (руководство кладовщика, "
-             "примечания к выпуску, резервные копии и восстановление, контракт, инструменты, проверка ПК), tools (перенос и его оракул), "
-             "RELEASE_MANIFEST.csv — версии как в исходниках; в манифесте каждый файл папки, размер и SHA-256 совпадают",
+             "примечания к выпуску, резервные копии и восстановление, контракт, инструменты, проверка ПК), tools (перенос и его оракул, "
+             "обновление 0.6 → 0.7) и модули src/basic для обновления, RELEASE_MANIFEST.csv — версии как в исходниках; в манифесте каждый "
+             "файл папки, размер и SHA-256 совпадают",
           sorted(f[0] for f in files) == on_disk and all(n in on_disk for n in need) and not bad and man.get("product")
           and f'WMS_PRODUCT_VERSION = "{man.get("product")}"' in cfg and f'WMS_CORE_VERSION = "{man.get("core")}"' in cfg
-          and man.get("schema") == "WMS-SYS-3",
+          and man.get("schema") == wms_versions()["WMS_SYS_SCHEMA"],
           f"{man}; файлов {len(files)} (на диске {len(on_disk)}); нет {[n for n in need if n not in on_disk]}; не совпали {bad}")
     rc = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "build_release.py"), rel], capture_output=True, text=True).returncode
     R.add(c, "повторная сборка в существующую папку — отказ (выпуск собирается заново)", rc == 2, str(rc))
@@ -117,8 +120,9 @@ def c02_candidate_book():
             btn[form.getByIndex(i).Label] = ev[0].ScriptCode.split("Standard.", 1)[1].split("?")[0] if ev else ""
         R.add(c, "книга-кандидат: режим PROD, первый запуск — «работа разрешена» (рабочий файл зарегистрирован), реестр пуст; на «Главной» — "
                  "версия продукта, ядра и схемы; листы по порядку, последний видимый — «Справка»",
-              st.get("STATE") == "CLEAN" and st.get("REG") == "own" and sys_mode == "PROD" and "версия 0.6.0" in ver and "WMS-SYS-3" in ver
-              and names == ["Главная", "Заказы", "Иной приход", "Выдачи", "Возврат", "Корректировки", "Наличие", "Получатели", "Справка"]
+              st.get("STATE") == "CLEAN" and st.get("REG") == "own" and sys_mode == "PROD" and f"версия {V['WMS_PRODUCT_VERSION']}" in ver
+              and V["WMS_SYS_SCHEMA"] in ver
+              and names == ["Главная", "Заказы", "Иной приход", "Приход авто", "Выдачи", "Возврат", "Корректировки", "Наличие", "Получатели", "Справка"]
               and s.sysv("NEXT_EI") == 1.0, f"{st}; {sys_mode}; «{ver}»; {names}")
         R.add(c, "«Справка»: руководство кладовщика, примечания к выпуску и руководство по резервным копиям и восстановлению (без разметки "
                  "Markdown); лист защищён",
@@ -148,7 +152,7 @@ def c03_status_and_prework():
         st = dict(sec[1:])
         R.add(c, "«Состояние системы»: раздел на «Главной» — версии, состояние, экземпляр, рабочий файл (зарегистрирован), проверенная версия "
                  "LibreOffice, журнал, резервные копии (ежедневная копия первого запуска), размер книги; книга не стала «изменённой»",
-              sec[0][0] == "СОСТОЯНИЕ СИСТЕМЫ" and "0.6.0-final-core" in st.get("WMS", "") and st.get("состояние", "").startswith("✓")
+              sec[0][0] == "СОСТОЯНИЕ СИСТЕМЫ" and V["WMS_CORE_VERSION"] in st.get("WMS", "") and st.get("состояние", "").startswith("✓")
               and "(зарегистрирован)" in st.get("рабочий файл", "") and "проверенная версия" in st.get("LibreOffice", "")
               and "1 шт." in st.get("резервные копии", "") and "строк движений 0" in st.get("размер книги", "") and s.doc.isModified() == mod0,
               f"{sec}")

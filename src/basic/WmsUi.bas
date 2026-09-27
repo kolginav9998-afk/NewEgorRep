@@ -27,7 +27,7 @@ Global gUiFixDate As String
 
 ' filtered WMS ranges whose rows were shown for a save (FiltersStash) and are filtered again after it (FiltersRestore)
 Global gFltN As Integer
-Global gFltName(5) As String
+Global gFltName(6) As String
 
 ' ================================================================ status panel «Главная»
 
@@ -430,6 +430,60 @@ Private Function FixDialog(k As Long, ByRef sEI As String, ByRef sQty As String,
     dlg.dispose()
 End Function
 
+' ================================================================ «Главная»: переходы на рабочие листы (M6 PRIME §11)
+' The sheet is shown with the cursor where the work starts: the two input cells of «Приход авто», the first free row of a
+' sheet of rows (its first input column), the top of «Наличие».
+
+Private Sub GoSheet(sName As String, inCol As Integer)
+    Dim sh As Object, r As Long, ctl As Object
+    WmsInit()
+    On Error GoTo EH
+    If Not gDoc.Sheets.hasByName(sName) Then Exit Sub
+    sh = gDoc.Sheets.getByName(sName)
+    ctl = gDoc.getCurrentController()
+    ctl.setActiveSheet(sh)
+    If sName = SH_CARS Then
+        ctl.select(sh.getCellByPosition(CP_PLATE_COL, CP_IN_ROW))
+    ElseIf inCol >= 0 Then
+        r = WmsOrders.LastRow(sh) + 1
+        If r < 1 Then r = 1
+        If r > MAX_SHEET_ROW Then r = MAX_SHEET_ROW
+        ctl.select(sh.getCellByPosition(inCol, r))
+    Else
+        ctl.select(sh.getCellByPosition(0, 1))
+    End If
+    gUiLastMsg = "OK:" & sName
+EH:
+End Sub
+
+Sub NavOrders(Optional oEvent As Variant)
+    GoSheet(SH_ORDERS, OC_ORDER)
+End Sub
+
+Sub NavSpecial(Optional oEvent As Variant)
+    GoSheet(SH_SPECIAL, XC_TYPE)
+End Sub
+
+Sub NavCars(Optional oEvent As Variant)
+    GoSheet(SH_CARS, CP_PLATE_COL)
+End Sub
+
+Sub NavIssues(Optional oEvent As Variant)
+    GoSheet(SH_ISSUES, IC_EI)
+End Sub
+
+Sub NavReturns(Optional oEvent As Variant)
+    GoSheet(SH_RETURNS, RC_ISSUE)
+End Sub
+
+Sub NavAdjust(Optional oEvent As Variant)
+    GoSheet(SH_ADJUST, AC_KIND)
+End Sub
+
+Sub NavStock(Optional oEvent As Variant)
+    GoSheet(SH_STOCK, -1)
+End Sub
+
 ' ================================================================ test seam (inert unless _SYS MODE = TEST)
 
 Function TestUiAuto(mode As Integer) As String
@@ -477,7 +531,7 @@ End Function
 ' names of the WMS database ranges that currently have filter conditions
 Private Function FilteredRanges() As Variant
     Dim names As Variant, i As Integer, out() As String, n As Integer, db As Object
-    names = Array("WMS_ORDERS", "WMS_SPECIAL", "WMS_ISSUES", "WMS_RETURNS", "WMS_ADJUST", "WMS_STOCK")
+    names = Array("WMS_ORDERS", "WMS_SPECIAL", "WMS_CARS", "WMS_ISSUES", "WMS_RETURNS", "WMS_ADJUST", "WMS_STOCK")
     ReDim out(UBound(names))
     For i = 0 To UBound(names)
         If gDoc.DatabaseRanges.hasByName(names(i)) Then

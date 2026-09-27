@@ -16,7 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools"))
-from harness import new_wms, PROFILES, unique  # noqa: E402
+from harness import new_wms, PROFILES, unique, wms_versions  # noqa: E402
 from wmslo import Office  # noqa: E402
 from gui_phase4 import step, run_msg, RESULTS  # noqa: E402
 
@@ -43,7 +43,7 @@ def main():
         labels = [form.getByIndex(i).Label for i in range(form.getCount())]
         state = main_sh.getCellByPosition(1, 2).getString()
         step("«Главная» рабочей книги: «Работа разрешена», версия рядом с заголовком, кнопки «Состояние системы» и «Проверка перед работой»",
-             state == "Работа разрешена" and ver.startswith("версия 0.6.0") and "Состояние системы" in labels and "Проверка перед работой" in labels,
+             state == "Работа разрешена" and ver.startswith("версия " + wms_versions()["WMS_PRODUCT_VERSION"]) and "Состояние системы" in labels and "Проверка перед работой" in labels,
              f"{state}; «{ver}»; {labels}")
         kids, msg = run_msg(o, ut, doc, "BtnPreWorkCheck", "WmsStatus")
         sec = section(doc)
@@ -55,7 +55,7 @@ def main():
         sec = dict(section(doc)[1:])
         head = section(doc)[0][0]
         step("«Состояние системы»: раздел без окна — версии, рабочий файл (зарегистрирован), LibreOffice, журнал, резервные копии",
-             head == "СОСТОЯНИЕ СИСТЕМЫ" and "0.6.0-final-core" in sec.get("WMS", "") and "(зарегистрирован)" in sec.get("рабочий файл", "")
+             head == "СОСТОЯНИЕ СИСТЕМЫ" and wms_versions()["WMS_CORE_VERSION"] in sec.get("WMS", "") and "(зарегистрирован)" in sec.get("рабочий файл", "")
              and "LibreOffice" in sec and "журнал" in sec and "резервные копии" in sec, f"{head}; {list(sec)}")
         hlp = doc.Sheets.getByName("Справка")
         doc.getCurrentController().setActiveSheet(hlp)

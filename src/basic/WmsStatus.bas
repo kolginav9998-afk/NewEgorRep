@@ -166,6 +166,8 @@ Function SystemStatus() As String
     s = s & L(IIf(age < 0, "WARN", "INFO"), "резервные копии", IIf(age < 0, "нет ни одной — «Резервная копия» на «Главной»", n & " шт.; последняя " & nm _
         & " (" & Format(age, "0.0") & " дн. назад)") & "; папка " & ConvertFromURL(gBDir))
     s = s & L("INFO", "размер книги", SizeMb(gDoc.getURL()) & " МБ; строк движений " & Movements() & " (ориентир — до " & PLANNED_MOVEMENTS & ")")
+    If gDoc.Sheets.hasByName(SH_CAR) Then s = s & L("INFO", "приход авто", "визитов " & (CLng(SysNum(SK_NEXT_CAR)) - 1) & "; на территории сейчас " _
+        & WmsCar.CarsOnSite())
     s = s & L("INFO", "проверено", Format(Now(), "DD.MM.YYYY HH:MM:SS"))
     SystemStatus = s
 End Function
@@ -222,6 +224,11 @@ Function PreWorkCheck() As String
         p & " — сообщите ответственному за WMS: защита не даёт изменить учёт мимо WMS"))
     k = WmsIssue.UnpostedCount()
     If k > 0 Then s = s & L("INFO", "непроведённые", "выдачи: " & k & " строк(и) без № — проверьте перед началом работы")
+    ' M6: a vehicle that stays «на территории» since an earlier day — most likely УЕХАЛ was forgotten
+    If gDoc.Sheets.hasByName(SH_CAR) And gState = "CLEAN" Then
+        k = WmsCar.StaleOpen()
+        If k > 0 Then s = s & L("WARN", "приход авто", "машин на территории с прошлых дней: " & k & " — отметьте выезд (УЕХАЛ) или исправьте время (лист «" & SH_CARS & "»)")
+    End If
     If gDoc.isModified() Then s = s & L("INFO", "сохранение", "есть несохранённые изменения (проведённые операции уже в журнале) — сохраните книгу")
     ln = Split(s, Chr(10))
     For k = 0 To UBound(ln)
@@ -235,7 +242,8 @@ End Function
 ' service sheets of WMS hidden, the structure of the book protected; otherwise what is not (the same rule as WMS_DOCTOR)
 Function Protections() As String
     Dim i As Integer, sh As Object, p As String, svc As String
-    svc = "|" & SH_ORD & "|" & SH_RCV & "|" & SH_SPR & "|" & SH_ART & "|" & SH_RET & "|" & SH_ISS & "|" & SH_ADJ & "|" & SH_IDX & "|" & SYS_SHEET & "|"
+    svc = "|" & SH_ORD & "|" & SH_RCV & "|" & SH_SPR & "|" & SH_ART & "|" & SH_RET & "|" & SH_ISS & "|" & SH_ADJ & "|" & SH_CAR & "|" & SH_IDX & "|" _
+        & SYS_SHEET & "|"
     For i = 0 To gDoc.Sheets.getCount() - 1
         sh = gDoc.Sheets.getByIndex(i)
         If Not sh.isProtected() And sh.Name <> SH_RCPT Then p = p & IIf(p <> "", "; ", "") & "лист «" & sh.Name & "» не защищён"

@@ -78,6 +78,10 @@ Function SheetsProblem() As String
         SheetsProblem = "лист «" & SH_ORDERS & "»: заголовок не совпадает с A:AB спецификации"
         Exit Function
     End If
+    If sh.getCellByPosition(OC_BLOCK, 0).getString() <> ORDER_BLOCK_HEADER Then
+        SheetsProblem = "лист «" & SH_ORDERS & "»: нет служебной колонки AC «" & ORDER_BLOCK_HEADER & "» (книга старой версии — обновите её)"
+        Exit Function
+    End If
     sh = OrdSheet()
     c = sh.getCellByPosition(OD_NEXT_COL, 0)
     If sh.getCellByPosition(OD_ID, 0).getString() <> "OLID" Or sh.getCellByPosition(OD_NEXT_COL - 1, 0).getString() <> "NEXT_OL" _
@@ -95,7 +99,7 @@ Function SheetsProblem() As String
         Exit Function
     End If
     sh = IdxSheet()
-    For i = IX_ECHO To IX_AA_COUNT
+    For i = IX_ECHO To IX_LAST
         If i <> IX_LIST And sh.getCellByPosition(1, i).getType() <> com.sun.star.table.CellContentType.FORMULA Then
             SheetsProblem = "служебный лист " & SH_IDX & " повреждён: нет формулы поиска в строке " & (i + 1)
             Exit Function
@@ -228,12 +232,24 @@ Private Function FaLookup(ixRow As Integer, key As Variant, start As Long) As Do
     Case IX_AA_MATCH, IX_AA_COUNT
         sh = gDoc.Sheets.getByName(SH_ADJUST)
         col = AC_NO
+    Case IX_CO_MATCH, IX_CO_COUNT
+        sh = gDoc.Sheets.getByName(SH_CAR)
+        col = CR_OKEY
+    Case IX_CK_COUNT
+        sh = gDoc.Sheets.getByName(SH_CAR)
+        col = CR_KEY
+    Case IX_CP_MATCH
+        sh = gDoc.Sheets.getByName(SH_CAR)
+        col = CD_PKEY
+    Case IX_CS_MATCH
+        sh = gDoc.Sheets.getByName(SH_CAR)
+        col = CD_SKEY
     Case Else
         sh = RcvSheet()
         col = RV_DUP
     End Select
     If ixRow = IX_V_COUNT Or ixRow = IX_DUP_COUNT Or ixRow = IX_RA_COUNT Or ixRow = IX_XA_COUNT Or ixRow = IX_ART_COUNT Or ixRow = IX_XD_COUNT _
-        Or ixRow = IX_AA_COUNT Then
+        Or ixRow = IX_AA_COUNT Or ixRow = IX_CO_COUNT Or ixRow = IX_CK_COUNT Then
         FaLookup = fa.callFunction("COUNTIF", Array(sh.getCellRangeByPosition(col, 1, col, MAX_SHEET_ROW), key))
         Exit Function
     End If
@@ -312,6 +328,38 @@ End Function
 
 Function CountAdjustNo(n As Long) As Long
     CountAdjustNo = CLng(IdxLookup(IX_AA_COUNT, CDbl(n), 0))
+End Function
+
+' M6: the visit № (= its _CAR row) of the first open visit of the vehicle key after visit start; -1 when none. A key of a
+' vehicle holds only letters and digits (WmsCar.PlateKey); the pattern "?*" (any key) finds the open visits one by one
+Function FindCarOpen(key As String, start As Long) As Long
+    Dim x As Double
+    x = IdxLookup(IX_CO_MATCH, key, start)
+    If x < 1 Then FindCarOpen = -1 Else FindCarOpen = CLng(x)
+End Function
+
+' M6: the number of open visits of the vehicle key ("?*": of all vehicles)
+Function CountCarOpen(key As String) As Long
+    CountCarOpen = CLng(IdxLookup(IX_CO_COUNT, key, 0))
+End Function
+
+' M6: the number of visits (open, closed, cancelled) of the vehicle key
+Function CountCarVisits(key As String) As Long
+    CountCarVisits = CLng(IdxLookup(IX_CK_COUNT, Replace(Replace(Replace(key, "~", "~~"), "*", "~*"), "?", "~?"), 0))
+End Function
+
+' M6: the entry (= _CAR row) of the vehicle key in the dictionary of vehicles; -1 when none
+Function FindCarPlate(key As String) As Long
+    Dim x As Double
+    x = IdxLookup(IX_CP_MATCH, Replace(Replace(Replace(key, "~", "~~"), "*", "~*"), "?", "~?"), 0)
+    If x < 1 Then FindCarPlate = -1 Else FindCarPlate = CLng(x)
+End Function
+
+' M6: the entry (= _CAR row) of the supplier key in the dictionary of suppliers; -1 when none
+Function FindCarSupplier(key As String) As Long
+    Dim x As Double
+    x = IdxLookup(IX_CS_MATCH, Replace(Replace(Replace(key, "~", "~~"), "*", "~*"), "?", "~?"), 0)
+    If x < 1 Then FindCarSupplier = -1 Else FindCarSupplier = CLng(x)
 End Function
 
 ' Phase 5: the _ART row of the first article key equal to key (text, compared as a whole cell, wildcards taken

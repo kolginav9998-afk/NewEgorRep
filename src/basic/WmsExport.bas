@@ -13,6 +13,9 @@
 Option Explicit
 
 Public Const SNAPSHOT_FORMAT = "WMS-SNAPSHOT-1"
+' the minor version of the contract (manifest «contract»): 1.1 (M6) adds cars.csv and service/_CAR.csv — a tool of 1.0 reads
+' the snapshot as before, a tool of 1.1 reads a snapshot of 1.0 as one without vehicle data
+Public Const CONTRACT_VERSION = "1.1"
 Public Const BATCH_FORMAT = "WMS-BATCH-1"
 Public Const EXPORT_DIR = "WMS_Export"
 Public Const BATCH_MAX_ROWS = 5000
@@ -112,7 +115,8 @@ End Function
 ' ================================================================ «Экспорт для инструментов»
 
 ' the tables of the snapshot: sheet, file (without .csv), column keys (| separated; "" — the header row of the book is
-' kept: the service tables), date columns (0-based, comma separated)
+' kept: the service tables), date columns (0-based, comma separated); optional: date-time columns, columns of a duration
+' written in whole minutes, the number of rows above the header of the table (the panel of «Приход авто» is not exported)
 Private Function TableSpecs() As Variant
     TableSpecs = Array( _
         Array(SH_STOCK, "stock", "ei|name|article|unit|qty|place|category|state|source|source_type", ""), _
@@ -127,10 +131,12 @@ Private Function TableSpecs() As Variant
             & "status|note", "7"), _
         Array(SH_ADJUST, "adjustments", "adj_no|kind|ei|name|article|unit|qty|fact|book|place_to|date|reason|place_from|bal_before|" _
             & "bal_after|diff|status|batch|note", "10"), _
+        Array(SH_CARS, "cars", "visit_no|date|vehicle|supplier|arrived|departed|duration_min|status|weekday|month|day_no|control|note|vehicle_key", _
+            "1", "4,5", "6", CAR_HEAD_ROW), _
         Array(SH_RCPT, "recipients", "short|full", ""), _
         Array(SH_ORD, "service/_ORD", "", ""), Array(SH_RCV, "service/_RCV", "", ""), Array(SH_SPR, "service/_SPR", "", "8"), _
         Array(SH_ART, "service/_ART", "", ""), Array(SH_RET, "service/_RET", "", ""), Array(SH_ISS, "service/_ISS", "", ""), _
-        Array(SH_ADJ, "service/_ADJ", "", "10"), Array(SYS_SHEET, "service/_SYS", "", ""))
+        Array(SH_ADJ, "service/_ADJ", "", "10"), Array(SH_CAR, "service/_CAR", "", "6", "4,5"), Array(SYS_SHEET, "service/_SYS", "", ""))
 End Function
 
 Private Function PV(sName As String, v As Variant) As com.sun.star.beans.PropertyValue
@@ -145,7 +151,7 @@ Function ExportSnapshot() As String
     Dim sfa As Object, sBase As String, sName As String, tmp As String, fin As String, specs As Variant, i As Integer, t0 As Long
     Dim files() As String, rows() As Long, nf As Integer, man As String, h As String, nb As Double, k As Integer, jf As Variant
     Dim summary As String, td As Object, sh As Object, loc As New com.sun.star.lang.Locale, nfs As Object, kGen As Long, kDate As Long
-    Dim keys As Variant, dates As Variant, j As Integer, last As Long, lastCol As Long, stage() As String, cur As Object
+    Dim keys As Variant, dates As Variant, j As Integer, last As Long, lastCol As Long, stage() As String, cur As Object, kDT As Long, kMin As Long
     WmsInit()
     If gBusy Then
         ExportSnapshot = "BUSY:операция уже выполняется"
@@ -187,12 +193,20 @@ Function ExportSnapshot() As String
     kGen = nfs.getStandardFormat(com.sun.star.util.NumberFormat.NUMBER, loc)
     kDate = nfs.queryKey("YYYY-MM-DD", loc, False)
     If kDate < 0 Then kDate = nfs.addNew("YYYY-MM-DD", loc)
+    kDT = nfs.queryKey("YYYY-MM-DD HH:MM:SS", loc, False)
+    If kDT < 0 Then kDT = nfs.addNew("YYYY-MM-DD HH:MM:SS", loc)
+    kMin = nfs.queryKey("[M]", loc, False)
+    If kMin < 0 Then kMin = nfs.addNew("[M]", loc)
     For i = 0 To UBound(specs)
         td.Sheets.importSheet(gDoc, specs(i)(0), td.Sheets.getCount())
         sh = td.Sheets.getByIndex(td.Sheets.getCount() - 1)
         If sh.isProtected() Then sh.unprotect(PROTECT_PWD)
         stage(i) = "s" & i
         sh.Name = stage(i)
+        ' the rows above the header of the table (the panel of «Приход авто») are not part of the contract
+        If UBound(specs(i)) >= 6 Then
+            If specs(i)(6) > 0 Then sh.getRows().removeByIndex(0, specs(i)(6))
+        End If
         cur = sh.createCursor()
         cur.gotoEndOfUsedArea(False)
         last = cur.getRangeAddress().EndRow
@@ -209,6 +223,22 @@ Function ExportSnapshot() As String
             For j = 0 To UBound(dates)
                 sh.getCellRangeByPosition(CInt(dates(j)), 1, CInt(dates(j)), IIf(last < 1, 1, last)).NumberFormat = kDate
             Next j
+        End If
+        If UBound(specs(i)) >= 4 Then
+            If specs(i)(4) <> "" Then
+                dates = Split(specs(i)(4), ",")
+                For j = 0 To UBound(dates)
+                    sh.getCellRangeByPosition(CInt(dates(j)), 1, CInt(dates(j)), IIf(last < 1, 1, last)).NumberFormat = kDT
+                Next j
+            End If
+        End If
+        If UBound(specs(i)) >= 5 Then
+            If specs(i)(5) <> "" Then
+                dates = Split(specs(i)(5), ",")
+                For j = 0 To UBound(dates)
+                    sh.getCellRangeByPosition(CInt(dates(j)), 1, CInt(dates(j)), IIf(last < 1, 1, last)).NumberFormat = kMin
+                Next j
+            End If
         End If
         ' a table of the contract has exactly its columns (nothing to the right of them)
         If specs(i)(2) <> "" And cur.getRangeAddress().EndColumn > lastCol Then
@@ -238,7 +268,8 @@ Function ExportSnapshot() As String
         & "mode;" & SysStr(SK_MODE) & Chr(10) & "created;" & TS() & Chr(10) & "book;" & CsvField(ConvertFromURL(gDoc.getURL()), False) & Chr(10) _
         & "last_seq;" & SysStr(SK_LAST_SEQ) & Chr(10) & "journal_pos;" & CsvField(SysStr(SK_JPOS), False) & Chr(10) _
         & "next_ei;" & SysStr(SK_NEXT_EI) & Chr(10) & "next_issue;" & SysStr(SK_NEXT_NO) & Chr(10) & "next_return;" & SysStr(SK_NEXT_RET) & Chr(10) _
-        & "next_line;" & SysStr(SK_NEXT_SPL) & Chr(10) & "next_adj;" & SysStr(SK_NEXT_ADJ) & Chr(10) & "book_modified;" & IIf(gDoc.isModified(), "1", "0") & Chr(10)
+        & "next_line;" & SysStr(SK_NEXT_SPL) & Chr(10) & "next_adj;" & SysStr(SK_NEXT_ADJ) & Chr(10) & "next_car;" & SysStr(SK_NEXT_CAR) & Chr(10) _
+        & "contract;" & CONTRACT_VERSION & Chr(10) & "book_modified;" & IIf(gDoc.isModified(), "1", "0") & Chr(10)
     ' the protections of the book (WMS_DOCTOR): every sheet — protected, visible; the structure of the book
     For i = 0 To gDoc.Sheets.getCount() - 1
         sh = gDoc.Sheets.getByIndex(i)

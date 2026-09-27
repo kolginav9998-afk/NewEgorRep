@@ -12,4 +12,6 @@ Poke no know
 - Примечания к выпуску — [`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md)
 - Состояние проекта — [`WMS_STATE.md`](WMS_STATE.md), техническое состояние — [`FINAL_HANDOFF.md`](FINAL_HANDOFF.md)
 
-Выпуск собирается из исходников: `python3 tools/build_release.py ПАПКА` (нужны LibreOffice и `python3-uno`).
+Текущий выпуск — **0.7.0** (журнал машин «Приход авто», аналитика с закономерностями, «Контроль дня»). Выпуск собирается из исходников: `python3 tools/build_release.py ПАПКА --zip` (нужны LibreOffice и `python3-uno`); книга 0.6.0 обновляется на месте — `tools/upgrade.py` ([`docs/BACKUP_RECOVERY.md`](docs/BACKUP_RECOVERY.md), раздел 7).
+
+- Контракт снимка и пакетов для инструментов — [`docs/EXPORT_CONTRACT.md`](docs/EXPORT_CONTRACT.md)

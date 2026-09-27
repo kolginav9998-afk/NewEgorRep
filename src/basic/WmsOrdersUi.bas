@@ -232,11 +232,17 @@ Sub BtnRcvMore(Optional oEvent As Variant)
         gUiLastMsg = res
         Exit Sub
     End If
-    ' the new row is shown to the user (its new EI in V)
+    ' the new row is shown to the user (its new EI in V); a row inserted inside a filtered range may be hidden by the filter
+    ' (M6 §18: the delivery row stays in the block of its order) — it is shown, the filter itself stays
     a = Split(res, "|")
     If UBound(a) >= 1 Then
         nr = CLng(Val(Mid(a(1), 8)))
         On Error Resume Next
+        If Not sh.getRows().getByIndex(nr - 1).IsVisible Then
+            gDoc.getUndoManager().lock()
+            sh.getRows().getByIndex(nr - 1).IsVisible = True
+            gDoc.getUndoManager().unlock()
+        End If
         gDoc.getCurrentController().select(sh.getCellByPosition(OC_EI, nr - 1))
     End If
 End Sub

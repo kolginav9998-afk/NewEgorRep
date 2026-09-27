@@ -3,14 +3,16 @@
 ' §2 and §14 fixed sheets «Выдачи», «Заказы», «Возврат», «Иной приход» and their service structures.
 Option Explicit
 
-Public Const WMS_CORE_VERSION = "0.6.0-final-core"
+Public Const WMS_CORE_VERSION = "0.7.0-transport"
 ' the product (the release of the whole WMS book and its tools; the snapshot for the tools names it)
-Public Const WMS_PRODUCT_VERSION = "0.6.0"
-' Phase 5 appended the counters of the special receipts (rows 19..24), Final Core the counter of the corrections (row 25);
-' a book of an earlier core has WMS-SYS-1 (Phase 1–4) or WMS-SYS-2 (Phase 5)
-Public Const WMS_SYS_SCHEMA = "WMS-SYS-3"
+Public Const WMS_PRODUCT_VERSION = "0.7.0"
+' Phase 5 appended the counters of the special receipts (rows 19..24), Final Core the counter of the corrections (row 25),
+' M6 the counter of the vehicle visits (row 26); a book of an earlier core has WMS-SYS-1 (Phase 1–4), WMS-SYS-2 (Phase 5)
+' or WMS-SYS-3 (Final Core, release 0.6.0 — tools/upgrade.py brings it to this schema with its data)
+Public Const WMS_SYS_SCHEMA = "WMS-SYS-4"
 Public Const WMS_SYS_SCHEMA_OLD = "WMS-SYS-1"
 Public Const WMS_SYS_SCHEMA_P5 = "WMS-SYS-2"
+Public Const WMS_SYS_SCHEMA_FC = "WMS-SYS-3"
 
 Public Const SYS_SHEET = "_SYS"
 Public Const JOURNAL_DIR = "WMS_Journal"
@@ -50,9 +52,11 @@ Public Const SK_NEXT_PROD = 21
 Public Const SK_NEXT_DET = 22
 Public Const SK_NEXT_OLD = 23
 Public Const SK_NEXT_OTH = 24
-' Final Core (WMS-SYS-3): the № of the corrections (MOVE / WRITE_OFF / INV_ADJ)
+'' Final Core (WMS-SYS-3): the № of the corrections (MOVE / WRITE_OFF / INV_ADJ)
 Public Const SK_NEXT_ADJ = 25
-Public Const SYS_ROWS = 26
+' M6 (WMS-SYS-4): the № of the vehicle visits of «Приход авто»
+Public Const SK_NEXT_CAR = 26
+Public Const SYS_ROWS = 27
 
 ' transaction marker states
 Public Const TX_NONE = "NONE"
@@ -166,6 +170,11 @@ Public Const OC_NOTE = 25
 Public Const OC_DAYS = 26
 Public Const OC_DUP = 27
 Public Const OC_LAST = 27
+' AC — outside the user interface A:AB (hidden, locked, not in the snapshot): the mark «OL<OrderLineID>» of a row created by
+' «Ещё поступление». The visual blocks of the orders (M6 §18) start where the user's numbering of the positions (A)
+' restarts at 1 on a row without this mark; a delivery row stays in the block of its order.
+Public Const OC_BLOCK = 28
+Public Const ORDER_BLOCK_HEADER = "Блок (служебная)"
 
 ' cell protection of a «Заказы» row, one character per column A..AB ("1" = locked). An order row that has no receipt yet:
 ' everything the user enters is open, what WMS fills (V W X Y AB) is locked. A row with a receipt or a cancelled position:
@@ -253,9 +262,17 @@ Public Const IX_ART_MATCH = 16
 Public Const IX_ART_COUNT = 17
 Public Const IX_XD_MATCH = 18
 Public Const IX_XD_COUNT = 19
-' Final Core: «Корректировки».A (the № of a correction)
+'' Final Core: «Корректировки».A (the № of a correction)
 Public Const IX_AA_MATCH = 20
 Public Const IX_AA_COUNT = 21
+' M6: _CAR.I (the key of the vehicle of an open visit) MATCH and COUNTIF, _CAR.B (the key of every visit) COUNTIF, the
+' dictionaries of _CAR: vehicles (O) and suppliers (Q) MATCH
+Public Const IX_CO_MATCH = 22
+Public Const IX_CO_COUNT = 23
+Public Const IX_CK_COUNT = 24
+Public Const IX_CP_MATCH = 25
+Public Const IX_CS_MATCH = 26
+Public Const IX_LAST = 26
 
 ' ---------------------------------------------------------------- Phase 4: returns of issued goods (spec §11, §14, D-004, D-011)
 Public Const SH_RETURNS = "Возврат"
@@ -439,22 +456,102 @@ Public Const AJ_FACT = 9
 Public Const AJ_DATE = 10
 Public Const AJ_LAST = 10
 
+' ---------------------------------------------------------------- M6: «Приход авто» — the journal of vehicles (M6 PRIME §1)
+' Not a receipt of goods: the balances never change. The user types two cells of the panel above the table («Марка /
+' госномер», «Поставщик») and presses ПРИЕХАЛ; at the departure the row of the vehicle is selected and УЕХАЛ pressed.
+' Everything else is written by WMS: one operation CAR_ARRIVE / CAR_DEPART / CAR_FIX / CAR_CANCEL each.
+Public Const SH_CARS = "Приход авто"
+Public Const SH_CAR = "_CAR"
+
+' the panel (rows 0..4, frozen with the header row): the input cells, the hint, the indicators, the threshold setting
+Public Const CP_IN_ROW = 1
+Public Const CP_PLATE_COL = 2
+Public Const CP_SUP_COL = 3
+Public Const CP_HINT_ROW = 2
+Public Const CP_VAL_ROW = 4
+Public Const CP_THR_COL = 11
+' the header of the table and its first data row: visit n is on row CAR_FIRST + n - 1 (dense, like «Наличие»; the rows
+' are written by WMS only — locked, no rows can be inserted, sorting a protected sheet is refused)
+Public Const CAR_HEAD_ROW = 5
+Public Const CAR_FIRST = 6
+
+' «Приход авто» A:N: 0-based column indices of the table
+Public Const CC_NO = 0
+Public Const CC_DATE = 1
+Public Const CC_PLATE = 2
+Public Const CC_SUP = 3
+Public Const CC_ARR = 4
+Public Const CC_DEP = 5
+Public Const CC_DUR = 6
+Public Const CC_STATUS = 7
+Public Const CC_WDAY = 8
+Public Const CC_MONTH = 9
+Public Const CC_NDAY = 10
+Public Const CC_CTL = 11
+Public Const CC_NOTE = 12
+' N: the search key of the vehicle (hidden column: «Найти» filters by it)
+Public Const CC_KEY = 13
+Public Const CC_LAST = 13
+
+' H «Статус» of a visit
+Public Const CS_OPEN = "На территории"
+Public Const CS_GONE = "Уехал"
+Public Const CS_CANCEL = "Отменён"
+
+' _CAR — the visits, one row per visit № (row index = №, dense like «Наличие»): key of the vehicle, state, the row of the
+' table, arrival, departure, the day and the № of the day, the key and the arrival of an open visit (only while it is open:
+' the lookups of the Calc engine find an open visit of a vehicle and the longest one without a loop over the history),
+' fixes, duration (days), the key of the supplier
+Public Const CR_NO = 0
+Public Const CR_KEY = 1
+Public Const CR_STATE = 2
+Public Const CR_ROW = 3
+Public Const CR_ARR = 4
+Public Const CR_DEP = 5
+Public Const CR_DAY = 6
+Public Const CR_NDAY = 7
+Public Const CR_OKEY = 8
+Public Const CR_OARR = 9
+Public Const CR_FIXES = 10
+Public Const CR_DUR = 11
+Public Const CR_SKEY = 12
+Public Const CR_LAST = 12
+Public Const CR_OPEN = "OPEN"
+Public Const CR_CLOSED = "CLOSED"
+Public Const CR_CANCELLED = "CANCELLED"
+' the dictionaries of _CAR (the lists of the two input cells): vehicles N:O (as typed first, key), suppliers P:Q; row k =
+' entry k; their sizes in _CAR!S1 and _CAR!U1
+Public Const CD_PLATE = 13
+Public Const CD_PKEY = 14
+Public Const CD_SUP = 15
+Public Const CD_SKEY = 16
+Public Const CD_NPLATE_COL = 18
+Public Const CD_NSUP_COL = 20
+
+' a stay longer than this (minutes) is marked on the sheet unless the threshold cell of the panel holds another number
+Public Const CAR_LONG_MIN = 120
+' УЕХАЛ within this many minutes after ПРИЕХАЛ asks first (a click on the wrong button)
+Public Const CAR_QUICK_MIN = 2
+' the texts of a vehicle and a supplier are limited (a stray paste into the input cell is refused)
+Public Const CAR_TEXT_MAX = 120
+
 Function SysKeyNames() As Variant
     SysKeyNames = Array("SCHEMA", "INSTANCE_ID", "MODE", "CORE_VERSION", "LAST_SEQ", "NEXT_EI", "NEXT_NO", "NEXT_RET", _
         "JOURNAL_POS", "REGISTERED_URL", "TX_STATE", "TX_SEQ", "TX_TYPE", "TX_TIME", "TX_BEFORE_IMAGE", _
-        "SAVE_STAMP", "SAVE_SEQ", "MAX_QTY", "KEY_SHEETS", "NEXT_SPL", "NEXT_OFF", "NEXT_PROD", "NEXT_DET", "NEXT_OLD", "NEXT_OTH", "NEXT_ADJ")
+        "SAVE_STAMP", "SAVE_SEQ", "MAX_QTY", "KEY_SHEETS", "NEXT_SPL", "NEXT_OFF", "NEXT_PROD", "NEXT_DET", "NEXT_OLD", "NEXT_OTH", "NEXT_ADJ", _
+        "NEXT_CAR")
 End Function
 
 ' keys of _SYS that must hold numbers
 Function SysNumericKeys() As Variant
     SysNumericKeys = Array(SK_LAST_SEQ, SK_NEXT_EI, SK_NEXT_NO, SK_NEXT_RET, SK_TX_SEQ, SK_SAVE_STAMP, SK_SAVE_SEQ, SK_MAX_QTY, _
-        SK_NEXT_SPL, SK_NEXT_OFF, SK_NEXT_PROD, SK_NEXT_DET, SK_NEXT_OLD, SK_NEXT_OTH, SK_NEXT_ADJ)
+        SK_NEXT_SPL, SK_NEXT_OFF, SK_NEXT_PROD, SK_NEXT_DET, SK_NEXT_OLD, SK_NEXT_OTH, SK_NEXT_ADJ, SK_NEXT_CAR)
 End Function
 
 ' counters that must be ≥ 1 (numbers handed out from 1)
 Function SysCounterKeys() As Variant
     SysCounterKeys = Array(SK_NEXT_EI, SK_NEXT_NO, SK_NEXT_RET, SK_MAX_QTY, SK_NEXT_SPL, SK_NEXT_OFF, SK_NEXT_PROD, SK_NEXT_DET, _
-        SK_NEXT_OLD, SK_NEXT_OTH, SK_NEXT_ADJ)
+        SK_NEXT_OLD, SK_NEXT_OTH, SK_NEXT_ADJ, SK_NEXT_CAR)
 End Function
 
 ' ---------------------------------------------------------------- AutoInput (spec §10, §29; decision D-031)

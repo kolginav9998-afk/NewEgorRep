@@ -257,6 +257,11 @@ Function SysLayoutProblem() As String
             & WMS_CORE_VERSION & " её не открывает — нужна новая книга или перенос данных"
         Exit Function
     End If
+    If gSysSh.getCellByPosition(0, SK_SCHEMA).getString() = "SCHEMA" And SysStr(SK_SCHEMA) = WMS_SYS_SCHEMA_FC Then
+        SysLayoutProblem = "книга версии 0.6 (схема " & WMS_SYS_SCHEMA_FC & " без листа «" & SH_CARS & "» и счётчика NEXT_CAR): ядро " _
+            & WMS_CORE_VERSION & " её не открывает — обновите книгу программой tools/upgrade.py из комплекта 0.7.0 (данные и журнал сохраняются)"
+        Exit Function
+    End If
     For i = 0 To UBound(names)
         If gSysSh.getCellByPosition(0, i).getString() <> names(i) Then
             SysLayoutProblem = SYS_SHEET & ": строка " & (i + 1) & " — ожидался ключ " & names(i) & ", найдено «" & gSysSh.getCellByPosition(0, i).getString() & "»"
@@ -517,7 +522,9 @@ End Function
 ' ================================================================ plan builder
 ' An operation module (Phase 2+: issue, receipt, return; tests: WmsTestOps) validates and calculates without
 ' touching the document, describes every write with PlanSetValue/PlanInput/PlanLock, then calls ApplyOperation.
-' Operations only write cells and cell locks; they never insert or delete rows (new rows are appended).
+' Operations only write cells and cell locks; they never insert or delete rows (new rows are appended). The one exception
+' is «Ещё поступление» (M6 §18): its new row is inserted inside the block of its order before the operation starts, the
+' journal names that row (INSROW) and the recovery inserts it again before the writes are replayed.
 
 Sub PlanBegin(sType As String, sKey As String)
     gPlanType = sType
@@ -579,6 +586,12 @@ End Sub
 ' overdue status changes with the date), so the saved book may hold an older derived value than the journal line
 Sub PlanDerived(sSheet As String, r As Long, c As Integer, vAfter As Variant)
     PlanAdd("D", sSheet, r, CStr(c), EncCell(SheetByName(sSheet).getCellByPosition(c, r)), EncVar(vAfter), True)
+End Sub
+
+' derived display formula (e.g. the running stay of a vehicle on the territory, =NOW()-E7): a D write whose value is
+' the formula text (the encoding F), written and rolled back like the other derived values
+Sub PlanFormula(sSheet As String, r As Long, c As Integer, sFormula As String)
+    PlanAdd("D", sSheet, r, CStr(c), EncCell(SheetByName(sSheet).getCellByPosition(c, r)), "F" & Esc(sFormula), True)
 End Sub
 
 ' user input that the operation relies on; not modified now, restored from the journal if lost in a crash

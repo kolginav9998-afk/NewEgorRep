@@ -5,8 +5,10 @@
 
 В DEST_DIR создаётся папка WMS_BACKUP_<ГГГГММДД-ЧЧММСС>/: рабочая книга (все .ods папки WMS), журнал WMS_Journal/ (без
 файла блокировки), если не задано --no-backups, копии WMS_Backups/, и, если не задано --no-tools, данные людей в
-инструментах — книги WMS_TOOLBOX/*.ods (журнал работы, история и номер актов, настройки) и созданные акты WMS_Docs/
-(скрипты набора не копируются: они есть в выпуске); MANIFEST.csv — размер и SHA-256 каждого файла.
+инструментах — книги WMS_TOOLBOX/*.ods (журнал работы, история и номер актов, настройки), созданные акты WMS_Docs/,
+словарь подтверждённых соответствий сверки WMS_Reconcile/dictionary.csv и история печати этикеток WMS_Labels/history.csv
+(скрипты набора не копируются: они есть в выпуске); MANIFEST.csv — размер и SHA-256 каждого файла. Визиты машин «Приход авто»
+лежат в книге и журнале — копируются вместе с ними.
 После записи каждый файл перечитывается и сверяется с манифестом; папка появляется под своим именем только проверенной
 (пишется во временную .part). Хранятся --keep последних копий этого вида в DEST_DIR (старые удаляются, другие файлы
 не трогаются). Если WMS открыта (есть wms.lock), копия всё равно делается: в ней книга на момент последнего сохранения и
@@ -42,6 +44,9 @@ def files_to_copy(wms, with_backups, with_tools=True):
     tb = os.path.join(wms, "WMS_TOOLBOX")
     if with_tools and os.path.isdir(tb):
         out += [f"WMS_TOOLBOX/{f}" for f in sorted(os.listdir(tb)) if f.lower().endswith(".ods") and not f.startswith(".~lock")]
+    if with_tools:
+        # the data of people the tools keep outside their books (M6): the reconcile dictionary, the history of the labels
+        out += [rel for rel in ("WMS_Reconcile/dictionary.csv", "WMS_Labels/history.csv") if os.path.isfile(os.path.join(wms, rel))]
     return out
 
 
@@ -105,7 +110,7 @@ def main(argv=None):
     ap.add_argument("--to", required=True)
     ap.add_argument("--keep", type=int, default=8)
     ap.add_argument("--no-backups", action="store_true")
-    ap.add_argument("--no-tools", action="store_true", help="без книг WMS_TOOLBOX и актов WMS_Docs")
+    ap.add_argument("--no-tools", action="store_true", help="без книг WMS_TOOLBOX, актов WMS_Docs, словаря сверки и истории этикеток")
     ap.add_argument("--verify", help="только проверить готовую копию (папку WMS_BACKUP_…)")
     a = ap.parse_args(argv)
     if a.verify:

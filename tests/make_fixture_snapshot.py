@@ -7,11 +7,14 @@ temporary WMS_Export folder), so the expected values of the tests never change w
 1–200, five recipients — no real data) gets a deterministic series through WMS itself: ordinary orders and receipts (a
 partial delivery, an overdue position), special receipts of every source (a part and its refill, an «Иной» to be
 identified), issues to three recipients in July–September 2026, returns, a move, a write-off, inventory corrections (a
-surplus and a shortage), a cancelled issue; then «Экспорт для инструментов». The folder is copied as WMS wrote it; only
+surplus and a shortage), a cancelled issue, vehicles of «Приход авто» on 24–26.09.2026 (M6: a long stay, a repeated
+vehicle, a cancelled wrong entry, one still on the territory); then «Экспорт для инструментов». The snapshot of release
+0.6 (contract 1.0, no vehicles) stays as WMS_SNAPSHOT_FIXTURE_060 — the tools must still read it. The folder is copied as WMS wrote it; only
 the absolute path of the book in manifest.csv is replaced by «WMS.ods» (manifest.csv itself is not hashed) and the
 registered path in service/_SYS.csv by «file:///WMS/WMS.ods» (its size and SHA-256 in the manifest recomputed), so no path of
 the machine that made it is committed.
 """
+import datetime
 import hashlib
 import os
 import shutil
@@ -77,6 +80,25 @@ def series(s):
     for i, cols in enumerate(adj, start=1):
         s.adjust_input(i, **cols)
         ok(s.click_adj("BtnAdjPost", i), f"корректировка {i}")
+    # M6: vehicles of 24–26.09.2026 (the clock of the operations set by the test seam): a long stay, a repeated vehicle, a
+    # cancelled wrong entry, one vehicle still on the territory
+    car = lambda f, *a: s.B(f, *a, module="WmsCar")      # noqa: E731
+
+    def at(d, h, m):
+        return (datetime.datetime(2026, 9, d, h, m) - datetime.datetime(1899, 12, 30)).total_seconds() / 86400
+    visits = [(24, (9, 10), (9, 55), "Газель А123ВС", "Метиз-Опт"), (24, (10, 30), (13, 5), "КАМАЗ Х456ОР", "Кабель-Сервис"),
+              (24, (14, 0), (14, 25), "Лада В789ТТ", "СИЗ-Центр"), (25, (8, 50), (9, 40), "Газель А123ВС", "Метиз-Опт"),
+              (25, (11, 0), (11, 30), "Scania Е001КХ", "Химпром"), (25, (12, 0), None, "Ошибочная запись", "Химпром"),
+              (26, (9, 5), (10, 15), "КАМАЗ Х456ОР", "Кабель-Сервис"), (26, (15, 30), None, "Газель В321ОР", "Метиз-Опт")]
+    for n, (d, a, b, plate, sup) in enumerate(visits, start=1):
+        car("TestCarNow", at(d, *a))
+        ok(car("CarArrive", plate, sup), f"машина {n}")
+        if b:
+            car("TestCarNow", at(d, *b))
+            ok(car("CarDepart", n), f"выезд {n}")
+    car("TestCarNow", at(25, 12, 5))
+    ok(car("CarCancel", 6), "отмена ошибочного визита")
+    car("TestCarNow", 0)
     s.doc.store()
 
 

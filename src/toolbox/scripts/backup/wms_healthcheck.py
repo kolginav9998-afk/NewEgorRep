@@ -37,7 +37,7 @@ OFF = "{urn:oasis:names:tc:opendocument:xmlns:office:1.0}"
 STY = "{urn:oasis:names:tc:opendocument:xmlns:style:1.0}"
 SYS_KEYS = ("SCHEMA", "INSTANCE_ID", "MODE", "CORE_VERSION", "LAST_SEQ")
 # the service sheets of WMS (hidden and protected) and the one sheet kept by hand without protection (WmsStatus.Protections)
-SERVICE_SHEETS = ("_ORD", "_RCV", "_SPR", "_ART", "_RET", "_ISS", "_ADJ", "_IDX", "_SYS")
+SERVICE_SHEETS = ("_ORD", "_RCV", "_SPR", "_ART", "_RET", "_ISS", "_ADJ", "_CAR", "_IDX", "_SYS")
 FREE_SHEETS = ("Получатели",)
 
 

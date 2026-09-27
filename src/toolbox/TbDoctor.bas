@@ -1,8 +1,11 @@
-' TbDoctor — WMS_DOCTOR: аудит снимка WMS и его журнала (задание «FINAL WMS MARATHON», §6). Только чтение: ничего не
-' исправляет, выдаёт понятный отчёт и план исправления. Проверки: целостность снимка, версии, журнал (формат, непрерывность,
-' экземпляр, хвост), остатки (пересчёт по движениям), отрицательные остатки, ЕИ без карточки, связи возвратов с
-' выдачами, счётчики, повторы номеров и копии, конфликт артикулов деталей, возможные дубли, непроведённые строки,
-' защиты листов и структуры книги (по manifest снимка), свежесть резервной копии, снимок против журнала.
+' TbDoctor — WMS_DOCTOR: аудит снимка WMS и его журнала (задание «FINAL WMS MARATHON», §6; M6 PRIME §8). Только чтение:
+' ничего не исправляет, выдаёт понятный отчёт и план исправления. Проверки: целостность снимка, версии схемы и контракта
+' снимка, журнал (формат, непрерывность, экземпляр, хвост), остатки (пересчёт по движениям), отрицательные остатки, ЕИ без
+' карточки, связи возвратов с выдачами, счётчики, повторы номеров и копии, конфликт артикулов деталей, возможные дубли,
+' непроведённые строки, защиты листов и структуры книги (по manifest снимка), транспортные визиты «Приход авто» (номера,
+' незакрытые и повреждённые визиты, выезд раньше приезда, пустые обязательные поля, служебные записи, машины с прошлых
+' дней), незавершённая загрузка пакетов, комплект инструментов выпуска, лишние файлы (незавершённый снимок, остаток
+' обновления), свежесть резервной копии. DoctorCollect — те же проверки для «Контроля дня» WMS_MANAGER.
 Option Explicit
 
 Private Const SH_REP = "Отчёт"
@@ -42,32 +45,14 @@ Sub BtnDoctor(Optional oEvent As Variant)
 End Sub
 
 Function DoctorRun() As String
-    Dim why As String, snap As String, t As Variant, i As Long, sh As Object, last As Long, nFail As Long, nWarn As Long, j As Long
+    Dim snap As String, sh As Object, last As Long, nFail As Long, nWarn As Long, j As Long
     On Error GoTo EH
-    ReDim mOut(60)
-    mN = 0
     snap = TbLatestSnapshot()
     If snap = "" Then
         DoctorRun = "ERR:в папке " & ConvertFromURL(TbExportDir()) & " нет снимков — в WMS нажмите «Экспорт для инструментов»"
         Exit Function
     End If
-    why = TbVerifySnapshot(snap)
-    If why <> "" Then
-        AddRow("FAIL", "снимок", why, "Сделайте новый снимок в WMS («Главная» → «Экспорт для инструментов»); этот не использовать")
-        GoTo SHOW_REPORT
-    End If
-    AddRow("OK", "снимок", ConvertFromURL(snap) & ": файлы и SHA-256 совпадают с manifest.csv", "")
-    t = Array("stock", "orders", "special", "issues", "returns", "adjustments")
-    For i = 0 To UBound(t)
-        TbLoadTable(snap, t(i) & ".csv", "_" & t(i), True)
-    Next i
-    TbLoadTable(snap, "service/_ART.csv", "_art", True)
-    CheckVersions(snap)
-    CheckProtections(snap)
-    CheckJournal(snap)
-    CheckStock(snap)
-    CheckBackups(snap)
-SHOW_REPORT:
+    DoctorCollect(snap)
     sh = ThisComponent.Sheets.getByName(SH_REP)
     last = TbLastRow(sh)
     If last >= 3 Then sh.getCellRangeByPosition(0, 3, 3, last).clearContents(1023)
@@ -89,13 +74,63 @@ EH:
     DoctorRun = "ERR:внутренняя ошибка инструмента: " & Error$ & " (код " & Err & ", строка " & Erl & ")"
 End Function
 
-Private Sub CheckVersions(snap As String)
-    Dim sc As String
-    sc = TbManifestValue(snap, "schema")
-    If sc = "WMS-SYS-3" Then
-        AddRow("OK", "версия схемы", sc & ", ядро " & TbManifestValue(snap, "core_version") & ", продукт " & TbManifestValue(snap, "product_version"), "")
+' every check of snapshot snap (the tables are loaded into the hidden sheets of this book): the rows (status OK / WARN /
+' FAIL, check, details, what to do). A snapshot that is not intact — only the row «снимок» FAIL
+Function DoctorCollect(snap As String) As Variant
+    Dim why As String, t As Variant, i As Long, r() As Variant
+    ReDim mOut(80)
+    mN = 0
+    why = TbVerifySnapshot(snap)
+    If why <> "" Then
+        AddRow("FAIL", "снимок", why, "Сделайте новый снимок в WMS («Главная» → «Экспорт для инструментов»); этот не использовать")
     Else
-        AddRow("WARN", "версия схемы", "схема «" & sc & "» — инструмент рассчитан на WMS-SYS-3", "Обновите WMS_TOOLBOX до версии этой WMS")
+        AddRow("OK", "снимок", ConvertFromURL(snap) & ": файлы и SHA-256 совпадают с manifest.csv", "")
+        t = Array("stock", "orders", "special", "issues", "returns", "adjustments")
+        For i = 0 To UBound(t)
+            TbLoadTable(snap, t(i) & ".csv", "_" & t(i), True)
+        Next i
+        TbLoadTable(snap, "service/_ART.csv", "_art", True)
+        CheckVersions(snap)
+        CheckProtections(snap)
+        CheckJournal(snap)
+        CheckStock(snap)
+        CheckCars(snap)
+        CheckBatches(snap)
+        CheckBackups(snap)
+        CheckRelease()
+        CheckOrphans(snap)
+    End If
+    If mN = 0 Then
+        DoctorCollect = Array()
+        Exit Function
+    End If
+    ReDim r(mN - 1)
+    For i = 0 To mN - 1
+        r(i) = mOut(i)
+    Next i
+    DoctorCollect = r
+End Function
+
+' the schema of _SYS (WMS-SYS-4 — WMS 0.7; WMS-SYS-3 — WMS 0.6, read without the vehicles) and the contract of the
+' snapshot (1.0 — no cars.csv; 1.1 — with «Приход авто»; a newer one — a newer WMS than this toolbox)
+Private Sub CheckVersions(snap As String)
+    Dim sc As String, ct As String, info As String
+    sc = TbManifestValue(snap, "schema")
+    info = sc & ", ядро " & TbManifestValue(snap, "core_version") & ", продукт " & TbManifestValue(snap, "product_version")
+    If sc = "WMS-SYS-4" Then
+        AddRow("OK", "версия схемы", info, "")
+    ElseIf sc = "WMS-SYS-3" Then
+        AddRow("OK", "версия схемы", info & " (WMS 0.6: «Приход авто» не ведётся)", "")
+    Else
+        AddRow("WARN", "версия схемы", "схема «" & sc & "» — инструмент рассчитан на WMS-SYS-3 и WMS-SYS-4", "Обновите WMS_TOOLBOX до версии этой WMS")
+    End If
+    ct = TbManifestValue(snap, "contract")
+    If ct = "" Then ct = "1.0"
+    If ct = "1.0" Or ct = "1.1" Then
+        AddRow("OK", "контракт снимка", "версия " & ct & IIf(ct = "1.0", " (без транспорта — снимок WMS 0.6)", " (с «Приход авто»)") & "; инструмент читает 1.0–" & TB_CONTRACT, "")
+    Else
+        AddRow("WARN", "контракт снимка", "версия " & ct & " новее инструмента (" & TB_CONTRACT & "): новые данные не проверяются", _
+            "Обновите WMS_TOOLBOX из выпуска той же версии, что и WMS")
     End If
 End Sub
 
@@ -104,7 +139,7 @@ End Sub
 ' «Проверка перед работой» of WMS (WmsStatus.Protections)
 Private Sub CheckProtections(snap As String)
     Dim lines As Variant, i As Long, f As Variant, p As String, n As Long, svc As String
-    svc = "|_ORD|_RCV|_SPR|_ART|_RET|_ISS|_ADJ|_IDX|_SYS|"
+    svc = "|_ORD|_RCV|_SPR|_ART|_RET|_ISS|_ADJ|_CAR|_IDX|_SYS|"
     lines = Split(Replace(TbReadText(snap & "manifest.csv"), Chr(13), ""), Chr(10))
     For i = 0 To UBound(lines)
         f = Split(lines(i), ";")
@@ -474,13 +509,12 @@ Private Sub CheckParts(st As Variant, art As Variant)
     End If
 End Sub
 
-' the backups next to the book (WMS_Backups): the newest one not older than two days
+' the backups of the WMS folder (the parent of the folder of the snapshots: …/WMS_Backups): one made today
 Private Sub CheckBackups(snap As String)
-    Dim sfa As Object, book As String, d As String, lst As Variant, i As Long, best As Date, dt As Date, n As Long
+    Dim sfa As Object, d As String, lst As Variant, i As Long, best As Date, dt As Date, n As Long
     Dim dtm As New com.sun.star.util.DateTime
     sfa = CreateUnoService("com.sun.star.ucb.SimpleFileAccess")
-    book = ConvertToURL(TbManifestValue(snap, "book"))
-    d = Left(book, TbInStrRev(book, "/")) & "WMS_Backups/"
+    d = TbWmsDir() & "WMS_Backups/"
     If Not sfa.exists(d) Then
         AddRow("WARN", "резервные копии", "папки WMS_Backups рядом с книгой не видно (" & ConvertFromURL(d) & ")", "Проверьте диск рабочей WMS: копии создаются при запуске и кнопкой «Резервная копия»")
         Exit Sub
@@ -494,10 +528,243 @@ Private Sub CheckBackups(snap As String)
     Next i
     If n = 0 Then
         AddRow("FAIL", "резервные копии", "в WMS_Backups нет копий", "В WMS нажмите «Резервная копия»")
-    ElseIf Now() - best > 2 Then
-        AddRow("WARN", "резервные копии", "последняя копия " & Format(best, "DD.MM.YYYY HH:MM") & " — старше двух дней", "В WMS нажмите «Резервная копия»; проверьте, что WMS открывают каждый рабочий день")
+    ElseIf Int(CDbl(best)) < Int(CDbl(Now())) Then
+        AddRow("WARN", "резервные копии", "последняя копия " & Format(best, "DD.MM.YYYY HH:MM") & " — сегодня копии не было" _
+            & IIf(Now() - best > 2, " (старше двух дней)", ""), "В WMS нажмите «Резервная копия»; проверьте, что WMS открывают каждый рабочий день")
     Else
         AddRow("OK", "резервные копии", "копий " & n & ", последняя " & Format(best, "DD.MM.YYYY HH:MM"), "")
+    End If
+End Sub
+
+' ================================================================ M6: vehicles, batches, the release, stray files
+
+Private Function DtText(v As Variant) As String
+    If VarType(v) = 5 Or VarType(v) = 7 Then DtText = Format(CDate(v), "DD.MM.YYYY HH:MM") Else DtText = CStr(v)
+End Function
+
+' «Приход авто» (cars.csv, the row k of the table — visit k; empty rows — the numbers of abandoned operations) and its
+' service table _CAR: numbers, statuses, the times, the required fields, the counter, the service records; the vehicles
+' left «На территории» since an earlier day
+Private Sub CheckCars(snap As String)
+    Dim n As Long, d As Variant, i As Long, nV As Long, nOpen As Long, nCl As Long, nCanc As Long, bad As Long, first As String, st As String
+    Dim p As String, old As String, nOld As Long, created As Double, cs As String, sv As Variant, nSvc As Long, maxNo As Long, nxt As Long, want As String
+    If Not TbHasFile(snap, "cars.csv") Then
+        AddRow("OK", "транспорт", "в снимке нет данных «Приход авто» (снимок WMS до версии 0.7)", "")
+        Exit Sub
+    End If
+    n = TbLoadTable(snap, "cars.csv", "_cars", True)
+    If TbHasFile(snap, "service/_CAR.csv") Then nSvc = TbLoadTable(snap, "service/_CAR.csv", "_car", True)
+    cs = TbManifestValue(snap, "created")
+    If Len(cs) >= 10 Then created = CDbl(DateSerial(Val(Left(cs, 4)), Val(Mid(cs, 6, 2)), Val(Mid(cs, 9, 2)))) Else created = Int(CDbl(Now()))
+    If n > 0 Then d = TblRows("_cars", 14) Else d = Array()
+    If nSvc > 0 Then sv = TblRows("_car", 3) Else sv = Array()
+    For i = 0 To UBound(d)
+        p = ""
+        If CStr(d(i)(0)) = "" And CStr(d(i)(2)) = "" And CStr(d(i)(7)) = "" Then GoTo NEXT_CAR
+        If VarType(d(i)(0)) <> 5 Then
+            p = "строка " & (i + 2) & ": нет номера визита"
+        ElseIf CLng(d(i)(0)) <> i + 1 Then
+            p = "строка " & (i + 2) & ": визит № " & d(i)(0) & " не на своём месте (повтор или сдвиг номера)"
+        Else
+            If CLng(d(i)(0)) > maxNo Then maxNo = CLng(d(i)(0))
+            st = CStr(d(i)(7))
+            Select Case st
+            Case "Отменён"
+                nCanc = nCanc + 1
+            Case "На территории", "Уехал"
+                nV = nV + 1
+                If Trim(CStr(d(i)(2))) = "" Then
+                    p = "визит № " & d(i)(0) & ": пустая «Марка / госномер»"
+                ElseIf Trim(CStr(d(i)(3))) = "" Then
+                    p = "визит № " & d(i)(0) & ": пустой «Поставщик»"
+                ElseIf VarType(d(i)(4)) <> 5 Or VarType(d(i)(1)) <> 5 Then
+                    p = "визит № " & d(i)(0) & ": нет даты или времени приезда"
+                ElseIf st = "Уехал" Then
+                    nCl = nCl + 1
+                    If VarType(d(i)(5)) <> 5 Then
+                        p = "визит № " & d(i)(0) & ": «Уехал» без времени выезда"
+                    ElseIf d(i)(5) < d(i)(4) - 1 / 86400 Then
+                        p = "визит № " & d(i)(0) & ": выезд " & DtText(d(i)(5)) & " раньше приезда " & DtText(d(i)(4))
+                    ElseIf VarType(d(i)(6)) <> 5 Then
+                        p = "визит № " & d(i)(0) & ": нет длительности"
+                    ElseIf Abs(d(i)(6) - (d(i)(5) - d(i)(4)) * 1440) > 1.01 Then
+                        p = "визит № " & d(i)(0) & ": длительность " & d(i)(6) & " мин не равна выезд − приезд"
+                    End If
+                Else
+                    nOpen = nOpen + 1
+                    If VarType(d(i)(5)) = 5 Then
+                        p = "визит № " & d(i)(0) & ": «На территории», но записан выезд"
+                    ElseIf Int(d(i)(4)) < created Then
+                        nOld = nOld + 1
+                        If old = "" Then old = "визит № " & d(i)(0) & " «" & d(i)(2) & "» с " & DtText(d(i)(4))
+                    End If
+                End If
+            Case Else
+                p = "визит № " & d(i)(0) & ": неизвестный статус «" & st & "»"
+            End Select
+            ' the service record of the visit: its state is the status of the sheet
+            If p = "" And nSvc > 0 Then
+                want = IIf(st = "Уехал", "CLOSED", IIf(st = "Отменён", "CANCELLED", "OPEN"))
+                If i > UBound(sv) Then
+                    p = "визит № " & d(i)(0) & ": нет служебной записи _CAR"
+                ElseIf CStr(sv(i)(0)) <> CStr(d(i)(0)) Or CStr(sv(i)(2)) <> want Then
+                    p = "визит № " & d(i)(0) & ": служебная запись _CAR (" & sv(i)(2) & ") не совпадает с листом (" & st & ")"
+                End If
+            End If
+        End If
+        If p <> "" Then
+            bad = bad + 1
+            If first = "" Then first = p
+        End If
+NEXT_CAR:
+    Next i
+    nxt = Val(TbManifestValue(snap, "next_car"))
+    If nxt <= maxNo Then
+        bad = bad + 1
+        If first = "" Then first = "счётчик NEXT_CAR " & nxt & " не выше последнего визита " & maxNo
+    End If
+    If bad > 0 Then
+        AddRow("FAIL", "транспорт", "нарушений " & bad & " (первое — " & first & ")", "Визиты меняются только кнопками листа «Приход авто» (УЕХАЛ, «Исправить», " _
+            & "«Отменить визит»); в WMS нажмите «Самопроверка»; повреждение без ошибки самопроверки — разбор ответственным по журналу")
+    Else
+        AddRow("OK", "транспорт", "визитов " & (nV + nCanc) & " (на территории " & nOpen & ", уехало " & nCl & ", отменено " & nCanc _
+            & "): номера, статусы, время, обязательные поля, служебные записи, счётчик — без ошибок", "")
+    End If
+    If nOld > 0 Then AddRow("WARN", "транспорт: машины с прошлых дней", "на территории с прошлых дней: " & nOld & " (" & old & ")", _
+        "Если машина уехала — выделите её строку на листе «Приход авто» и нажмите УЕХАЛ, затем «Исправить» время выезда")
+End Sub
+
+' a batch loaded into WMS but not posted (rows with its mark and without a number), and the batch files WMS never loaded
+Private Sub CheckBatches(snap As String)
+    Dim o As Variant, sp As Variant, ad As Variant, i As Long, n As Long, ids As String, loaded As String, sfa As Object, d As String, lst As Variant
+    Dim id As String, lines As Variant, j As Long, nWait As Long, waitIds As String
+    o = TblRows("_orders", 28)
+    sp = TblRows("_special", 19)
+    ad = TblRows("_adjustments", 19)
+    For i = 0 To UBound(ad)
+        If CStr(ad(i)(17)) <> "" Then
+            loaded = loaded & "|" & ad(i)(17) & "|"
+            If VarType(ad(i)(0)) <> 5 And Left(CStr(ad(i)(16)), 5) <> "КОПИЯ" Then
+                n = n + 1
+                If InStr(1, ids, CStr(ad(i)(17)), 0) = 0 Then ids = ids & IIf(ids <> "", ", ", "") & ad(i)(17)
+            End If
+        End If
+    Next i
+    For i = 0 To UBound(sp)
+        id = BatchMark(CStr(sp(i)(18)))
+        If id <> "" Then
+            loaded = loaded & "|" & id & "|"
+            If VarType(sp(i)(0)) <> 5 And Left(CStr(sp(i)(17)), 5) <> "КОПИЯ" Then
+                n = n + 1
+                If InStr(1, ids, id, 0) = 0 Then ids = ids & IIf(ids <> "", ", ", "") & id
+            End If
+        End If
+    Next i
+    For i = 0 To UBound(o)
+        id = BatchMark(CStr(o(i)(25)))
+        If id <> "" Then
+            loaded = loaded & "|" & id & "|"
+            If CStr(o(i)(21)) = "" And Left(CStr(o(i)(24)), 5) <> "КОПИЯ" Then
+                n = n + 1
+                If InStr(1, ids, id, 0) = 0 Then ids = ids & IIf(ids <> "", ", ", "") & id
+            End If
+        End If
+    Next i
+    If n > 0 Then
+        AddRow("WARN", "пакеты: незавершённая загрузка", "строк пакетов загружено, но не проведено: " & n & " (пакеты: " & ids & ")", _
+            "В WMS проведите эти строки кнопками их листа или очистите их; повторно тот же пакет WMS не загрузит")
+    Else
+        AddRow("OK", "пакеты: незавершённая загрузка", "строк загруженных, но не проведённых пакетов нет", "")
+    End If
+    ' the batch files of the folder of the batches: a file whose #id no row of the snapshot carries waits for loading
+    sfa = CreateUnoService("com.sun.star.ucb.SimpleFileAccess")
+    d = TbBatchDir()
+    If sfa.exists(d) Then
+        lst = sfa.getFolderContents(d, False)
+        For i = 0 To UBound(lst)
+            If LCase(Right(lst(i), 4)) = ".csv" Then
+                lines = Split(Replace(TbReadText(lst(i)), Chr(13), ""), Chr(10))
+                id = ""
+                For j = 0 To IIf(UBound(lines) > 8, 8, UBound(lines))
+                    If Left(lines(j), 4) = "#id;" Then id = Mid(lines(j), 5)
+                Next j
+                If id <> "" And InStr(1, loaded, "|" & id & "|", 0) = 0 Then
+                    nWait = nWait + 1
+                    If nWait <= 5 Then waitIds = waitIds & IIf(waitIds <> "", ", ", "") & id
+                End If
+            End If
+        Next i
+    End If
+    If nWait > 0 Then AddRow("WARN", "пакеты: ожидают загрузки", "файлов пакетов, которых нет в WMS по снимку: " & nWait & " (" & waitIds & ")", _
+        "Если пакет нужен — в WMS «Главная» → «Загрузить пакет»; ненужный файл перенесите из папки пакетов")
+End Sub
+
+' the id of the mark «[пакет <id>]» of a comment ("" — none)
+Private Function BatchMark(s As String) As String
+    Dim p As Long, q As Long
+    p = InStr(1, s, "[пакет ", 0)
+    If p = 0 Then Exit Function
+    q = InStr(p, s, "]")
+    If q > p + 7 Then BatchMark = Mid(s, p + 7, q - p - 7)
+End Function
+
+' the set of the release next to this book: the tool books, the launcher, the scripts, VERSION of this very version
+Private Sub CheckRelease()
+    Dim sfa As Object, f As Variant, miss As String, n As Integer, v As String
+    sfa = CreateUnoService("com.sun.star.ucb.SimpleFileAccess")
+    For Each f In Array("WMS_TOOLBOX.ods", "WMS_INVENTORY.ods", "WMS_ANALYTICS.ods", "WMS_MANAGER.ods", "WMS_SEARCH.ods", "WMS_DOCTOR.ods", "WMS_LABELS.ods", _
+        "WMS_DOCS.ods", "WMS_ARCHIVE.ods", "WMS_IMPORTER.ods", "reconcile/wms_reconcile.py", "backup/wms_backup.py", "backup/wms_healthcheck.py", _
+        "labels/tspl_labels.py", "insights/wms_insights.py", "VERSION")
+        n = n + 1
+        If Not sfa.exists(TbFolder() & f) Then miss = miss & IIf(miss <> "", ", ", "") & f
+    Next f
+    If sfa.exists(TbFolder() & "VERSION") Then v = Trim(Replace(Replace(TbReadText(TbFolder() & "VERSION"), Chr(10), ""), Chr(13), ""))
+    If miss <> "" Then
+        AddRow("WARN", "комплект инструментов", "нет файлов: " & miss, "Распакуйте папку WMS_TOOLBOX из архива выпуска заново (данные книг — журнал работы, история актов — перенесите вручную)")
+    ElseIf v <> "WMS_TOOLBOX " & TB_VERSION Then
+        AddRow("WARN", "комплект инструментов", "VERSION «" & v & "», а эта книга — WMS_TOOLBOX " & TB_VERSION, "Книги из разных выпусков: распакуйте WMS_TOOLBOX одного выпуска")
+    Else
+        AddRow("OK", "комплект инструментов", "файлов " & n & ": книги инструментов, launcher, скрипты, VERSION — " & v, "")
+    End If
+End Sub
+
+' stray files of the WMS folder: an export that did not finish (.…part, a snapshot folder without manifest.csv), the rest
+' of an update (…upgrade.ods)
+Private Sub CheckOrphans(snap As String)
+    Dim sfa As Object, w As String, e As String, lst As Variant, i As Long, nm As String, found As String, n As Long
+    sfa = CreateUnoService("com.sun.star.ucb.SimpleFileAccess")
+    w = TbWmsDir()
+    e = TbExportDir()
+    If sfa.exists(e) Then
+        lst = sfa.getFolderContents(e, True)
+        For i = 0 To UBound(lst)
+            nm = Mid(lst(i), Len(e) + 1)
+            If Right(nm, 1) = "/" Then nm = Left(nm, Len(nm) - 1)
+            If Right(nm, 5) = ".part" Then
+                n = n + 1
+                found = found & IIf(found <> "", "; ", "") & "WMS_Export/" & nm & " (незавершённый снимок)"
+            ElseIf Left(nm, 13) = "WMS_SNAPSHOT_" And sfa.isFolder(lst(i)) Then
+                If Not sfa.exists(lst(i) & IIf(Right(lst(i), 1) = "/", "", "/") & "manifest.csv") Then
+                    n = n + 1
+                    found = found & IIf(found <> "", "; ", "") & "WMS_Export/" & nm & " (снимок без manifest.csv)"
+                End If
+            End If
+        Next i
+    End If
+    If sfa.exists(w) Then
+        lst = sfa.getFolderContents(w, False)
+        For i = 0 To UBound(lst)
+            nm = Mid(lst(i), Len(w) + 1)
+            If Right(nm, 12) = ".upgrade.ods" Then
+                n = n + 1
+                found = found & IIf(found <> "", "; ", "") & nm & " (остаток незавершённого обновления)"
+            End If
+        Next i
+    End If
+    If n > 0 Then
+        AddRow("WARN", "лишние файлы", found, "Эти файлы не используются: убедитесь, что WMS закрыта и обновление не идёт, и удалите их (или перенесите для разбора)")
+    Else
+        AddRow("OK", "лишние файлы", "незавершённых снимков и остатков обновления нет", "")
     End If
 End Sub
 

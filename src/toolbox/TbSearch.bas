@@ -1,10 +1,14 @@
-' TbSearch — WMS_SEARCH: быстрый поиск по снимку и карточка ЕИ с историей (задание «FINAL WMS MARATHON», §6).
-' Поиск: ЕИ, артикул, часть наименования, место, категория, источник, получатель. Карточка ЕИ: данные «Наличие» и
-' история — пришло → пополнено → перемещено → выдано → возвращено → списано → корректировано (по датам). Только чтение.
+' TbSearch — WMS_SEARCH: быстрый поиск по снимку и карточка ЕИ с историей (задание «FINAL WMS MARATHON», §6; M6 PRIME §7).
+' Поиск: ЕИ, артикул, часть наименования, место, категория, источник, получатель, поставщик (его заказы и машины), госномер
+' или марка машины (её визиты). Карточка ЕИ: данные «Наличие» (остаток, место, происхождение) и история — пришло →
+' пополнено → перемещено → выдано → возвращено → списано → корректировано (по датам). Лист «Поставщик» — все заказы и
+' транспортные визиты поставщика; лист «Машина» — вся история приездов по госномеру в любом написании. Только чтение.
 Option Explicit
 
 Private Const SH_FIND = "Поиск"
 Private Const SH_CARD = "Карточка"
+Private Const SH_SUP = "Поставщик"
+Private Const SH_VEH = "Машина"
 Private Const RES_ROW = 3              ' 0-based: the results start at row 4
 Private Const MAX_RESULTS = 500
 
@@ -14,7 +18,7 @@ Sub BtnSearchRefresh(Optional oEvent As Variant)
 End Sub
 
 Function SearchRefresh() As String
-    Dim why As String, snap As String, t As Variant, i As Integer, s As String
+    Dim why As String, snap As String, t As Variant, i As Integer, s As String, n As Long
     On Error GoTo EH
     snap = TbPickSnapshot(why)
     If snap = "" Then
@@ -25,6 +29,8 @@ Function SearchRefresh() As String
     For i = 0 To UBound(t)
         s = s & IIf(s <> "", ", ", "") & t(i) & " " & TbLoadTable(snap, t(i) & ".csv", "_" & t(i), True)
     Next i
+    n = TbLoadOptional(snap, "cars.csv", "_cars", True, TB_CAR_KEYS)
+    s = s & ", cars " & IIf(n < 0, "нет в снимке (WMS до 0.7)", CStr(n))
     TbPutSetting(3, snap)
     ThisComponent.Sheets.getByName(SH_FIND).getCellByPosition(0, 1).setString("Снимок: " & ConvertFromURL(snap) & " (LAST_SEQ " _
         & TbManifestValue(snap, "last_seq") & ")")
@@ -112,6 +118,40 @@ Function SearchRun(ByVal q As String) As String
             End If
         Next i
     End If
+    ' orders: the supplier or the number of the order
+    Dim o As Variant, cars As Variant, pk As String, nSup As Long, supName As String
+    If e = "" Then
+        o = Data("_orders", 28)
+        For i = 0 To UBound(o)
+            If k > MAX_RESULTS Then Exit For
+            If CStr(o(i)(1)) <> "" Or CStr(o(i)(0)) <> "" Then
+                If InStr(Norm(CStr(o(i)(11))), nq) > 0 Or Norm(CStr(o(i)(0))) = nq Then
+                    out(k) = Array("Заказ " & o(i)(0), o(i)(21), o(i)(1), o(i)(4), o(i)(20), o(i)(18), IIf(CStr(o(i)(5)) <> "", o(i)(5), o(i)(7)), o(i)(11), _
+                        DateText(IIf(CStr(o(i)(13)) <> "", o(i)(13), o(i)(16))), o(i)(22))
+                    k = k + 1
+                    If InStr(Norm(CStr(o(i)(11))), nq) > 0 Then
+                        nSup = nSup + 1
+                        supName = CStr(o(i)(11))
+                    End If
+                End If
+            End If
+        Next i
+    End If
+    ' vehicles: the plate in any spelling (or its digits), the make, the supplier
+    cars = Data("_cars", 14)
+    pk = TbPlateKey(q)
+    For i = 0 To UBound(cars)
+        If k > MAX_RESULTS Then Exit For
+        If VarType(cars(i)(0)) = 5 Then
+            If (Len(pk) >= 3 And InStr(1, CStr(cars(i)(13)), pk, 0) > 0) Or (e = "" And InStr(Norm(CStr(cars(i)(2)) & "|" & CStr(cars(i)(3))), nq) > 0) Then
+                out(k) = Array("Визит № " & cars(i)(0), "", cars(i)(2), "", "", "", IIf(CStr(cars(i)(7)) = "Уехал", cars(i)(6), ""), cars(i)(3), _
+                    DateTimeText(cars(i)(4)), cars(i)(7))
+                k = k + 1
+            End If
+        End If
+    Next i
+    ' a supplier found: its name goes to «Поставщик» (all its orders and vehicles there)
+    If nSup > 0 Then ThisComponent.Sheets.getByName(SH_SUP).getCellByPosition(1, 0).setString(supName)
     If k > 0 Then
         Dim rows() As Variant, j As Long
         ReDim rows(IIf(k > MAX_RESULTS, MAX_RESULTS, k) - 1)
@@ -120,7 +160,8 @@ Function SearchRun(ByVal q As String) As String
         Next j
         sh.getCellRangeByPosition(0, RES_ROW, 9, RES_ROW + UBound(rows)).setDataArray(rows)
     End If
-    SearchRun = "OK:найдено " & k & IIf(k > MAX_RESULTS, " (показаны первые " & MAX_RESULTS & ")", "")
+    SearchRun = "OK:найдено " & k & IIf(k > MAX_RESULTS, " (показаны первые " & MAX_RESULTS & ")", "") _
+        & IIf(nSup > 0, "; поставщик «" & supName & "»: все его заказы и машины — лист «" & SH_SUP & "», кнопка «Заказы и машины поставщика»", "")
     Exit Function
 EH:
     SearchRun = "ERR:внутренняя ошибка инструмента: " & Error$ & " (код " & Err & ", строка " & Erl & ")"
@@ -215,6 +256,171 @@ Function CardShow(ByVal q As String) As String
     Exit Function
 EH:
     CardShow = "ERR:внутренняя ошибка инструмента: " & Error$ & " (код " & Err & ", строка " & Erl & ")"
+End Function
+
+Private Function DateText(v As Variant) As String
+    If VarType(v) = 5 Or VarType(v) = 7 Then DateText = Format(CDate(v), "DD.MM.YYYY") Else DateText = CStr(v)
+End Function
+
+Private Function DateTimeText(v As Variant) As String
+    If VarType(v) = 5 Or VarType(v) = 7 Then DateTimeText = Format(CDate(v), "DD.MM.YYYY HH:MM") Else DateTimeText = CStr(v)
+End Function
+
+' ================================================================ «Поставщик» and «Машина»
+
+Private Sub Title2(sh As Object, r As Long, s As String)
+    sh.getCellByPosition(0, r).setString(s)
+    sh.getCellByPosition(0, r).CharWeight = 150
+End Sub
+
+Private Sub Heads(sh As Object, r As Long, h As Variant)
+    Dim rng As Object
+    rng = sh.getCellRangeByPosition(0, r, UBound(h), r)
+    rng.setDataArray(Array(h))
+    rng.CharWeight = 150
+    rng.CellBackColor = RGB(231, 230, 230)
+End Sub
+
+Private Sub ClearFrom(sh As Object, r0 As Long, nCols As Integer)
+    Dim last As Long
+    last = TbLastRow(sh)
+    If last >= r0 Then
+        sh.getCellRangeByPosition(0, r0, nCols - 1, last).clearContents(1023)
+        sh.getCellRangeByPosition(0, r0, nCols - 1, last).CellBackColor = -1
+    End If
+End Sub
+
+Sub BtnSupplier(Optional oEvent As Variant)
+    TbMsg(SupplierShow(ThisComponent.Sheets.getByName(SH_SUP).getCellByPosition(1, 0).getString()))
+End Sub
+
+' «Заказы и машины поставщика»: every row of «Заказы» of the supplier (the name contains the query, any case) and every
+' visit of its vehicles; a summary line
+Function SupplierShow(ByVal q As String) As String
+    Dim sh As Object, o As Variant, cars As Variant, i As Long, r As Long, nq As String, k As Long, nOver As Long, nWait As Long, nV As Long, nCl As Long
+    Dim sumD As Double, names As String, row As Variant, avg As String
+    On Error GoTo EH
+    sh = ThisComponent.Sheets.getByName(SH_SUP)
+    ClearFrom(sh, 1, 9)
+    nq = Norm(q)
+    If nq = "" Then
+        SupplierShow = "ERR:введите поставщика (часть названия) в B1"
+        Exit Function
+    End If
+    o = Data("_orders", 28)
+    If UBound(o) < 0 And Not ThisComponent.Sheets.hasByName("_orders") Then
+        SupplierShow = "ERR:сначала «Обновить из снимка»"
+        Exit Function
+    End If
+    r = 3
+    Title2(sh, r, "ЗАКАЗЫ ПОСТАВЩИКА")
+    r = r + 1
+    Heads(sh, r, Array("№ заказа", "Наименование", "Поставщик", "ЕИ", "Кол-во (факт / заказано)", "Дата заказа", "Ожидается", "Получено", "Статус"))
+    r = r + 1
+    For i = 0 To UBound(o)
+        If CStr(o(i)(11)) <> "" And InStr(Norm(CStr(o(i)(11))), nq) > 0 Then
+            row = Array(CStr(o(i)(0)), CStr(o(i)(1)), CStr(o(i)(11)), CStr(o(i)(21)), IIf(CStr(o(i)(5)) <> "", o(i)(5), o(i)(7)), DateText(o(i)(15)), _
+                DateText(o(i)(16)), DateText(o(i)(13)), CStr(o(i)(22)))
+            sh.getCellRangeByPosition(0, r, 8, r).setDataArray(Array(row))
+            r = r + 1
+            k = k + 1
+            If InStr(1, "|" & names & "|", "|" & o(i)(11) & "|", 0) = 0 Then names = names & IIf(names <> "", "|", "") & o(i)(11)
+            If CStr(o(i)(22)) = "Просрочено" Or CStr(o(i)(22)) = "Частично получено / просрочено" Then nOver = nOver + 1
+            If CStr(o(i)(22)) = "Ожидается" Then nWait = nWait + 1
+        End If
+    Next i
+    If k = 0 Then
+        sh.getCellByPosition(0, r).setString("нет")
+        r = r + 1
+    End If
+    r = r + 1
+    Title2(sh, r, "ТРАНСПОРТНЫЕ ВИЗИТЫ ПОСТАВЩИКА («Приход авто»)")
+    r = r + 1
+    Heads(sh, r, Array("№ визита", "Машина", "Поставщик", "Приезд", "Выезд", "Минут", "Статус"))
+    r = r + 1
+    cars = Data("_cars", 14)
+    For i = 0 To UBound(cars)
+        If VarType(cars(i)(0)) = 5 And InStr(Norm(CStr(cars(i)(3))), nq) > 0 Then
+            sh.getCellRangeByPosition(0, r, 6, r).setDataArray(Array(Array(cars(i)(0), CStr(cars(i)(2)), CStr(cars(i)(3)), DateTimeText(cars(i)(4)), _
+                DateTimeText(cars(i)(5)), IIf(CStr(cars(i)(7)) = "Уехал", cars(i)(6), ""), CStr(cars(i)(7)))))
+            r = r + 1
+            If CStr(cars(i)(7)) <> "Отменён" Then nV = nV + 1
+            If CStr(cars(i)(7)) = "Уехал" And VarType(cars(i)(6)) = 5 Then
+                nCl = nCl + 1
+                sumD = sumD + cars(i)(6)
+            End If
+        End If
+    Next i
+    If nV = 0 And UBound(cars) < 0 Then sh.getCellByPosition(0, r).setString(IIf(ThisComponent.Sheets.hasByName("_cars"), "нет", "нет данных транспорта в снимке"))
+    ' (IIf of Basic computes both branches: the mean only when there are closed visits)
+    If nCl > 0 Then avg = ", средняя стоянка " & Format(sumD / nCl, "0") & " мин"
+    sh.getCellByPosition(0, 1).setString("Заказов (строк) " & k & ": просрочено " & nOver & ", ожидается " & nWait & "; визитов машин " & nV _
+        & avg & IIf(names <> "", " — поставщики: " & Replace(names, "|", ", "), ""))
+    SupplierShow = "OK:заказов " & k & ", визитов " & nV
+    Exit Function
+EH:
+    SupplierShow = "ERR:внутренняя ошибка инструмента: " & Error$ & " (код " & Err & ", строка " & Erl & ")"
+End Function
+
+Sub BtnVehicle(Optional oEvent As Variant)
+    TbMsg(VehicleShow(ThisComponent.Sheets.getByName(SH_VEH).getCellByPosition(1, 0).getString()))
+End Sub
+
+' «История приездов»: the visits of a vehicle by its plate in any spelling («а 123 вс», «A123BC 77»); without a plate in
+' the query — the visits whose make / plate text contains it
+Function VehicleShow(ByVal q As String) As String
+    Dim sh As Object, cars As Variant, i As Long, r As Long, pk As String, nq As String, k As Long, nOpen As Long, first As String, lastV As String
+    Dim sups As String, bExact As Boolean
+    On Error GoTo EH
+    sh = ThisComponent.Sheets.getByName(SH_VEH)
+    ClearFrom(sh, 1, 8)
+    nq = Norm(q)
+    If nq = "" Then
+        VehicleShow = "ERR:введите госномер (или марку) в B1"
+        Exit Function
+    End If
+    If Not ThisComponent.Sheets.hasByName("_cars") Then
+        VehicleShow = "ERR:сначала «Обновить из снимка»"
+        Exit Function
+    End If
+    pk = TbPlateKey(q)
+    cars = Data("_cars", 14)
+    ' an exact key (the plate) first; otherwise a part of the text
+    For i = 0 To UBound(cars)
+        If VarType(cars(i)(0)) = 5 And CStr(cars(i)(13)) = pk Then bExact = True
+    Next i
+    r = 3
+    Title2(sh, r, "ИСТОРИЯ ПРИЕЗДОВ" & IIf(bExact, " (госномер " & pk & ")", " (текст «" & q & "»)"))
+    r = r + 1
+    Heads(sh, r, Array("№ визита", "Дата", "Машина (как записано)", "Поставщик", "Приезд", "Выезд", "Минут", "Статус"))
+    r = r + 1
+    For i = 0 To UBound(cars)
+        If VarType(cars(i)(0)) = 5 Then
+            If (bExact And CStr(cars(i)(13)) = pk) Or (Not bExact And (InStr(Norm(CStr(cars(i)(2))), nq) > 0 Or (Len(pk) >= 3 And InStr(1, CStr(cars(i)(13)), pk, 0) > 0))) Then
+                sh.getCellRangeByPosition(0, r, 7, r).setDataArray(Array(Array(cars(i)(0), DateText(cars(i)(1)), CStr(cars(i)(2)), CStr(cars(i)(3)), _
+                    DateTimeText(cars(i)(4)), DateTimeText(cars(i)(5)), IIf(CStr(cars(i)(7)) = "Уехал", cars(i)(6), ""), CStr(cars(i)(7)))))
+                r = r + 1
+                If CStr(cars(i)(7)) <> "Отменён" Then
+                    k = k + 1
+                    If first = "" Then first = DateTimeText(cars(i)(4))
+                    lastV = DateTimeText(cars(i)(4))
+                    If CStr(cars(i)(7)) = "На территории" Then nOpen = nOpen + 1
+                    If InStr(1, "|" & sups & "|", "|" & cars(i)(3) & "|", 0) = 0 Then sups = sups & IIf(sups <> "", "|", "") & cars(i)(3)
+                End If
+            End If
+        End If
+    Next i
+    If k = 0 Then
+        sh.getCellByPosition(0, r).setString("визитов нет")
+        sh.getCellByPosition(0, 1).setString("Визитов нет")
+    Else
+        sh.getCellByPosition(0, 1).setString("Визитов " & k & ": первый " & first & ", последний " & lastV & "; поставщики: " & Replace(sups, "|", ", ") _
+            & IIf(nOpen > 0, "; СЕЙЧАС НА ТЕРРИТОРИИ", ""))
+    End If
+    VehicleShow = "OK:визитов " & k & IIf(nOpen > 0, ", на территории", "")
+    Exit Function
+EH:
+    VehicleShow = "ERR:внутренняя ошибка инструмента: " & Error$ & " (код " & Err & ", строка " & Erl & ")"
 End Function
 
 ' one event of the history; the date as ГГГГ-ММ-ДД (it sorts and reads the same)

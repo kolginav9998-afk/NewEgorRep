@@ -5,7 +5,9 @@
 ' запись отчёта.
 Option Explicit
 
-Public Const TB_VERSION = "1.0.0"
+Public Const TB_VERSION = "1.1.0"
+' the contract versions of the snapshot this toolbox reads: 1.0 (WMS 0.6, no vehicles) and 1.1 (WMS 0.7, «Приход авто»)
+Public Const TB_CONTRACT = "1.1"
 Public Const TB_SNAPSHOT_FORMAT = "WMS-SNAPSHOT-1"
 Public Const TB_BATCH_FORMAT = "WMS-BATCH-1"
 ' the sheet «Настройки» of every tool: B2 the folder of the snapshots, B3 the folder of the batches, B4 the snapshot in use
@@ -220,6 +222,8 @@ Function TbColumnFormats(sFile As String) As String
         t = "1222221112522111222"
     Case "recipients.csv"
         t = "22"
+    Case "cars.csv"
+        t = "15221112221222"
     Case Else
         t = ""
     End Select
@@ -254,6 +258,121 @@ Function TbLoadTable(snap As String, sFile As String, sDest As String, bHide As 
     cur = sh.createCursor()
     cur.gotoEndOfUsedArea(False)
     TbLoadTable = cur.getRangeAddress().EndRow
+End Function
+
+' is file sFile listed in the manifest of the snapshot (cars.csv — only from contract 1.1, WMS 0.7)
+Function TbHasFile(snap As String, sFile As String) As Boolean
+    Dim lines As Variant, i As Long
+    lines = Split(Replace(TbReadText(snap & "manifest.csv"), Chr(13), ""), Chr(10))
+    For i = 0 To UBound(lines)
+        If Left(lines(i), Len(sFile) + 6) = "file;" & sFile & ";" Then
+            TbHasFile = CreateUnoService("com.sun.star.ucb.SimpleFileAccess").exists(snap & sFile)
+            Exit Function
+        End If
+    Next i
+End Function
+
+' TbLoadTable for a table a snapshot may lack (cars.csv of a WMS 0.6 snapshot): -1 and an empty sheet sDest (hidden when
+' bHide) with the column keys sKeys ("a|b|…") when the file is not in the snapshot
+Function TbLoadOptional(snap As String, sFile As String, sDest As String, bHide As Boolean, sKeys As String) As Long
+    Dim sh As Object, k As Variant, i As Integer
+    If TbHasFile(snap, sFile) Then
+        TbLoadOptional = TbLoadTable(snap, sFile, sDest, bHide)
+        Exit Function
+    End If
+    If ThisComponent.Sheets.hasByName(sDest) Then ThisComponent.Sheets.removeByName(sDest)
+    ThisComponent.Sheets.insertNewByName(sDest, ThisComponent.Sheets.getCount())
+    sh = ThisComponent.Sheets.getByName(sDest)
+    k = Split(sKeys, "|")
+    For i = 0 To UBound(k)
+        sh.getCellByPosition(i, 0).setString(k(i))
+    Next i
+    If bHide Then sh.IsVisible = False
+    TbLoadOptional = -1
+End Function
+
+Public Const TB_CAR_KEYS = "visit_no|date|vehicle|supplier|arrived|departed|duration_min|status|weekday|month|day_no|control|note|vehicle_key"
+
+' a CSV file (UTF-8, «;») into sheet sDest of this book (replaced; hidden when bHide) with the column types sTypes of the
+' CSV filter («1» standard, «2» text, «5» date Y-M-D per column; "" — every column standard); the number of data rows
+Function TbLoadCsv(url As String, sDest As String, bHide As Boolean, sTypes As String) As Long
+    Dim args(2) As New com.sun.star.beans.PropertyValue, csv As Object, doc As Object, pos As Integer, sh As Object, i As Integer, s As String
+    For i = 1 To Len(sTypes)
+        s = s & IIf(s <> "", "/", "") & i & "/" & Mid(sTypes, i, 1)
+    Next i
+    doc = ThisComponent
+    args(0).Name = "FilterName"
+    args(0).Value = "Text - txt - csv (StarCalc)"
+    args(1).Name = "FilterOptions"
+    args(1).Value = "59,34,76,1," & s & ",1033,false,true,false,false,false"
+    args(2).Name = "Hidden"
+    args(2).Value = True
+    csv = StarDesktop.loadComponentFromURL(url, "_blank", 0, args())
+    pos = doc.Sheets.getCount()
+    If doc.Sheets.hasByName(sDest) Then
+        pos = TbSheetIndex(sDest)
+        doc.Sheets.removeByName(sDest)
+    End If
+    doc.Sheets.importSheet(csv, csv.Sheets.getByIndex(0).Name, pos)
+    csv.close(True)
+    sh = doc.Sheets.getByIndex(pos)
+    sh.Name = sDest
+    If bHide Then sh.IsVisible = False
+    TbLoadCsv = TbLastRow(sh)
+End Function
+
+' the folder of the working WMS: the parent of the folder of the snapshots (…/WMS_Export → …/), with a trailing "/"
+Function TbWmsDir() As String
+    Dim d As String
+    d = TbExportDir()
+    TbWmsDir = Left(d, TbInStrRev(Left(d, Len(d) - 1), "/"))
+End Function
+
+' python3 <this folder>/sScript with the arguments (already quoted), the output and the errors into sLog (a URL);
+' "" — ran (the log exists), otherwise why not
+Function TbRunPython(sScript As String, sArgs As String, sLog As String) As String
+    Dim sfa As Object, cmd As String
+    sfa = CreateUnoService("com.sun.star.ucb.SimpleFileAccess")
+    If Not sfa.exists(TbFolder() & sScript) Then
+        TbRunPython = "нет скрипта " & ConvertFromURL(TbFolder() & sScript) & " — соберите WMS_TOOLBOX заново из выпуска"
+        Exit Function
+    End If
+    If sfa.exists(sLog) Then sfa.kill(sLog)
+    cmd = "python3 '" & ConvertFromURL(TbFolder() & sScript) & "' " & sArgs & " > '" & ConvertFromURL(sLog) & "' 2>&1"
+    Shell("/bin/sh", 0, "-c """ & cmd & """", True)
+    If Not sfa.exists(sLog) Then TbRunPython = "скрипт не выполнился (нужен python3): " & cmd
+End Function
+
+' the key of a vehicle — the rule of WMS (WmsCar.PlateKey): upper case, the Latin look-alikes of the letters of a plate as
+' Cyrillic, Ё → Е, only letters and digits; a Russian plate in the text (letter, three digits, two letters; the last one)
+' without the region, otherwise the whole text: «Газель А123ВС 77», «а 123 вс» and «A123BC» are one vehicle
+Function TbPlateKey(ByVal s As String) As String
+    Dim i As Long, ch As String, p As Integer, t As String, a As Long
+    s = UCase(s)
+    For i = 1 To Len(s)
+        ch = Mid(s, i, 1)
+        p = InStr(1, "ABEKMHOPCTYX", ch, 0)
+        If p > 0 Then ch = Mid("АВЕКМНОРСТУХ", p, 1)
+        If ch = "Ё" Then ch = "Е"
+        a = Asc(ch)
+        If (a >= 48 And a <= 57) Or (a >= 65 And a <= 90) Or (a >= 1040 And a <= 1071) Then t = t & ch
+    Next i
+    For i = Len(t) - 5 To 1 Step -1
+        If PlateLetter(Mid(t, i, 1)) And PlateDigit(Mid(t, i + 1, 1)) And PlateDigit(Mid(t, i + 2, 1)) And PlateDigit(Mid(t, i + 3, 1)) _
+            And PlateLetter(Mid(t, i + 4, 1)) And PlateLetter(Mid(t, i + 5, 1)) Then
+            TbPlateKey = Mid(t, i, 6)
+            Exit Function
+        End If
+    Next i
+    TbPlateKey = t
+End Function
+
+Private Function PlateLetter(ch As String) As Boolean
+    PlateLetter = (InStr(1, "АВЕКМНОРСТУХ", ch, 0) > 0)
+End Function
+
+Private Function PlateDigit(ch As String) As Boolean
+    PlateDigit = (ch >= "0" And ch <= "9" And Len(ch) = 1)
 End Function
 
 Function TbSheetIndex(sName As String) As Integer
@@ -343,11 +462,38 @@ Function TbWriteBatch(sTarget As String, sId As String, sSource As String, sSnap
     TbWriteBatch = d & sId & ".csv"
 End Function
 
-' a message for the user (recorded for the tests, no window in the test mode)
+' «Все инструменты» (every tool book): the launcher WMS_TOOLBOX.ods of this folder; an open one comes to the front
+Function TbOpenLauncher() As String
+    Dim url As String, doc As Object, args(0) As New com.sun.star.beans.PropertyValue
+    url = TbFolder() & "WMS_TOOLBOX.ods"
+    If Not CreateUnoService("com.sun.star.ucb.SimpleFileAccess").exists(url) Then
+        TbOpenLauncher = "ERR:нет файла " & ConvertFromURL(url) & " — книги инструментов лежат в одной папке WMS_TOOLBOX"
+        Exit Function
+    End If
+    args(0).Name = "MacroExecutionMode"
+    args(0).Value = 4
+    doc = StarDesktop.loadComponentFromURL(url, "_default", 0, args())
+    If IsNull(doc) Then TbOpenLauncher = "ERR:не открылся " & ConvertFromURL(url) Else TbOpenLauncher = "OK:WMS_TOOLBOX"
+End Function
+
+Sub BtnTbLauncher(Optional oEvent As Variant)
+    Dim res As String
+    res = TbOpenLauncher()
+    If Left(res, 3) <> "OK:" Then TbMsg(res)
+End Sub
+
+' a message for the user (recorded for the tests, no window in the test mode): «OK:…» — information, «ERR:…» — a refusal
+' with the warning icon; the prefixes themselves are not shown
 Sub TbMsg(s As String)
     gTbLastMsg = s
     If gTbAuto Then Exit Sub
-    MsgBox s, 64, "WMS_TOOLBOX"
+    If Left(s, 4) = "ERR:" Then
+        MsgBox Mid(s, 5), 48, "WMS_TOOLBOX — не выполнено"
+    ElseIf Left(s, 3) = "OK:" Then
+        MsgBox Mid(s, 4), 64, "WMS_TOOLBOX"
+    Else
+        MsgBox s, 64, "WMS_TOOLBOX"
+    End If
 End Sub
 
 Function TbTestAuto(b As Boolean) As String

@@ -1,20 +1,21 @@
 # FINAL_HANDOFF — техническое состояние WMS
 
-Компактное состояние для продолжения работы после сжатия контекста или в новой сессии. Не отчёт: подробности — в `WMS_DECISIONS.md`, `WMS_MASTER_SPEC.md`, отчётах этапов. Обновляется на каждой крупной контрольной точке «FINAL WMS MARATHON» (`CLAUDE_TASK.md`).
+Компактное состояние для продолжения работы после сжатия контекста или в новой сессии. Не отчёт: подробности — в `WMS_DECISIONS.md`, `WMS_MASTER_SPEC.md`, отчётах этапов. Обновляется на каждой крупной контрольной точке (`CLAUDE_TASK.md`).
 
-**Обновлено:** 27.09.2026, контрольная точка **M5 — Final Release preparation** (ядро feature-frozen с M2; правила П-1…П-35 — на утверждении: `CLAUDE_REPORT_FINAL_CORE.md` §9, `CLAUDE_REPORT_MIGRATION_CANDIDATE.md` §4, `CLAUDE_REPORT_TOOLBOX.md` §4, `CLAUDE_REPORT_FINAL_RELEASE.md` §7).
+**Обновлено:** 27.09.2026, **M6 PRIME — выпуск 0.7.0** (`CLAUDE_REPORT_M6_PRIME.md`): «Приход авто», блоки заказов, аналитика с закономерностями, «Контроль дня», обновление 0.6 → 0.7. Правила П-1…П-48 — на утверждении (`CLAUDE_REPORT_FINAL_CORE.md` §9, `CLAUDE_REPORT_MIGRATION_CANDIDATE.md` §4, `CLAUDE_REPORT_TOOLBOX.md` §4, `CLAUDE_REPORT_FINAL_RELEASE.md` §7, `CLAUDE_REPORT_M6_PRIME.md` §12).
 
 ## 1. Git
 
-- Ветка работы — только `claude/festive-lamport-l4f8f1`. Разрешено: обычный commit + push после каждого полностью зелёного milestone марафона (Phase 5 accepted; Final Core; Migration + Production Candidate; Toolbox; Final Release preparation). Запрещено: force push, merge в `main`, новый PR, новая ветка.
-- Commits: Phase 1 `7e6d280`, Phase 2 `561be9e` (PR #1 слит пользователем в `main`, merge `defb278`), Phase 3 `0125af3`, Phase 4 `17774f9`, Phase 5 (M1) `bff146e`, Final Core (M2) `8f4be2c`, Migration + Production Candidate (M3) `21f4bcb`, Toolbox (M4) `a041973`, Final Release preparation — commit milestone M5 поверх `a041973` (`git log -1`).
+- Ветка работы — только `claude/festive-lamport-l4f8f1`. Разрешено: обычный commit + push после полностью зелёного milestone (M6 — один commit). Запрещено: force push, merge в `main`, новый PR, новая ветка.
+- Commits: Phase 1 `7e6d280`, Phase 2 `561be9e` (PR #1 слит пользователем в `main`, merge `defb278`), Phase 3 `0125af3`, Phase 4 `17774f9`, Phase 5 (M1) `bff146e`, Final Core (M2) `8f4be2c`, Migration + Production Candidate (M3) `21f4bcb`, Toolbox (M4) `a041973`, Final Release preparation (M5, выпуск 0.6.0) `939929a`, M6 PRIME (выпуск 0.7.0) — commit поверх `939929a` (`git log -1`).
+- Выпуск 0.6.0 не хранится файлом: он собирается из `939929a` (`git archive` + его `tools/build_release.py`); так же его книгу собирают тесты U01, U02, E11, K15 (без истории git — SKIP с причиной).
 - Перед commit: тесты milestone зелёные; в дереве нет реальных складских данных, временных книг и журналов; commit содержит только свой milestone. Бинарные книги в Git не хранятся (D-009): книга собирается `tools/build_ods.py`.
 - Реальная миграция — только с файлом пользователя (остановиться и запросить файл с точным списком колонок).
 
 ## 2. Ядро
 
-- Версия ядра `0.6.0-final-core` (`WmsConfig.WMS_CORE_VERSION`), продукта `0.6.0` (`WMS_PRODUCT_VERSION`), схема `_SYS` **`WMS-SYS-3`**. Книгу предыдущей схемы ядро не открывает (D-068, D-072, П-12) — нужна новая книга или перенос импортёром (M3).
-- **Ядро feature-frozen (M2):** новые операции в ядро не добавляются; только исправления ошибок и совместимые изменения.
+- Версия ядра `0.7.0-transport` (`WmsConfig.WMS_CORE_VERSION`), продукта `0.7.0` (`WMS_PRODUCT_VERSION`), схема `_SYS` **`WMS-SYS-4`** (`WMS_SYS_SCHEMA_FC` = `WMS-SYS-3` — схема 0.6.0). Книга 0.6.0 обновляется на месте `tools/upgrade.py` (всё или ничего, копия `…_preupgrade.ods`); книги этапов 1–5 — только перенос (D-068, D-072, П-12).
+- **Ядро feature-frozen (M2):** складские операции не добавляются. M6 добавил только журнал машин (`WmsCar`, остатков не касается) и блоки «Заказов» — как разрешило задание M6.
 - LibreOffice Calc + Basic; модули `src/basic/*.bas` (текст, D-009), книга собирается `tools/build_ods.py`.
 - **Единственный путь записи — `ApplyOperation`** (`WmsCore`): план операции (PlanBegin / PlanField / PlanSetValue / PlanDerived / PlanInput / PlanLockBits) → фаза 2.1 STARTED + снимок «до» (`_SYS` TX_*) → 2.2 изменения → 2.3 строка журнала (точка фиксации) → 2.4 COMMITTED + LAST_SEQ. Ошибка до строки журнала — полный откат по снимку; после — операция завершена (при сбое до сохранения книги — хвост журнала, «Восстановить»).
 - Журнал: внешний, только дописывание, `WMS_Journal/WMS_journal_YYYY-MM.csv`, строка `J1;seq;timestamp;instance;type;fields...;END;length`, seq строго непрерывен; позиция в книге `JPOS` = `file|offset|seq`, проверяется по содержимому файла.
@@ -24,14 +25,15 @@
 
 ### Операции журнала
 
-`ISSUE`, `ISSUE_FIX`, `ISSUE_DEL` · `RECEIPT`, `RECEIPT_ADD`, `RECEIPT_FIX`, `RECEIPT_DEL`, `ORDER_CANCEL`, `ORDER_CANCEL_REST` · `RETURN`, `RETURN_FIX`, `RETURN_DEL` · `SP_RECEIPT`, `SP_REFILL`, `SP_FIX`, `SP_DEL`, `SP_IDENTIFY` · `MOVE`, `MOVE_FIX`, `MOVE_DEL`, `WRITE_OFF`, `WRITE_OFF_FIX`, `WRITE_OFF_DEL`, `INV_ADJ`, `INV_ADJ_FIX`, `INV_ADJ_DEL` · `MIGRATE` (перенос ЕИ, без исправления и сторно). Исправление = одна составная операция (сторно старого + новое движение), сторно = статус «Удалено (сторно)», строка остаётся, номера не переиспользуются (D-039, D-040).
+`ISSUE`, `ISSUE_FIX`, `ISSUE_DEL` · `RECEIPT`, `RECEIPT_ADD`, `RECEIPT_FIX`, `RECEIPT_DEL`, `ORDER_CANCEL`, `ORDER_CANCEL_REST` · `RETURN`, `RETURN_FIX`, `RETURN_DEL` · `SP_RECEIPT`, `SP_REFILL`, `SP_FIX`, `SP_DEL`, `SP_IDENTIFY` · `MOVE`, `MOVE_FIX`, `MOVE_DEL`, `WRITE_OFF`, `WRITE_OFF_FIX`, `WRITE_OFF_DEL`, `INV_ADJ`, `INV_ADJ_FIX`, `INV_ADJ_DEL` · `MIGRATE` (перенос ЕИ, без исправления и сторно) · `CAR_ARRIVE`, `CAR_DEPART`, `CAR_FIX`, `CAR_CANCEL` (визиты машин, остатков не меняют). Исправление = одна составная операция (сторно старого + новое движение), сторно = статус «Удалено (сторно)», строка остаётся, номера не переиспользуются (D-039, D-040).
 
 ## 3. Книга
 
-Порядок листов: `Главная`, `Заказы`, `Иной приход`, `Выдачи`, `Возврат`, `Корректировки`, `Наличие`, `Получатели`; скрытые `_ORD`, `_RCV`, `_SPR`, `_ART`, `_RET`, `_ISS`, `_ADJ`, `_IDX`, `_SYS` (тестовая книга — ещё `_TST`).
+Порядок листов: `Главная`, `Заказы`, `Иной приход`, `Приход авто`, `Выдачи`, `Возврат`, `Корректировки`, `Наличие`, `Получатели`, `Справка`; скрытые `_ORD`, `_RCV`, `_SPR`, `_ART`, `_RET`, `_ISS`, `_ADJ`, `_CAR`, `_IDX`, `_SYS` (тестовая книга — ещё `_TST`).
 
 | Лист | Колонки | Ввод открыт |
 |---|---|---|
+| **Приход авто** | строки 1–5 — панель (C2 «Марка / госномер», D2 «Поставщик», подсказка C3, показатели строки 5, L5 — порог долгой стоянки, мин), строка 6 — шапка, визит n — строка 6 + n; закреплены строки 1–6. A № визита, B Дата, C Марка / госномер, D Поставщик, E Приезд, F Выезд, G Длительность (у открытого — формула `NOW()-E`), H Статус (На территории / Уехал / Отменён), I День недели, J Месяц / год, K № за день, L Контроль, M Комментарий, N Ключ машины (скрыта) | C2, D2, L5, M |
 | **Заказы** A:AB | A № заказа, B Полное наименование, C Номер документа, D Номер счёта, E Артикул, F Фактическое кол-во, G Кол-во по документу, H Заказанное кол-во, I Ед., J Цена, K Сумма, L Площадка / Поставщик, M Продавец, N Дата поступления, O Дата документа, P Дата заказа, Q Ожидаемая дата, R Покупатель, S Категория, T Кому назначено, U Место, **V Внутренний код (ЕИ)**, W Статус, X Наличие, Y Контроль, Z Комментарий, AA Срок поставки, AB Возможный дубль | всё, кроме V W X Y AB |
 | **Иной приход** A:S | A № строки, B Тип прихода, C № поступления, D Наименование, E Артикул, F Кол-во, G Ед., H Дата поступления, I Место, J Категория, K Кто передал, L Документ, M Старая маркировка, N Внутренний код, O Остаток до, P Остаток после, Q Статус, R Контроль, S Комментарий | B…M, S |
 | **Выдачи** A:R | A №, B № документа выдачи, C Наименование, D Артикул, E Кол-во, F Кол-во в % (заполнено — блок, D-043), G Ед., H Дата выдачи, I Кому выдано, J Место, K Категория, **L Внутренний код**, M Вернул, N Вернул в % (legacy, D-004), O Комментарий, P Остаток до, Q Остаток после, R Контроль | B E F H I L M N O |
@@ -39,7 +41,9 @@
 | **Корректировки** A:S | A №, B Вид (Перемещение / Списание / Инвентаризация), C Внутренний код, D Наименование, E Артикул, F Ед., G Списать кол-во, H Фактический остаток, I Учётный остаток, J Новое место, K Дата, L Причина / основание, M Место до, N Остаток до, O Остаток после, P Разница, Q Контроль, R Пакет, S Комментарий | B C G H I J K L R S |
 | **Наличие** A:J | A ЕИ, B Наименование, C Артикул, D Ед., E Остаток, F Место, G Категория, H Состояние, I Источник, J Тип источника | нет (реестр) |
 | **Получатели** | справочник получателей | да |
-| **Главная** | кнопки (в т. ч. «Экспорт для инструментов», «Загрузить пакет»), состояние, отчёт запуска | — |
+| **Главная** | кнопки (в т. ч. «Экспорт для инструментов», «Загрузить пакет»), переходы на 7 рабочих листов, состояние, отчёт запуска | — |
+
+«Заказы».AC «Блок (служебная)» — скрыта: метка `OL<OrderLineID>` у строк «Ещё поступление»; линия блока — условное форматирование A:AB `AND(ROW()>2;TRIM($A2)="1";$AC2="")`.
 
 Скрытые таблицы:
 - `_ORD` позиции заказов: OLID, Строка, Ключ (ЕИ исходной строки), Отпечаток, Заказано, Получено, Поступлений, Без документов, Отмена.
@@ -48,8 +52,9 @@
 - `_ART` индекс деталей: Артикул (норм.), ЕИ, Артикул. Перестройка — `ArticleIndexRebuild` (D-083).
 - `_ADJ` корректировки (плотно по №): №, Вид (MOVE/WRITE_OFF/INV_ADJ), ЕИ, Изменение остатка, Состояние LIVE/STORNO, Строка, Место до, Место после, Учётный остаток, Фактический остаток, Дата.
 - `_RET` возвраты: № возврата, № выдачи, ЕИ, Кол-во, Состояние, Строка. `_ISS` возвраты выдачи: № выдачи, Строка, Возвращено, Возвратов.
-- `_IDX` формулы поиска движка Calc (MATCH/COUNTIF/COUNTIFS; спецсимволы экранируются).
-- `_SYS` (A ключ, B значение; строка = константа `SK_*`): 0 SCHEMA, 1 INSTANCE, 2 MODE, 3 CORE_VERSION, 4 LAST_SEQ, 5 NEXT_EI, 6 NEXT_NO (№ выдачи), 7 NEXT_RET, 8 JPOS, 9 REG_URL, 10–14 TX_STATE/SEQ/TYPE/TIME/BI, 15–16 SAVE_STAMP/SAVE_SEQ, 17 MAX_QTY, 18 KEY_SHEETS, 19 NEXT_SPL, 20 NEXT_OFF, 21 NEXT_PROD, 22 NEXT_DET, 23 NEXT_OLD, 24 NEXT_OTH, 25 NEXT_ADJ.
+- `_CAR` визиты (плотно по №): №, Ключ машины, Состояние OPEN/CLOSED/CANCELLED, Строка, Приезд, Выезд, День, № за день, Ключ открытого визита, Приезд открытого визита, Исправлений, Длительность (сут.), Ключ поставщика; справочники N:O (машины), P:Q (поставщики), размеры — S1, U1.
+- `_IDX` формулы поиска движка Calc (MATCH/COUNTIF/COUNTIFS; спецсимволы экранируются); строки 22–26 — открытый визит машины, число открытых, справочники машин и поставщиков.
+- `_SYS` (A ключ, B значение; строка = константа `SK_*`): 0 SCHEMA, 1 INSTANCE, 2 MODE, 3 CORE_VERSION, 4 LAST_SEQ, 5 NEXT_EI, 6 NEXT_NO (№ выдачи), 7 NEXT_RET, 8 JPOS, 9 REG_URL, 10–14 TX_STATE/SEQ/TYPE/TIME/BI, 15–16 SAVE_STAMP/SAVE_SEQ, 17 MAX_QTY, 18 KEY_SHEETS, 19 NEXT_SPL, 20 NEXT_OFF, 21 NEXT_PROD, 22 NEXT_DET, 23 NEXT_OLD, 24 NEXT_OTH, 25 NEXT_ADJ, 26 NEXT_CAR.
 
 ## 4. Инварианты
 
@@ -61,6 +66,7 @@
 6. Реестр «Наличие» плотный: строка = номер ЕИ (D-033); ЕИ не перенумеровываются (перенос `MIGRATE` сохраняет старый номер, дыры допустимы).
 8. Место ЕИ меняется только `MOVE`; остаток — только движениями (приход, выдача, возврат, списание, инвентаризация).
 7. Колонки «Остаток до/после» — снимок на момент операции (не живые).
+9. Визиты машин остатков не меняют; у машины (ключ) не больше одного визита «На территории»; № визита — только `NEXT_CAR`; открытый визит переживает сбой и сохранение без потери и дубля (оракул `tests/car_oracle.py`).
 
 ## 5. Правила ЕИ и зависимости
 
@@ -86,11 +92,13 @@
 - **П-1…П-12 — Final Core, на утверждении** (`CLAUDE_REPORT_FINAL_CORE.md` §9): один лист «Корректировки»; перемещение ЕИ целиком; списание не ниже 0; инвентаризация (учётный остаток, разница ≠ 0); правила «Исправить»/«Удалить»; D-069 для корректировок; ЕИ «Сторно» не корректируется; снимок; пакеты; MIGRATE; книга этапа 5 не открывается.
 - **П-31…П-35 — выпуск, на утверждении** (`CLAUDE_REPORT_FINAL_RELEASE.md` §7): проверка ПК из исходников, рабочая папка не трогается; WMS_TOOLBOX в выпуске, рядом с книгой; копия на носитель — с книгами инструментов и актами; «Справка» начинается с руководства кладовщика; итоговый набор — пакетом проверки ПК.
 - **П-21…П-30 — инструменты, на утверждении** (`CLAUDE_REPORT_TOOLBOX.md` §4): только снимок (SHA-256); пакет INVENTORY — строки с разницей и учётный остаток снимка; IMPORTER — всё или ничего, повторы (в файле и с WMS) — ошибка; ARCHIVE не удаляет; RECONCILE — до 5 кандидатов, соответствие только по «да» человека; DOCTOR — ЕИ без прихода/переноса — ошибка; DOCS — номер не повторяется, книга сохраняется; набор — только в новую папку; защиты — предупреждение.
+- **П-36…П-48 — M6, на утверждении** (`CLAUDE_REPORT_M6_PRIME.md` §12): «Приход авто» без связи с остатками; ключ машины и один открытый визит; `NEXT_CAR`, отменённый визит; правила УЕХАЛ; «Исправить» визит; порог L5 и комментарий без журнала; блоки заказов; контракт 1.1; пороги Pattern Engine; уровни «Контроля дня»; словарь сверки; данные людей вне книг и копии; обновление 0.6 → 0.7.
 - **П-13…П-20 — перенос и кандидат, на утверждении** (`CLAUDE_REPORT_MIGRATION_CANDIDATE.md` §4): неизвестные единица и место при переносе — стоп; пустое место и нулевое количество — предупреждения; строка без ЕИ — новый номер выше всех; PROMOTE — только после VERIFY без расхождений; совместимость LibreOffice (24.2, 26.2; ≥ 7 — предупреждение); снятые защиты — предупреждение проверки; снимок сообщает защиты; папка выпуска самодостаточна (перенос с оракулом).
 
 ## 7. Код и тесты
 
-- `src/basic/`: WmsConfig, WmsCore (ApplyOperation, план, швы), WmsJournal, WmsLock, WmsBackup, WmsRecovery, WmsDiagnostics, WmsUi (кнопки «Главной», окна), WmsIssue, WmsOrders/WmsOrdersUi, WmsReceipt, WmsReturn/WmsReturnUi, WmsSpecial/WmsSpecialUi, WmsAdjust/WmsAdjustUi (корректировки), WmsExport (снимок, пакеты, SHA-256), WmsMigrate (`MIGRATE`); тестовый модуль — `tests/basic/`.
+- `src/basic/`: WmsConfig, WmsCore (ApplyOperation, план, швы), WmsJournal, WmsLock, WmsBackup, WmsRecovery, WmsDiagnostics, WmsUi (кнопки «Главной», переходы, окна), WmsIssue, WmsOrders/WmsOrdersUi, WmsReceipt, WmsReturn/WmsReturnUi, WmsSpecial/WmsSpecialUi, WmsAdjust/WmsAdjustUi (корректировки), WmsCar/WmsCarUi (визиты машин; шов часов `TestCarNow`), WmsExport (снимок 1.1, пакеты, SHA-256), WmsMigrate (`MIGRATE`); тестовый модуль — `tests/basic/`.
+- `tools/upgrade.py` — книга 0.6.0 → 0.7.0 на месте (`--check`; проверки, копия, модули и листы 0.7 на копии, открытие WMS 0.7 и самопроверка, иначе возврат); в выпуске — вместе с `tools/build_ods.py` и `src/basic/`.
 - Контракт с инструментами — `docs/EXPORT_CONTRACT.md` (`WMS-SNAPSHOT-1`, `WMS-BATCH-1`); manifest снимка сообщает защиты (`sheet;лист;защищён;виден`, `structure;1`), незнакомые строки manifest инструменты пропускают.
 - WmsStatus — «Состояние системы», «Проверка перед работой» (в том числе `Protections`: листы кроме «Получатели» защищены, служебные — `SH_ORD…SYS_SHEET` — скрыты, структура защищена; иначе WARN), совместимость LibreOffice (`LoCompat`: 24.2 и 26.2 — проверены, ≥ 7 — предупреждение, < 7 — ошибка проверки; заметка запуска, не блокировка). Раздел на «Главной» с `WmsStatus.STATUS_ROW` (24).
 - `tools/migrate.py` — перенос: DRY RUN → MIGRATE COPY → VERIFY → PROMOTE.
@@ -100,7 +108,7 @@
 - `tools/build_release.py` — папка выпуска: `WMS_PROD_CANDIDATE.ods`, docs, инструменты переноса вместе с оракулом (`ORACLES` — модули `tests/*_oracle.py`, которые импортирует VERIFY; C06 переносит таблицу из одной папки выпуска), `RELEASE_MANIFEST.csv`. Лист «Справка» собирается из `docs/RELEASE_NOTES.md` и `docs/BACKUP_RECOVERY.md`.
 - `tools/pc_check.py` — проверка складского ПК (среда, компиляция в своём Xvfb, наборы тестов; `--full`, `--env-only`; отчёт `PC_CHECK_REPORT.md`, `pc_check.json`, архив); `tools/printer_check.py` — тестовые этикетки (CUPS через PDF WMS_LABELS, TSPL, `--pdf-only`). Результаты — `pc_check_results/` (в `.gitignore`).
 - `tools/`: `build_ods.py` (сборка книги), `wmslo.py` (Python-UNO: Office, props), `basic_compile_check.py`, `migration_dryrun.py` (dry-run переноса, `--default-source`).
-- `tests/`: `run_phase1..5.py`, `run_final_core.py` (Y01–Y25), `run_migration.py` (MG01–MG07), `run_candidate.py` (C01–C06), `gui_candidate.py` — сценарии с оракулом; `run_toolbox.py` (K01–K13, фикстура `fixtures/WMS_SNAPSHOT_FIXTURE`); `run_e2e.py` (E01–E10, финальный end-to-end); `run_pc_tools.py` (P01–P02, пакет проверки ПК); `gui_phase2..5.py`, `gui_final_core.py` (окна на Xvfb; список и поля Basic-диалога — через дерево accessibility: роль LIST — `selectAccessibleChild`, роль TEXT — `setText`); `bench_phase*.py`, `bench_final_core.py`; оракулы `journal_oracle.py`, `receipt_oracle.py` (+ `replay_adjust`, `replay_migrate`), `return_oracle.py`, `special_oracle.py`, `adjust_oracle.py`; `harness.py`.
+- `tests/`: `run_phase1..5.py`, `run_final_core.py` (Y01–Y25), `run_migration.py` (MG01–MG07), `run_candidate.py` (C01–C06), `gui_candidate.py` — сценарии с оракулом; `run_m6.py` (M01–M14 «Приход авто», S01–S04 блоки заказов, U01–U02 обновление 0.6 и возврат повреждённой книги), `car_oracle.py`, `gui_m6.py`, `pdfscan.py` (линии в PDF-рендере); `run_insights.py` (I01–I04, Pattern Engine на наборах с известными закономерностями); `run_toolbox.py` (K01–K15, фикстуры `fixtures/WMS_SNAPSHOT_FIXTURE` — снимок 0.7, `…_060` — снимок 0.6; `make_fixture_snapshot.py`); `run_e2e.py` (E01–E11, финальный end-to-end и обновление склада 0.6.0); `run_pc_tools.py` (P01–P02, пакет проверки ПК); `gui_phase2..5.py`, `gui_final_core.py` (окна на Xvfb; список и поля Basic-диалога — через дерево accessibility: роль LIST — `selectAccessibleChild`, роль TEXT — `setText`); `bench_phase*.py`, `bench_final_core.py`; оракулы `journal_oracle.py`, `receipt_oracle.py` (+ `replay_adjust`, `replay_migrate`), `return_oracle.py`, `special_oracle.py`, `adjust_oracle.py`; `harness.py`.
 
 Команды (машина разработчика, LibreOffice + Python-UNO; `Xvfb :99` для окон и компиляции):
 
@@ -112,7 +120,10 @@ WMS_TEST_OUT=/tmp/wms_mg python3 tests/run_migration.py; WMS_TEST_OUT=/tmp/wms_c
 python3 tools/migrate.py dry-run|copy|verify|promote …; python3 tools/build_release.py ПАПКА
 python3 tools/build_toolbox.py ПАПКА; python3 tools/tb_compile_check.py ПАПКА/WMS_TOOLBOX --display :99
 WMS_TEST_OUT=/tmp/wms_e2e python3 tests/run_e2e.py; WMS_TEST_OUT=/tmp/wms_pc python3 tests/run_pc_tools.py
-python3 tools/pc_check.py [--full | --env-only] [--out ПАПКА]     # пакет проверки складского ПК (docs/PC_VALIDATION.md)
+python3 tools/pc_check.py [--full | --env-only] [--out ПАПКА] [--display :99]   # пакет проверки ПК = полный регресс (≈ час)
+WMS_TEST_OUT=/tmp/wms_m6 python3 tests/run_m6.py [m01 s02 u01 ...]; WMS_TEST_OUT=/tmp/wms_ins python3 tests/run_insights.py
+WMS_TEST_OUT=/tmp/wms_gm6 python3 tests/gui_m6.py --display :99; python3 tools/upgrade.py WMS_PROD.ods [--check]
+python3 tools/build_release.py ПАПКА --zip                        # выпуск и WMS_RELEASE_<версия>.zip
 python3 tools/printer_check.py [--cups ИМЯ | --tspl /dev/usb/lp0 | --pdf-only]
 WMS_TEST_OUT=/tmp/wms_tb python3 tests/run_toolbox.py [k01 k13 ...]
 WMS_TEST_OUT=/tmp/wms_p5 python3 tests/run_phase5.py [x01 x16 ...]      # так же run_phase4 (w..), 3 (r..), 2 (v..), 1 (t..)
@@ -123,7 +134,7 @@ WMS_TEST_OUT=/tmp/wms_b5 python3 tests/bench_phase5.py 100000 250000
 python3 tools/migration_dryrun.py table.csv --book WMS.ods --report dryrun.md [--default-source "Старый склад"]
 ```
 
-Последний полный набор (M2, один прогон на финальном коде): см. `TEST_REPORT.md`. Время: Final Core ≈ 3 мин, этап 5 ≈ 5,5, 4 ≈ 4, 3 ≈ 4,5, 2 ≈ 2,5, 1 ≈ 4,5; окна ≈ 1,5 мин; бенчмарк 100k+250k ≈ 7 мин.
+Последний полный набор (M6, выпуск 0.7.0): один прогон `tools/pc_check.py --full`, 1032 PASS / 0 FAIL / 0 SKIP — `TEST_REPORT.md`. Время: кандидат ≈ 0,5 мин, перенос ≈ 2, Final Core ≈ 3, M6 ≈ 3,5, инструменты ≈ 1,5, end-to-end ≈ 1,2, этап 5 ≈ 5,5, 4 ≈ 4, 3 ≈ 5, 2 ≈ 2,5, 1 ≈ 8; окна ≈ 1,5 мин; весь набор ≈ 45 мин. Бенчмарк 100k+250k (`bench_final_core.py`) ≈ 7 мин — отдельно.
 
 **Ловушки LibreOffice Basic** (обрыв «URP bridge disposed» при компиляции — почти всегда одна из них):
 - Basic не различает регистр: локальная `stype` и параметр `sType` — одно имя (ошибка «уже определено»).
@@ -141,13 +152,16 @@ python3 tools/migration_dryrun.py table.csv --book WMS.ods --report dryrun.md [-
 |---|---|---|
 | M1 Phase 5 accepted | D-071…D-088, пункты 11 и 17, регресс ×1, commit + push | готово, `bff146e` |
 | M2 Final Core | `MOVE`, `WRITE_OFF`, `INV_ADJ` (лёгкий лист «Корректировки» + служебная история), recovery/oracle/тесты/benchmark; «Экспорт для инструментов» (версионированный snapshot вне книги); приём batch-файлов (валидация и проведение самой WMS); `MIGRATE`; регресс ×1 + oracle + benchmark; ядро — feature-frozen | готово, `8f4be2c` |
-| M3 Migration + Production Candidate | importer DRY RUN → MIGRATE COPY → VERIFY → PROMOTE, oracle миграции, `WMS_PROD_CANDIDATE.ods` (версия продукта, схема, совместимость, release notes, backup/recovery guide, состояние системы) | эта контрольная точка |
-| M4 Toolbox | `WMS_TOOLBOX/`: INVENTORY, ANALYTICS, MANAGER, SEARCH, DOCTOR, RECONCILE, LABELS, DOCS, ARCHIVE, BACKUP + HEALTHCHECK, IMPORTER; launcher `WMS_TOOLBOX.ods`; тесты на фиксированных snapshot | следующий |
-| M5 Final Release preparation | документация кладовщика, финальный end-to-end, пакет проверки Ubuntu/принтера; запрос реального файла остатков | — |
+| M3 Migration + Production Candidate | importer DRY RUN → MIGRATE COPY → VERIFY → PROMOTE, oracle миграции, `WMS_PROD_CANDIDATE.ods` (версия продукта, схема, совместимость, release notes, backup/recovery guide, состояние системы) | готово, `21f4bcb` |
+| M4 Toolbox | `WMS_TOOLBOX/`: INVENTORY, ANALYTICS, MANAGER, SEARCH, DOCTOR, RECONCILE, LABELS, DOCS, ARCHIVE, BACKUP + HEALTHCHECK, IMPORTER; launcher `WMS_TOOLBOX.ods`; тесты на фиксированных snapshot | готово, `a041973` |
+| M5 Final Release preparation | документация кладовщика, финальный end-to-end, пакет проверки Ubuntu/принтера; запрос реального файла остатков | готово, `939929a` (выпуск 0.6.0) |
+| M6 PRIME | «Приход авто», блоки заказов, снимок 1.1, Analytics/Insights, Manager/«Контроль дня», Search/Doctor/Reconcile/Labels Prime, UX, обновление 0.6 → 0.7, выпуск 0.7.0 | готово — выпуск 0.7.0 |
 
 **Инструменты (M4):** исходники `src/toolbox/*.bas` (общий модуль TbCommon — папки, выбор и проверка снимка, загрузка таблиц снимка, запись пакета; по модулю на инструмент; TbLauncher) и `src/toolbox/scripts/` (python3, только стандартная библиотека); сборка `tools/build_toolbox.py ПАПКА` (только в новую папку); фикстура снимка `tests/fixtures/WMS_SNAPSHOT_FIXTURE` (`tests/make_fixture_snapshot.py`, без путей машины); тесты `tests/run_toolbox.py` (K01–K13); компиляция книг — `tools/tb_compile_check.py ПАПКА/WMS_TOOLBOX --display :99` (у каждого модуля своя проба `PROBES`). Ловушки Basic для инструментов: `InStrRev`, `Round`, `Filter` есть только в режиме VBA; `DateSerial` не принимает месяц вне 1…12; каждый модуль компилируется отдельно — общая функция должна быть в общем модуле книги; `IIf` вычисляет обе ветви; `InStr` без третьего аргумента не различает регистр; путь для скрипта — `ConvertFromURL`, а не URL.
 
-**Следующий шаг:** марафон остановлен на шагах пользователя (`CLAUDE_REPORT_FINAL_RELEASE.md` §6):
+**Инструменты M6:** `src/toolbox/scripts/insights/wms_insights.py` — Pattern Engine (только снимок; пороги — константы в начале файла; результат `../WMS_Reports/INSIGHTS_…`), вызывается кнопкой «Найти закономерности»; «Контроль дня» и «Что изменилось сегодня» считаются в TbManager. История печати этикеток — `../WMS_Labels/history.csv`, словарь сверки — `../WMS_Reconcile/dictionary.csv` (книги инструментов их не хранят). **Ловушка LibreOffice 24.2:** фигуры, привязанные к ячейкам на двух и более этикетках, при сохранении книги дают бесконечный временный файл — штрихкоды привязаны к странице; тесты сохраняют такие книги под сторожем размера (`Guard` в `run_toolbox.py`). `Private` переменная модуля Basic сбрасывается между запусками макросов — общее состояние между кнопками — `Global`.
+
+**Следующий шаг:** работа остановлена на шагах пользователя (`CLAUDE_REPORT_FINAL_RELEASE.md` §6, `CLAUDE_REPORT_M6_PRIME.md` §11):
 1. Проверка складского ПК и принтера (`docs/PC_VALIDATION.md`) — ждём архив `pc_check_results/<время>.tar.gz`, `printer_check.txt`, фото этикетки. По отчёту — исправления, если нужны.
 2. Файл остатков — перенос: `migrate.py dry-run` → отчёт пользователю → copy → verify → promote → `WMS_PROD.ods`; установка WMS_TOOLBOX рядом.
 

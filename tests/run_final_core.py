@@ -23,7 +23,7 @@ import time
 import uno  # noqa: F401  (LibreOffice Python-UNO)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from harness import OUT, Session, Results, new_wms, template  # noqa: E402
+from harness import OUT, Session, Results, new_wms, template, wms_versions  # noqa: E402
 
 R = Results()
 CASES = []
@@ -724,7 +724,7 @@ def y20_snapshot():
                 rows_ok = False
         R.add(c, "«Экспорт для инструментов»: папка WMS_Export/WMS_SNAPSHOT_<время>_seq<N>; manifest.csv — формат WMS-SNAPSHOT-1, версии, "
                  "схема, экземпляр, LAST_SEQ, позиция журнала, счётчики; у каждого файла число строк, размер и SHA-256 (сверены)",
-              res.startswith("OK:") and man.get("format") == ["WMS-SNAPSHOT-1"] and man.get("schema") == ["WMS-SYS-3"]
+              res.startswith("OK:") and man.get("format") == ["WMS-SNAPSHOT-1"] and man.get("schema") == [wms_versions()["WMS_SYS_SCHEMA"]]
               and man.get("last_seq") == [str(int(seq0))] and man.get("next_adj") == ["4"] and hashes_ok and rows_ok
               and os.path.basename(snap.rstrip("/")).startswith(f"WMS_SNAPSHOT_") and snap.rstrip("/").endswith(f"_seq{int(seq0)}"),
               f"{res[:120]}; {man.get('format')}; hashes {hashes_ok}; rows {rows_ok}")
@@ -754,7 +754,8 @@ def y20_snapshot():
         jr = sorted(os.path.basename(x) for x in glob.glob(os.path.join(snap, "journal", "*.csv")))
         R.add(c, "снимок: служебные таблицы (service/) и копия журнала (journal/); книга не изменилась (флаг «изменена», LAST_SEQ, журнал — "
                  "как до экспорта); временной папки .part не осталось",
-              "_ADJ.csv" in svc and "_SYS.csv" in svc and len(svc) == 8 and jr and s.doc.isModified() == mod0 and s.sysv("LAST_SEQ") == seq0
+              "_ADJ.csv" in svc and "_CAR.csv" in svc and "_SYS.csv" in svc and len(svc) == 9 and jr and s.doc.isModified() == mod0
+              and s.sysv("LAST_SEQ") == seq0
               and njournal(s) == j0 and not glob.glob(os.path.join(os.path.dirname(snap.rstrip("/")), ".*.part")), f"{svc}; {jr}")
         res2 = s.EX("ExportSnapshot")
         snap2 = s.EX("TestLastSnapshot")

@@ -201,10 +201,11 @@ def r04_positions_of_one_order():
         fact(s, 2, "5")
         a, b = post(s, 1), post(s, 2)
         m = more(s, 2, "10", c="УПД-7", o=D0)
-        ws = [W(s, r) for r in (1, 2, 3)]
-        ok = (a == "OK:1" and b == "OK:2" and m.startswith("OK:3|строка 5") and ws == ["Получено", "Частично получено", "Ожидается"]
-              and s.opos(1)[4:6] == (50.0, 50.0) and s.opos(2)[4:6] == (20.0, 15.0) and s.next_ol() == 3.0 and s.ord(4, "B") == "Розетка"
-              and s.ord(4, "A") == "З-5")
+        # M6 §18: the delivery row goes right under its position (row 4 of the sheet), the third position moves down to row 5
+        ws = [W(s, r) for r in (1, 2, 4)]
+        ok = (a == "OK:1" and b == "OK:2" and m.startswith("OK:3|строка 4") and ws == ["Получено", "Частично получено", "Ожидается"]
+              and s.opos(1)[4:6] == (50.0, 50.0) and s.opos(2)[4:6] == (20.0, 15.0) and s.next_ol() == 3.0 and s.ord(3, "B") == "Розетка"
+              and s.ord(3, "A") == "З-5" and W(s, 3) == "Дополнительное поступление" and s.ord(4, "B") == "Выключатель")
         R.add(c, "один № заказа — три разные позиции: статусы независимы (Получено / Частично получено / Ожидается), «Ещё поступление» "
                  "относится только к своей позиции", ok, f"{a}; {b}; {m}; W {ws}; позиции {s.opos(1)} {s.opos(2)}")
         oracle(c, s, "позиции одного заказа")
@@ -493,11 +494,12 @@ def r13_inserted_rows():
         iss = issue(s, 1, "202", "3")
         x = s.ord(4, "X")
         hint_add = s.rcv(202)[2]
-        dl = s.Rc("ReceiptDeleteRow", 6)
+        # M6 §18: the new delivery row (ЕИ-00000203) is right under the earlier one (row 6 of the sheet), «Гайка» moved down
+        dl = s.Rc("ReceiptDeleteRow", 5)
         R.add(c, "вставка строк над приходами: «Ещё поступление» из сдвинутой строки, выдача по ЕИ сдвинутой строки (X обновлён), сторно — "
                  "строки найдены по ключу, подсказки строк исправлены той же операцией",
-              moved == (ei(201), ei(202), "Гайка") and m.startswith("OK") and hint_src == 3.0 and iss == "OK:4" and x == 7.0 and hint_add == 4.0
-              and dl.startswith("OK") and W(s, 3) == "Частично получено" and "получено 50 из 100" in s.ord(3, "Y"),
+              moved == (ei(201), ei(202), "Гайка") and m.startswith("OK:3|строка 6|") and hint_src == 3.0 and iss == "OK:4" and x == 7.0 and hint_add == 4.0
+              and dl.startswith("OK") and W(s, 3) == "Частично получено" and "получено 50 из 100" in s.ord(3, "Y") and s.ord(6, "B") == "Гайка",
               f"сдвиг {moved}; {m}; подсказка исходной {hint_src}; {iss}; X {x}; подсказка доп. {hint_add}; {dl}; {s.ord(3, 'Y')}")
         locked = s.ord_locks(1)
         s.type_ord("B", 1, "вставлено")
@@ -542,21 +544,23 @@ def r14_filter():
         set_filter(s, 11, "Озон")
         vis = [visible(s, r) for r in range(1, 6)]
         m = more(s, 1, "6", c="УПД-2", o=D0)
-        f3 = post(s, 3)
-        s.goto("Заказы", "$A$2:$AB$6")
+        # M6 §18: the delivery row of З-1 is inserted right under it (row 3 of the sheet, supplier «Озон» — shown); the rows below move
+        f3 = post(s, 4)
+        s.goto("Заказы", "$A$2:$AB$7")
         s.OU("BtnRcvPost")
         batch = s.U("TestUiLastMessage")
-        ok = (vis == [True, False, True, False, True] and m.startswith("OK") and f3.startswith("OK") and s.ord(4, "V") == "" and s.ord(5, "V") != ""
-              and W(s, 1) == "Получено" and W(s, 2) == "Ожидается")
+        vis = [visible(s, r) for r in range(1, 7)]
+        ok = (vis == [True, True, False, True, False, True] and m.startswith("OK:2|строка 3|") and f3.startswith("OK") and s.ord(5, "V") == ""
+              and s.ord(6, "V") != "" and W(s, 1) == "Получено" and W(s, 3) == "Ожидается")
         R.add(c, "при активном автофильтре (Поставщик = Озон): приход, «Ещё поступление», проведение выделенного блока — только видимые строки, "
-                 "скрытая строка с фактом не проведена", ok, f"видимость {vis}; {m}; {f3}; блок {batch}; V4 {s.ord(4, 'V')!r} V5 {s.ord(5, 'V')!r}")
+                 "скрытая строка с фактом не проведена", ok, f"видимость {vis}; {m}; {f3}; блок {batch}; V5 {s.ord(5, 'V')!r} V6 {s.ord(6, 'V')!r}")
         s.doc.store()
-        vis1 = [visible(s, r) for r in range(1, 6)]
+        vis1 = [visible(s, r) for r in range(1, 7)]
         with zipfile.ZipFile(p) as z:
             nfilt = z.read("content.xml").decode("utf-8").count('table:visibility="filter"')
         s.close()
         s = ready(Session(p))
-        vis2 = [visible(s, r) for r in range(1, 6)]
+        vis2 = [visible(s, r) for r in range(1, 7)]
         R.add(c, "сохранение при фильтре на «Заказы» (D-041): строки сохранены показанными, фильтр восстановлен после сохранения и при открытии",
               nfilt == 0 and vis1 == vis and vis2 == vis and not s.doc.isModified() and st(s)[0] == "CLEAN", f"{vis1} {vis2}; скрытых в файле {nfilt}")
         oracle(c, s, "фильтр")
@@ -1110,10 +1114,12 @@ def r33_several_orders():
         s.OU("BtnRcvPost")
         batch = s.U("TestUiLastMessage")
         m1 = more(s, 1, "30", c="УПД-20", o=D0)
-        m5 = s.Rc("ReceiptAddRow", 3, "1", "", "", "", D0, "A-1", "")
-        ws = [W(s, r) for r in range(1, 7)]
+        # M6 §18: each delivery row goes right under its position — З-10 Кабель's under row 2, then З-11 Кабель (now row 5) gets its own
+        m5 = s.Rc("ReceiptAddRow", 4, "1", "", "", "", D0, "A-1", "")
+        ws = [W(s, r) for r in (1, 3, 4, 6, 7, 8)]
         ok = (batch.startswith("OK=4;ERR=1;SKIP=1") and ws == ["Получено", "Получено", "Получено без документов", "Ожидается", "Ожидается", "Получено"]
-              and m1.startswith("OK") and m5.startswith("OK") and s.opos(1)[5] == 50.0 and s.opos(3)[5] == 21.0 and s.ord(5, "Y").startswith("Не проведено"))
+              and m1.startswith("OK:5|строка 3|") and m5.startswith("OK:6|строка 6|") and W(s, 2) == W(s, 5) == "Дополнительное поступление"
+              and s.opos(1)[5] == 50.0 and s.opos(3)[5] == 21.0 and s.ord(7, "Y").startswith("Не проведено"))
         R.add(c, "несколько заказов одновременно: блок из 6 строк 3 заказов — 4 прихода проведены, ошибка строки 6 в «Контроль», строка без F пропущена; "
                  "дальнейшие поступления — каждое к своей позиции (поступление без документов меняет статус своей позиции)", ok, f"{batch}; {m1}; {m5}; W {ws}")
         oracle(c, s, "несколько заказов")
@@ -1543,21 +1549,24 @@ def r45_partial_overdue():
         s.Od("TestRefreshMode", 1)
         s.Od("TestSetToday", "")
         s.OU("BtnOrdRefresh")
-        wa = [W(s, r) for r in range(1, 7)]
+        # M6 §18: the cancelled delivery row of З-1 stays right under it (row 3 of the sheet); the positions follow
+        src_rows = (1, 3, 4, 5, 6, 7)
+        wa = [W(s, r) for r in src_rows]
         s.Od("TestSetToday", later)
         s.OU("BtnOrdRefresh")
-        wb = [W(s, r) for r in range(1, 7)]
+        wb = [W(s, r) for r in src_rows]
         path2 = s.Od("TestRefreshPath")
         s.Od("TestRefreshMode", 0)
         R.add(c, "«Обновить статусы» находит частично полученные строки одной формулой массива; запасной путь (чтение строк) даёт те же статусы "
                  "в обе стороны (сегодня — «Частично получено», через 40 дней — «Частично получено / просрочено»)",
-              path1 == "FORMULA" and path2 == "ROWS" and wa == [PO, "Частично получено"] + want[2:] and wb == [PO, PO] + want[2:],
+              path1 == "FORMULA" and path2 == "ROWS" and wa == [PO, "Частично получено"] + want[2:] and wb == [PO, PO] + want[2:]
+              and W(s, 2) == "Поступление удалено (сторно)",
               f"{path1}/{path2}; {wa}; {wb}")
         s.Od("TestSetToday", "")
         s.close(save=True)
         s = ready(Session(p))
         rep = s.report()
-        ws3 = [W(s, r) for r in range(1, 7)]
+        ws3 = [W(s, r) for r in (1, 3, 4, 5, 6, 7)]
         R.add(c, "повторное открытие (настоящая дата): статусы пересчитаны при запуске — у позиции со сроком в будущем снова «Частично получено»",
               ws3 == [PO, "Частично получено"] + want[2:] and "частично получено и просрочено 1" in rep, f"{ws3}; {rep[-240:]}")
         oracle(c, s, "статусы после открытия")
