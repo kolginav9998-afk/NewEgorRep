@@ -18,7 +18,7 @@ from wmslo import Office  # noqa: E402
 PROBES = {"TbCommon": ("TbInStrRev", ("a/b", "/")), "TbInventory": ("NumText", (1.5,)), "TbAnalytics": ("AnProbe", ()),
           "TbManager": ("MgrProbe", ()), "TbSearch": ("SearchProbe", ()), "TbDoctor": ("DoctorProbe", ()), "TbLabels": ("Code128C", ("00000201",)),
           "TbDocs": ("DocsProbe", ()), "TbArchive": ("FieldOf", ("a;b;c", 1)), "TbImporter": ("DateText", ("2026-09-01", "")),
-          "TbLauncher": ("ToolList", ())}
+          "TbLauncher": ("ToolList", ()), "LtMain": ("LtInStrRev", ("a/b", "/"))}
 
 
 def main():

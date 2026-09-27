@@ -76,6 +76,8 @@ def ei_history(st):
         e = h.setdefault(ei, dict(refills=0, issued=0.0, returned=0.0, balance=bal.get(ei), place=place.get(ei)))
         e["origin"] = f"Заказ {rec.get('order')}" if rec.get("order") is not None else "обычный приход"
         e["received"] = rec["qty"] if rec["state"] == "LIVE" else 0.0
+        # M7: a receipt of the old table transferred with its current balance — what was used before the transfer
+        e["legacy_used"] = rec.get("legacy_used", 0.0) if rec["state"] == "LIVE" else 0.0
     # Final Core: a migrated EI came with its transferred stock (MIGRATE)
     for ei, c in sp["eis"].items():
         if c.get("code") == "MIG":
@@ -275,10 +277,11 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, legacy_mn_em
         for ei, e in hist.items():
             if e.get("received") is None:
                 continue
-            want = e["received"] - e["issued"] + e["returned"] + e.get("adjusted", 0.0)
+            used = e.get("legacy_used", 0.0)
+            want = e["received"] - used - e["issued"] + e["returned"] + e.get("adjusted", 0.0)
             if abs(want - (e["balance"] or 0.0)) > 1e-4:
-                bad(f"{ei}: история не сходится: пришло {e['received']} − выдано {e['issued']} + возвращено {e['returned']} = {want}, "
-                    f"остаток {e['balance']}", 3)
+                bad(f"{ei}: история не сходится: пришло {e['received']}" + (f" − израсходовано до переноса {used}" if used else "")
+                    + f" − выдано {e['issued']} + возвращено {e['returned']} = {want}, остаток {e['balance']}", 3)
 
     live = sum(1 for L in lines.values() if L["state"] == "LIVE")
     info.update(dict(special_ops=sp["ops"], special_lines=len(lines), special_live=live, special_eis=len(eis), parts=len(parts),

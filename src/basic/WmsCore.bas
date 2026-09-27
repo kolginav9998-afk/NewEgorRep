@@ -259,7 +259,7 @@ Function SysLayoutProblem() As String
     End If
     If gSysSh.getCellByPosition(0, SK_SCHEMA).getString() = "SCHEMA" And SysStr(SK_SCHEMA) = WMS_SYS_SCHEMA_FC Then
         SysLayoutProblem = "книга версии 0.6 (схема " & WMS_SYS_SCHEMA_FC & " без листа «" & SH_CARS & "» и счётчика NEXT_CAR): ядро " _
-            & WMS_CORE_VERSION & " её не открывает — обновите книгу программой tools/upgrade.py из комплекта 0.7.0 (данные и журнал сохраняются)"
+            & WMS_CORE_VERSION & " её не открывает — обновите книгу программой tools/upgrade.py из комплекта WMS " & WMS_PRODUCT_VERSION & " (данные и журнал сохраняются)"
         Exit Function
     End If
     For i = 0 To UBound(names)

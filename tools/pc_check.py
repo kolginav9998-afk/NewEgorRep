@@ -40,6 +40,7 @@ QUICK = [("candidate", "tests/run_candidate.py", "Книга-кандидат (C
          ("migration", "tests/run_migration.py", "Перенос (MG)", False),
          ("final_core", "tests/run_final_core.py", "Final Core (Y)", False),
          ("m6", "tests/run_m6.py", "Приход авто, разделители заказов, обновление 0.6 (M, S, U)", False),
+         ("legacy", "tests/run_legacy_transfer.py", "Перенос старой таблицы «Заказы» (L)", False),
          ("insights", "tests/run_insights.py", "Закономерности (I)", False),
          ("toolbox", "tests/run_toolbox.py", "Инструменты (K)", False),
          ("e2e", "tests/run_e2e.py", "Сквозной тест (E)", False),
@@ -48,6 +49,7 @@ FULL = [("phase5", "tests/run_phase5.py", "Этап 5 (X)", False), ("phase4", "
         ("phase3", "tests/run_phase3.py", "Этап 3 (R)", False), ("phase2", "tests/run_phase2.py", "Этап 2 (V)", False),
         ("phase1", "tests/run_phase1.py", "Этап 1 (T)", False),
         ("gui_m6", "tests/gui_m6.py", "Окна: M6 («Приход авто», «Заказы»)", True),
+        ("gui_transfer", "tests/gui_transfer.py", "Окна: перенос старой таблицы (WMS_LEGACY_TRANSFER)", True),
         ("gui_candidate", "tests/gui_candidate.py", "Окна: кандидат", True), ("gui_final_core", "tests/gui_final_core.py", "Окна: Final Core", True),
         ("gui_phase5", "tests/gui_phase5.py", "Окна: этап 5", True), ("gui_phase4", "tests/gui_phase4.py", "Окна: этап 4", True),
         ("gui_phase3", "tests/gui_phase3.py", "Окна: этап 3", True), ("gui_phase2", "tests/gui_phase2.py", "Окна: этап 2", True)]
@@ -66,7 +68,8 @@ def run(cmd, timeout=60, **kw):
 def fingerprint():
     """SHA-256 (16 знаков) исходников, которыми проверяется ПК: src, tools, tests, docs"""
     h = hashlib.sha256()
-    pats = ["src/basic/*.bas", "src/toolbox/*.bas", "src/toolbox/scripts/*/*.py", "tools/*.py", "tests/*.py", "tests/basic/*.bas", "docs/*.md"]
+    pats = ["src/basic/*.bas", "src/toolbox/*.bas", "src/toolbox/scripts/*/*.py", "src/transfer/*.bas", "tools/*.py", "tests/*.py", "tests/basic/*.bas",
+            "docs/*.md"]
     for p in sorted(f for pat in pats for f in glob.glob(os.path.join(ROOT, pat))):
         h.update(os.path.relpath(p, ROOT).encode())
         h.update(open(p, "rb").read())
@@ -227,6 +230,15 @@ def step_compile(out, display):
     ok = rc1 == 0 and log2.startswith("COMPILE OK")
     steps.append(dict(key="compile_toolbox", title="Компиляция книг WMS_TOOLBOX", rc=rc2, seconds=round(time.time() - t0),
                       bad=[] if ok else [(log1 + log2).strip()[-400:]], **{"pass": 1 if ok else 0, "fail": 0 if ok else 1, "skip": 0}))
+    t0 = time.time()
+    lt = os.path.join(out, "transfer_build")
+    shutil.rmtree(lt, ignore_errors=True)
+    rc3, log3 = run([sys.executable, os.path.join(ROOT, "tools", "build_transfer.py"), lt], timeout=1200, cwd=ROOT)
+    rc4, log4 = run([sys.executable, os.path.join(ROOT, "tools", "tb_compile_check.py"), lt, "--display", display], timeout=1200, cwd=ROOT)
+    open(os.path.join(out, "compile_transfer.log"), "w", encoding="utf-8").write(log3 + "\n" + log4)
+    ok = rc3 == 0 and log4.startswith("COMPILE OK")
+    steps.append(dict(key="compile_transfer", title="Компиляция книги WMS_LEGACY_TRANSFER", rc=rc4, seconds=round(time.time() - t0),
+                      bad=[] if ok else [(log3 + log4).strip()[-400:]], **{"pass": 1 if ok else 0, "fail": 0 if ok else 1, "skip": 0}))
     return steps
 
 

@@ -1214,7 +1214,7 @@ def k14_snapshot_060():
           f"{res}; " + "; ".join(f"{k}={v[0]}" for k, v in rep.items()))
 
 
-# ================================================================ K15 WMS_TOOLBOX of release 0.6.0 on a snapshot of 0.7.0
+# ================================================================ K15 WMS_TOOLBOX of release 0.6.0 on a snapshot of 0.7
 
 OLD_COMMIT = "939929a"               # release 0.6.0 (M5)
 
@@ -1226,7 +1226,7 @@ def k15_old_toolbox_new_snapshot():
     if not os.path.isdir(os.path.join(src, "tools")):
         why = git_sources(OLD_COMMIT, src)
         if why:
-            R.add(c, "WMS_TOOLBOX выпуска 0.6.0 на снимке 0.7.0", "SKIP", why)
+            R.add(c, "WMS_TOOLBOX выпуска 0.6.0 на снимке 0.7", "SKIP", why)
             return
     tb6 = os.path.join(OUT, "toolbox_060")
     if not os.path.isdir(os.path.join(tb6, "WMS_TOOLBOX")):
@@ -1264,7 +1264,7 @@ def k15_old_toolbox_new_snapshot():
     finally:
         t.close()
     sch = rep_.get("версия схемы", ("", "", ""))
-    R.add(c, "WMS_TOOLBOX выпуска 0.6.0 (собран из исходников его commit) на снимке 0.7.0 (контракт 1.1): диагностика — ошибок 0, схема "
+    R.add(c, "WMS_TOOLBOX выпуска 0.6.0 (собран из исходников его commit) на снимке 0.7 (контракт 1.1): диагностика — ошибок 0, схема "
              "WMS-SYS-4 — предупреждение «обновите WMS_TOOLBOX»; аналитика, поиск и карточка ЕИ, отчёт, инвентаризация работают (машины не видит)",
           res.startswith("OK:ошибок 0") and sch[0] == "WARN" and "WMS-SYS-4" in sch[1] and an.startswith("OK:сводка построена") and sr.startswith("OK")
           and card.startswith("OK:ЕИ-00000201") and mr.startswith("OK") and mp.startswith("OK") and inv.startswith("OK:строк пересчёта 208"),

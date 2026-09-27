@@ -1274,3 +1274,276 @@ EH:
     stopRow = r + 1
     Resume DONE
 End Function
+
+' ================================================================ перенос старой таблицы (M7 PRIME: инструмент WMS_LEGACY_TRANSFER)
+' Приход позиции старого листа «Заказы», уже бывший до WMS: строка вписана инструментом переноса как обычная строка заказа
+' (ввод A..U, Z, AA), операция проводит её как приход WMS — позиция _ORD, запись прихода _RCV, строка «Наличие», V W X Y —
+' но с прежним номером ЕИ (без перенумерации) и с текущим остатком этого ЕИ (после прихода по старой таблице могли быть
+' выдачи: остаток ≤ количества прихода; разница — расход до переноса, как уже выданное). Журнал хранит происхождение:
+' строку staging, её SHA-256, старые статус, контроль и наличие, откуда взят остаток. Дальше позиция живёт обычной
+' жизнью WMS: «Ещё поступление», выдачи, возвраты, корректировки, «Исправить» (уже расходованное считается выданным).
+' Вызывается только инструментом переноса на копии чистой книги-кандидата.
+
+' "" when EI n (any number, not only NEXT_EI) may be given to a transferred receipt: its «Наличие» and _RCV rows are empty
+' and «Заказы» does not hold it; otherwise the reason
+Private Function LegacyEIProblem(n As Long, canon As String) As String
+    Dim d As Variant
+    If n < 1 Or n >= MAX_SHEET_ROW Then
+        LegacyEIProblem = "номер " & canon & " вне допустимого диапазона"
+        Exit Function
+    End If
+    d = WmsIssue.StockSheet().getCellRangeByPosition(0, n, SC_LAST, n).getDataArray()(0)
+    If CStr(d(SC_EI)) <> "" Or CStr(d(SC_QTY)) <> "" Then
+        LegacyEIProblem = canon & " уже есть в «" & SH_STOCK & "» — перенос не перенумеровывает и не сливает ЕИ"
+        Exit Function
+    End If
+    d = WmsOrders.RcvRow(n)
+    If CStr(d(RV_EI)) <> "" Or CStr(d(RV_OL)) <> "" Then
+        LegacyEIProblem = canon & " уже есть среди приходов (" & SH_RCV & ")"
+        Exit Function
+    End If
+    If WmsOrders.CountEI(canon) > 0 Then
+        LegacyEIProblem = canon & " уже записан в «" & SH_ORDERS & "»"
+        Exit Function
+    End If
+    LegacyEIProblem = ""
+End Function
+
+' the current balance of a transferred EI: 0 ≤ balance ≤ its receipt; "" or the reason
+Private Function LegacyBalance(sBal As String, fact As Double, ByRef bal As Double) As String
+    Dim st As Integer, msg As String
+    st = ParseQtyText(sBal, bal, msg)
+    If st = 5 And bal = 0 And InStr(sBal, "-") = 0 Then
+        bal = 0
+    ElseIf st <> 0 Then
+        LegacyBalance = "остаток «" & sBal & "» — " & msg
+        Exit Function
+    End If
+    If bal > fact + 0.0000001 Then
+        LegacyBalance = "остаток " & WmsIssue.QtyText(bal) & " больше количества прихода " & WmsIssue.QtyText(fact) & " — такой остаток перенос не создаёт"
+        Exit Function
+    End If
+    LegacyBalance = ""
+End Function
+
+' the audit fields of a transferred receipt (the journal: the history of the transfer, the reconciliation)
+Private Sub PlanLegacyFields(sOrigin As String, sLegStatus As String, sLegCtl As String, sLegStock As String, sLegDup As String, _
+    sStockSrc As String, sEiSrc As String)
+    PlanField("ORIGIN", sOrigin)
+    PlanField("LEGACY_STATUS", sLegStatus)
+    PlanField("LEGACY_CTL", sLegCtl)
+    PlanField("LEGACY_STOCK", sLegStock)
+    PlanField("LEGACY_DUP", sLegDup)
+    PlanField("STOCK_SRC", sStockSrc)
+    PlanField("EI_SRC", sEiSrc)
+End Sub
+
+' LEGACY_RECEIPT: the first receipt of a transferred position in its source row r (0-based, kind OPEN: written by the tool,
+' V empty). sEI — the EI of the old table (or the new number the tool planned above all old ones: sEiSrc NEW); sBal — the
+' current balance; sPlaceNow — the current place of the EI when it differs from U (""); the rest — the audit fields (the old
+' W, Y, X and AB of the row — LEGACY_STATUS, LEGACY_CTL, LEGACY_STOCK, LEGACY_DUP — and the sources of the balance and the EI).
+' OK:<seq>, SKIP:<why> (already done — a repeated run), ERR:<why> (nothing written), or an ApplyOperation error.
+Function ReceiptLegacyRow(r As Long, sEI As String, sBal As String, sPlaceNow As String, sOrigin As String, sLegStatus As String, _
+    sLegCtl As String, sLegStock As String, sLegDup As String, sStockSrc As String, sEiSrc As String) As String
+    Dim why As String, kind As String, n As Long, canon As String, msg As String, olid As Long, res As String, sKey As String, dup As String
+    Dim fp As String, st As String, ctl As String, nodoc As Integer, own As String, sOrder As String, sArt As String, sSupplier As String
+    Dim bal As Double, placeNow As String
+    WmsInit()
+    If r < 1 Or r > MAX_SHEET_ROW Then
+        ReceiptLegacyRow = "ERR:строка вне листа"
+        Exit Function
+    End If
+    On Error GoTo EH
+    kind = WmsOrders.OrderRowKind(r)
+    If kind = "RECEIVED" Or kind = "STORNO" Then
+        ReceiptLegacyRow = "SKIP:строка уже проведена (" & gKcanon & ")"
+        Exit Function
+    ElseIf kind <> "OPEN" Then
+        ReceiptLegacyRow = "ERR:строка " & (r + 1) & " не строка заказа без прихода (" & kind & ")"
+        Exit Function
+    End If
+    why = PostingBlockReason()
+    If why <> "" Then
+        ReceiptLegacyRow = why
+        Exit Function
+    End If
+    why = CheckOrderPart(r, True)
+    If why = "" Then why = CheckReceiptCells(r)
+    If why <> "" Then
+        ReceiptLegacyRow = "ERR:" & why
+        Exit Function
+    End If
+    If Not WmsIssue.NormalizeEI(sEI, n, canon, msg) Then
+        ReceiptLegacyRow = "ERR:" & msg
+        Exit Function
+    End If
+    why = LegacyEIProblem(n, canon)
+    If why = "" Then why = LegacyBalance(sBal, mFact, bal)
+    olid = WmsOrders.NextOl()
+    If why = "" Then why = NewOlProblem(olid)
+    If why <> "" Then
+        ReceiptLegacyRow = "ERR:" & why
+        Exit Function
+    End If
+    placeNow = Trim(sPlaceNow)
+    If placeNow = "" Then placeNow = mPlace
+    sOrder = Trim(Txt(r, OC_ORDER))
+    sArt = Trim(Txt(r, OC_ART))
+    sSupplier = Trim(Txt(r, OC_SUPPLIER))
+    sKey = WmsOrders.DupKeyText(sSupplier, mDoc, sArt, mName, mFact, DupDate())
+    dup = WmsOrders.FindDuplicate(sKey, 0)
+    nodoc = DocsMissing(mDoc, mHasDdate)
+    st = WmsOrders.PositionStatus(mOrdQty, mFact, nodoc, "", IIf(mHasEdate, mEdate, 0))
+    own = WmsOrders.ReceiptControl(mFact, mHasDocQty, mDocQty, mDoc <> "", mHasDdate, mUnit)
+    ctl = WmsOrders.SourceControl(own, mOrdQty, mFact, "", mUnit)
+    fp = WmsOrders.Fingerprint(r, mOrdQty, IIf(mHasOdate, mOdate, 0))
+    PlanBegin("LEGACY_RECEIPT", canon)
+    PlanField("EI", canon)
+    PlanField("OL", olid)
+    PlanField("ROW", r + 1)
+    PlanField("ORD_QTY", mOrdQty)
+    PlanReceiptFields(sOrder, mName, sArt, mUnit, sSupplier)
+    PlanField("BAL_AFTER", bal)
+    If placeNow <> mPlace Then PlanField("PLACE_NOW", placeNow)
+    PlanField("STATUS", st)
+    If dup <> "" Then PlanField("DUP", dup)
+    PlanLegacyFields(sOrigin, sLegStatus, sLegCtl, sLegStock, sLegDup, sStockSrc, sEiSrc)
+    If n >= SysNum(SK_NEXT_EI) Then PlanSetValue(SYS_SHEET, SK_NEXT_EI, 1, n + 1, False)
+    PlanStockRow(n, canon, bal, mName, sArt, mUnit, placeNow, Trim(Txt(r, OC_CAT)), "Перенос: заказ " & sOrder)
+    PlanRcvRow(n, canon, olid, r, sKey, RV_SRC, mFact, nodoc)
+    PlanSetValue(SH_ORD, 0, OD_NEXT_COL, olid + 1, False)
+    PlanOrdRow(olid, r, canon, fp, mOrdQty, mFact, 1, nodoc, "")
+    PlanOrderInputs(r)
+    PlanOrderValues(r)
+    PlanReceiptValues(r, True, False)
+    PlanSetValue(SH_ORDERS, r, OC_EI, canon, False)
+    PlanDerived(SH_ORDERS, r, OC_STATUS, st)
+    PlanDerived(SH_ORDERS, r, OC_STOCK, bal)
+    PlanDerived(SH_ORDERS, r, OC_CTL, ctl)
+    PlanDerived(SH_ORDERS, r, OC_DUP, IIf(dup <> "", "Возможный дубль: " & dup, ""))
+    PlanLockBits(SH_ORDERS, r, 0, OC_LAST, ORDER_LOCKS_POSTED)
+    res = ApplyOperation(0, 0)
+    ReceiptLegacyRow = res
+    Exit Function
+EH:
+    ReceiptLegacyRow = "ERR-SYS:внутренняя ошибка переноса строки: " & Error$ & " (код " & Err & ", строка " & Erl & ")"
+End Function
+
+' LEGACY_RECEIPT_ADD: a further receipt of a transferred position (a delivery row of the old table). Row r (0-based, OPEN,
+' written by the tool right under the source row srcRow and the earlier deliveries of its position, H empty) becomes the
+' delivery row of the position, as «Ещё поступление» makes it — only without inserting a row, with the old EI and the
+' current balance. The identity of the position (A B D E I L M P R S T) is taken from the source row.
+Function ReceiptLegacyAdd(r As Long, srcRow As Long, sEI As String, sBal As String, sPlaceNow As String, sOrigin As String, _
+    sLegStatus As String, sLegCtl As String, sLegStock As String, sLegDup As String, sStockSrc As String, sEiSrc As String) As String
+    Dim why As String, kind As String, olid As Long, od As Variant, sd As Variant, n As Long, canon As String, msg As String
+    Dim sKey As String, dup As String, nodoc As Integer, rcv2 As Double, nodoc2 As Double, res As String, cols As Variant, i As Integer
+    Dim own As String, bal As Double, placeNow As String, want As Long
+    WmsInit()
+    If r < 1 Or r > MAX_SHEET_ROW Or srcRow < 1 Or srcRow >= r Then
+        ReceiptLegacyAdd = "ERR:строка поступления должна быть ниже исходной строки позиции"
+        Exit Function
+    End If
+    On Error GoTo EH
+    kind = WmsOrders.OrderRowKind(r)
+    If kind = "RECEIVED" Or kind = "STORNO" Then
+        ReceiptLegacyAdd = "SKIP:строка уже проведена (" & gKcanon & ")"
+        Exit Function
+    ElseIf kind <> "OPEN" Then
+        ReceiptLegacyAdd = "ERR:строка " & (r + 1) & " не строка поступления без прихода (" & kind & ")"
+        Exit Function
+    End If
+    If WmsOrders.OrderRowKind(srcRow) <> "RECEIVED" Or Not gKsrc Then
+        ReceiptLegacyAdd = "ERR:исходная строка " & (srcRow + 1) & " — не проведённая исходная строка позиции"
+        Exit Function
+    End If
+    olid = gKol
+    If Not WmsOrders.OlValid(olid, od) Then
+        ReceiptLegacyAdd = "ERR:позиция заказа (OLID " & olid & ") не найдена в служебной таблице"
+        Exit Function
+    End If
+    If CStr(od(OD_CANCEL)) = OD_CANCEL_ORDER Then
+        ReceiptLegacyAdd = "ERR:позиция отменена — поступление по ней не проводится"
+        Exit Function
+    End If
+    want = DeliveryRowAfter(srcRow, olid)
+    If want <> r Then
+        ReceiptLegacyAdd = "ERR:строка поступления " & (r + 1) & " не сразу под позицией (ожидалась строка " & (want + 1) & ")"
+        Exit Function
+    End If
+    If Trim(Txt(r, OC_ORDQTY)) <> "" Then
+        ReceiptLegacyAdd = "ERR:у строки поступления заполнено заказанное количество (H)"
+        Exit Function
+    End If
+    why = PostingBlockReason()
+    If why <> "" Then
+        ReceiptLegacyAdd = why
+        Exit Function
+    End If
+    why = CheckReceiptCells(r)
+    If why <> "" Then
+        ReceiptLegacyAdd = "ERR:" & why
+        Exit Function
+    End If
+    If Not WmsIssue.NormalizeEI(sEI, n, canon, msg) Then
+        ReceiptLegacyAdd = "ERR:" & msg
+        Exit Function
+    End If
+    why = LegacyEIProblem(n, canon)
+    If why = "" Then why = LegacyBalance(sBal, mFact, bal)
+    If why <> "" Then
+        ReceiptLegacyAdd = "ERR:" & why
+        Exit Function
+    End If
+    placeNow = Trim(sPlaceNow)
+    If placeNow = "" Then placeNow = mPlace
+    sd = OSh().getCellRangeByPosition(0, srcRow, OC_LAST, srcRow).getDataArray()(0)
+    sKey = WmsOrders.DupKeyText(CStr(sd(OC_SUPPLIER)), mDoc, CStr(sd(OC_ART)), CStr(sd(OC_NAME)), mFact, DupDate())
+    dup = WmsOrders.FindDuplicate(sKey, 0)
+    nodoc = DocsMissing(mDoc, mHasDdate)
+    rcv2 = WmsIssue.Round3(od(OD_RCV) + mFact)
+    nodoc2 = od(OD_NODOC) + nodoc
+    own = WmsOrders.ReceiptControl(mFact, mHasDocQty, mDocQty, mDoc <> "", mHasDdate, Trim(CStr(sd(OC_UNIT))))
+    PlanBegin("LEGACY_RECEIPT_ADD", canon)
+    PlanField("EI", canon)
+    PlanField("OL", olid)
+    PlanField("ROW", r + 1)
+    PlanField("SRC_ROW", srcRow + 1)
+    PlanReceiptFields(Trim(CStr(sd(OC_ORDER))), Trim(CStr(sd(OC_NAME))), Trim(CStr(sd(OC_ART))), Trim(CStr(sd(OC_UNIT))), Trim(CStr(sd(OC_SUPPLIER))))
+    PlanField("BAL_AFTER", bal)
+    If placeNow <> mPlace Then PlanField("PLACE_NOW", placeNow)
+    PlanField("POS_RCV", rcv2)
+    If dup <> "" Then PlanField("DUP", dup)
+    PlanLegacyFields(sOrigin, sLegStatus, sLegCtl, sLegStock, sLegDup, sStockSrc, sEiSrc)
+    If n >= SysNum(SK_NEXT_EI) Then PlanSetValue(SYS_SHEET, SK_NEXT_EI, 1, n + 1, False)
+    PlanStockRow(n, canon, bal, Trim(CStr(sd(OC_NAME))), Trim(CStr(sd(OC_ART))), Trim(CStr(sd(OC_UNIT))), placeNow, Trim(CStr(sd(OC_CAT))), _
+        "Перенос: заказ " & Trim(CStr(sd(OC_ORDER))))
+    PlanRcvRow(n, canon, olid, r, sKey, RV_ADD, mFact, nodoc)
+    PlanSetValue(SH_ORD, olid, OD_RCV, rcv2, False)
+    PlanSetValue(SH_ORD, olid, OD_CNT, od(OD_CNT) + 1, False)
+    PlanSetValue(SH_ORD, olid, OD_NODOC, nodoc2, False)
+    ' the identity of the position, as «Ещё поступление» copies it; the old row's own values of these columns are replaced
+    cols = Array(OC_ORDER, OC_NAME, OC_INVOICE, OC_ART, OC_UNIT, OC_SUPPLIER, OC_SELLER, OC_ODATE, OC_BUYER, OC_CAT, OC_ASSIGNED)
+    For i = 0 To UBound(cols)
+        PlanSetValue(SH_ORDERS, r, cols(i), sd(cols(i)), False)
+    Next i
+    ' the delivery's own sum, comment and delivery time, as the old table had them: kept as inputs of the row
+    If OSh().getCellByPosition(OC_SUM, r).getType() <> com.sun.star.table.CellContentType.EMPTY Then PlanInput(SH_ORDERS, r, OC_SUM)
+    If OSh().getCellByPosition(OC_NOTE, r).getType() <> com.sun.star.table.CellContentType.EMPTY Then PlanInput(SH_ORDERS, r, OC_NOTE)
+    If OSh().getCellByPosition(OC_DAYS, r).getType() <> com.sun.star.table.CellContentType.EMPTY Then PlanInput(SH_ORDERS, r, OC_DAYS)
+    If mDoc <> "" Then PlanSetValue(SH_ORDERS, r, OC_DOC, mDoc, False)
+    PlanReceiptValues(r, True, False)
+    PlanSetValue(SH_ORDERS, r, OC_PLACE, mPlace, False)
+    PlanSetValue(SH_ORDERS, r, OC_EI, canon, False)
+    PlanSetValue(SH_ORDERS, r, OC_BLOCK, "OL" & olid, False)
+    PlanDerived(SH_ORDERS, r, OC_STATUS, OS_ADD)
+    PlanDerived(SH_ORDERS, r, OC_STOCK, bal)
+    PlanDerived(SH_ORDERS, r, OC_CTL, own)
+    PlanDerived(SH_ORDERS, r, OC_DUP, IIf(dup <> "", "Возможный дубль: " & dup, ""))
+    PlanLockBits(SH_ORDERS, r, 0, OC_LAST, ORDER_LOCKS_POSTED)
+    PlanSourceStatus(srcRow, od, rcv2, nodoc2, CStr(od(OD_CANCEL)))
+    res = ApplyOperation(0, 0)
+    ReceiptLegacyAdd = res
+    Exit Function
+EH:
+    ReceiptLegacyAdd = "ERR-SYS:внутренняя ошибка переноса поступления: " & Error$ & " (код " & Err & ", строка " & Erl & ")"
+End Function

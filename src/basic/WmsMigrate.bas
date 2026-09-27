@@ -102,3 +102,35 @@ Function MigrateEI(sEI As String, sName As String, sArt As String, sUnit As Stri
 EH:
     MigrateEI = "ERR:внутренняя ошибка проверки переноса: " & Error$ & " (код " & Err & ", строка " & Erl & ")"
 End Function
+
+' M7 PRIME: the marks of a transfer of the old table «Заказы» (tools/legacy_transfer.py, the tool WMS_LEGACY_TRANSFER) in
+' the journal of the new WMS: LEGACY_BEGIN before the first operation of the transfer, LEGACY_END after the last one — the
+' history of the transfer (the SHA-256 of the staging data, what was transferred) stays in the journal of the book itself.
+' No write of the book. sFields: «KEY=value» pairs separated by Tab. OK:<seq>, ERR:<why> or an ApplyOperation error.
+Function LegacyMark(sKind As String, sFields As String) As String
+    Dim a As Variant, i As Long, p As Long, k As String, why As String
+    WmsInit()
+    If sKind <> "BEGIN" And sKind <> "END" Then
+        LegacyMark = "ERR:неизвестная отметка переноса «" & sKind & "»"
+        Exit Function
+    End If
+    why = PostingBlockReason()
+    If why <> "" Then
+        LegacyMark = why
+        Exit Function
+    End If
+    PlanBegin("LEGACY_" & sKind, "")
+    a = Split(sFields, Chr(9))
+    For i = 0 To UBound(a)
+        p = InStr(a(i), "=")
+        If p > 1 Then
+            k = Left(a(i), p - 1)
+            If k = "W" Then
+                LegacyMark = "ERR:поле «W» в отметке переноса не допускается"
+                Exit Function
+            End If
+            PlanField(k, Mid(a(i), p + 1))
+        End If
+    Next i
+    LegacyMark = ApplyOperation(0, 0)
+End Function

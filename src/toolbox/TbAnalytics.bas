@@ -158,11 +158,22 @@ Function AnRefresh(dToday As Double) As String
     carMsg = CarSheet(snap, nCar, dToday)
     Charts(snap, nCar >= 0)
     ThisComponent.calculateAll()
-    AnRefresh = "OK:сводка построена: ЕИ " & n(0) & ", заказов " & n(1) & ", иного прихода " & n(2) & ", выдач " & n(3) & ", возвратов " & n(4) _
-        & ", корректировок " & n(5) & "; " & carMsg
+    AnRefresh = "OK:сводка построена: ЕИ " & EICount(n(0)) & ", заказов " & n(1) & ", иного прихода " & n(2) & ", выдач " & n(3) & ", возвратов " _
+        & n(4) & ", корректировок " & n(5) & "; " & carMsg
     Exit Function
 EH:
     AnRefresh = "ERR:внутренняя ошибка инструмента: " & Error$ & " (код " & Err & ", строка " & Erl & ")"
+End Function
+
+' the EIs of the registry (its rows are dense by the number of the EI: a transferred or migrated registry has empty rows)
+Private Function EICount(nRows As Long) As Long
+    Dim a As Variant, i As Long
+    If nRows < 1 Then Exit Function
+    a = ThisComponent.Sheets.getByName("_stock").getCellRangeByPosition(0, 1, 0, nRows).queryContentCells(com.sun.star.sheet.CellFlags.STRING) _
+        .getRangeAddresses()
+    For i = 0 To UBound(a)
+        EICount = EICount + a(i).EndRow - a(i).StartRow + 1
+    Next i
 End Function
 
 Private Function SnapName(snap As String) As String

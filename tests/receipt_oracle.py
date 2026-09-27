@@ -41,7 +41,10 @@ import re
 
 import journal_oracle
 
-RECEIPT_TYPES = ("RECEIPT", "RECEIPT_ADD", "RECEIPT_FIX", "RECEIPT_DEL", "ORDER_CANCEL", "ORDER_CANCEL_REST")
+RECEIPT_TYPES = ("RECEIPT", "RECEIPT_ADD", "RECEIPT_FIX", "RECEIPT_DEL", "ORDER_CANCEL", "ORDER_CANCEL_REST", "LEGACY_RECEIPT", "LEGACY_RECEIPT_ADD")
+# M7: a receipt of the old table transferred with its own EI and its current balance (≤ the received quantity: what was
+# consumed before the transfer counts as issued); the stock row names the transfer («Перенос: заказ <A>»)
+LEGACY_RECEIPTS = ("LEGACY_RECEIPT", "LEGACY_RECEIPT_ADD")
 ISSUE_TYPES = ("ISSUE", "ISSUE_FIX", "ISSUE_DEL")
 RETURN_TYPES = ("RETURN", "RETURN_FIX", "RETURN_DEL")
 SPECIAL_TYPES = ("SP_RECEIPT", "SP_REFILL", "SP_FIX", "SP_DEL", "SP_IDENTIFY")
@@ -287,23 +290,34 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
 
     for e in ops:
         f, t, sq = e["fields"], e["type"], e["seq"]
-        if t in ("RECEIPT", "RECEIPT_ADD"):
+        if t in ("RECEIPT", "RECEIPT_ADD") + LEGACY_RECEIPTS:
             n_rcpt_ops += 1
+            legacy = t in LEGACY_RECEIPTS
             ei, ol, q = f["EI"], int(f["OL"]), float(f["QTY"])
             if ei in bal or ei in receipts:
                 bad(f"seq {sq} {t}: {ei} уже существовал — ЕИ выдан повторно", 2)
             created.append(ei)
             nodoc = 0 if f.get("DOC", "").strip() and f.get("DOC_DATE") else 1
-            rec = dict(ol=ol, qty=q, state="LIVE", kind="SRC" if t == "RECEIPT" else "ADD", nodoc=nodoc, name=f.get("NAME"),
+            rec = dict(ol=ol, qty=q, state="LIVE", kind="SRC" if t in ("RECEIPT", "LEGACY_RECEIPT") else "ADD", nodoc=nodoc, name=f.get("NAME"),
                        art=f.get("ART"), unit=f.get("UNIT"), place=f.get("PLACE"), order=f.get("ORDER"), doc=f.get("DOC", ""),
                        ddate=iso_serial(f.get("DOC_DATE")), rdate=iso_serial(f.get("DATE")), docqty=f_num(f, "DOC_QTY"),
-                       price=f_num(f, "PRICE"), supplier=f.get("SUPPLIER"))
+                       price=f_num(f, "PRICE"), supplier=f.get("SUPPLIER"), legacy=legacy)
             receipts[ei] = rec
-            bal[ei] = q
-            place[ei] = f.get("PLACE")
-            if abs(float(f["BAL_AFTER"]) - q) > EPS:
-                bad(f"seq {sq} {t}: BAL_AFTER {f['BAL_AFTER']} ≠ {q}", 3)
-            if t == "RECEIPT":
+            if legacy:
+                b = float(f["BAL_AFTER"])
+                if b < -EPS or b > q + EPS:
+                    bad(f"seq {sq} {t} {ei}: остаток переноса {b} вне 0…{q} (больше прихода не переносится)", 3)
+                if not f.get("ORIGIN"):
+                    bad(f"seq {sq} {t} {ei}: нет происхождения (ORIGIN)", "M")
+                bal[ei] = b
+                place[ei] = f.get("PLACE_NOW") or f.get("PLACE")
+                rec["legacy_used"] = q - b          # consumed before the transfer: counts as issued in the history of the EI
+            else:
+                bal[ei] = q
+                place[ei] = f.get("PLACE")
+                if abs(float(f["BAL_AFTER"]) - q) > EPS:
+                    bad(f"seq {sq} {t}: BAL_AFTER {f['BAL_AFTER']} ≠ {q}", 3)
+            if t in ("RECEIPT", "LEGACY_RECEIPT"):
                 if ol in positions:
                     bad(f"seq {sq} RECEIPT: позиция OLID {ol} уже существовала")
                 positions[ol] = dict(ord=float(f["ORD_QTY"]), rcv=q, cnt=1, nodoc=nodoc, cancel="", key=ei)
@@ -488,7 +502,7 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
         srow = book_ei.get(ei)
         if srow is not None and rec.get("name") is not None:
             want_s = (rec["name"], rec["art"] or "", rec["unit"], place.get(ei, rec["place"]), "Активен" if rec["state"] == "LIVE" else "Приход удалён (сторно)",
-                      f"Заказ {rec['order']}")
+                      f"Перенос: заказ {rec['order']}" if rec.get("legacy") else f"Заказ {rec['order']}")
             got_s = (srow[1], srow[2], srow[3], srow[5], srow[7], srow[8])
             if got_s != want_s:
                 bad(f"{ei}: «Наличие» {got_s} ≠ ожидаемое {want_s}", 3)

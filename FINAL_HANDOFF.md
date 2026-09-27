@@ -2,20 +2,20 @@
 
 Компактное состояние для продолжения работы после сжатия контекста или в новой сессии. Не отчёт: подробности — в `WMS_DECISIONS.md`, `WMS_MASTER_SPEC.md`, отчётах этапов. Обновляется на каждой крупной контрольной точке (`CLAUDE_TASK.md`).
 
-**Обновлено:** 27.09.2026, **M6 PRIME — выпуск 0.7.0** (`CLAUDE_REPORT_M6_PRIME.md`): «Приход авто», блоки заказов, аналитика с закономерностями, «Контроль дня», обновление 0.6 → 0.7. Правила П-1…П-48 — на утверждении (`CLAUDE_REPORT_FINAL_CORE.md` §9, `CLAUDE_REPORT_MIGRATION_CANDIDATE.md` §4, `CLAUDE_REPORT_TOOLBOX.md` §4, `CLAUDE_REPORT_FINAL_RELEASE.md` §7, `CLAUDE_REPORT_M6_PRIME.md` §12).
+**Обновлено:** 27.09.2026, **M7 PRIME — выпуск 0.7.1** (`CLAUDE_REPORT_M7_PRIME.md`): перенос старой таблицы «Заказы» книгой `WMS_LEGACY_TRANSFER.ods` и программой `tools/legacy_transfer.py`; до этого M6 PRIME — выпуск 0.7.0 (`e65f606`). Правила П-1…П-67 — на утверждении (`CLAUDE_REPORT_FINAL_CORE.md` §9, `CLAUDE_REPORT_MIGRATION_CANDIDATE.md` §4, `CLAUDE_REPORT_TOOLBOX.md` §4, `CLAUDE_REPORT_FINAL_RELEASE.md` §7, `CLAUDE_REPORT_M6_PRIME.md` §12, `CLAUDE_REPORT_M7_PRIME.md` §9).
 
 ## 1. Git
 
-- Ветка работы — только `claude/festive-lamport-l4f8f1`. Разрешено: обычный commit + push после полностью зелёного milestone (M6 — один commit). Запрещено: force push, merge в `main`, новый PR, новая ветка.
-- Commits: Phase 1 `7e6d280`, Phase 2 `561be9e` (PR #1 слит пользователем в `main`, merge `defb278`), Phase 3 `0125af3`, Phase 4 `17774f9`, Phase 5 (M1) `bff146e`, Final Core (M2) `8f4be2c`, Migration + Production Candidate (M3) `21f4bcb`, Toolbox (M4) `a041973`, Final Release preparation (M5, выпуск 0.6.0) `939929a`, M6 PRIME (выпуск 0.7.0) — commit поверх `939929a` (`git log -1`).
+- Ветка работы — только `claude/festive-lamport-l4f8f1`. Разрешено: обычный commit + push после полностью зелёного milestone (M6, M7 — по одному commit). Запрещено: force push, merge в `main`, новый PR, новая ветка.
+- Commits: Phase 1 `7e6d280`, Phase 2 `561be9e` (PR #1 слит пользователем в `main`, merge `defb278`), Phase 3 `0125af3`, Phase 4 `17774f9`, Phase 5 (M1) `bff146e`, Final Core (M2) `8f4be2c`, Migration + Production Candidate (M3) `21f4bcb`, Toolbox (M4) `a041973`, Final Release preparation (M5, выпуск 0.6.0) `939929a`, M6 PRIME (выпуск 0.7.0) `e65f606`, M7 PRIME (выпуск 0.7.1) — commit поверх `e65f606` (`git log -1`).
 - Выпуск 0.6.0 не хранится файлом: он собирается из `939929a` (`git archive` + его `tools/build_release.py`); так же его книгу собирают тесты U01, U02, E11, K15 (без истории git — SKIP с причиной).
 - Перед commit: тесты milestone зелёные; в дереве нет реальных складских данных, временных книг и журналов; commit содержит только свой milestone. Бинарные книги в Git не хранятся (D-009): книга собирается `tools/build_ods.py`.
 - Реальная миграция — только с файлом пользователя (остановиться и запросить файл с точным списком колонок).
 
 ## 2. Ядро
 
-- Версия ядра `0.7.0-transport` (`WmsConfig.WMS_CORE_VERSION`), продукта `0.7.0` (`WMS_PRODUCT_VERSION`), схема `_SYS` **`WMS-SYS-4`** (`WMS_SYS_SCHEMA_FC` = `WMS-SYS-3` — схема 0.6.0). Книга 0.6.0 обновляется на месте `tools/upgrade.py` (всё или ничего, копия `…_preupgrade.ods`); книги этапов 1–5 — только перенос (D-068, D-072, П-12).
-- **Ядро feature-frozen (M2):** складские операции не добавляются. M6 добавил только журнал машин (`WmsCar`, остатков не касается) и блоки «Заказов» — как разрешило задание M6.
+- Версия ядра `0.7.1-legacy` (`WmsConfig.WMS_CORE_VERSION`), продукта `0.7.1` (`WMS_PRODUCT_VERSION`), схема `_SYS` **`WMS-SYS-4`** (с 0.7.0 не менялась) (`WMS_SYS_SCHEMA_FC` = `WMS-SYS-3` — схема 0.6.0). Книга 0.6.0 обновляется на месте `tools/upgrade.py` (всё или ничего, копия `…_preupgrade.ods`); книги этапов 1–5 — только перенос (D-068, D-072, П-12).
+- **Ядро feature-frozen (M2):** складские операции не добавляются. M6 добавил только журнал машин (`WmsCar`, остатков не касается) и блоки «Заказов» — как разрешило задание M6. M7 добавил только операции переноса старой таблицы (`WmsReceipt.ReceiptLegacyRow` / `ReceiptLegacyAdd`, `WmsMigrate.LegacyMark`) — их вызывает только `tools/legacy_transfer.py` на копии чистой книги-кандидата.
 - LibreOffice Calc + Basic; модули `src/basic/*.bas` (текст, D-009), книга собирается `tools/build_ods.py`.
 - **Единственный путь записи — `ApplyOperation`** (`WmsCore`): план операции (PlanBegin / PlanField / PlanSetValue / PlanDerived / PlanInput / PlanLockBits) → фаза 2.1 STARTED + снимок «до» (`_SYS` TX_*) → 2.2 изменения → 2.3 строка журнала (точка фиксации) → 2.4 COMMITTED + LAST_SEQ. Ошибка до строки журнала — полный откат по снимку; после — операция завершена (при сбое до сохранения книги — хвост журнала, «Восстановить»).
 - Журнал: внешний, только дописывание, `WMS_Journal/WMS_journal_YYYY-MM.csv`, строка `J1;seq;timestamp;instance;type;fields...;END;length`, seq строго непрерывен; позиция в книге `JPOS` = `file|offset|seq`, проверяется по содержимому файла.
@@ -25,7 +25,7 @@
 
 ### Операции журнала
 
-`ISSUE`, `ISSUE_FIX`, `ISSUE_DEL` · `RECEIPT`, `RECEIPT_ADD`, `RECEIPT_FIX`, `RECEIPT_DEL`, `ORDER_CANCEL`, `ORDER_CANCEL_REST` · `RETURN`, `RETURN_FIX`, `RETURN_DEL` · `SP_RECEIPT`, `SP_REFILL`, `SP_FIX`, `SP_DEL`, `SP_IDENTIFY` · `MOVE`, `MOVE_FIX`, `MOVE_DEL`, `WRITE_OFF`, `WRITE_OFF_FIX`, `WRITE_OFF_DEL`, `INV_ADJ`, `INV_ADJ_FIX`, `INV_ADJ_DEL` · `MIGRATE` (перенос ЕИ, без исправления и сторно) · `CAR_ARRIVE`, `CAR_DEPART`, `CAR_FIX`, `CAR_CANCEL` (визиты машин, остатков не меняют). Исправление = одна составная операция (сторно старого + новое движение), сторно = статус «Удалено (сторно)», строка остаётся, номера не переиспользуются (D-039, D-040).
+`ISSUE`, `ISSUE_FIX`, `ISSUE_DEL` · `RECEIPT`, `RECEIPT_ADD`, `RECEIPT_FIX`, `RECEIPT_DEL`, `ORDER_CANCEL`, `ORDER_CANCEL_REST` · `RETURN`, `RETURN_FIX`, `RETURN_DEL` · `SP_RECEIPT`, `SP_REFILL`, `SP_FIX`, `SP_DEL`, `SP_IDENTIFY` · `MOVE`, `MOVE_FIX`, `MOVE_DEL`, `WRITE_OFF`, `WRITE_OFF_FIX`, `WRITE_OFF_DEL`, `INV_ADJ`, `INV_ADJ_FIX`, `INV_ADJ_DEL` · `MIGRATE` (перенос ЕИ, без исправления и сторно) · `CAR_ARRIVE`, `CAR_DEPART`, `CAR_FIX`, `CAR_CANCEL` (визиты машин, остатков не меняют) · `LEGACY_RECEIPT`, `LEGACY_RECEIPT_ADD` (приход старой таблицы: прежний ЕИ, `BAL_AFTER` = текущий остаток ≤ `QTY`, `ORIGIN`, `LEGACY_STATUS`, `LEGACY_CTL`, `LEGACY_STOCK`, `LEGACY_DUP` (старые W, Y, X, AB), `STOCK_SRC`, `EI_SRC`; дальше — обычные `RECEIPT_ADD`, `RECEIPT_FIX` (израсходованное до переноса считается выданным), выдачи и корректировки), `LEGACY_BEGIN`, `LEGACY_END` (отметки переноса: SHA-256 данных, счётчики; без записей книги). Исправление = одна составная операция (сторно старого + новое движение), сторно = статус «Удалено (сторно)», строка остаётся, номера не переиспользуются (D-039, D-040).
 
 ## 3. Книга
 
@@ -101,6 +101,7 @@
 - `tools/upgrade.py` — книга 0.6.0 → 0.7.0 на месте (`--check`; проверки, копия, модули и листы 0.7 на копии, открытие WMS 0.7 и самопроверка, иначе возврат); в выпуске — вместе с `tools/build_ods.py` и `src/basic/`.
 - Контракт с инструментами — `docs/EXPORT_CONTRACT.md` (`WMS-SNAPSHOT-1`, `WMS-BATCH-1`); manifest снимка сообщает защиты (`sheet;лист;защищён;виден`, `structure;1`), незнакомые строки manifest инструменты пропускают.
 - WmsStatus — «Состояние системы», «Проверка перед работой» (в том числе `Protections`: листы кроме «Получатели» защищены, служебные — `SH_ORD…SYS_SHEET` — скрыты, структура защищена; иначе WARN), совместимость LibreOffice (`LoCompat`: 24.2 и 26.2 — проверены, ≥ 7 — предупреждение, < 7 — ошибка проверки; заметка запуска, не блокировка). Раздел на «Главной» с `WmsStatus.STATUS_ROW` (24).
+- **Перенос старой таблицы (M7):** `src/transfer/LtMain.bas` — модуль книги `WMS_LEGACY_TRANSFER.ods` (сборка `tools/build_transfer.py`): кнопки шагов, фиксация формул значениями, копия книги в `LEGACY_WORK/staging.ods`, `settings.txt` из «Настроек», асинхронный запуск `python3 tools/legacy_transfer.py` с опросом `progress.txt`, загрузка `check/summary.csv`, `errors.csv`, `rows.csv`, `verify_summary.csv`; состояние шагов — `state.txt` (кнопка «СДЕЛАТЬ РАБОЧЕЙ» доступна только при `promote_ready=1`); тестовые швы `LtTestAuto`, `LtTestConfirm`, `LtTestLastMessage`, `LtTestLastAsk`. `tools/legacy_transfer.py`: `Analysis` (заголовок и сдвиг, блоки по A, поступления и слияние первой дочерней строки, ЕИ и дубли, детали по ключу артикула, остатки, статусы, раскладка строк и операции, OLID по порядку операций), `write_check_outputs`, `inspect_candidate` (схема, версия ядра из кода Basic, чистота), `execute` (строки A:U и Z:AA одним `setDataArray`, операции по плану), `reconcile` (книга против плана: строки, ЕИ, «Наличие», `_RCV`, `_ORD`, счётчики), `write_verify_report`, `cmd_promote`. Состояние — `LEGACY_WORK/state.json`.
 - `tools/migrate.py` — перенос: DRY RUN → MIGRATE COPY → VERIFY → PROMOTE.
   - Стоп-условия задания §4; неизвестные единица и место — стоп (П-13); места — `--places` или явно `--accept-table-places`.
   - Перенос в копию целиком или никак; VERIFY — таблица, журнал (SHA-256 таблицы), самопроверка, оракул.
@@ -124,6 +125,8 @@ python3 tools/pc_check.py [--full | --env-only] [--out ПАПКА] [--display :9
 WMS_TEST_OUT=/tmp/wms_m6 python3 tests/run_m6.py [m01 s02 u01 ...]; WMS_TEST_OUT=/tmp/wms_ins python3 tests/run_insights.py
 WMS_TEST_OUT=/tmp/wms_gm6 python3 tests/gui_m6.py --display :99; python3 tools/upgrade.py WMS_PROD.ods [--check]
 python3 tools/build_release.py ПАПКА --zip                        # выпуск и WMS_RELEASE_<версия>.zip
+WMS_TEST_OUT=/tmp/wms_lt python3 tests/run_legacy_transfer.py [l01 l29 ...]; WMS_TEST_OUT=/tmp/wms_glt python3 tests/gui_transfer.py --display :99
+python3 tools/build_transfer.py ПАПКА; python3 tools/legacy_transfer.py check|build|verify|promote|status --work LEGACY_WORK …
 python3 tools/printer_check.py [--cups ИМЯ | --tspl /dev/usb/lp0 | --pdf-only]
 WMS_TEST_OUT=/tmp/wms_tb python3 tests/run_toolbox.py [k01 k13 ...]
 WMS_TEST_OUT=/tmp/wms_p5 python3 tests/run_phase5.py [x01 x16 ...]      # так же run_phase4 (w..), 3 (r..), 2 (v..), 1 (t..)
@@ -134,7 +137,7 @@ WMS_TEST_OUT=/tmp/wms_b5 python3 tests/bench_phase5.py 100000 250000
 python3 tools/migration_dryrun.py table.csv --book WMS.ods --report dryrun.md [--default-source "Старый склад"]
 ```
 
-Последний полный набор (M6, выпуск 0.7.0): один прогон `tools/pc_check.py --full`, 1032 PASS / 0 FAIL / 0 SKIP — `TEST_REPORT.md`. Время: кандидат ≈ 0,5 мин, перенос ≈ 2, Final Core ≈ 3, M6 ≈ 3,5, инструменты ≈ 1,5, end-to-end ≈ 1,2, этап 5 ≈ 5,5, 4 ≈ 4, 3 ≈ 5, 2 ≈ 2,5, 1 ≈ 8; окна ≈ 1,5 мин; весь набор ≈ 45 мин. Бенчмарк 100k+250k (`bench_final_core.py`) ≈ 7 мин — отдельно.
+Последний полный набор (M7, выпуск 0.7.1): один прогон `tools/pc_check.py --full`, 1121 PASS / 0 FAIL / 0 SKIP — `TEST_REPORT.md` (отпечаток `0bbb656cce6b0459`). Время: кандидат ≈ 0,7 мин, перенос ≈ 2, Final Core ≈ 3, M6 ≈ 4, перенос старой таблицы ≈ 8, инструменты ≈ 1,7, end-to-end ≈ 1,4, этап 5 ≈ 6, 4 ≈ 4,5, 3 ≈ 5,5, 2 ≈ 2,5, 1 ≈ 7,5; окна ≈ 2,5 мин; весь набор ≈ 50 мин. Бенчмарк 100k+250k (`bench_final_core.py`) ≈ 7 мин — отдельно.
 
 **Ловушки LibreOffice Basic** (обрыв «URP bridge disposed» при компиляции — почти всегда одна из них):
 - Basic не различает регистр: локальная `stype` и параметр `sType` — одно имя (ошибка «уже определено»).
@@ -155,7 +158,8 @@ python3 tools/migration_dryrun.py table.csv --book WMS.ods --report dryrun.md [-
 | M3 Migration + Production Candidate | importer DRY RUN → MIGRATE COPY → VERIFY → PROMOTE, oracle миграции, `WMS_PROD_CANDIDATE.ods` (версия продукта, схема, совместимость, release notes, backup/recovery guide, состояние системы) | готово, `21f4bcb` |
 | M4 Toolbox | `WMS_TOOLBOX/`: INVENTORY, ANALYTICS, MANAGER, SEARCH, DOCTOR, RECONCILE, LABELS, DOCS, ARCHIVE, BACKUP + HEALTHCHECK, IMPORTER; launcher `WMS_TOOLBOX.ods`; тесты на фиксированных snapshot | готово, `a041973` |
 | M5 Final Release preparation | документация кладовщика, финальный end-to-end, пакет проверки Ubuntu/принтера; запрос реального файла остатков | готово, `939929a` (выпуск 0.6.0) |
-| M6 PRIME | «Приход авто», блоки заказов, снимок 1.1, Analytics/Insights, Manager/«Контроль дня», Search/Doctor/Reconcile/Labels Prime, UX, обновление 0.6 → 0.7, выпуск 0.7.0 | готово — выпуск 0.7.0 |
+| M6 PRIME | «Приход авто», блоки заказов, снимок 1.1, Analytics/Insights, Manager/«Контроль дня», Search/Doctor/Reconcile/Labels Prime, UX, обновление 0.6 → 0.7, выпуск 0.7.0 | готово, `e65f606` (выпуск 0.7.0) |
+| M7 PRIME | `WMS_LEGACY_TRANSFER.ods` + `tools/legacy_transfer.py`: перенос старого «Заказы» A:AB (заказы по колонке A, поступления, ЕИ, остатки X → 1B → 1C/1D → правило, статусы, детали) — CHECK → BUILD (тестовая WMS) → VERIFY (отчёт) → PROMOTE (`WMS_WORK`, CUTOVER); тесты L01–L38 и окна; выпуск 0.7.1 | готово — выпуск 0.7.1 |
 
 **Инструменты (M4):** исходники `src/toolbox/*.bas` (общий модуль TbCommon — папки, выбор и проверка снимка, загрузка таблиц снимка, запись пакета; по модулю на инструмент; TbLauncher) и `src/toolbox/scripts/` (python3, только стандартная библиотека); сборка `tools/build_toolbox.py ПАПКА` (только в новую папку); фикстура снимка `tests/fixtures/WMS_SNAPSHOT_FIXTURE` (`tests/make_fixture_snapshot.py`, без путей машины); тесты `tests/run_toolbox.py` (K01–K13); компиляция книг — `tools/tb_compile_check.py ПАПКА/WMS_TOOLBOX --display :99` (у каждого модуля своя проба `PROBES`). Ловушки Basic для инструментов: `InStrRev`, `Round`, `Filter` есть только в режиме VBA; `DateSerial` не принимает месяц вне 1…12; каждый модуль компилируется отдельно — общая функция должна быть в общем модуле книги; `IIf` вычисляет обе ветви; `InStr` без третьего аргумента не различает регистр; путь для скрипта — `ConvertFromURL`, а не URL.
 

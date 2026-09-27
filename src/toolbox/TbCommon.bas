@@ -5,7 +5,7 @@
 ' запись отчёта.
 Option Explicit
 
-Public Const TB_VERSION = "1.1.0"
+Public Const TB_VERSION = "1.1.1"
 ' the contract versions of the snapshot this toolbox reads: 1.0 (WMS 0.6, no vehicles) and 1.1 (WMS 0.7, «Приход авто»)
 Public Const TB_CONTRACT = "1.1"
 Public Const TB_SNAPSHOT_FORMAT = "WMS-SNAPSHOT-1"

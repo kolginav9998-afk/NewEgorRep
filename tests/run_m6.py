@@ -24,7 +24,7 @@ import uno  # noqa: F401  (LibreOffice Python-UNO)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools"))
-from harness import OUT, PROFILES, Session, Results, git_sources, new_wms, template, unique  # noqa: E402
+from harness import OUT, PROFILES, Session, Results, git_sources, new_wms, template, unique, wms_versions  # noqa: E402
 import car_oracle  # noqa: E402
 from wmslo import Office  # noqa: E402
 
@@ -1012,7 +1012,7 @@ def u01_upgrade_060():
         rep = s.B("StartupReport")
         sc = s.B("ActionSelfCheck")
         R.add(c, "WMS 0.7 открывает обновлённую книгу там же: «работа разрешена», самопроверка без ошибок, схема WMS-SYS-4, журнал продолжается",
-              st(s)[0] == "CLEAN" and "ядро 0.7.0" in rep and sc.startswith("САМОПРОВЕРКА WMS: ошибок 0") and s.sysv("SCHEMA") == "WMS-SYS-4"
+              st(s)[0] == "CLEAN" and f"ядро {wms_versions()['WMS_CORE_VERSION']}" in rep and sc.startswith("САМОПРОВЕРКА WMS: ошибок 0") and s.sysv("SCHEMA") == "WMS-SYS-4"
               and s.sysv("NEXT_CAR") == 1.0, f"{rep[:120]}; {sc[:60]}")
         roracle(c, s, "журнал 0.6 после обновления")
         sh = s.doc.Sheets.getByName("Заказы")

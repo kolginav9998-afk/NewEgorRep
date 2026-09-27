@@ -7,12 +7,15 @@ OUT_DIR (it must not exist) gets:
                            MODE PROD) with «Главная» (version, «Состояние системы», «Проверка перед работой») and «Справка»
                            (the guide of the storekeeper, these release notes and the backup / recovery guide);
   WMS_TOOLBOX/             the separate tools (tools/build_toolbox.py): it goes next to the working book;
+  WMS_LEGACY_TRANSFER.ods  the transfer of the old table «Заказы» into this WMS (tools/build_transfer.py; M7): its buttons
+                           run tools/legacy_transfer.py of this folder on a copy of WMS_PROD_CANDIDATE.ods;
   docs/                    OPERATOR_GUIDE.md, RELEASE_NOTES.md, BACKUP_RECOVERY.md, EXPORT_CONTRACT.md, TOOLBOX.md,
-                           PC_VALIDATION.md;
+                           PC_VALIDATION.md, LEGACY_TRANSFER.md;
   tools/                   migrate.py, migration_dryrun.py, wmslo.py — the transfer of the old warehouse (tools/migrate.py),
                            with the independent oracle its VERIFY replays the journal by (tests/*_oracle.py it imports): the
                            folder alone is enough to transfer, nothing of the repository is needed; upgrade.py with build_ods.py
                            — the upgrade of a working book of the previous release (0.6, WMS-SYS-3) to this one in place;
+                           legacy_transfer.py — the engine of WMS_LEGACY_TRANSFER.ods (it imports migrate.py and the oracles);
   src/basic/               the Basic modules of this release: what upgrade.py puts into the upgraded book;
   RELEASE_MANIFEST.csv     versions and every file of the folder with its size and SHA-256.
 --zip: also WMS_RELEASE_<product version>.zip next to OUT_DIR — the folder packed under the name WMS_RELEASE_<version>/
@@ -32,8 +35,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
-DOCS = ["OPERATOR_GUIDE.md", "RELEASE_NOTES.md", "BACKUP_RECOVERY.md", "EXPORT_CONTRACT.md", "TOOLBOX.md", "PC_VALIDATION.md"]
-TOOLS = ["migrate.py", "migration_dryrun.py", "wmslo.py", "upgrade.py", "build_ods.py"]
+DOCS = ["OPERATOR_GUIDE.md", "RELEASE_NOTES.md", "BACKUP_RECOVERY.md", "EXPORT_CONTRACT.md", "TOOLBOX.md", "PC_VALIDATION.md",
+        "LEGACY_TRANSFER.md"]
+TOOLS = ["migrate.py", "migration_dryrun.py", "wmslo.py", "upgrade.py", "build_ods.py", "legacy_transfer.py"]
 # the oracle of `migrate.py verify` (tests/adjust_oracle.py) and the modules it imports
 ORACLES = ["adjust_oracle.py", "journal_oracle.py", "receipt_oracle.py", "special_oracle.py", "return_oracle.py"]
 
@@ -60,6 +64,7 @@ def build_release(out, name="WMS_PROD_CANDIDATE.ods"):
     from wmslo import Office
     import build_ods
     import build_toolbox
+    import build_transfer
     out = os.path.abspath(out)
     if os.path.exists(out):
         raise ValueError(f"{out} уже существует — выпуск собирается в новую папку")
@@ -70,6 +75,7 @@ def build_release(out, name="WMS_PROD_CANDIDATE.ods"):
     try:
         build_ods.build(o, os.path.join(out, name), test=False)
         build_toolbox.build(o, out)
+        build_transfer.build(o, out)
     finally:
         o.terminate()
         shutil.rmtree(prof, ignore_errors=True)

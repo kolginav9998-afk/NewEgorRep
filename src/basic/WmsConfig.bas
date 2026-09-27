@@ -3,9 +3,9 @@
 ' §2 and §14 fixed sheets «Выдачи», «Заказы», «Возврат», «Иной приход» and their service structures.
 Option Explicit
 
-Public Const WMS_CORE_VERSION = "0.7.0-transport"
+Public Const WMS_CORE_VERSION = "0.7.1-legacy"
 ' the product (the release of the whole WMS book and its tools; the snapshot for the tools names it)
-Public Const WMS_PRODUCT_VERSION = "0.7.0"
+Public Const WMS_PRODUCT_VERSION = "0.7.1"
 ' Phase 5 appended the counters of the special receipts (rows 19..24), Final Core the counter of the corrections (row 25),
 ' M6 the counter of the vehicle visits (row 26); a book of an earlier core has WMS-SYS-1 (Phase 1–4), WMS-SYS-2 (Phase 5)
 ' or WMS-SYS-3 (Final Core, release 0.6.0 — tools/upgrade.py brings it to this schema with its data)
