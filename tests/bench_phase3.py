@@ -4,12 +4,14 @@
 
 For each N a TEST book gets N movements: 40 % receipts on «Заказы» (3 of 4 on the source row of their position, 1 of 4
 an additional delivery in its own row), 60 % posted issues of those EIs on «Выдачи»; plus order positions still expected
-(every 50th row, half of them overdue) and cancelled ones (every 200th row); every 10th source row has an expected date Q
-20 days ahead (its partly received positions become «Частично получено / просрочено» in the refresh 45 days later). «Наличие», _RCV, _ORD, the antidubl index
+(every 50th row, half of them with an expected date that has passed) and cancelled ones (every 200th row); every 10th source
+row has an expected date Q 20 days ahead. The book is written as WMS before 0.7.2 left it — with its date statuses
+(«Просрочено», D-047): the first start of the 0.7.2 core turns them into the statuses of the data (D-089), and no later refresh
+changes a status with the date (45 days later, then back). «Наличие», _RCV, _ORD, the antidubl index
 and the protection of every row are written exactly as WMS writes them (the history itself is not journaled: the
 journal of the book starts with the measured operations). Then, with WMS running: open and startup (with the refresh of
 the statuses), 100 receipts (each creates an EI), 50 second deliveries of positions spread over the sheet, 50 corrections,
-50 storno, 50 issues of received EIs (the X mirror), cancellations, the status refresh (as it is and 30 days later), the
+50 storno, 50 issues of received EIs (the X mirror), cancellations, the status refresh (as it is and 45 days later), the
 antidubl and row lookups, the change handler, rows inserted above the data, self-check, save, reopen, the start after a
 save without WMS (full key check) and the independent oracle (trusted snapshot + journal replay).
 Times are measured from Python around one UNO call (the call itself costs ~1–3 ms), so they are upper bounds.
@@ -85,8 +87,13 @@ def fp_s(v):
     return "E" if v == "" else ("N" + num(v) if isinstance(v, float) else "S" + v)
 
 
-def status(ordq, rcv, nodoc, cancel, q):
-    return receipt_oracle.position_status(ordq, rcv, nodoc, cancel, q, TSER)
+def old_status(ordq, rcv, nodoc, cancel, q):
+    """the status WMS before 0.7.2 wrote (D-047: an expected date before today made a position overdue) — the synthetic book is
+    such an old book; the 0.7.2 core never writes these statuses and turns them into the statuses of the data (D-089)"""
+    st = receipt_oracle.position_status(ordq, rcv, nodoc, cancel)
+    if q is not None and q < TSER:
+        return {"Ожидается": "Просрочено", "Частично получено": "Частично получено / просрочено"}.get(st, st)
+    return st
 
 
 def protection(locked):
@@ -111,7 +118,7 @@ def generate(n):
     while k < n_rcpt:
         r = len(orders) + 1
         if r % 50 == 0 or r % 200 == 7:
-            # an expected position (half overdue) or a cancelled one
+            # an expected position (half of them with a passed expected date: an old book shows them «Просрочено») or a cancelled one
             a, name, art = f"З-{r // 3}", f"Позиция заказа {r}", f"P-{r:06d}"
             unit, sup = UNITS[r % 5], SUPPLIERS[r % 5]
             pdate = float((first + datetime.timedelta(days=r % 300) - EPOCH).days)
@@ -183,7 +190,7 @@ def generate(n):
         if pos[2]:
             r = int(pos[1])
             row = orders[r - 1]
-            row[22] = status(pos[4], pos[5], 0, "", row[16] if row[16] != "" else None)
+            row[22] = old_status(pos[4], pos[5], 0, "", row[16] if row[16] != "" else None)
             row[24] = f"Норма; позиция: получено {qtext(pos[5])} из {qtext(pos[4])} {row[8]}"
             if pos[5] < pos[4] - 1e-9:
                 row[24] += f", осталось {qtext(round(pos[4] - pos[5], 3))}"
@@ -378,7 +385,7 @@ def bench(n):
             ms.append(t)
         r["cancel_rest"] = stats(ms) | dict(ok=sum(1 for x in res if x.startswith("OK")))
         print(f"[{n}] отмены: {r['cancel_order']} / {r['cancel_rest']}", flush=True)
-        # 7. status refresh: as it is, then 30 days later (many expected positions become overdue), then back
+        # 7. status refresh: as it is, then 45 days later (the statuses do not change with the date — D-089), then back
         x, t = timed(s.Od, "RefreshStatuses")
         r["refresh"] = dict(ms=round(t), result=x)
         s.Od("TestSetToday", (TODAY + datetime.timedelta(days=45)).strftime("%d.%m.%Y"))

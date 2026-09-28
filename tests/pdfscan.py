@@ -5,12 +5,15 @@ scan(path) → (lines, rows_y)
   lines  — {y: share of the table width} of the thick horizontal lines drawn in the separator colour (y from the top of
            the page, the same units as rows_y); the table width is the width of the grey header row
   rows_y — the baselines (y from the top) of the texts of the first column below the header row
+fills(path, rgb) → [(x, y from the top, width, height)] of the rectangles filled in the colour rgb (LATE_RGB: the mark of
+  a passed expected date on Q, 0.7.2)
 """
 import re
 import zlib
 
 SEPARATOR_RGB = (0x1F / 255, 0x38 / 255, 0x64 / 255)       # build_ods.order_separators: TopBorder colour 1F3864
 HEADER_RGB = (0xE7 / 255, 0xE6 / 255, 0xE6 / 255)          # build_ods.header: CellBackColor E7E6E6
+LATE_RGB = (0xFF / 255, 0xEB / 255, 0x9C / 255)            # build_ods.order_separators: WMS_LateDate CellBackColor FFEB9C
 TOKEN = re.compile(rb"\((?:\\.|[^\\)])*\)|<[0-9A-Fa-f\s]*>|\[|\]|/[^\s/\[\]()<>]+|[-+]?(?:\d+\.?\d*|\.\d+)|[A-Za-z'\"*]+")
 
 
@@ -49,7 +52,8 @@ def close(c, want, eps=0.01):
     return c is not None and all(abs(a - b) <= eps for a, b in zip(c, want))
 
 
-def scan(path):
+def parse(path):
+    """(page height, stroked segments, filled rectangles, text positions) of the page contents"""
     h = page_height(path)
     segs, rects, texts = [], [], []
     for content in streams(path):
@@ -98,6 +102,18 @@ def scan(path):
             elif op in ("n", "f", "f*", "B", "b"):
                 path_pts = []
             ops = []
+    return h, segs, rects, texts
+
+
+def fills(path, rgb=LATE_RGB):
+    """the rectangles filled in the colour rgb: [(x, y from the top, width, height)], top to bottom"""
+    h, _, rects, _ = parse(path)
+    return sorted(((round(x, 1), round(h - y - hh, 1), round(w, 1), round(hh, 1)) for x, y, w, hh, col in rects
+                   if close(col, rgb) and w > 0.5 and hh > 0.5), key=lambda r: (r[1], r[0]))
+
+
+def scan(path):
+    h, segs, rects, texts = parse(path)
     heads = [r for r in rects if close(r[4], HEADER_RGB) and r[2] > 50]
     if not heads:
         return {}, []

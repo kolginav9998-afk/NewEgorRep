@@ -388,7 +388,8 @@ Sub BtnOrdCancelRest(Optional oEvent As Variant)
     gUiLastMsg = res
 End Sub
 
-' «Обновить статусы»: «Ожидается» / «Просрочено» by today's date for the positions that are still expected
+' «Обновить статусы»: order rows without a status get it, the date statuses of an earlier core become the status of their
+' data; the note counts the expected positions whose expected date has passed (D-089: the status never depends on the date)
 Sub BtnOrdRefresh(Optional oEvent As Variant)
     Dim res As String, um As Object
     WmsInit()

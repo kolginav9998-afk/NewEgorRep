@@ -471,9 +471,11 @@ def k05_analytics():
               and all(val[k][0] == v for k, v in src.items()) and got_m == {k: tuple(float(x) for x in v) for k, v in months.items()},
               f"{res[:80]}; источники {[(k, val.get(k, [''])[0]) for k in src]}; месяцы {got_m} ≠? {months}")
         adj = {k: val[k] for k in ("09.2026",)}
-        R.add(c, "сентябрь: списаний 1, инвентаризаций 2, перемещений 1; заказы: просрочено 1 (З-104); отрицательных остатков 0",
-              adj["09.2026"][3:6] == [1.0, 2.0, 1.0] and val["Просрочено"][0] == 1.0 and val["Отрицательные остатки (должно быть 0)"][0] == 0.0,
-              f"{adj}; просрочено {val.get('Просрочено')}")
+        late = val.get("Ожидаемая дата прошла (заказ ждём)", [None])[0]
+        R.add(c, "сентябрь: списаний 1, инвентаризаций 2, перемещений 1; заказы: ожидаемая дата прошла у 1 (З-104: снимок WMS до 0.7.2 "
+                 "со статусом «Просрочено», ожидаемая дата 20.08.2026 — открытая позиция, считается по дате); отрицательных остатков 0",
+              adj["09.2026"][3:6] == [1.0, 2.0, 1.0] and late == 1.0 and "Просрочено" not in val
+              and val["Отрицательные остатки (должно быть 0)"][0] == 0.0, f"{adj}; ожидаемая дата прошла {late}")
         top = [r for r in rows if str(r[0]).startswith("Иванов")]
         R.add(c, "получатели: Иванов Иван Андреевич — первым, выдач 4 (проведённых), количество 20 + 25 + 5 + 4",
               bool(top) and top[0][1] == 4.0 and top[0][2] == 54.0, str(top[:1]))
@@ -593,11 +595,12 @@ def k06_manager():
         rows = [r for r in allr[:k] if r[0]]
         st = {str(r[1]): (r[0], r[2]) for r in rows}
         R.add(c, "«Контроль дня» 26.09.2026: машина на территории (сегодняшняя — внимание), «Иной приход» ждёт разбора 25 дн. — проблема, "
-                 "просроченный заказ З-104, предупреждения диагностики, резервной копии рядом нет; непроведённых строк и приходов без "
-                 "документов нет",
+                 "ожидаемая дата З-104 прошла на 37 дн. (заказ ждём — напоминание, не статус), предупреждения диагностики, резервной копии "
+                 "рядом нет; непроведённых строк и приходов без документов нет",
               ctl.startswith("ERR:контроль дня: проблем 1") and st.get("Машины на территории", ("",))[0] == "ВНИМАНИЕ" and "№ 8" in st["Машины на территории"][1]
               and st.get("«Иной приход»: требует разбора", ("",))[0] == "ПРОБЛЕМА" and "ЕИ-00000208" in st["«Иной приход»: требует разбора"][1]
-              and st.get("Просроченные заказы", ("", ""))[0] == "ВНИМАНИЕ" and "З-104" in st["Просроченные заказы"][1]
+              and st.get("Ожидаемая дата прошла", ("", ""))[0] == "ВНИМАНИЕ" and "З-104" in st["Ожидаемая дата прошла"][1]
+              and "на 37 дн." in st["Ожидаемая дата прошла"][1] and "Просроченные заказы" not in st
               and st.get("Диагностика (проверки WMS_DOCTOR)", ("",))[0] == "ВНИМАНИЕ" and st.get("Резервная копия за сегодня", ("",))[0] == "ВНИМАНИЕ"
               and st.get("Непроведённые строки", ("",))[0] == "OK" and st.get("Приходы без документов", ("",))[0] == "OK", f"{ctl}; {st}")
         chg = {str(r[0]): str(r[1]) for r in allr[k + 2:] if r[0]}
@@ -1269,6 +1272,52 @@ def k15_old_toolbox_new_snapshot():
           res.startswith("OK:ошибок 0") and sch[0] == "WARN" and "WMS-SYS-4" in sch[1] and an.startswith("OK:сводка построена") and sr.startswith("OK")
           and card.startswith("OK:ЕИ-00000201") and mr.startswith("OK") and mp.startswith("OK") and inv.startswith("OK:строк пересчёта 208"),
           f"{res}; {sch[:2]}; {an[:60]}; {sr[:60]}; {card[:40]}; {mr[:40]}; {mp}; {inv[:40]}")
+
+
+
+# ================================================================ K16 the expected date, not a status (WMS 0.7.2, D-089)
+
+@case
+def k16_expected_date():
+    c = "K16"
+    got = {}
+    for name, status, q in (("k16a", "Ожидается", "2026-08-20"), ("k16b", "Ожидается", "2099-10-20")):
+        d = place(name)
+        snap = os.path.join(d, "WMS_Export", "WMS_SNAPSHOT_FIXTURE")
+        p = os.path.join(snap, "orders.csv")
+        txt = open(p, encoding="utf-8").read()
+        old = "З-104;Герметик силиконовый;;;SIL-300;;;24;шт;;;Химпром;;;;2026-08-01;2026-08-20;;Химия;;D-01;;Просрочено;"
+        assert old in txt
+        open(p, "w", encoding="utf-8").write(txt.replace(old, old.replace("2026-08-20", q).replace(";Просрочено;", f";{status};")))
+        rehash(snap, "orders.csv")
+        t = Tool(d, "WMS_ANALYTICS")
+        try:
+            t.B("AnRefresh", float(ser("2026-09-26")), module="TbAnalytics")
+            t.doc.calculateAll()
+            val = {str(r[0]): r[1:] for r in t.rows("Сводка", 0, 7) if r[0]}
+        finally:
+            t.close()
+        t = Tool(d, "WMS_MANAGER")
+        try:
+            t.B("MgrRefresh", module="TbManager")
+            t.B("MgrControl", float(ser("2026-09-26")), module="TbManager")
+            st = {str(r[1]): (r[0], r[2]) for r in t.rows("Контроль дня", 3, 3) if r[0]}
+        finally:
+            t.close()
+        t = Tool(d, "WMS_SEARCH")
+        try:
+            t.B("SearchRefresh", module="TbSearch")
+            t.B("SupplierShow", "химпром", module="TbSearch")
+            head = str(t.sheet("Поставщик").getCellByPosition(0, 1).getString())
+        finally:
+            t.close()
+        got[name] = (val.get("Ожидаемая дата прошла (заказ ждём)", [None])[0], st.get("Ожидаемая дата прошла", ("", "")), head)
+    a, b = got["k16a"], got["k16b"]
+    R.add(c, "снимок WMS 0.7.2: З-104 «Ожидается» (просрочки как статуса нет), ожидаемая дата 20.08.2026 прошла — аналитика: 1, «Контроль "
+             "дня»: внимание «З-104 … на 37 дн.», поиск поставщика: «ожидаемая дата прошла 1»; та же позиция с датой 20.10.2099 — 0, «нет», "
+             "«ожидаемая дата прошла 0»: инструменты считают по ожидаемой дате, не по статусу",
+          a[0] == 1.0 and a[1][0] == "ВНИМАНИЕ" and "З-104" in a[1][1] and "на 37 дн." in a[1][1] and "ожидаемая дата прошла 1" in a[2]
+          and b[0] == 0.0 and b[1] == ("OK", "нет") and "ожидаемая дата прошла 0" in b[2] and "ожидается 1" in b[2], str(got))
 
 
 def _components(o):

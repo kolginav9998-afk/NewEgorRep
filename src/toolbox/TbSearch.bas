@@ -325,7 +325,7 @@ Function SupplierShow(ByVal q As String) As String
             r = r + 1
             k = k + 1
             If InStr(1, "|" & names & "|", "|" & o(i)(11) & "|", 0) = 0 Then names = names & IIf(names <> "", "|", "") & o(i)(11)
-            If CStr(o(i)(22)) = "Просрочено" Or CStr(o(i)(22)) = "Частично получено / просрочено" Then nOver = nOver + 1
+            If TbDaysLate(CStr(o(i)(22)), o(i)(16), Int(CDbl(Now()))) > 0 Then nOver = nOver + 1
             If CStr(o(i)(22)) = "Ожидается" Then nWait = nWait + 1
         End If
     Next i
@@ -354,7 +354,7 @@ Function SupplierShow(ByVal q As String) As String
     If nV = 0 And UBound(cars) < 0 Then sh.getCellByPosition(0, r).setString(IIf(ThisComponent.Sheets.hasByName("_cars"), "нет", "нет данных транспорта в снимке"))
     ' (IIf of Basic computes both branches: the mean only when there are closed visits)
     If nCl > 0 Then avg = ", средняя стоянка " & Format(sumD / nCl, "0") & " мин"
-    sh.getCellByPosition(0, 1).setString("Заказов (строк) " & k & ": просрочено " & nOver & ", ожидается " & nWait & "; визитов машин " & nV _
+    sh.getCellByPosition(0, 1).setString("Заказов (строк) " & k & ": ожидается " & nWait & ", ожидаемая дата прошла " & nOver & "; визитов машин " & nV _
         & avg & IIf(names <> "", " — поставщики: " & Replace(names, "|", ", "), ""))
     SupplierShow = "OK:заказов " & k & ", визитов " & nV
     Exit Function

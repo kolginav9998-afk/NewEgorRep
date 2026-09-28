@@ -1,7 +1,7 @@
 ' WmsOrders — лист «Заказы»: служебная идентичность позиций заказа и приходов, статус позиции, поиск строк, антидубль,
-' зеркало остатка ЕИ в «Наличие» (X), лёгкий обработчик листа и обновление статусов, зависящих от даты («Ожидается»,
-' «Просрочено», «Частично получено / просрочено») (MASTER SPEC v0.3 §2, §4–§6, §13–§16, §25; D-006, D-007, D-033,
-' D-045…D-059; задание Core Phase 3).
+' зеркало остатка ЕИ в «Наличие» (X), лёгкий обработчик листа и «Обновить статусы» (MASTER SPEC v0.3 §2, §4–§6, §13–§16,
+' §25; D-006, D-007, D-033, D-045…D-059, D-089; задание Core Phase 3). С 0.7.2 статус позиции от даты не зависит (D-089):
+' ожидаемая дата Q — информация (подсветка на листе, аналитика, контроль сроков), «Просрочено» не ставится никогда.
 '
 ' Модель OrderLineID (OLID):
 '  - позиция заказа получает постоянный OLID своей первой операцией (первый приход или «Отменить заказ»); _ORD — плотная
@@ -15,13 +15,10 @@ Option Explicit
 
 ' lookup freshness: every lookup writes a new mark, the echo cell proves that the formulas were recalculated
 Global gIdxNonce As Double
-' test seam: "today" for the overdue status (0 = the real date); honoured only in TEST books
+' test seam: "today" of the tests (0 = the real date); honoured only in TEST books
 Global gTodayOverride As Double
-' result of the last status refresh (startup report, «Главная»); how its partly received rows were found (FORMULA / ROWS)
+' result of the last status refresh (startup report, «Главная»)
 Global gRefreshNote As String
-Global gRefreshPath As String
-' test seam: the refresh does not use the array formula (the fallback path is tested on its own)
-Global gRefreshNoFormula As Boolean
 ' details of the last OrderRowKind: EI of the row, OLID of its position, source row or not, row hint outdated, why FOREIGN
 Global gKn As Long
 Global gKcanon As String
@@ -664,26 +661,18 @@ Function Today() As Double
 End Function
 
 ' The business status of a position: its ordered quantity, the sum of its live receipts, how many of them have no
-' documents, the cancellation, the expected date Q (0 = none). The expected date has passed (Q before today): nothing
-' received — «Просрочено», partly received — «Частично получено / просрочено» (D-047); a cancelled rest and a fully
-' received position are never overdue.
-Function PositionStatus(ordQty As Double, rcvQty As Double, nodoc As Double, cancel As String, edate As Double) As String
+' documents, the cancellation. It never depends on the date (D-089): a position whose expected date Q has passed stays
+' «Ожидается» (nothing received) or «Частично получено» — WMS waits for the delivery until it arrives or the user
+' cancels the order; «Просрочено» and «Частично получено / просрочено» are not computed any more.
+Function PositionStatus(ordQty As Double, rcvQty As Double, nodoc As Double, cancel As String) As String
     If cancel = OD_CANCEL_ORDER Then
         PositionStatus = OS_CANCELLED
     ElseIf rcvQty <= 0.0000001 Then
-        If cancel = OD_CANCEL_REST Then
-            PositionStatus = OS_CANCELLED
-        ElseIf edate > 0 And edate < Today() Then
-            PositionStatus = OS_OVERDUE
-        Else
-            PositionStatus = OS_WAITING
-        End If
+        If cancel = OD_CANCEL_REST Then PositionStatus = OS_CANCELLED Else PositionStatus = OS_WAITING
     ElseIf rcvQty >= ordQty - 0.0000001 Then
         If nodoc > 0 Then PositionStatus = OS_NODOCS Else PositionStatus = OS_RECEIVED
     ElseIf cancel = OD_CANCEL_REST Then
         PositionStatus = OS_REST_CANCELLED
-    ElseIf edate > 0 And edate < Today() Then
-        PositionStatus = OS_PARTIAL_OVERDUE
     Else
         PositionStatus = OS_PARTIAL
     End If
@@ -1062,14 +1051,8 @@ Private Function DateIfFilled(c As Object, sField As String, ByRef msg As String
     End If
 End Function
 
-' the expected date Q of row r as a serial (0 when empty or not a valid date)
-Function ExpectedDate(r As Long) As Double
-    ExpectedDate = QSerial(OrdersSheet().getCellRangeByPosition(OC_EDATE, r, OC_EDATE, r).getDataArray()(0)(0))
-End Function
-
 ' the expected date from a cell value (as getDataArray returns it): a date of 2000–2099 given as a number (the column is
-' date-formatted) or as a text dd.mm.yyyy; 0 = no expected date. The one reading of Q for the operations, the change
-' handler and «Обновить статусы», so all three agree on «просрочено».
+' date-formatted) or as a text dd.mm.yyyy; 0 = no expected date. Q is information only (D-089): it never changes a status.
 Function QSerial(v As Variant) As Double
     Dim d As Double, msg As String
     If VarType(v) = 5 Then
@@ -1081,14 +1064,13 @@ Function QSerial(v As Variant) As Double
     End If
 End Function
 
-' the status of an open order row: «Ожидается» or «Просрочено» (Q before today); "" for a row without order data
+' the status of an open order row: «Ожидается», whatever its expected date (D-089); "" for a row without order data
 Function OpenRowStatus(r As Long) As String
-    Dim sh As Object, e As Double
+    Dim sh As Object
     sh = OrdersSheet()
     If sh.getCellByPosition(OC_ORDER, r).getString() = "" And sh.getCellByPosition(OC_NAME, r).getString() = "" _
         And sh.getCellByPosition(OC_ORDQTY, r).getString() = "" Then Exit Function
-    e = ExpectedDate(r)
-    If e > 0 And e < Today() Then OpenRowStatus = OS_OVERDUE Else OpenRowStatus = OS_WAITING
+    OpenRowStatus = OS_WAITING
 End Function
 
 ' ================================================================ light change handler (spec §13, D-008)
@@ -1133,7 +1115,7 @@ Private Sub HandleRange(ra As Variant)
         n = n + 1
         ' more rows at once (paste, fill): the rest keeps its status until «Обновить статусы» (spec §13)
         If n > PREVIEW_MAX_ROWS Then Exit For
-        PreviewOrderRow(r, (ra.StartColumn <= OC_EI And ra.EndColumn >= OC_EI), (ra.StartColumn <= OC_EDATE And ra.EndColumn >= OC_EDATE))
+        PreviewOrderRow(r, (ra.StartColumn <= OC_EI And ra.EndColumn >= OC_EI))
     Next r
     um.leaveUndoContext()
     mInHandler = False
@@ -1144,12 +1126,11 @@ EH:
     mInHandler = False
 End Sub
 
-' W and Y of an open row: the status by the expected date, the first problem of the filled inputs. Of a row with a
-' receipt only W of the source row of its position is recalculated, and only when its expected date Q (open after the
-' receipt) was changed: a partly received position becomes or stops being overdue at once (D-047). Cancelled rows and
+' W and Y of an open row: its status («Ожидается»), the first problem of the filled inputs. A row with a receipt keeps
+' what its operations wrote (its expected date Q, open after the receipt, changes no status — D-089). Cancelled rows and
 ' copies are never touched here; a key in V that WMS did not write marks the row КОПИЯ.
-Sub PreviewOrderRow(r As Long, bKeyTouched As Boolean, bDateTouched As Boolean)
-    Dim sh As Object, kind As String, p As String, nChanged As Long
+Sub PreviewOrderRow(r As Long, bKeyTouched As Boolean)
+    Dim sh As Object, kind As String, p As String
     sh = OrdersSheet()
     kind = OrderRowKind(r)
     Select Case kind
@@ -1166,7 +1147,6 @@ Sub PreviewOrderRow(r As Long, bKeyTouched As Boolean, bDateTouched As Boolean)
         SetIfDiff(sh.getCellByPosition(OC_DUP, r), "")
     Case "RECEIVED", "STORNO"
         If bKeyTouched And gKmoved Then CopyCheckOrder(r)
-        If bDateTouched And gKsrc Then RefreshRow(r, nChanged, Today(), p)
     End Select
 End Sub
 
@@ -1211,22 +1191,20 @@ Sub CopyCheckOrder(r As Long)
     sh.getCellByPosition(OC_CTL, r).setString("КОПИЯ: " & why & " — не проводится, очистите строку кнопкой «Очистить»")
 End Sub
 
-' ================================================================ «Обновить статусы» (spec: «Просрочено» depends on Q and the date)
-' Only the rows whose status can change with the date are examined, found by the Calc engine without a loop over the sheet
-' (for each status: one MATCH for its first row, then one query of the W cells that differ from it):
-'  - W «Ожидается» and «Просрочено» — every such row (their status depends on Q only);
-'  - W «Частично получено» — only the rows whose expected date Q has passed, W «Частично получено / просрочено» — only the
-'    rows whose Q has not passed (edited or cleared): Q is read only where these rows meet a filled Q cell (one query of the
-'    filled Q cells, one read per common block), so partly received positions cost nothing while their Q stays as it was;
-'  - order rows without a status yet (queries of empty W cells and filled B cells).
-' The derived status W is written directly (not an accounting change, not journaled); every operation also recalculates
-' the statuses of the positions it touches.
+' ================================================================ «Обновить статусы» (D-089: a status never depends on the date)
+' The status of a position changes only with its operations. The refresh (at the opening and by the button) handles what
+' the operations do not reach, found by the Calc engine without a loop over the sheet:
+'  - order rows without a status yet (entered with macros off, more rows at once than the preview handles): queries of the
+'    empty W cells and of the filled B cells;
+'  - the date statuses of books before 0.7.2 («Просрочено», «Частично получено / просрочено»; an upgraded book, a copy of
+'    an older one): one MATCH and one query of the W cells per status — they become the status of their data.
+' Its note counts the expected positions and those whose expected date Q has passed — information only, the status stays.
+' The derived status W is written directly (not an accounting change, not journaled).
 
 Function RefreshStatuses() As String
-    Dim sh As Object, last As Long, t0 As Long, words As Variant, w As Integer, blocks As Variant, got As Variant, qb As Variant
-    Dim i As Long, j As Long, rr As Long, nChanged As Long, nOver As Long, nOpen As Long, nPartOver As Long, sOld As String
-    Dim flags As Long, st As String, more As Boolean, rows() As Long, nr As Long, bs() As Long, be() As Long, nb As Long
-    Dim tday As Double, found As Boolean
+    Dim sh As Object, last As Long, t0 As Long, words As Variant, w As Integer, blocks As Variant, got As Variant
+    Dim i As Long, j As Long, rr As Long, nChanged As Long, sOld As String, nOld As Long
+    Dim flags As Long, more As Boolean, rows() As Long, nr As Long, bs() As Long, be() As Long, nb As Long
     WmsInit()
     t0 = GetSystemTicks()
     sh = OrdersSheet()
@@ -1236,12 +1214,11 @@ Function RefreshStatuses() As String
         RefreshStatuses = gRefreshNote
         Exit Function
     End If
-    tday = Today()
     flags = com.sun.star.sheet.CellFlags.VALUE + com.sun.star.sheet.CellFlags.DATETIME + com.sun.star.sheet.CellFlags.STRING _
         + com.sun.star.sheet.CellFlags.FORMULA
     ' 1. the candidate rows are collected first (the queries see the statuses before any change), then recalculated
     ReDim rows(255)
-    words = Array(OS_WAITING, OS_OVERDUE)
+    words = Array(OS_OVERDUE, OS_PARTIAL_OVERDUE)
     For w = 0 To UBound(words)
         nb = WordBlocks(sh, last, CStr(words(w)), bs, be)
         For i = 0 To nb - 1
@@ -1250,26 +1227,7 @@ Function RefreshStatuses() As String
             Next rr
         Next i
     Next w
-    ' partly received positions: only the rows where the date condition and the shown status disagree — found by one array
-    ' formula of the Calc engine; if it cannot be used, by reading the rows of these statuses where Q is filled
-    gRefreshPath = "FORMULA"
-    If gRefreshNoFormula Then
-        found = False
-    Else
-        found = PartialDueRows(last, tday, rows, nr, nPartOver)
-    End If
-    If Not found Then
-        gRefreshPath = "ROWS"
-        qb = sh.getCellRangeByPosition(OC_EDATE, 1, OC_EDATE, last).queryContentCells(flags).getRangeAddresses()
-        nb = WordBlocks(sh, last, OS_PARTIAL, bs, be)
-        AddByDate(sh, bs, be, nb, qb, True, tday, rows, nr)
-        nb = WordBlocks(sh, last, OS_PARTIAL_OVERDUE, bs, be)
-        nPartOver = 0
-        For i = 0 To nb - 1
-            nPartOver = nPartOver + be(i) - bs(i) + 1
-        Next i
-        AddByDate(sh, bs, be, nb, qb, False, tday, rows, nr)
-    End If
+    nOld = nr
     ' order rows without a status (entered with macros off, or more rows at once than the preview handles)
     blocks = sh.getCellRangeByPosition(OC_STATUS, 1, OC_STATUS, last).queryEmptyCells().getRangeAddresses()
     For i = 0 To UBound(blocks)
@@ -1286,50 +1244,29 @@ Function RefreshStatuses() As String
     Next i
     ' 2. recalculation
     For i = 0 To nr - 1
-        st = RefreshRow(rows(i), nChanged, tday, sOld)
-        If st = OS_OVERDUE Then nOver = nOver + 1
-        If st = OS_OVERDUE Or st = OS_WAITING Then nOpen = nOpen + 1
-        If st = OS_PARTIAL_OVERDUE And sOld <> OS_PARTIAL_OVERDUE Then nPartOver = nPartOver + 1
-        If st <> OS_PARTIAL_OVERDUE And sOld = OS_PARTIAL_OVERDUE Then nPartOver = nPartOver - 1
+        RefreshRow(rows(i), nChanged, sOld)
     Next i
-    gRefreshNote = "статусы заказов: ожидаемых позиций " & nOpen & ", из них просрочено " & nOver _
-        & "; частично получено и просрочено " & nPartOver & "; обновлено статусов " & nChanged _
+    gRefreshNote = "статусы заказов: " & LateNote(last) & "; обновлено статусов " & nChanged _
+        & IIf(nOld > 0, " (статусов по дате прежней версии пересчитано " & nOld & ")", "") _
         & IIf(more, " (строк без статуса больше, чем проверено за раз — нажмите «Обновить статусы» ещё раз)", "") & ", " & (GetSystemTicks() - t0) & " мс"
     RefreshStatuses = gRefreshNote
 End Function
 
-' The rows of «Заказы» (1..last) whose status must be checked for the date: «Частично получено» with a passed expected date
-' Q, «Частично получено / просрочено» whose Q has not passed or is not a date (a text Q is always checked: RefreshRow reads
-' it). One array formula over the used rows — TEXTJOIN of the row numbers, 30 ms on 100 000 rows instead of reading every
-' partly received row — written into the unlocked scratch cell _IDX!B<IX_LIST>, read and cleared at once (no Undo, the
-' book does not become «modified»); a tag proves the value was calculated for this call. nPO: the rows shown «Частично
-' получено / просрочено» now. False when the formula could not be used.
-Private Function PartialDueRows(last As Long, tday As Double, rows() As Long, ByRef nr As Long, ByRef nPO As Long) As Boolean
-    Dim f As String, w As String, q As String, s As String, a As Variant, cond As String, p As Long, k As Long, ok As Boolean
-    On Error GoTo EH
+' the expected positions («Ожидается», «Частично получено») and those of them whose expected date Q has passed — two
+' counts of the Calc engine; information for the user and the control of the dates, never a status (D-089)
+Private Function LateNote(last As Long) As String
+    Dim w As String, q As String, t As String, s As String, ok As Boolean, a As Variant
     w = "$'" & SH_ORDERS & "'.$W$2:$W$" & (last + 1)
     q = "$'" & SH_ORDERS & "'.$Q$2:$Q$" & (last + 1)
-    ' a valid date of 2000–2099 before today, as QSerial reads a number
-    cond = "ISNUMBER(" & q & ")*(" & q & ">=" & Format(CDbl(DateSerial(2000, 1, 1)), "0") & ")*(" & q & "<=" _
-        & Format(CDbl(DateSerial(2099, 12, 31)), "0") & ")*(" & q & "<" & Format(tday, "0") & ")"
-    f = "COUNTIF(" & w & ";""" & OS_PARTIAL_OVERDUE & """)&""|""&TEXTJOIN("";"";1;IF((" & w & "=""" & OS_PARTIAL _
-        & """)*(" & cond & "+ISTEXT(" & q & "))+(" & w & "=""" & OS_PARTIAL_OVERDUE & """)*(1-" & cond & ");ROW(" & w & ")-1;""""))"
-    s = ScratchEval(f, ok)
-    If Not ok Then Exit Function
-    p = InStr(s, "|")
-    If p < 2 Then Exit Function
-    nPO = CLng(Left(s, p - 1))
-    s = Mid(s, p + 1)
-    If s <> "" Then
-        a = Split(s, ";")
-        For k = 0 To UBound(a)
-            AddRow(rows, nr, CLng(a(k)))
-        Next k
+    t = Format(Today(), "0")
+    s = ScratchEval("(COUNTIF(" & w & ";""" & OS_WAITING & """)+COUNTIF(" & w & ";""" & OS_PARTIAL & """))&""|""&(COUNTIFS(" & w & ";""" _
+        & OS_WAITING & """;" & q & ";""<" & t & """)+COUNTIFS(" & w & ";""" & OS_PARTIAL & """;" & q & ";""<" & t & """))", ok)
+    a = Split(s, "|")
+    If Not ok Or UBound(a) <> 1 Then
+        LateNote = "ожидаемых позиций — (не посчитано)"
+    Else
+        LateNote = "ожидаемых позиций " & a(0) & ", из них с прошедшей ожидаемой датой " & a(1) & " (статус от даты не зависит)"
     End If
-    PartialDueRows = True
-    Exit Function
-EH:
-    PartialDueRows = False
 End Function
 
 ' the blocks of rows 1..last whose W equals s (one MATCH for the first such row, then one query of the W cells that differ
@@ -1361,47 +1298,6 @@ Private Function WordBlocks(sh As Object, last As Long, s As String, bs() As Lon
     WordBlocks = nb
 End Function
 
-' adds the rows of the blocks bs/be whose expected date Q has passed (bPassed) or has not passed (Not bPassed). Both block
-' lists are sorted: they are merged in one pass, Q is read only where a block meets a filled Q cell (qb); a row without Q
-' has no expected date, so it has not passed.
-Private Sub AddByDate(sh As Object, bs() As Long, be() As Long, nb As Long, qb As Variant, bPassed As Boolean, tday As Double, _
-        rows() As Long, ByRef nr As Long)
-    Dim i As Long, j As Long, rr As Long, pos As Long, qs As Long, qe As Long, got As Variant, e As Double, passed As Boolean
-    For i = 0 To nb - 1
-        pos = bs(i)
-        Do While pos <= be(i)
-            ' the first block of filled Q that ends at or after pos
-            Do While j <= UBound(qb)
-                If qb(j).EndRow >= pos Then Exit Do
-                j = j + 1
-            Loop
-            qs = be(i) + 1
-            If j <= UBound(qb) Then
-                If qb(j).StartRow <= be(i) Then
-                    qs = qb(j).StartRow
-                    If qs < pos Then qs = pos
-                End If
-            End If
-            ' rows pos .. qs - 1: no expected date
-            If Not bPassed Then
-                For rr = pos To qs - 1
-                    AddRow(rows, nr, rr)
-                Next rr
-            End If
-            If qs > be(i) Then Exit Do
-            qe = qb(j).EndRow
-            If qe > be(i) Then qe = be(i)
-            got = sh.getCellRangeByPosition(OC_EDATE, qs, OC_EDATE, qe).getDataArray()
-            For rr = qs To qe
-                e = QSerial(got(rr - qs)(0))
-                passed = (e > 0 And e < tday)
-                If passed = bPassed Then AddRow(rows, nr, rr)
-            Next rr
-            pos = qe + 1
-        Loop
-    Next i
-End Sub
-
 Private Sub AddRow(rows() As Long, ByRef nr As Long, r As Long)
     If nr > UBound(rows) Then
         ReDim Preserve rows(2 * nr + 1)
@@ -1410,10 +1306,11 @@ Private Sub AddRow(rows() As Long, ByRef nr As Long, r As Long)
     nr = nr + 1
 End Sub
 
-' recalculates W of one row whose status depends on the date; returns the status it now shows, sOld the one it showed
-' (nChanged counts writes). The row is read once; only a row with a receipt (V) needs the service data of its position.
-Private Function RefreshRow(r As Long, ByRef nChanged As Long, tday As Double, ByRef sOld As String) As String
-    Dim sh As Object, d As Variant, want As String, od As Variant, rv As Variant, n As Long, i As Integer, has As Boolean, e As Double
+' recalculates W of one row (a date status of an earlier core, a row without a status); returns the status it now shows,
+' sOld the one it showed (nChanged counts writes). The row is read once; only a row with a receipt (V) needs the service
+' data of its position.
+Private Function RefreshRow(r As Long, ByRef nChanged As Long, ByRef sOld As String) As String
+    Dim sh As Object, d As Variant, want As String, od As Variant, rv As Variant, n As Long, i As Integer, has As Boolean
     sh = OrdersSheet()
     d = sh.getCellRangeByPosition(0, r, OC_LAST, r).getDataArray()(0)
     sOld = CStr(d(OC_STATUS))
@@ -1432,18 +1329,17 @@ Private Function RefreshRow(r As Long, ByRef nChanged As Long, tday As Double, B
         ElseIf CStr(d(OC_ORDER)) = "" And CStr(d(OC_NAME)) = "" And CStr(d(OC_ORDQTY)) = "" Then
             want = ""
         Else
-            e = QSerial(d(OC_EDATE))
-            If e > 0 And e < tday Then want = OS_OVERDUE Else want = OS_WAITING
+            want = OS_WAITING
         End If
     Else
-        ' a row with a receipt: only the source row of its position shows a date-dependent status; the copy and move
+        ' a row with a receipt: only the source row of its position shows the status of the position; the copy and move
         ' checks of OrderRowKind are not needed for a display value (a marked copy was skipped above)
         If Not StrictEI(CStr(d(OC_EI)), n) Then Exit Function
         If Not RcvRegistered(n, rv) Then Exit Function
         If CStr(rv(RV_KIND)) <> RV_SRC Then Exit Function
         If VarType(rv(RV_OL)) <> 5 Then Exit Function
         If Not OlValid(CLng(rv(RV_OL)), od) Then Exit Function
-        want = PositionStatus(od(OD_ORD), od(OD_RCV), od(OD_NODOC), CStr(od(OD_CANCEL)), QSerial(d(OC_EDATE)))
+        want = PositionStatus(od(OD_ORD), od(OD_RCV), od(OD_NODOC), CStr(od(OD_CANCEL)))
     End If
     If CStr(d(OC_STATUS)) <> want Then
         SetIfDiff(sh.getCellByPosition(OC_STATUS, r), want)
@@ -1452,7 +1348,8 @@ Private Function RefreshRow(r As Long, ByRef nChanged As Long, tday As Double, B
     RefreshRow = want
 End Function
 
-' end of a clean start: the statuses that changed with the date are refreshed (spec: recalculated at the opening)
+' end of a clean start: order rows without a status get it, the date statuses of an earlier core become the status of
+' their data (D-089)
 Sub RefreshAtStartup()
     Dim s As String
     On Error GoTo EH
@@ -1563,21 +1460,6 @@ Sub HandlerOff(b As Boolean)
 End Sub
 
 ' ================================================================ test seam (inert unless _SYS MODE = TEST)
-
-' mode 1: «Обновить статусы» finds the partly received rows by reading them (the fallback), 0: as in production
-Function TestRefreshMode(mode As Integer) As String
-    WmsInit()
-    If SysStr(SK_MODE) <> "TEST" Then
-        TestRefreshMode = "REFUSED:не тестовая книга"
-        Exit Function
-    End If
-    gRefreshNoFormula = (mode = 1)
-    TestRefreshMode = "OK"
-End Function
-
-Function TestRefreshPath() As String
-    TestRefreshPath = gRefreshPath
-End Function
 
 Function TestSetToday(sDate As String) As String
     Dim d As Double, msg As String

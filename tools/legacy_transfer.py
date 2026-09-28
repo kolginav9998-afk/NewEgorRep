@@ -63,9 +63,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "tests"))
 
-TOOL_VERSION = "1.0.0"
+TOOL_VERSION = "1.0.1"
 SCHEMA = "WMS-SYS-4"
-MIN_CORE = (0, 7, 1)
+MIN_CORE = (0, 7, 2)
 SHEET_ORDERS = "1_Вставить_Заказы"
 SHEET_STOCK = "1B_Вставить_Наличие"
 SHEET_ISSUES = "1C_Вставить_Выдачи"
@@ -91,11 +91,12 @@ INPUT_COLS = tuple(range(C_A, C_U + 1)) + (C_Z, C_AA)
 # the identity of a position that «Ещё поступление» copies from the source row into a delivery row (WmsReceipt)
 IDENTITY_COLS = (C_A, C_B, C_D, C_E, C_I, C_L, C_M, C_P, C_R, C_S, C_T)
 
-OS_WAITING, OS_OVERDUE, OS_PARTIAL, OS_RECEIVED = "Ожидается", "Просрочено", "Частично получено", "Получено"
+# the statuses WMS computes (WmsOrders.PositionStatus): never from the date — WMS 0.7.2 has no «Просрочено» (D-089)
+OS_WAITING, OS_PARTIAL, OS_RECEIVED = "Ожидается", "Частично получено", "Получено"
 OS_NODOCS, OS_CANCELLED = "Получено без документов", "Отменено"
-OS_REST_CANCELLED, OS_PARTIAL_OVERDUE = "Частично получено / остаток отменён", "Частично получено / просрочено"
+OS_REST_CANCELLED = "Частично получено / остаток отменён"
 OS_ADD = "Дополнительное поступление"
-RECEIVED_FAMILY = (OS_PARTIAL, OS_PARTIAL_OVERDUE, OS_RECEIVED, OS_NODOCS, OS_REST_CANCELLED)
+RECEIVED_FAMILY = (OS_PARTIAL, OS_RECEIVED, OS_NODOCS, OS_REST_CANCELLED)
 EI_ACTIVE, EI_REVIEW = "Активен", "Требует разбора"
 STYPE_SUPPLIER = "Поставщик"
 SPECIAL = {"офис": "Офис", "производство": "Производство", "детали": "Детали", "старый склад": "Старый склад", "иной": "Иной приход",
@@ -110,23 +111,59 @@ UNIT_SYNONYMS = {"штук": "шт", "штука": "шт", "штуки": "шт",
                  "см.": "см", "мм.": "мм", "набор.": "набор", "бухта": "бух", "бух.": "бух", "п.м": "пог. м", "пог.м": "пог. м",
                  "пог. м.": "пог. м", "т.": "т", "тонна": "т"}
 
-# the old statuses (W) as the users wrote them → the status of WMS (the key: lower case, ё = е, punctuation as spaces)
-OLD_STATUS = {
-    "ожидается": OS_WAITING, "ожидание": OS_WAITING, "ожидаем": OS_WAITING, "в пути": OS_WAITING, "заказано": OS_WAITING,
-    "в заказе": OS_WAITING, "ждем": OS_WAITING, "не получено": OS_WAITING,
-    "просрочено": OS_OVERDUE, "просрочен": OS_OVERDUE, "просрочка": OS_OVERDUE,
-    "частично получено": OS_PARTIAL, "частично": OS_PARTIAL, "получено частично": OS_PARTIAL, "частично получен": OS_PARTIAL,
-    "частично получено / просрочено": OS_PARTIAL_OVERDUE, "частично получено просрочено": OS_PARTIAL_OVERDUE,
-    "частично просрочено": OS_PARTIAL_OVERDUE, "частично / просрочено": OS_PARTIAL_OVERDUE,
-    "получено": OS_RECEIVED, "получен": OS_RECEIVED, "доставлено": OS_RECEIVED, "принято": OS_RECEIVED, "выполнено": OS_RECEIVED,
-    "закрыто": OS_RECEIVED, "получено полностью": OS_RECEIVED,
-    "получено без документов": OS_NODOCS, "без документов": OS_NODOCS, "получено б / д": OS_NODOCS, "получено без док": OS_NODOCS,
-    "получено нет документов": OS_NODOCS,
-    "отменено": OS_CANCELLED, "отменен": OS_CANCELLED, "отмена": OS_CANCELLED, "аннулировано": OS_CANCELLED, "отказ": OS_CANCELLED,
-    "частично получено / остаток отменен": OS_REST_CANCELLED, "частично получено остаток отменен": OS_REST_CANCELLED,
-    "остаток отменен": OS_REST_CANCELLED, "частично / остаток отменен": OS_REST_CANCELLED,
-    "дополнительное поступление": OS_ADD, "доп поступление": OS_ADD, "поступление": OS_ADD,
-}
+def _forms(*stems):
+    """a short participle in its forms: получен → получен, получена, получено, получены"""
+    return [st + e for st in stems for e in ("", "а", "о", "ы")]
+
+
+# the meaning of an old status (W) as the users wrote it (compared by status_key: lower case, ё = е, without punctuation, one
+# space; «заказ …» also without the word «заказ»). The old text is kept for the audit (LegacyStatus); the status of the new
+# WMS is always computed from the quantities, receipts and documents — never from the date (D-089) — the meaning only tells
+# a cancellation, the critical contradictions and what the report shows as «старый → новый». OS_WAITING — OPEN: waiting,
+# placed, awaiting placement, ordered, on the way; an old «Просрочено» is OPEN too (WMS keeps waiting for the goods).
+# The real statuses of the user's table: «Ожидаем», «Отменён», «Получен без документов», «Ожидает размещения», «Размещён».
+NOT_PLACED = ["ожидает размещения", "ждет размещения", "к размещению"] + ["не " + f for f in _forms("размещен")]
+STATUS_SYNONYMS = [
+    (OS_WAITING, ["ожидается", "ожидание", "ожидаем", "ожидаем поставку", "ждем", "ждем поставку", "в пути", "в заказе",
+                  "не получено", "не получен", "не поступило", "в работе", "просрочка"] + NOT_PLACED
+     + _forms("размещен", "заказан", "оформлен", "отгружен", "оплачен", "согласован", "подтвержден", "просрочен")),
+    (OS_PARTIAL, ["частично", "частичная поставка", "частичный приход", "частично получено / просрочено", "частично получен / просрочен",
+                  "частично просрочено", "частично / просрочено"]
+     + ["частично " + f for f in _forms("получен", "оприходован", "поставлен", "доставлен", "принят")]
+     + [f + " частично" for f in _forms("получен", "оприходован", "поставлен", "доставлен", "принят")]),
+    (OS_RECEIVED, ["получено полностью", "получен полностью", "поступило", "поступил", "на складе"]
+     + _forms("получен", "оприходован", "доставлен", "поставлен", "принят", "выполнен", "закрыт")),
+    (OS_NODOCS, ["получено без документов", "получен без документов", "без документов", "без док", "нет документов", "получено б / д",
+                 "получено без док", "получено нет документов"]),
+    (OS_CANCELLED, ["отмена", "отказ", "отказано", "снят с заказа", "снято с заказа", "снята с заказа"]
+     + _forms("отменен", "аннулирован", "снят")
+     + [f + " " + who for f in _forms("отменен") for who in ("поставщиком", "клиентом", "заказчиком")]),
+    (OS_REST_CANCELLED, ["частично получено / остаток отменен", "частично получен / остаток отменен", "частично / остаток отменен",
+                         "остаток отменен", "остаток заказа отменен"]),
+    (OS_ADD, ["дополнительное поступление", "доп поступление", "дополнительный приход", "поступление"]),
+]
+# what looks like a cancellation: a status with such a word that is not in the table stops the transfer of its position
+# (cancelled as a whole, the rest cancelled or still expected — without the meaning it cannot be transferred safely)
+CANCEL_STEMS = ("отмен", "аннулир", "отказ", "снят")
+OS_UNCLEAR_CANCEL = "?отмена"
+# the meanings a user may give in «Настройки» (own synonyms): the statuses of WMS and the words of the table above
+MEANING_NAMES = (OS_WAITING, OS_PARTIAL, OS_RECEIVED, OS_NODOCS, OS_CANCELLED, OS_REST_CANCELLED)
+
+
+def status_key(t):
+    """an old status (text) as it is compared: lower case, ё = е, punctuation as spaces, « / » for a slash, one space"""
+    t = str(t or "").lower().replace("ё", "е")
+    t = re.sub(r"[^\w/]+|_", " ", t)
+    t = re.sub(r"\s*/\s*", " / ", t)
+    return re.sub(r"\s+", " ", t).strip(" /")
+
+
+NOT_PLACED_KEYS = {status_key(t): True for t in NOT_PLACED}
+OLD_STATUS = {}
+for _meaning, _texts in STATUS_SYNONYMS:
+    for _t in _texts:
+        for _k in (status_key(_t), status_key(_t).replace(" / ", " ")):
+            OLD_STATUS.setdefault(_k, _meaning)
 
 LEVELS = ("BLOCK", "WARN", "INFO")
 RESULT_BLOCK, RESULT_WARN, RESULT_OK, RESULT_SKIP = "БЛОКЕР", "Проверить", "Готово", "Пропущено"
@@ -137,7 +174,7 @@ D2000, D2099 = 36526, 73050            # serials of 01.01.2000 and 31.12.2099 (C
 # the rules of the transfer (sheet «Настройки» of the frontend; «stop» — the safe default: a blocking finding)
 DEFAULT_SETTINGS = dict(default_unit="", default_place="", unknown_balance="stop", no_order_qty="stop", no_receipt_date="stop",
                         stock_only="stop", price_round="stop", empty_rows="stop", units="|".join(DEFAULT_UNITS), places="",
-                        source_file="")
+                        source_file="", status_map="")
 SETTING_CHOICES = dict(unknown_balance=("stop", "zero", "fact"), no_order_qty=("stop", "fact"), no_receipt_date=("stop", "doc"),
                        stock_only=("stop", "skip", "old"), price_round=("stop", "round"), empty_rows=("stop", "skip"))
 BALANCE_MARK = "[перенос: проверить остаток]"
@@ -388,39 +425,46 @@ def number_value(v):
     return None
 
 
-def date_value(v):
-    """(serial, "", note) or (None, reason, ""): a Calc date number (the time part dropped) or a text date: dd.mm.yyyy
-    (as WMS reads it); dd.mm.yy, yyyy-mm-dd, dd/mm/yyyy are accepted and noted as normalized; 2000–2099 only"""
+DATE_FORMS = "1.9.26, 01.09.2026, 1/9/26, 1-9-26 и даты Calc"
+
+
+def parse_legacy_date(v):
+    """the one reader of every date of the old table: (serial, "", note) or (None, reason, "").
+    A Calc date or date-time number (the time dropped); a text date day-month-year with «.», «/» or «-» (one separator in a
+    date), a year of 2 digits (26 → 2026) or 4, spaces around the value and the separators, a trailing «г.» and a time after
+    the date allowed; yyyy-mm-dd. 2000–2099 only. Anything else — a number that is no date serial (a quantity, a price), a word,
+    a date in another order — is not a date: the caller keeps the value and decides (a warning, or a blocker where WMS needs it)"""
     note = ""
     if isinstance(v, float):
         x = float(int(v))
+        if x < 3653:
+            return None, f"«{txt(v)}» — число, а не дата", ""
         if v != x:
             note = "время отброшено"
     else:
-        t = txt(v)
-        m = re.fullmatch(r"(\d{1,2})\.(\d{1,2})\.(\d{4})", t)
-        m2 = re.fullmatch(r"(\d{1,2})[./](\d{1,2})[./](\d{2})", t)
-        m3 = re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})", t)
-        m4 = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{4})", t)
+        t0 = txt(v)
+        t = re.sub(r"\s+", " ", t0).strip()
+        m = re.fullmatch(r"(.+?)[ T]\d{1,2}:\d{2}(?::\d{2})?", t)
+        if m and re.search(r"\d\s*[./-]\s*\d", m.group(1)):
+            t, note = m.group(1).strip(), "время отброшено"
+        t = re.sub(r"\s*(г\.?|года?)$", "", t)
+        m = re.fullmatch(r"(\d{1,2})\s*([./-])\s*(\d{1,2})\s*\2\s*(\d{4}|\d{2})\.?", t)
+        iso = re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})", t)
         try:
             if m:
-                d = datetime.date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
-            elif m2:
-                d = datetime.date(2000 + int(m2.group(3)), int(m2.group(2)), int(m2.group(1)))
-                note = f"дата «{t}» прочитана как {d:%d.%m.%Y}"
-            elif m3:
-                d = datetime.date(int(m3.group(1)), int(m3.group(2)), int(m3.group(3)))
-                note = f"дата «{t}» прочитана как {d:%d.%m.%Y}"
-            elif m4:
-                d = datetime.date(int(m4.group(3)), int(m4.group(2)), int(m4.group(1)))
-                note = f"дата «{t}» прочитана как {d:%d.%m.%Y}"
+                y = int(m.group(4))
+                d = datetime.date(2000 + y if len(m.group(4)) == 2 else y, int(m.group(3)), int(m.group(1)))
+            elif iso:
+                d = datetime.date(int(iso.group(1)), int(iso.group(2)), int(iso.group(3)))
             else:
-                return None, f"«{t}» не является датой (дд.мм.гггг)", ""
+                return None, f"не распознана; понимаются {DATE_FORMS}", ""
         except ValueError:
-            return None, f"«{t}» — такой даты нет", ""
+            return None, "такой даты нет (день.месяц.год)", ""
         x = serial_date(d)
+        if t0 != f"{d:%d.%m.%Y}":
+            note = f"дата «{t0}» прочитана как {d:%d.%m.%Y}" + ("; время отброшено" if note else "")
     if x < D2000 or x > D2099:
-        return None, f"{date_text(x) if D2000 - 40000 < x < D2099 + 40000 else txt(v)} — вне диапазона 2000–2099", ""
+        return None, f"{date_text(x)} — вне диапазона 2000–2099", ""
     return x, "", note
 
 
@@ -475,31 +519,71 @@ def special_source(v):
     return SPECIAL.get(norm_space(txt(v)).lower(), "")
 
 
-def old_status(v):
-    """(the status of WMS or None, the text as it was)"""
+def status_lookup(k, table):
+    """the meaning of a status key in a table: as it is, without the slash, without a leading «заказ»"""
+    for key in (k, k.replace(" / ", " ")):
+        if key in table:
+            return table[key]
+    if k.startswith("заказ "):
+        return status_lookup(k[6:], table)
+    return None
+
+
+# the meanings a user may name in own synonyms besides the statuses of WMS and the words of the table
+MEANING_ALIASES = {"open": OS_WAITING, "placed": OS_WAITING, "received": OS_RECEIVED, "partial": OS_PARTIAL, "cancelled": OS_CANCELLED,
+                   "canceled": OS_CANCELLED, "overdue": OS_WAITING, "overdue hint": OS_WAITING, "rest cancelled": OS_REST_CANCELLED,
+                   "no docs": OS_NODOCS}
+
+
+def parse_status_map(text):
+    """own synonyms of «Настройки»: «старый статус = смысл; …» → ({key: meaning}, problems)"""
+    out, problems = {}, []
+    for part in re.split(r"[;\n\r]+", text or ""):
+        if not part.strip():
+            continue
+        left, sep, right = part.partition("=")
+        if not sep or not status_key(left) or not status_key(right):
+            problems.append(f"свои синонимы статусов: «{part.strip()}» — нужно «старый статус = смысл»")
+            continue
+        m = MEANING_ALIASES.get(status_key(right)) or status_lookup(status_key(right), OLD_STATUS)
+        if m not in MEANING_NAMES:
+            problems.append(f"свои синонимы статусов: «{part.strip()}» — смысл «{right.strip()}» не распознан; укажите один из: "
+                            + ", ".join(MEANING_NAMES))
+            continue
+        out[status_key(left)] = m
+    return out, problems
+
+
+def old_status(v, own=None):
+    """(the meaning of an old status W — a status of WMS, OS_UNCLEAR_CANCEL or None when unknown —, the text as it was, the source
+    of the meaning: "own" (a synonym of «Настройки»), "table" or "")"""
     raw = norm_space(txt(v))
     if not raw:
-        return None, ""
-    t = raw.lower().replace("ё", "е")
-    t = re.sub(r"[()\.,;:!«»\"]+", " ", t)
-    t = re.sub(r"\s*/\s*", " / ", t)
-    t = re.sub(r"\s+", " ", t).strip()
-    return OLD_STATUS.get(t) or OLD_STATUS.get(t.replace(" / ", " ")), raw
+        return None, "", ""
+    k = status_key(raw)
+    m = status_lookup(k, own) if own else None
+    if m is not None:
+        return m, raw, "own"
+    m = status_lookup(k, OLD_STATUS)
+    if m is not None:
+        return m, raw, "table"
+    if any(st in k for st in CANCEL_STEMS):
+        return OS_UNCLEAR_CANCEL, raw, ""
+    return None, raw, ""
 
 
-def position_status(ordq, rcv, nodoc, cancel, edate, today):
-    """WmsOrders.PositionStatus"""
+def position_status(ordq, rcv, nodoc, cancel):
+    """WmsOrders.PositionStatus: never from the date (D-089) — a position whose expected date has passed stays «Ожидается» or
+    «Частично получено»"""
     if cancel == "ORDER":
         return OS_CANCELLED
     if rcv <= EPS:
-        if cancel == "REST":
-            return OS_CANCELLED
-        return OS_OVERDUE if edate and edate < today else OS_WAITING
+        return OS_CANCELLED if cancel == "REST" else OS_WAITING
     if rcv >= ordq - EPS:
         return OS_NODOCS if nodoc > 0 else OS_RECEIVED
     if cancel == "REST":
         return OS_REST_CANCELLED
-    return OS_PARTIAL_OVERDUE if edate and edate < today else OS_PARTIAL
+    return OS_PARTIAL
 
 
 # ================================================================ settings
@@ -520,6 +604,7 @@ def load_settings(path=None, overrides=None):
         if s[k] not in choices:
             problems.append(f"правило «{k}»: «{s[k]}» — допустимо {', '.join(choices)}")
             s[k] = "stop"
+    problems += parse_status_map(s["status_map"])[1]
     return s, problems
 
 
@@ -705,6 +790,7 @@ class Analysis:
         self.plan = None
         self.known_units = [u.lower() for u in split_list(settings.get("units"))] or DEFAULT_UNITS
         self.known_places = split_list(settings.get("places"))
+        self.own_statuses = parse_status_map(settings.get("status_map", ""))[0]
 
     # ------------------------------------------------------------ findings
     def find(self, level, kind, text, srow=None, sheet=SHEET_ORDERS, row=None):
@@ -1074,28 +1160,39 @@ class Analysis:
                     out[c] = x
                     if not isinstance(raw[c], float):
                         note(c, f"«{txt(raw[c])}» → {txt(x)}")
-        # dates: N O are facts of a receipt (a wrong one stops the transfer); P Q only describe the order — what is not a
-        # date there is kept in the comment Z instead of being lost or stopping the transfer
+        # dates (0.7.2): one reader for N O P Q; an empty date stays empty; what is not a date is kept in the comment Z with a
+        # warning. It stops only where WMS needs the date to build the operation: the receipt date N of a receipt (unless the
+        # rule «дата поступления = дата документа»). A special receipt becomes an EI without a date — its N is not required.
+        receipt = role in ("RECEIPT", "DELIVERY")
+        not_n = ""
         for c in (C_N, C_O, C_P, C_Q):
             if is_empty(raw[c]):
                 out[c] = None
                 continue
-            x, why, n = date_value(raw[c])
-            if x is None and c in (C_P, C_Q):
-                keep = f"{COL_NAMES[c]}: {txt(raw[c])}"
-                out[C_Z] = (out[C_Z] + "; " if out[C_Z] else "") + keep
-                self.find("WARN", "дата", f"{COLS[c]}: «{txt(raw[c])}» не дата ({why}) — записано в комментарий (Z)", src_of[c])
-                out[c] = None
-                continue
+            x, why, n = parse_legacy_date(raw[c])
             if x is None:
-                bad(c, why, "дата")
+                out[C_Z] = (out[C_Z] + "; " if out[C_Z] else "") + f"{COL_NAMES[c]}: {txt(raw[c])}"
+                out[c] = None
+                if c == C_N and receipt:
+                    not_n = f"«{txt(raw[c])}» не дата ({why})"
+                    continue
+                more = "; приход считается без даты документа" if c == C_O and receipt else ""
+                self.find("WARN", "дата", f"{COLS[c]}: «{txt(raw[c])}» не дата ({why}) — записано в комментарий (Z){more}", src_of[c])
+                continue
             out[c] = x
             if n:
                 note(c, n)
-        if role in ("RECEIPT", "DELIVERY", "SPECIAL") and out[C_N] is None and is_empty(raw[C_N]):
+        if receipt and out[C_N] is None:
             if s["no_receipt_date"] == "doc" and out[C_O] is not None:
                 out[C_N] = out[C_O]
-                note(C_N, f"дата поступления не указана → дата документа {date_text(out[C_O])} (правило)")
+                if not_n:
+                    self.find("WARN", "дата", f"N: {not_n} — взята дата документа {date_text(out[C_O])} (правило); исходное значение — в "
+                              "комментарии (Z)", src_of[C_N])
+                else:
+                    note(C_N, f"дата поступления не указана → дата документа {date_text(out[C_O])} (правило)")
+            elif not_n:
+                bad(C_N, f"{not_n} — у прихода дата поступления обязательна: исправьте её в этой строке или включите правило «дата "
+                    "поступления = дата документа» (исходное значение сохранено в комментарии Z)", "дата")
             else:
                 bad(C_N, "не указана дата поступления (или включите правило «дата поступления = дата документа»)", "обязательное поле")
         if role in ("RECEIPT", "DELIVERY") and out[C_N] and out[C_N] > self.today:
@@ -1459,6 +1556,8 @@ class Analysis:
     def statuses(self):
         self.status_diff = 0
         self.status_critical = 0
+        self.status_unknown = 0
+        self.status_unclear = 0
         self.pairs = {}
         for pos in self.positions:
             v = pos.vals
@@ -1466,8 +1565,18 @@ class Analysis:
             pos.rcv = round(sum(it.fact for it in pos.receipts), 3)
             pos.nodoc = sum(it.nodoc for it in pos.receipts)
             pos.edate = v.get(C_Q) or 0.0
-            pos.old, pos.old_raw = old_status(pos.row.v[C_W])
+            pos.old, pos.old_raw, how = old_status(pos.row.v[C_W], self.own_statuses)
             row = pos.row
+            unclear = pos.old == OS_UNCLEAR_CANCEL
+            if unclear:
+                # a cancellation changes the order itself: its meaning is not guessed
+                pos.old = None
+                self.status_unclear += 1
+                self.find("BLOCK", "статус", f"W: «{pos.old_raw}» похоже на отмену, но такого статуса нет в словаре переноса — без его смысла "
+                          "позицию нельзя перенести безопасно (отменена целиком, отменён только остаток или ещё ожидается?): задайте смысл в "
+                          f"«Настройках» («Свои синонимы статусов», например «{pos.old_raw} = Отменено») или исправьте статус в этой строке", row)
+            elif pos.old is not None and status_key(pos.old_raw) != status_key(pos.old):
+                row.norm.append(f"W: старый статус «{pos.old_raw}» понят как «{pos.old}»" + (" (свой синоним)" if how == "own" else ""))
             if pos.old == OS_CANCELLED:
                 if pos.rcv <= EPS:
                     pos.cancel = "ORDER"
@@ -1484,35 +1593,38 @@ class Analysis:
                 self.status_critical += 1
                 self.find("BLOCK", "статус", f"W: старый статус «{pos.old_raw}», но фактическое количество F не указано — критическое "
                           "противоречие: укажите F (дату, место, ЕИ) или исправьте статус", row)
-            pos.new = position_status(pos.ordq, pos.rcv, pos.nodoc, pos.cancel, pos.edate, self.today)
+            pos.new = position_status(pos.ordq, pos.rcv, pos.nodoc, pos.cancel)
+            if pos.new == OS_WAITING and status_lookup(status_key(pos.old_raw), NOT_PLACED_KEYS):
+                # WMS has no «not placed yet»: the order waits like every open one — the old meaning stays visible in Z
+                note = f"Статус до переноса: {pos.old_raw}"
+                pos.vals[C_Z] = (pos.vals[C_Z] + "; " if pos.vals.get(C_Z) else "") + note
+                row.norm.append(f"Z: «{note}» — в WMS заказ ожидается, ещё не размещён")
             key = (pos.old_raw or "(пусто)", pos.new)
             self.pairs[key] = self.pairs.get(key, 0) + 1
-            if pos.old is None and pos.old_raw:
-                self.find("WARN", "статус", f"W: неизвестный старый статус «{pos.old_raw}» — новый статус «{pos.new}»", row)
+            if pos.old is None and pos.old_raw and not unclear:
+                # kept as it was (LegacyStatus); the state comes from the quantities, receipts, dates and documents
+                self.status_unknown += 1
+                self.find("WARN", "статус", f"W: неизвестный старый статус «{pos.old_raw}» — состояние рассчитано по данным: «{pos.new}»", row)
             elif pos.old is not None and pos.old != pos.new:
                 self.status_diff += 1
                 pos.status_note = self.status_reason(pos)
                 if not any(m[0] == "BLOCK" and m[1].startswith("W:") for m in row.msgs):
-                    lvl = "WARN" if (pos.old in (OS_WAITING, OS_OVERDUE) and pos.rcv > EPS) else "INFO"
+                    lvl = "WARN" if (pos.old == OS_WAITING and pos.rcv > EPS) else "INFO"
                     self.find(lvl, "статус", f"W: «{pos.old_raw}» → «{pos.new}» ({pos.status_note})", row)
             if pos.old is not None and pos.old != pos.new:
                 row.recalc = True
 
     def status_reason(self, pos):
         o, n = pos.old, pos.new
-        if o in (OS_WAITING, OS_OVERDUE) and pos.rcv > EPS:
+        if o == OS_WAITING and pos.rcv > EPS:
             return f"в старой таблице не учтён приход {num_text(pos.rcv)}"
-        if n in (OS_OVERDUE, OS_PARTIAL_OVERDUE) and o in (OS_WAITING, OS_PARTIAL):
-            return f"ожидаемая дата {date_text(pos.edate)} прошла"
-        if o in (OS_OVERDUE, OS_PARTIAL_OVERDUE) and n in (OS_WAITING, OS_PARTIAL):
-            return "ожидаемая дата не прошла или не указана" if pos.edate else "ожидаемая дата (Q) не указана"
         if o == OS_RECEIVED and n == OS_NODOCS:
             return "у прихода нет документа (C) или его даты (O)"
         if o == OS_NODOCS and n == OS_RECEIVED:
             return "документы указаны"
         if n in (OS_RECEIVED, OS_NODOCS):
             return f"получено {num_text(pos.rcv)} из {num_text(pos.ordq)}"
-        if n in (OS_PARTIAL, OS_PARTIAL_OVERDUE):
+        if n == OS_PARTIAL:
             return f"получено {num_text(pos.rcv)} из {num_text(pos.ordq)}"
         return f"заказано {num_text(pos.ordq)}, получено {num_text(pos.rcv)}"
 
@@ -1601,15 +1713,17 @@ class Analysis:
         def add(key, label, value, level="INFO", hint=""):
             m.append((key, label, value, level, hint))
 
-        n_open = sum(st.get(k, 0) for k in (OS_WAITING, OS_OVERDUE, OS_PARTIAL, OS_PARTIAL_OVERDUE))
+        n_open = st.get(OS_WAITING, 0) + st.get(OS_PARTIAL, 0)
+        # the expected date has passed: information for the control of the dates — the status does not change (D-089)
+        n_late = sum(1 for p in self.positions if p.new in (OS_WAITING, OS_PARTIAL) and p.edate and p.edate < self.today)
         add("rows_total", "Всего строк данных", len(data))
         add("orders", "Заказов (блоков, A = 1 начинает заказ)", len({p.block for p in self.positions}))
         add("positions", "Позиций заказов", len(self.positions))
         add("open", "Открытых позиций (ожидается / частично получено)", n_open)
         add("received_full", "Полностью полученных", st.get(OS_RECEIVED, 0) + st.get(OS_NODOCS, 0))
-        add("partial", "Частично полученных", st.get(OS_PARTIAL, 0) + st.get(OS_PARTIAL_OVERDUE, 0))
-        add("waiting", "Ожидающихся (ничего не получено)", st.get(OS_WAITING, 0) + st.get(OS_OVERDUE, 0))
-        add("overdue", "Просроченных", st.get(OS_OVERDUE, 0) + st.get(OS_PARTIAL_OVERDUE, 0))
+        add("partial", "Частично полученных", st.get(OS_PARTIAL, 0))
+        add("waiting", "Ожидающихся (ничего не получено)", st.get(OS_WAITING, 0))
+        add("late_expected", "С прошедшей ожидаемой датой (заказ ждём, статус не меняется)", n_late)
         add("cancelled", "Отменённых (и с отменённым остатком)", st.get(OS_CANCELLED, 0) + st.get(OS_REST_CANCELLED, 0))
         add("nodocs", "Получено без документов", st.get(OS_NODOCS, 0))
         add("deliveries", "Дополнительных поступлений (строки)", sum(len(p.deliveries) for p in self.positions))
@@ -1649,6 +1763,10 @@ class Analysis:
         add("missing_fields", "Отсутствующие обязательные поля", mf, "BLOCK" if mf else "OK")
         add("status_diff", "Старый статус ≠ новый рассчитанный", self.status_diff, "WARN" if self.status_diff else "OK")
         add("status_critical", "из них критических противоречий", self.status_critical, "BLOCK" if self.status_critical else "OK")
+        add("status_unknown", "Неизвестные старые статусы (состояние рассчитано по данным)", self.status_unknown,
+            "WARN" if self.status_unknown else "OK")
+        add("status_unclear", "Статусы, похожие на отмену, но не из словаря (нужен смысл)", self.status_unclear,
+            "BLOCK" if self.status_unclear else "OK")
         add("stock_suspicious", "Подозрительные остатки", self.suspicious, "WARN" if self.suspicious else "OK")
         add("stock_unknown", "Требуется проверить остаток", self.unknown,
             ("BLOCK" if self.s["unknown_balance"] == "stop" else "WARN") if self.unknown else "OK")
@@ -1932,8 +2050,9 @@ def inspect_candidate(o, path, allow_test=False):
             P.append(f"книга-кандидат схемы «{info['schema']}», а этот инструмент переноса работает только со схемой {SCHEMA} (WMS 0.7): "
                      "возьмите книгу-кандидат и WMS_LEGACY_TRANSFER.ods из одного выпуска")
         elif core_version_tuple(info["core"]) < MIN_CORE or info["legacy_ops"] is False:
-            P.append(f"ядро книги-кандидата {info['core']} не умеет переносить старую таблицу — нужна книга выпуска "
-                     f"{'.'.join(map(str, MIN_CORE))} или новее")
+            P.append(f"ядро книги-кандидата {info['core']} не умеет переносить старую таблицу по правилам этого инструмента — нужна "
+                     f"книга выпуска {'.'.join(map(str, MIN_CORE))} или новее: возьмите книгу-кандидат и WMS_LEGACY_TRANSFER.ods из "
+                     "одного выпуска")
         if info["mode"] != "PROD" and not allow_test:
             P.append(f"книга-кандидат в режиме «{info['mode']}» — нужна рабочая книга-кандидат выпуска (режим PROD)")
         if isinstance(info["last_seq"], float) and info["last_seq"] > 0:
@@ -2270,7 +2389,7 @@ def reconcile(doc, plan, an=None, today=None):
         if r["kind"] == "DEL":
             want_w, want_ac = OS_ADD, f"OL{pos['olid']}"
         else:
-            want_w = position_status(pos["ordq"], pos["rcv"], pos["nodoc"], pos["cancel"], pos["edate"], today)
+            want_w = position_status(pos["ordq"], pos["rcv"], pos["nodoc"], pos["cancel"])
             want_ac = ""
         if got[C_W] != want_w:
             C.append(f"«Заказы» строка {t + 1}: статус «{got[C_W]}», новый движок должен дать «{want_w}»")

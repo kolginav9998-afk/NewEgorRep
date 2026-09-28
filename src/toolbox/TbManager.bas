@@ -5,7 +5,7 @@
 ' закупки, проблемные поставки, прочее). «Сформировать отчёт руководителю» — аккуратный документ (ODT и PDF) в
 ' ../WMS_Reports без служебных данных WMS; «В PDF» — лист «Отчёт». «Контроль дня» — одним запуском перед окончанием
 ' работы: машины на территории, непроведённые строки, неразобранный «Иной приход», проблемы диагностики (проверки
-' WMS_DOCTOR), приходы без документов, просроченные заказы, резервная копия за сегодня, снимок; и «Что изменилось
+' WMS_DOCTOR), приходы без документов, заказы с прошедшей ожидаемой датой, резервная копия за сегодня, снимок; и «Что изменилось
 ' сегодня». Ничего не исправляет — только список и что делать.
 Option Explicit
 
@@ -144,8 +144,7 @@ Function MgrReport() As String
     RowV(sh, r, "ЕИ в движении (разных ЕИ с операциями)", EIsMoved(a, b))
     r = r + 1
     Head(sh, r, "ЗАКАЗЫ И ДОКУМЕНТЫ")
-    RowF(sh, r, "Просроченных заказов (на момент снимка)", "=COUNTIF($_orders.W2:W" & n(0) & ";""Просрочено"")+COUNTIF($_orders.W2:W" & n(0) _
-        & ";""Частично получено / просрочено"")")
+    RowF(sh, r, "Ожидаемая дата прошла, позиций (на день снимка; заказ ждём)", TbLateFormula(n(0), TbSnapDay(TbSetting(3))))
     RowF(sh, r, "Получено без документов (на момент снимка)", "=COUNTIF($_orders.W2:W" & n(0) & ";""Получено без документов"")")
     RowF(sh, r, "Приходов за период без № или даты документа", "=SUMPRODUCT(($_orders.N2:N" & n(0) & ">=" & a & ")*($_orders.N2:N" & n(0) & "<" & b & ")*($_orders.V2:V" _
         & n(0) & "<>"""")*((($_orders.C2:C" & n(0) & "="""")+($_orders.O2:O" & n(0) & "=""""))>0))")
@@ -621,17 +620,19 @@ Private Sub CtlChecks(snap As String, dToday As Double, out() As Variant, ByRef 
     Else
         AddCtl(out, n, "ВНИМАНИЕ", "Приходы без документов", nNoDoc & ": " & noDoc, "Получите документы и впишите № и дату документа в строку заказа («Исправить»)")
     End If
-    ' 6. overdue orders
+    ' 6. the expected date has passed: the order is still awaited — a reminder, not a status (WMS D-089)
     For i = 0 To UBound(o)
-        If CStr(o(i)(22)) = "Просрочено" Or CStr(o(i)(22)) = "Частично получено / просрочено" Then
+        e = TbDaysLate(CStr(o(i)(22)), o(i)(16), dToday)
+        If e > 0 Then
             nOver = nOver + 1
-            If nOver <= 8 Then over = over & IIf(over <> "", "; ", "") & o(i)(0) & " «" & o(i)(1) & "»" & IIf(CStr(o(i)(11)) <> "", " (" & o(i)(11) & ")", "")
+            If nOver <= 8 Then over = over & IIf(over <> "", "; ", "") & o(i)(0) & " «" & o(i)(1) & "»" & IIf(CStr(o(i)(11)) <> "", " (" & o(i)(11) & ")", "") _
+                & " — на " & e & " дн."
         End If
     Next i
     If nOver = 0 Then
-        AddCtl(out, n, "OK", "Просроченные заказы", "нет", "")
+        AddCtl(out, n, "OK", "Ожидаемая дата прошла", "нет", "")
     Else
-        AddCtl(out, n, "ВНИМАНИЕ", "Просроченные заказы", nOver & ": " & over, "Уточните сроки у поставщиков и закупок")
+        AddCtl(out, n, "ВНИМАНИЕ", "Ожидаемая дата прошла", nOver & ": " & over, "Заказ ждём дальше: уточните сроки у поставщиков и закупок (статус от даты не меняется)")
     End If
     ' 7. a backup made today (the folder WMS_Backups of the WMS folder)
     sfa = CreateUnoService("com.sun.star.ucb.SimpleFileAccess")

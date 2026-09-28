@@ -10,7 +10,8 @@ built WMS is read like the tests of the core read a book (tests/harness.Session)
 (tests/adjust_oracle.py — the whole journal replayed with the rules of the task, LEGACY_RECEIPT included) and by an
 independent model of the old table written here (orders from column A, statuses, balances).
 L01–L32 are the scenarios of the task (§19) in its order; L33–L39 the frontend, the version check, the rules, Doctor, Search
-and Analytics on transferred EIs.
+and Analytics on transferred EIs; L40–L42 the hotfix 0.7.2: old statuses and dates as people wrote them, the real
+statuses of the user's table, no status from the date (D-089).
 Results: WMS_TEST_OUT/results_legacy.json and WMS_TEST_OUT/TEST_REPORT_legacy.md.
 """
 import datetime
@@ -224,9 +225,10 @@ def blocks_of(rows):
 # ================================================================ the old table of the scenarios (an independent model below)
 
 def full_rows():
-    """the old «Заказы» of the main scenarios: eight orders; received, waiting, overdue, partly received, overdue partly
-    received, without documents, cancelled, rest cancelled; delivery rows; a position whose first receipt is a child row;
-    parts; a special receipt; EIs in every form; a large EI; a wrong old status"""
+    """the old «Заказы» of the main scenarios: eight orders with the old statuses received, waiting, «Просрочено», partly received,
+    «Частично получено / просрочено» (in WMS 0.7.2 both are open positions, D-089), without documents, cancelled, rest cancelled;
+    delivery rows; a position whose first receipt is a child row; parts; a special receipt; EIs in every form; a large EI; a wrong
+    old status"""
     return [
         row(A=1.0, B="Болт М8х30", C="УПД-101", D="СЧ-7", E="DIN933-M8", F=100.0, G=100.0, H=100.0, I="шт", J=5.5, K=550.0, L="Ромашка",
             M="Иванов", N=d(-30), O=d(-31), P=d(-40), Q=d(-32), R="Цех 1", S="Крепёж", T="Петров", U="A-01", V="ЕИ-00000427", W="Получено",
@@ -261,9 +263,9 @@ def full_rows():
 
 # an independent model of the rows above (written from the task, not from the engine): row → (status, EI, balance)
 FULL_EXPECT = {
-    2: ("Получено", ei(427), 60.0), 3: ("Ожидается", "", None), 4: ("Частично получено / просрочено", ei(428), 100.0),
+    2: ("Получено", ei(427), 60.0), 3: ("Ожидается", "", None), 4: ("Частично получено", ei(428), 100.0),
     5: ("Частично получено", ei(500), 150.0), 6: ("Дополнительное поступление", ei(501), 100.0), 7: ("Отменено", "", None),
-    8: ("Частично получено / остаток отменён", ei(5001), 40.0), 9: ("Получено без документов", ei(600), 0.0), 10: ("Просрочено", "", None),
+    8: ("Частично получено / остаток отменён", ei(5001), 40.0), 9: ("Получено без документов", ei(600), 0.0), 10: ("Ожидается", "", None),
     14: ("Частично получено", ei(900), 80.0), 16: ("Дополнительное поступление", ei(901), 50.0), 17: ("Получено", ei(1001), 10.0),
     18: ("Получено", ei(1002), 5.0), 19: ("Получено", ei(5000), 5.0), 20: ("Получено", ei(1100), 4.0)}
 
@@ -333,7 +335,7 @@ def l02_several_orders():
 def l03_to_l18():
     c, st, work, res = full_case()
     ok = all(res[k][0] == 0 for k in ("check", "build", "verify", "promote"))
-    R.add("L03", "основной набор (8 заказов: получено, ожидается, просрочено, частично, частично/просрочено, без документов, отменено, "
+    R.add("L03", "основной набор (8 заказов со старыми статусами: получено, ожидается, «Просрочено», частично, «Частично получено / просрочено», без документов, отменено, "
                  "остаток отменён, поступления, детали, специальный приход, ЕИ во всех формах): проверка, тестовая WMS, сверка, рабочая WMS — "
                  "все шаги выполнены",
           ok, "; ".join(f"{k}: {v[0]} {v[1][-160:]} ({v[2]:.0f} с)" for k, v in res.items()))
@@ -348,11 +350,13 @@ def l03_to_l18():
               got.get(2) == FULL_EXPECT[2] and s.opos(1)[4:7] == (100.0, 100.0, 1.0), f"{got.get(2)}; {s.opos(1)}")
         R.add("L04", "ожидаемый: строка 3 «Ожидается» (ожидаемая дата впереди), ЕИ нет, позиции в _ORD нет — обычная строка заказа",
               got.get(3) == FULL_EXPECT[3], str(got.get(3)))
-        R.add("L05", "просроченный: «Просрочено» (ожидаемая дата прошла, ничего не получено)", got.get(10) == FULL_EXPECT[10], str(got.get(10)))
+        R.add("L05", "просроченный в старой таблице («Просрочено», ожидаемая дата прошла, ничего не получено): в новой WMS «Ожидается» — заказ "
+                     "ждём до поставки или отмены, просрочки как статуса нет (D-089)", got.get(10) == FULL_EXPECT[10], str(got.get(10)))
         R.add("L06", "частично полученный: «Частично получено» — приход 200 и поступление 100 из 500; ожидается 200",
               got.get(5) == FULL_EXPECT[5] and got.get(6) == FULL_EXPECT[6] and "осталось 200" in by_row[5][24], f"{got.get(5)}; {by_row[5][24]}")
-        R.add("L07", "частично полученный и просроченный: старый статус «Частично получено» → новый «Частично получено / просрочено» "
-                     "(ожидаемая дата прошла)", got.get(4) == FULL_EXPECT[4], str(got.get(4)))
+        R.add("L07", "частично полученный с прошедшей ожидаемой датой: «Частично получено» (не «Частично получено / просрочено» — "
+                     "статус от даты не зависит, D-089); «2_Проверка»: с прошедшей ожидаемой датой — информация",
+              got.get(4) == FULL_EXPECT[4] and int(m.get("late_expected", "0")) >= 2, f"{got.get(4)}; late {m.get('late_expected')}")
         R.add("L08", "без документов: «Получено без документов» (у прихода нет номера и даты документа)", got.get(9) == FULL_EXPECT[9],
               str(got.get(9)))
         R.add("L09", "отменённый: «Отменено» (ORDER_CANCEL, ЕИ не создавался); «Отменено» при частичном приходе → «остаток отменён»",
@@ -395,7 +399,7 @@ def l03_to_l18():
               j427.get("LEGACY_STATUS") == "Получено" and j427.get("LEGACY_CTL") == "Норма" and j427.get("LEGACY_STOCK") == "60"
               and j427.get("LEGACY_DUP") == "Возможный дубль: УПД-101" and "LEGACY_DUP" in j501
               and lr[2][5:12] == [ei(427), "Получено", "Получено", "60", "60", "Норма", "Возможный дубль: УПД-101"]
-              and lr[3][5:8] == ["", "Ожидается", "Ожидается"] and lr[4][6:8] == ["Частично получено", "Частично получено / просрочено"]
+              and lr[3][5:8] == ["", "Ожидается", "Ожидается"] and lr[4][6:8] == ["Частично получено", "Частично получено"]
               and lr[6][5] == ei(501) and lr[6][7] == "Дополнительное поступление",
               f"{ {k: j427.get(k) for k in ('LEGACY_STATUS', 'LEGACY_CTL', 'LEGACY_STOCK', 'LEGACY_DUP')} }; {lr.get(2)}; {lr.get(3)}; {lr.get(6)}")
         oracle("L03", s, "рабочая WMS после переноса")
@@ -1194,6 +1198,186 @@ def l39_real_life():
               and "на след. неделе" in new[0][25] and new[1][5] == 10.0 and new[1][7] == 10.0 and s.stock(3101) == 7.0 and s.stock(3102) == 4.0
               and new[2][26] == "" and any(f["level"] == "ПРОВЕРИТЬ" and "не дата" in f["text"] for f in F) and "считается пустым" in rr[2][1],
               f"{res['check'][1][-160:]}; {[r[:8] + r[15:17] + r[21:26] for r in new[:3]]}; {rr.get(2)}")
+    finally:
+        if s:
+            s.close()
+
+
+
+# ================================================================ L40 old statuses as people wrote them (0.7.2)
+
+@case
+def l40_statuses():
+    c = "L40"
+    rows = [row(A=1.0, B="Размещен, срок впереди", H=5.0, I="шт", L="П", Q=d(5), W="Размещен"),                                   # 2
+            row(A=2.0, B="Размещён, срок прошёл", H=5.0, I="шт", L="П", Q=d(-3), W="Размещён"),                                  # 3
+            row(A=3.0, B="размещено, получено частично", C="УПД-40", F=2.0, H=5.0, I="шт", L="П", N=d(-4), O=d(-4), Q=d(9), U="S-1",
+                V="4001", X=2.0, W="размещено"),                                                                                # 4
+            row(A=4.0, B="ЗАКАЗ РАЗМЕЩЁН, получено", C="УПД-41", F=3.0, H=3.0, I="шт", L="П", N=d(-4), O=d(-4), U="S-1", V="4002", X=3.0,
+                W="ЗАКАЗ РАЗМЕЩЁН"),                                                                                            # 5
+            row(A=5.0, B="Неизвестный статус", H=3.0, I="шт", L="П", Q=d(10), W="Согласуется с бухгалтерией"),                   # 6
+            row(A=6.0, B="Отменён", H=2.0, I="шт", L="П", W="Отменён"),                                                          # 7
+            row(A=1.0, B="Оприходовано", C="УПД-42", F=4.0, H=4.0, I="шт", L="П", N=d(-2), O=d(-2), U="S-2", V="4003", X=4.0,
+                W="Оприходовано"),                                                                                              # 8
+            row(A=2.0, B="В пути", H=1.0, I="шт", L="П", Q=d(4), W="  в пути  "),                                                # 9
+            row(A=3.0, B="Частично получен", C="УПД-43", F=1.0, H=2.0, I="шт", L="П", N=d(-1), O=d(-1), Q=d(3), U="S-2", V="4004",
+                X=1.0, W="Частично получен")]                                                                                  # 10
+    cd, st, work, res = transfer("l40", rows, steps=("check", "build", "verify"))
+    F = findings(work)
+    m = summary(work)
+    s = ready(Session(test_book(work))) if res.get("build", (1,))[0] == 0 else None
+    try:
+        new = [r[22] for r in orders_of(s, 10)[:9]] if s else []
+        want = ["Ожидается", "Ожидается", "Частично получено", "Получено", "Ожидается", "Отменено", "Получено", "Ожидается",
+                "Частично получено"]
+        R.add(c, "«Размещен», «Размещён», «размещено», «ЗАКАЗ РАЗМЕЩЁН», «в пути», «Оприходовано», «Отменён», «Частично получен» "
+                 "(регистр, ё/е, пробелы, «заказ …») понятны и не блокируют; статус новой WMS — по данным: ожидается (и с прошедшей ожидаемой "
+                 "датой — просрочки как статуса нет), частично, получено, отменено; тестовая WMS создана и сверена",
+              all(v[0] == 0 for v in res.values()) and m.get("blockers") == "0" and new == want, f"{new}; {[v[1][-120:] for v in res.values()]}")
+        unk = [f for f in F if "неизвестный старый статус" in f["text"]]
+        R.add(c, "неизвестный старый статус («Согласуется с бухгалтерией») — жёлтое «неизвестный старый статус — состояние рассчитано по "
+                 "данным», перенос не останавливается; «2_Проверка»: неизвестных старых статусов 1",
+              len(unk) == 1 and unk[0]["level"] == "ПРОВЕРИТЬ" and unk[0]["row"] == "6" and "состояние рассчитано по данным" in unk[0]["text"]
+              and m.get("status_unknown") == "1" and m.get("status_unclear") == "0", str(unk)[:300])
+        import csv
+        import journal_oracle
+        ents, _ = journal_oracle.read_journal(os.path.join(work, "test", "WMS_Journal"))
+        leg = {e["fields"].get("EI"): e["fields"].get("LEGACY_STATUS") for e in ents if e["type"] == "LEGACY_RECEIPT"}
+        with open(os.path.join(work, "LEGACY_ROWS.csv"), encoding="utf-8") as f:
+            lr = {int(r[0]): r for r in list(csv.reader(f, delimiter=";"))[1:]}
+        R.add(c, "старый текст статуса сохраняется дословно (LegacyStatus) — в журнале прихода и в карте строк, рядом — рассчитанный статус; "
+                 "понятый синоним отмечен как нормализация",
+              leg.get(ei(4001)) == "размещено" and leg.get(ei(4002)) == "ЗАКАЗ РАЗМЕЩЁН" and lr[2][6:8] == ["Размещен", "Ожидается"]
+              and lr[3][6:8] == ["Размещён", "Ожидается"] and lr[6][6:8] == ["Согласуется с бухгалтерией", "Ожидается"]
+              and "понят как «Ожидается»" in lr[2][13],
+              f"{leg}; {[lr[k][6:8] for k in (2, 3, 6)]}; {lr[2][13][:80]}")
+    finally:
+        if s:
+            s.close()
+    # a status that looks like a cancellation but is not in the table: its meaning changes the order — asked, not guessed; own
+    # synonyms of «Настройки» give it
+    odd = [row(A=1.0, B="Отменить?", H=2.0, I="шт", L="П", W="Отменить?"),
+           row(A=2.0, B="Снят поставщиком", H=2.0, I="шт", L="П", W="Снят поставщиком")]
+    cd2, st2, work2, res2 = transfer("l40b", odd, steps=("check",))
+    F2 = [f for f in findings(work2) if f["kind"] == "статус"]
+    cd3, st3, work3, res3 = transfer("l40c", odd, steps=("check",), status_map="Отменить? = Отменено; снят поставщиком=отменено")
+    plan3 = json.load(open(os.path.join(work3, "check", "plan.json"), encoding="utf-8")) if res3["check"][0] == 0 else {}
+    R.add(c, "статус, похожий на отмену, но не из словаря («Отменить?», «Снят поставщиком») — БЛОКЕР с подсказкой (смысл отмены не "
+             "угадывается); «Свои синонимы статусов» в «Настройках» задают смысл — позиции отменены, блокеров нет",
+          res2["check"][0] == 1 and len([f for f in F2 if f["level"] == "БЛОКЕР" and "похоже на отмену" in f["text"]]) == 2
+          and summary(work2).get("status_unclear") == "2" and res3["check"][0] == 0
+          and [p["new"] for p in plan3.get("positions", [])] == ["Отменено", "Отменено"],
+          f"{[(f['row'], f['text'][:70]) for f in F2]}; {res3['check'][1][-150:]}; {[p['new'] for p in plan3.get('positions', [])]}")
+
+
+# ================================================================ L41 dates as people wrote them (0.7.2)
+
+@case
+def l41_dates():
+    c = "L41"
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("lt_release_engine", os.path.join(release(), "tools", "legacy_transfer.py"))
+    lt = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(lt)
+    sep1 = serial(datetime.date(2026, 9, 1))
+    forms = ["1.9.26", "01.09.26", "1.09.2026", "01.09.2026", "1/9/26", "01/09/2026", "1-9-26", "01-09-2026", " 01.09.2026 ",
+             "01.09.2026 г.", "01.09.2026 10:30", "2026-09-01", sep1, sep1 + 0.4]
+    got = {repr(f): lt.parse_legacy_date(f)[0] for f in forms}
+    bad = {repr(f): lt.parse_legacy_date(f)[1] for f in ("31.02.2026", "1.9", "когда-то", "46266", 5.0, "1.9-26", "")}
+    R.add(c, "parse_legacy_date: 1.9.26, 01.09.26, 1.09.2026, 01.09.2026, 1/9/26, 01/09/2026, 1-9-26, 01-09-2026, с пробелами, с «г.», "
+             "со временем, 2026-09-01, число Calc и дата-время Calc → 01.09.2026 (год 26 — 2026); «31.02.2026», «1.9», слово, «46266», "
+             "число 5, смешанные разделители — не дата; дата не принимается за количество или цену",
+          all(v == sep1 for v in got.values()) and all(bad.values()) and lt.qty_value("1.9.26")[0] is None
+          and lt.qty_value("01.09.2026")[0] is None and lt.price_value("1/9/26", False)[0] is None, f"{got}; {bad}")
+    rows = [row(A=1.0, B="Короткие даты", C="УПД-50", F=2.0, H=2.0, I="шт", L="П", N="1.9.26", O="01.09.26", P="1/9/26", Q="1-9-26",
+                U="D-5", V="4101", X=2.0),                                                                                     # 2
+            row(A=2.0, B="Полные даты", C="УПД-51", F=1.0, H=1.0, I="шт", L="П", N="01.09.2026", O="01/09/2026", P="01-09-2026",
+                Q=" 01.09.2026 ", U="D-5", V="4102", X=1.0),                                                                   # 3
+            row(A=3.0, B="Даты Calc", C="УПД-52", F=1.0, H=1.0, I="шт", L="П", N=d(-3) + 0.5, O=d(-3), P=d(-10), Q=d(20), U="D-5",
+                V="4103", X=1.0),                                                                                              # 4
+            row(A=4.0, B="Пустые даты", H=2.0, I="шт", L="П"),                                                                  # 5
+            row(A=5.0, B="Непонятные даты заказа", H=2.0, I="шт", L="П", P="когда-то", Q="31.02.2026"),                         # 6
+            row(A=6.0, B="Непонятная дата документа", C="УПД-53", F=1.0, H=1.0, I="шт", L="П", N="01.09.2026", O="вчера", U="D-5",
+                V="4104", X=1.0)]                                                                                              # 7
+    cd, st, work, res = transfer("l41", rows, steps=("check", "build"))
+    F = [f for f in findings(work) if f["kind"] == "дата"]
+    s = ready(Session(test_book(work))) if res.get("build", (1,))[0] == 0 else None
+    try:
+        new = orders_of(s, 7) if s else [[""] * 29] * 6
+        R.add(c, "в тестовой WMS: 1.9.26, 01.09.26, 1/9/26, 1-9-26, 01.09.2026, 01/09/2026, 01-09-2026, « 01.09.2026 » — настоящие даты "
+                 "01.09.2026 в N, O, P, Q; дата и дата-время Calc — дата; пустые даты — пусто; ни одного замечания о датах у этих строк",
+              res["check"][0] == 0 and s is not None and new[0][13:17] == [sep1] * 4 and new[1][13:17] == [sep1] * 4
+              and new[2][13:17] == [d(-3), d(-3), d(-10), d(20)] and new[3][13:17] == ["", "", "", ""]
+              and not any(f["row"] in ("2", "3", "4", "5") for f in F),
+              f"{[r[13:17] for r in new[:4]]}; {[(f['row'], f['text'][:60]) for f in F]}; {res['check'][1][-150:]}")
+        R.add(c, "непонятная дата не останавливает перенос: «когда-то» (P), «31.02.2026» (Q), «вчера» (O прихода) — жёлтые, дата пустая, "
+                 "исходный текст — в комментарии Z; приход с непонятной датой документа — «Получено без документов»",
+              s is not None and sorted((f["row"], f["level"]) for f in F) == [("6", "ПРОВЕРИТЬ"), ("6", "ПРОВЕРИТЬ"), ("7", "ПРОВЕРИТЬ")]
+              and new[4][15:17] == ["", ""] and "когда-то" in new[4][25] and "31.02.2026" in new[4][25] and new[5][14] == ""
+              and "вчера" in new[5][25] and new[5][22] == "Получено без документов",
+              f"{[(f['row'], f['level'], f['text'][:70]) for f in F]}; {new[4][15:17]} {new[4][25]!r}; {new[5][14]!r} {new[5][22]} {new[5][25]!r}")
+    finally:
+        if s:
+            s.close()
+    # the one date WMS needs: the receipt date N of a receipt
+    badn = [row(A=1.0, B="Непонятная дата поступления", C="УПД-54", F=1.0, H=1.0, I="шт", L="П", N="позавчера", O="01.09.2026", U="D-5",
+                V="4105", X=1.0)]
+    cd2, st2, work2, res2 = transfer("l41b", badn, steps=("check",))
+    F2 = findings(work2)
+    cd3, st3, work3, res3 = transfer("l41c", badn, steps=("check", "build"), no_receipt_date="doc")
+    s = ready(Session(test_book(work3))) if res3.get("build", (1,))[0] == 0 else None
+    try:
+        r3 = orders_of(s, 2)[0] if s else [""] * 29
+        R.add(c, "непонятная дата поступления (N) у прихода — единственный блокер по датам (без неё WMS не проведёт приход), с подсказкой; "
+                 "правило «дата поступления = дата документа» — жёлтое, N = дата документа, исходное значение — в Z",
+              res2["check"][0] == 1 and any(f["level"] == "БЛОКЕР" and f["row"] == "2" and "позавчера" in f["text"] and "обязательна" in f["text"]
+                                            for f in F2)
+              and s is not None and r3[13] == sep1 and "позавчера" in r3[25]
+              and any(f["level"] == "ПРОВЕРИТЬ" and "взята дата документа" in f["text"] for f in findings(work3)),
+              f"{[(f['level'], f['text'][:90]) for f in F2 if f['kind'] == 'дата']}; {r3[13]} {r3[25]!r}; {res3.get('build', res3['check'])[1][-120:]}")
+    finally:
+        if s:
+            s.close()
+
+
+# ================================================================ L42 the real statuses of the old table, no overdue (0.7.2)
+
+@case
+def l42_real_statuses():
+    c = "L42"
+    rows = [row(A=1.0, B="Ожидаем, срок прошёл", H=5.0, I="шт", L="П", Q=d(-12), W="Ожидаем"),                                   # 2
+            row(A=2.0, B="ОЖИДАЕМ с пробелами", H=5.0, I="шт", L="П", Q=d(10), W="  ожидаем "),                                  # 3
+            row(A=3.0, B="Отменён", H=5.0, I="шт", L="П", Q=d(-40), W="Отменён"),                                                # 4
+            row(A=4.0, B="Отменен", H=5.0, I="шт", L="П", W="Отменен"),                                                          # 5
+            row(A=5.0, B="Получен без документов", F=5.0, H=5.0, I="шт", L="П", N=d(-3), U="R-1", V="4201", W="Получен без документов",
+                X=5.0),                                                                                                        # 6
+            row(A=6.0, B="Ожидает размещения", H=3.0, I="шт", L="П", Z="срочно", W="Ожидает размещения"),                         # 7
+            row(A=1.0, B="ожидает размещения, срок прошёл", H=3.0, I="шт", L="П", Q=d(-30), W="ожидает  размещения"),             # 8
+            row(A=2.0, B="Размещён, срок прошёл", H=3.0, I="шт", L="П", Q=d(-5), W="Размещён"),                                  # 9
+            row(A=3.0, B="Размещен, частично получен, срок прошёл", C="УПД-42", O=d(-2), F=1.0, H=3.0, I="шт", L="П", N=d(-2), Q=d(-5),
+                U="R-1", V="4202", W="Размещен", X=1.0)]                                                                        # 10
+    cd, st, work, res = transfer("l42", rows, steps=("check", "build", "verify"))
+    F = findings(work)
+    m = summary(work)
+    s = ready(Session(test_book(work))) if res.get("build", (1,))[0] == 0 else None
+    try:
+        new = orders_of(s, 10)[:9] if s else []
+        ws = [r[22] for r in new]
+        want = ["Ожидается", "Ожидается", "Отменено", "Отменено", "Получено без документов", "Ожидается", "Ожидается", "Ожидается",
+                "Частично получено"]
+        R.add(c, "статусы старой таблицы пользователя: «Ожидаем», «Отменён», «Получен без документов», «Ожидает размещения», «Размещён» и их "
+                 "варианты (регистр, е/ё, пробелы: «Отменен», «Размещен», «  ожидаем ») — понятны, блокеров и неизвестных статусов нет; "
+                 "тестовая WMS создана и сверена; статусы — по данным",
+              all(v[0] == 0 for v in res.values()) and m.get("blockers") == "0" and m.get("status_unknown") == "0" and ws == want,
+              f"{ws}; {[v[1][-100:] for v in res.values()]}")
+        R.add(c, "просрочки нет (D-089): ожидаемая дата прошла у 4 открытых позиций — они «Ожидается» / «Частично получено», ни одной строки "
+                 "«Просрочено» в тестовой WMS; «2_Проверка»: «С прошедшей ожидаемой датой» 4 (информация, не статус)",
+              s is not None and m.get("late_expected") == "4" and not any("просрочено" in str(r[22]).lower() for r in orders_of(s, 20))
+              and m.get("overdue") is None, f"late {m.get('late_expected')}; {ws}")
+        R.add(c, "«Ожидает размещения» — открытый заказ, ещё не размещён: статус WMS «Ожидается», смысл не теряется — в комментарии Z «Статус "
+                 "до переноса: Ожидает размещения» (к прежнему комментарию); у «Размещён» и «Ожидаем» комментарий не меняется",
+              s is not None and new[5][25] == "срочно; Статус до переноса: Ожидает размещения" and new[6][25] == "Статус до переноса: ожидает размещения"
+              and new[7][25] == "" and new[0][25] == "", f"{[r[25] for r in new]}")
     finally:
         if s:
             s.close()

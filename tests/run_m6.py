@@ -722,7 +722,7 @@ def m14_volume():
         s.close()
 
 
-# ================================================================ S01–S04 the visual blocks of «Заказы» (M6 §18)
+# ================================================================ S01–S05 the visual blocks of «Заказы» (M6 §18) and the mark on Q (0.7.2)
 
 SEQ = ["1", "2", "3", "4", "5", "1", "2", "3", "1", "2", "3", "4"]
 
@@ -764,6 +764,25 @@ def blocks_model(s, last=None):
                 first = i + 1
             starts.append(i + 1)
     return [r for r in starts if r != 1]
+
+
+BLOCK_RULE = [('AND(ROW()>2;TRIM($A2)="1";$AC2="")', "WMS_OrderStart")]
+Q_STYLES = ["WMS_OrderStartLate", "WMS_OrderStart", "WMS_LateDate"]
+
+
+def order_cf(sh):
+    """the conditional formats of «Заказы» rows 2… as [(formula, style)]: A:P, Q (the expected date: its own format since
+    0.7.2 — the separator with the mark of a passed date, the separator, the mark) and R:AB"""
+    def entries(c0, c1):
+        cf = sh.getCellRangeByPosition(c0, 1, c1, 1048575).ConditionalFormat
+        return [(cf.getByIndex(k).getFormula1(), cf.getByIndex(k).getStyleName()) for k in range(cf.getCount())]
+    return entries(0, 15), entries(16, 16), entries(17, 27)
+
+
+def order_cf_ok(sh):
+    left, q, right = order_cf(sh)
+    return (left == BLOCK_RULE and right == BLOCK_RULE and [x[1] for x in q] == Q_STYLES and q[1] == BLOCK_RULE[0]
+            and q[0][0].startswith(BLOCK_RULE[0][0][:-1] + ";") and "TODAY()" in q[0][0] and "TODAY()" in q[2][0])
 
 
 def rendered_lines(path_ods, first_col_x=None):
@@ -813,15 +832,17 @@ def s01_structure():
     s = ready(Session(p))
     try:
         sh = s.doc.Sheets.getByName("Заказы")
-        cf = sh.getCellRangeByPosition(0, 1, 27, 1048575).ConditionalFormat
-        entries = [(cf.getByIndex(k).getFormula1(), cf.getByIndex(k).getStyleName()) for k in range(cf.getCount())]
-        st_ = s.doc.StyleFamilies.getByName("CellStyles").getByName("WMS_OrderStart")
-        tb = st_.TopBorder
+        styles = s.doc.StyleFamilies.getByName("CellStyles")
+        tb = styles.getByName("WMS_OrderStart").TopBorder
+        both = styles.getByName("WMS_OrderStartLate")
         db = s.doc.DatabaseRanges.getByName("WMS_ORDERS").getDataArea()
-        R.add(c, "«Заказы»: условное оформление A2:AB — одно правило «A = 1 и строка не «Ещё поступление» (AC пуста), кроме первой строки» → "
-                 "стиль с заметной верхней линией на всю ширину",
-              entries == [('AND(ROW()>2;TRIM($A2)="1";$AC2="")', "WMS_OrderStart")] and tb.OuterLineWidth + tb.InnerLineWidth >= 70
-              and tb.Color == 0x1F3864, f"{entries}; ширина {tb.OuterLineWidth}, цвет {tb.Color:06X}")
+        R.add(c, "«Заказы»: условное оформление A2:AB — правило «A = 1 и строка не «Ещё поступление» (AC пуста), кроме первой строки» → "
+                 "стиль с заметной верхней линией на всю ширину; у Q (0.7.2) своё оформление: та же линия и отметка прошедшей ожидаемой "
+                 "даты — сначала «начало заказа и дата прошла» (линия и отметка), затем линия, затем отметка (оформление применяет "
+                 "первое верное условие)",
+              order_cf_ok(sh) and tb.OuterLineWidth + tb.InnerLineWidth >= 70 and tb.Color == 0x1F3864 and both.TopBorder.Color == 0x1F3864
+              and both.TopBorder.OuterLineWidth == tb.OuterLineWidth and both.CellBackColor == styles.getByName("WMS_LateDate").CellBackColor == 0xFFEB9C,
+              f"{order_cf(sh)}; ширина {tb.OuterLineWidth}, цвет {tb.Color:06X}")
         R.add(c, "служебная колонка AC «Блок (служебная)»: скрыта, защищена, вне автофильтра A:AB",
               sh.getCellByPosition(28, 0).getString() == "Блок (служебная)" and not sh.getColumns().getByIndex(28).IsVisible
               and sh.getCellByPosition(28, 5).CellProtection.IsLocked and db.EndColumn == 27, f"автофильтр до колонки {db.EndColumn}")
@@ -898,13 +919,12 @@ def s03_blocks_survive():
               fx.startswith("OK") and base == [7, 10] and after_ins == [8, 11], f"{fx}; {base} → {after_ins}")
         s.goto("Заказы", "$L$1")
         sh = s.doc.Sheets.getByName("Заказы")
-        cf_before = sh.getCellRangeByPosition(0, 1, 27, 1048575).ConditionalFormat.getCount()
+        cf_before = order_cf_ok(sh)
         s.close(save=True)
         s = ready(Session(p))
         sh = s.doc.Sheets.getByName("Заказы")
-        cf_after = sh.getCellRangeByPosition(0, 1, 27, 1048575).ConditionalFormat.getCount()
-        R.add(c, "сохранение и повторное открытие: правило оформления на месте, модель блоков та же", cf_before == cf_after == 1 and blocks_model(s) == [8, 11],
-              f"{cf_before}/{cf_after}; {blocks_model(s)}")
+        R.add(c, "сохранение и повторное открытие: правила оформления на месте (A:P и R:AB — линия, Q — линия и отметка даты), модель блоков та же",
+              cf_before and order_cf_ok(sh) and blocks_model(s) == [8, 11], f"{cf_before}; {order_cf(sh)}; {blocks_model(s)}")
         roracle(c, s, "блоки после исправлений и вставки")
         s.close(save=True)
         lines, rows_y = rendered_lines(p)
@@ -954,6 +974,46 @@ def s04_unsaved_crash_replays_inserted_rows():
               crash == "CRASH-SIM" and "восстановлено операций: 1" in rec2 and len(used) == 15 and d[5][0] == "3" and d[5][28] == d[4][28] != ""
               and d[5][21] != "" and blocks_model(s) == [9, 12], f"{rec2[:70]}; строк {len(used)}; A {[x[0] for x in d]}")
         roracle(c, s, "сбой после журнала")
+    finally:
+        s.close()
+
+
+@case
+def s05_late_mark_and_separator():
+    """0.7.2 (D-089): a passed expected date Q of a position still expected is only marked on Q; on the first row of an
+    order the mark and the separator come together (Q has its own conditional format: one format applies its first true
+    entry only). Checked by the rendering of LibreOffice: the lines and the filled cells of the exported sheet."""
+    c = "S05"
+    p = new_wms("s05")
+    s = ready(Session(p))
+    try:
+        today = datetime.date.today()
+        late = (today - datetime.timedelta(days=10)).strftime("%d.%m.%Y")
+        future = (today + datetime.timedelta(days=10)).strftime("%d.%m.%Y")
+        order_rows(s, ["1", "2", "1", "2", "1"])
+        for r, q in ((1, late), (2, future), (3, late), (4, late), (5, future)):
+            s.order_input(r, Q=q)
+        s.OU("BtnOrdRefresh")
+        sh = s.doc.Sheets.getByName("Заказы")
+        ws = [sh.getCellByPosition(22, r).getString() for r in range(1, 6)]
+        qs = [sh.getCellByPosition(16, r).getValue() for r in range(1, 6)]
+        R.add(c, "пять позиций трёх заказов, у трёх ожидаемая дата прошла (в том числе у первой позиции второго заказа): статус у всех "
+                 "«Ожидается» — от даты не зависит",
+              ws == ["Ожидается"] * 5 and all(v > 0 for v in qs), f"W {ws}; Q {qs}")
+        s.close(save=True)
+        import pdfscan
+        lines, rows_y = rendered_lines(p)
+        ys, counts = blocks_from_render(lines, rows_y)
+        # the filled cells (LibreOffice draws adjacent ones as one rectangle) → the rows whose text lies inside them
+        marks = pdfscan.fills(p + ".pdf")
+        marked = sorted({i for x, y, w, hh in marks for i, by in enumerate(rows_y) if y <= by <= y + hh})
+        together = bool(ys) and any(abs(y - ys[0]) <= 0.6 for x, y, w, hh in marks)
+        R.add(c, "отрисовка LibreOffice (лист в PDF): две разделительные линии через всю ширину, блоки 2 / 2 / 1 строки; отметка прошедшей "
+                 "ожидаемой даты — ровно у трёх строк (1-я, 3-я и 4-я позиции), у первой строки второго заказа — вместе с линией (отметка "
+                 "начинается на линии)",
+              len(ys) == 2 and counts == [2, 2, 1] and all(lines[y] >= 0.95 for y in lines) and marked == [0, 2, 3] and together,
+              f"линии {ys}, доля ширины {lines}; строки по блокам {counts}; отметки {marks} → строки {marked}")
+        s = ready(Session(p))
     finally:
         s.close()
 

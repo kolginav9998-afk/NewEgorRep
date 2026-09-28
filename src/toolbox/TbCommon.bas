@@ -5,7 +5,7 @@
 ' запись отчёта.
 Option Explicit
 
-Public Const TB_VERSION = "1.1.1"
+Public Const TB_VERSION = "1.1.2"
 ' the contract versions of the snapshot this toolbox reads: 1.0 (WMS 0.6, no vehicles) and 1.1 (WMS 0.7, «Приход авто»)
 Public Const TB_CONTRACT = "1.1"
 Public Const TB_SNAPSHOT_FORMAT = "WMS-SNAPSHOT-1"
@@ -231,6 +231,45 @@ Function TbColumnFormats(sFile As String) As String
         s = s & IIf(s <> "", "/", "") & i & "/" & Mid(t, i, 1)
     Next i
     TbColumnFormats = s
+End Function
+
+' ================================================================ the expected date of an order (WMS 0.7.2, D-089)
+' WMS never shows a date status: a position whose expected date Q has passed stays «Ожидается» / «Частично получено» until
+' the goods arrive or the order is cancelled. The tools count such positions from Q — information for the control of the
+' dates. A snapshot of WMS before 0.7.2 may still hold «Просрочено» / «Частично получено / просрочено»: open positions too.
+Function TbOpenStatus(st As String) As Boolean
+    Select Case st
+    Case "Ожидается", "Частично получено", "Просрочено", "Частично получено / просрочено"
+        TbOpenStatus = True
+    End Select
+End Function
+
+' the days the expected date q of a position with the status st has passed on day d (0: not passed, no date, not open)
+Function TbDaysLate(st As String, q As Variant, d As Double) As Long
+    If Not TbOpenStatus(st) Then Exit Function
+    If VarType(q) < 2 Or VarType(q) > 7 Then Exit Function
+    If q > 0 And Int(q) < d Then TbDaysLate = d - Int(q)
+End Function
+
+' a formula: the open positions of the table _orders (rows 2..nLast) whose expected date Q has passed on day d
+Function TbLateFormula(nLast As Long, d As Double) As String
+    Dim st As Variant, i As Integer, f As String
+    st = Array("Ожидается", "Частично получено", "Просрочено", "Частично получено / просрочено")
+    For i = 0 To UBound(st)
+        f = f & IIf(f <> "", "+", "") & "COUNTIFS($_orders.W2:W" & nLast & ";""" & st(i) & """;$_orders.Q2:Q" & nLast & ";""<" & Format(d, "0") & """)"
+    Next i
+    TbLateFormula = "=" & f
+End Function
+
+' the day of a snapshot (the date of its manifest «created»); today when it is not known
+Function TbSnapDay(snap As String) As Double
+    Dim c As String
+    c = TbManifestValue(snap, "created")
+    If Len(c) >= 10 And Mid(c, 5, 1) = "-" And Mid(c, 8, 1) = "-" Then
+        TbSnapDay = CDbl(DateSerial(CInt(Left(c, 4)), CInt(Mid(c, 6, 2)), CInt(Mid(c, 9, 2))))
+    Else
+        TbSnapDay = Int(CDbl(Now()))
+    End If
 End Function
 
 ' loads table sFile of snapshot snap into sheet sDest of this book (the sheet is replaced; hidden when bHide); the number of

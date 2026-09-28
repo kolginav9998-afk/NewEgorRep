@@ -6,7 +6,7 @@
 ' книгу не переносятся), копия книги сохраняется в рабочую папку переноса — программа читает только её.
 Option Explicit
 
-Public Const LT_VERSION = "1.0.0"
+Public Const LT_VERSION = "1.0.1"
 Public Const LT_MAIN = "LEGACY TRANSFER"
 Public Const LT_ORDERS = "1_Вставить_Заказы"
 Public Const LT_STOCK = "1B_Вставить_Наличие"
@@ -31,6 +31,7 @@ Public Const LS_PRICE = 11
 Public Const LS_EMPTY = 12
 Public Const LS_UNITS = 13
 Public Const LS_PLACES = 14
+Public Const LS_STATUSES = 15
 ' «LEGACY TRANSFER»: the status cells (column C) of the steps, the message line
 Public Const LM_STEP1 = 3
 Public Const LM_STATE = 9
@@ -248,7 +249,8 @@ Function LtWriteSettings(work As String) As String
         & "unknown_balance=" & LtRule(LS_BALANCE) & Chr(10) & "no_order_qty=" & LtRule(LS_NOQTY) & Chr(10) _
         & "no_receipt_date=" & LtRule(LS_NODATE) & Chr(10) & "stock_only=" & LtRule(LS_STOCKONLY) & Chr(10) _
         & "price_round=" & LtRule(LS_PRICE) & Chr(10) & "empty_rows=" & LtRule(LS_EMPTY) & Chr(10) _
-        & "units=" & LtSetting(LS_UNITS) & Chr(10) & "places=" & LtSetting(LS_PLACES) & Chr(10) & "source_file=" & src & Chr(10)
+        & "units=" & LtSetting(LS_UNITS) & Chr(10) & "places=" & LtSetting(LS_PLACES) & Chr(10) & "source_file=" & src & Chr(10) _
+        & "status_map=" & Replace(Replace(LtSetting(LS_STATUSES), Chr(13), ";"), Chr(10), ";") & Chr(10)
     LtWriteText(work & "settings.txt", s)
     LtWriteSettings = work & "settings.txt"
 End Function

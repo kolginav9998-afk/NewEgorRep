@@ -378,7 +378,8 @@ Function WmsStartup() As String
     WmsIssue.RecipientsInvalidate()
     ' the file holds no rows hidden by a filter (OnDocSave): the filter the user left is run again
     WmsUi.FiltersAtStart()
-    ' order statuses that depend on the date («Просрочено») are recalculated at the opening
+    ' order rows without a status get it; the date statuses of an earlier core («Просрочено») become the status of their
+    ' data (D-089: since 0.7.2 a status never depends on the date)
     WmsOrders.RefreshAtStartup()
     ' the compatibility of LibreOffice (FINAL WMS MARATHON §5): a version WMS was not verified on is named, never blocking
     If WmsStatus.LoCompat(sCompat) > 0 Then AddNote("ВНИМАНИЕ: " & sCompat)
@@ -583,7 +584,7 @@ End Sub
 
 ' derived display value (a status, a balance mirror, a control text): written and rolled back like a value, but on replay
 ' it is neither evidence that the operation ran nor a conflict — WMS also refreshes such cells outside operations (the
-' overdue status changes with the date), so the saved book may hold an older derived value than the journal line
+' change handler, «Обновить статусы»), so the saved book may hold an older derived value than the journal line
 Sub PlanDerived(sSheet As String, r As Long, c As Integer, vAfter As Variant)
     PlanAdd("D", sSheet, r, CStr(c), EncCell(SheetByName(sSheet).getCellByPosition(c, r)), EncVar(vAfter), True)
 End Sub

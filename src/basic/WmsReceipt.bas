@@ -390,7 +390,7 @@ Private Sub PlanSourceStatus(src As Long, od As Variant, rcvQty As Double, nodoc
         End If
         own = RowOwnControl(src, bStorno)
     End If
-    PlanDerived(SH_ORDERS, src, OC_STATUS, WmsOrders.PositionStatus(od(OD_ORD), rcvQty, nodoc, cancel, WmsOrders.ExpectedDate(src)))
+    PlanDerived(SH_ORDERS, src, OC_STATUS, WmsOrders.PositionStatus(od(OD_ORD), rcvQty, nodoc, cancel))
     PlanDerived(SH_ORDERS, src, OC_CTL, WmsOrders.SourceControl(own, od(OD_ORD), rcvQty, cancel, Trim(Txt(src, OC_UNIT))))
 End Sub
 
@@ -460,7 +460,7 @@ Function ReceiptPostRow(r As Long) As String
     sKey = WmsOrders.DupKeyText(sSupplier, mDoc, sArt, mName, mFact, DupDate())
     dup = WmsOrders.FindDuplicate(sKey, 0)
     nodoc = DocsMissing(mDoc, mHasDdate)
-    st = WmsOrders.PositionStatus(mOrdQty, mFact, nodoc, "", IIf(mHasEdate, mEdate, 0))
+    st = WmsOrders.PositionStatus(mOrdQty, mFact, nodoc, "")
     own = WmsOrders.ReceiptControl(mFact, mHasDocQty, mDocQty, mDoc <> "", mHasDdate, mUnit)
     ctl = WmsOrders.SourceControl(own, mOrdQty, mFact, "", mUnit)
     fp = WmsOrders.Fingerprint(r, mOrdQty, IIf(mHasOdate, mOdate, 0))
@@ -784,7 +784,7 @@ Function ReceiptFixRow(r As Long, vFact As Variant, vDocQty As Variant, vDoc As 
     PlanDerived(SH_ORDERS, r, OC_STOCK, newBal)
     PlanDerived(SH_ORDERS, r, OC_DUP, IIf(dup <> "", "Возможный дубль: " & dup, ""))
     If isSrc Then
-        st = WmsOrders.PositionStatus(od(OD_ORD), rcv2, nodoc2, CStr(od(OD_CANCEL)), WmsOrders.ExpectedDate(r))
+        st = WmsOrders.PositionStatus(od(OD_ORD), rcv2, nodoc2, CStr(od(OD_CANCEL)))
         PlanDerived(SH_ORDERS, r, OC_STATUS, st)
         PlanDerived(SH_ORDERS, r, OC_CTL, WmsOrders.SourceControl(own, od(OD_ORD), rcv2, CStr(od(OD_CANCEL)), Trim(Txt(r, OC_UNIT))))
     Else
@@ -970,7 +970,7 @@ Private Function RcvDelete(r As Long, checkOnly As Boolean) As String
     PlanDerived(SH_ORDERS, r, OC_STOCK, newBal)
     PlanDerived(SH_ORDERS, r, OC_DUP, "")
     If isSrc Then
-        st = WmsOrders.PositionStatus(od(OD_ORD), rcv2, nodoc2, cancel, WmsOrders.ExpectedDate(r))
+        st = WmsOrders.PositionStatus(od(OD_ORD), rcv2, nodoc2, cancel)
         ctl = WmsOrders.SourceControl("Приход удалён (сторно)", od(OD_ORD), rcv2, cancel, Trim(Txt(r, OC_UNIT)))
         PlanDerived(SH_ORDERS, r, OC_STATUS, st)
         PlanDerived(SH_ORDERS, r, OC_CTL, ctl)
@@ -1218,7 +1218,7 @@ Function CheckRow(r As Long) As String
             CheckRow = "ERR:" & why
             Exit Function
         End If
-        st = WmsOrders.PositionStatus(od(OD_ORD), od(OD_RCV), od(OD_NODOC), CStr(od(OD_CANCEL)), WmsOrders.ExpectedDate(src))
+        st = WmsOrders.PositionStatus(od(OD_ORD), od(OD_RCV), od(OD_NODOC), CStr(od(OD_CANCEL)))
         CheckRow = "OK:" & gKcanon & IIf(kind = "STORNO", " (приход удалён, сторно)", "") & ": остаток " & WmsIssue.QtyText(s) & " " _
             & Trim(Txt(r, OC_UNIT)) & "; статус позиции «" & st & "», " & WmsOrders.PositionSummary(od(OD_ORD), od(OD_RCV), CStr(od(OD_CANCEL)), _
             Trim(Txt(r, OC_UNIT))) & "; исходная строка " & (src + 1)
@@ -1393,7 +1393,7 @@ Function ReceiptLegacyRow(r As Long, sEI As String, sBal As String, sPlaceNow As
     sKey = WmsOrders.DupKeyText(sSupplier, mDoc, sArt, mName, mFact, DupDate())
     dup = WmsOrders.FindDuplicate(sKey, 0)
     nodoc = DocsMissing(mDoc, mHasDdate)
-    st = WmsOrders.PositionStatus(mOrdQty, mFact, nodoc, "", IIf(mHasEdate, mEdate, 0))
+    st = WmsOrders.PositionStatus(mOrdQty, mFact, nodoc, "")
     own = WmsOrders.ReceiptControl(mFact, mHasDocQty, mDocQty, mDoc <> "", mHasDdate, mUnit)
     ctl = WmsOrders.SourceControl(own, mOrdQty, mFact, "", mUnit)
     fp = WmsOrders.Fingerprint(r, mOrdQty, IIf(mHasOdate, mOdate, 0))

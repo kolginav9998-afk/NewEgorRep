@@ -284,6 +284,7 @@ Private Function OpenOrderPositions(sSup As String) As Long
     q = """=" & Replace(Replace(Replace(Replace(sSup, "~", "~~"), "*", "~*"), "?", "~?"), """", """""") & """"
     l = "$'" & SH_ORDERS & "'.$L$2:$L$1048576"
     w = "$'" & SH_ORDERS & "'.$W$2:$W$1048576"
+    ' the open statuses (with the date statuses of an earlier core, until the refresh at the opening turns them)
     st = Array(OS_WAITING, OS_OVERDUE, OS_PARTIAL, OS_PARTIAL_OVERDUE)
     For i = 0 To UBound(st)
         f = f & IIf(f <> "", "+", "") & "COUNTIFS(" & l & ";" & q & ";" & w & ";""" & st(i) & """)"

@@ -15,7 +15,7 @@ vehicles) is read as one without transport data. Written into DIR (default: <WMS
                      the date of depletion if the observed consumption continues, the basis and the confidence;
   transport_*.csv    the vehicles: summary, by day / week / month, by supplier, by hour of arrival, repeated vehicles;
   control.csv        «Контроль дня»: vehicles on the territory, unposted rows, «Иной приход» to identify, receipts without
-                     documents, overdue orders, the backup of today, the snapshot, the problems of the data;
+                     documents, orders whose expected date has passed, the backup of today, the snapshot, the problems of the data;
   changes.csv        «Что изменилось сегодня»: receipts, issues, returns, moves, write-offs, corrections, vehicles, the
                      largest changes of balances, the problems;
   INSIGHTS_REPORT.md all of it for a person.
@@ -102,6 +102,9 @@ def table(snap, name):
     if not os.path.exists(p):
         return None
     return list(csv.DictReader(io.StringIO(read_text(p)), delimiter=";"))
+
+
+OPEN_STATUSES = ("Ожидается", "Частично получено", "Просрочено", "Частично получено / просрочено")
 
 
 def num(s):
@@ -665,8 +668,15 @@ def control(w, man, wms_dir):
     add("ВНИМАНИЕ" if rev else "OK", "Неразобранный «Иной приход»", f"{len(rev)}: " + ", ".join(rev[:10]) if rev else "нет")
     nodoc = [r for r in w.orders if r.get("ei") and (r.get("status") == "Получено без документов" or not (r.get("doc_no") and r.get("date_doc")))]
     add("ВНИМАНИЕ" if nodoc else "OK", "Приходы без документов", f"{len(nodoc)}: " + ", ".join(r["ei"] for r in nodoc[:10]) if nodoc else "нет")
-    over = [r for r in w.orders if r.get("status") in ("Просрочено", "Частично получено / просрочено")]
-    add("ВНИМАНИЕ" if over else "OK", "Просроченные заказы", f"{len(over)}: " + "; ".join(f"{r.get('order_no')} {r.get('name')}" for r in over[:8]) if over else "нет")
+    # the expected date has passed: the order is still awaited — a reminder, never a status (WMS 0.7.2, D-089); a snapshot of
+    # WMS before 0.7.2 may still hold the date statuses — open positions too
+    late = []
+    for r in w.orders:
+        exp = day(r.get("date_expected"))
+        if r.get("status") in OPEN_STATUSES and exp is not None and exp < t:
+            late.append((r, (t - exp).days))
+    add("ВНИМАНИЕ" if late else "OK", "Ожидаемая дата прошла", f"{len(late)}: " + "; ".join(f"{r.get('order_no')} {r.get('name')} — на {k} дн."
+        for r, k in late[:8]) if late else "нет")
     neg = [ei for ei, s in w.stock.items() if s["qty"] < 0]
     copies = sum(1 for rows, col in ((w.issue_rows, "status"), (w.orders, "control"), (w.special, "control"), (w.return_rows, "status"),
                                      (w.adjust_rows, "status")) for r in rows if (r.get(col) or "").startswith("КОПИЯ"))

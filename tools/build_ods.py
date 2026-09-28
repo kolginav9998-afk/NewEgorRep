@@ -384,14 +384,16 @@ def car_formulas():
     thr = "$N$4"                               # the threshold in effect (the setting L5 when it is a positive number)
     mn = "$N$5"                                # the arrival of the longest open visit
     sup = 'TRIM($D$2)'
-    l_, w_ = f"{o}.$L$2:$L$1048576", f"{o}.$W$2:$W$1048576"
-    cnt = "+".join(f'COUNTIFS({l_};"="&{sup};{w_};"{x}")' for x in ("Ожидается", "Просрочено", "Частично получено",
-                                                                   "Частично получено / просрочено"))
-    over = f'COUNTIFS({l_};"="&{sup};{w_};"Просрочено")+COUNTIFS({l_};"="&{sup};{w_};"Частично получено / просрочено")'
+    l_, w_, q_ = f"{o}.$L$2:$L$1048576", f"{o}.$W$2:$W$1048576", f"{o}.$Q$2:$Q$1048576"
+    # the open positions (with the date statuses of a book before 0.7.2 until its refresh) and those whose expected date Q
+    # has passed — information for the storekeeper, never a status (D-089)
+    open_st = ("Ожидается", "Частично получено", "Просрочено", "Частично получено / просрочено")
+    cnt = "+".join(f'COUNTIFS({l_};"="&{sup};{w_};"{x}")' for x in open_st)
+    over = "+".join(f'COUNTIFS({l_};"="&{sup};{w_};"{x}";{q_};"<"&TODAY())' for x in open_st)
     hm = f'RIGHT("0"&HOUR({mn});2)&":"&RIGHT("0"&MINUTE({mn});2)'
     return {
         (2, 2): f'=IF({sup}="";"Впишите машину и поставщика → ПРИЕХАЛ. При выезде выделите строку машины → УЕХАЛ.";'
-                f'"У поставщика «"&{sup}&"» открытых позиций заказов: "&({cnt})&IF(({over})>0;", из них просрочено: "&({over});""))',
+                f'"У поставщика «"&{sup}&"» открытых позиций заказов: "&({cnt})&IF(({over})>0;", из них ожидаемая дата прошла: "&({over});""))',
         (13, 3): f"=IF(AND(ISNUMBER($L$5);$L$5>=1);$L$5;{CAR_LONG_MIN})",
         (13, 4): f'=IF(COUNT({oarr})=0;"";MIN({oarr}))',
         (2, 4): f'=COUNTIF({st};"OPEN")',
@@ -532,6 +534,20 @@ def order_separators(doc, sh):
     sh.getColumns().getByIndex(ORDER_BLOCK_COL).IsVisible = False
     cell_style(doc, "WMS_OrderStart", TopBorder=border_line(88, 0x1F3864))
     add_cond(sh, sh.getCellRangeByPosition(0, 1, len(ORDER_HEADERS) - 1, LAST_ROW), 'AND(ROW()>2;TRIM($A2)="1";$AC2="")', "WMS_OrderStart", 0, 1)
+    # the expected date Q of a position still expected has passed: an unobtrusive mark on Q — the status stays «Ожидается» /
+    # «Частично получено», the posting and the receipts are not affected (D-089). A conditional format applies its first true
+    # entry only, so Q gets its own one: the order line with the mark, the order line, the mark
+    start = 'ROW()>2;TRIM($A2)="1";$AC2=""'
+    late = 'ISNUMBER($Q2);$Q2<TODAY();OR($W2="Ожидается";$W2="Частично получено")'
+    cell_style(doc, "WMS_LateDate", CellBackColor=0xFFEB9C, CharColor=0x9C5700)
+    cell_style(doc, "WMS_OrderStartLate", TopBorder=border_line(88, 0x1F3864), CellBackColor=0xFFEB9C, CharColor=0x9C5700)
+    q = sh.getCellRangeByPosition(16, 1, 16, LAST_ROW)
+    cf = q.ConditionalFormat
+    cf.clear()
+    q.ConditionalFormat = cf
+    add_cond(sh, q, f"AND({start};{late})", "WMS_OrderStartLate", 16, 1)
+    add_cond(sh, q, f"AND({start})", "WMS_OrderStart", 16, 1)
+    add_cond(sh, q, f"AND({late})", "WMS_LateDate", 16, 1)
 
 
 def build_orders(doc, sh):

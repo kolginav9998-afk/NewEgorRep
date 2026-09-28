@@ -31,7 +31,6 @@ TODAY = datetime.date.today()
 PAST = (TODAY - datetime.timedelta(days=10)).strftime("%d.%m.%Y")
 FUTURE = (TODAY + datetime.timedelta(days=20)).strftime("%d.%m.%Y")
 D0 = "25.09.2026"
-PO = "Частично получено / просрочено"
 KEEP = "<как предложено>"          # WmsOrdersUi test seam: the dialog field keeps the value the window proposed
 PWD = "wms"
 
@@ -347,7 +346,7 @@ def r10_cancel_rest():
         s.U("BtnSelfCheck")
         s.OU("BtnOrdRefresh")
         again = s.click_ord("BtnOrdCancelRest", 1)
-        R.add(c, "отменённый остаток не считается ожидаемым: «Обновить статусы» при прошедшей Q не делает позицию «Просрочено»; повторная отмена — SKIP",
+        R.add(c, "отменённый остаток не считается ожидаемым: «Обновить статусы» при прошедшей Q статус не меняет; повторная отмена — SKIP",
               W(s, 1) == "Частично получено / остаток отменён" and again.startswith("SKIP"), f"{W(s, 1)}; {again}")
         order(s, 3, a="З-3", h="10")
         fact(s, 3, "10")
@@ -1130,7 +1129,7 @@ def r33_several_orders():
 # ================================================================ R34–R39 statuses, special receipts, buttons, EI safety, abandon
 
 @case
-def r34_overdue_refresh():
+def r34_status_not_by_date():
     c = "R34"
     p = new_wms("r34")
     s = ready(Session(p))
@@ -1142,9 +1141,13 @@ def r34_overdue_refresh():
     post(s, 4)
     w0 = [W(s, r) for r in (1, 2, 3, 4)]
     s.close(save=True)
-    # the same rows entered with macros off: no status yet
+    # the same book as WMS before 0.7.2 left it (date statuses in W) and a row entered with macros off (no status yet)
     s = Session(p, macros=0)
     sh = s.doc.Sheets.getByName("Заказы")
+    sh.unprotect("wms")
+    sh.getCellByPosition(22, 1).setString("Просрочено")
+    sh.getCellByPosition(22, 4).setString("Частично получено / просрочено")
+    sh.protect("wms")
     sh.getCellByPosition(0, 5).setString("З-6")
     sh.getCellByPosition(1, 5).setString("Без статуса")
     sh.getCellByPosition(7, 5).setString("3")
@@ -1156,21 +1159,27 @@ def r34_overdue_refresh():
     try:
         rep = s.report()
         w1 = [W(s, r) for r in (1, 2, 3, 4, 5)]
-        R.add(c, "«Просрочено» по Q и текущей дате: при вводе и при открытии; строка без статуса (ввод без макросов) получает статус при открытии; "
-                 "частично полученная позиция с прошедшей Q — «Частично получено / просрочено» (D-047)",
-              w0 == ["Просрочено", "Ожидается", "Ожидается", PO] and w1 == ["Просрочено", "Ожидается", "Ожидается", PO, "Просрочено"]
-              and "статусы заказов" in rep, f"{w0}; {w1}; {rep[-200:]}")
+        R.add(c, "статус не зависит от даты (D-089): при вводе прошедшая ожидаемая дата Q не делает позицию «Просрочено», частично полученную — "
+                 "«Частично получено / просрочено»; при открытии строка без статуса (ввод без макросов) получает «Ожидается», статусы по дате "
+                 "прежней версии («Просрочено», «Частично получено / просрочено») становятся статусами по данным; в отчёте запуска — позиции с "
+                 "прошедшей ожидаемой датой",
+              w0 == ["Ожидается", "Ожидается", "Ожидается", "Частично получено"]
+              and w1 == ["Ожидается", "Ожидается", "Ожидается", "Частично получено", "Ожидается"]
+              and "статусов по дате прежней версии пересчитано 2" in rep and "обновлено статусов 3" in rep
+              and "ожидаемых позиций 5, из них с прошедшей ожидаемой датой 3" in rep, f"{w0}; {w1}; {rep[-320:]}")
+        q = s.doc.Sheets.getByName("Заказы").getCellByPosition(16, 1).ConditionalFormat
+        cf = {q.getByIndex(i).getStyleName(): q.getByIndex(i).getFormula1() for i in range(q.getCount())}
         later = (TODAY + datetime.timedelta(days=40)).strftime("%d.%m.%Y")
         s.Od("TestSetToday", later)
-        t0 = time.time()
         s.OU("BtnOrdRefresh")
         msg = s.U("TestUiLastMessage")
-        dt = time.time() - t0
         w2 = [W(s, r) for r in (1, 2, 3, 4, 5)]
-        R.add(c, "«Обновить статусы» с датой через 40 дней: ожидаемая позиция с прошедшей Q становится «Просрочено», без Q — «Ожидается»",
-              w2 == ["Просрочено", "Просрочено", "Ожидается", PO, "Просрочено"] and "просрочено 3" in msg
-              and "частично получено и просрочено 1" in msg, f"{w2}; {msg}; {dt:.2f} с")
-        oracle(c, s, "статусы по дате", today=later)
+        R.add(c, "«Обновить статусы» с датой через 40 дней: ни один статус не меняется — заказ ждём до поставки или отмены; в сообщении — "
+                 "позиций с прошедшей ожидаемой датой 4 (у З-2 срок тоже прошёл); на Q — условное оформление «ожидаемая дата прошла» "
+                 "(подсветка по TODAY(), статус и проведение не затрагивает)",
+              w2 == w1 and "из них с прошедшей ожидаемой датой 4" in msg and "обновлено статусов 0" in msg and "WMS_LateDate" in cf
+              and "TODAY()" in cf.get("WMS_LateDate", "") and "$W2" in cf.get("WMS_LateDate", ""), f"{w2}; {msg}; {cf}")
+        oracle(c, s, "статусы без даты", today=later)
         s.Od("TestSetToday", "")
     finally:
         s.close()
@@ -1405,13 +1414,14 @@ def r43_autocalc_off():
         p3 = post(s, 3)
         s.Od("TestSetToday", (TODAY + datetime.timedelta(days=40)).strftime("%d.%m.%Y"))
         s.OU("BtnOrdRefresh")
-        w3, path = W(s, 3), s.Od("TestRefreshPath")
+        w3, m3 = W(s, 3), s.U("TestUiLastMessage")
         s.Od("TestSetToday", "")
         s.OU("BtnOrdRefresh")
-        R.add(c, "автопересчёт выключен: «Обновить статусы» находит частично полученную позицию с прошедшим сроком формулой массива "
-                 "(свежесть результата подтверждена меткой) — «Частично получено / просрочено»; с настоящей датой — снова «Частично получено»",
-              p3 == "OK:3" and w3 == PO and path == "FORMULA" and W(s, 3) == "Частично получено" and not s.doc.isAutomaticCalculationEnabled(),
-              f"{p3}; {w3}; {path}; {W(s, 3)}")
+        m0 = s.U("TestUiLastMessage")
+        R.add(c, "автопересчёт выключен: «Обновить статусы» считает позиции с прошедшей ожидаемой датой формулами Calc (свежесть результата "
+                 "подтверждена меткой) — через 40 дней 1, сегодня 0; статус частично полученной позиции от даты не меняется («Частично получено»)",
+              p3 == "OK:3" and w3 == "Частично получено" and W(s, 3) == "Частично получено" and "из них с прошедшей ожидаемой датой 1" in m3
+              and "из них с прошедшей ожидаемой датой 0" in m0 and not s.doc.isAutomaticCalculationEnabled(), f"{p3}; {w3}; {m3}; {m0}")
         oracle(c, s, "без автопересчёта")
     finally:
         s.close()
@@ -1497,7 +1507,7 @@ def r44_receipt_date():
 
 
 @case
-def r45_partial_overdue():
+def r45_status_without_date():
     c = "R45"
     p = new_wms("r45")
     s = ready(Session(p))
@@ -1516,10 +1526,10 @@ def r45_partial_overdue():
         res = [post(s, r) for r in (1, 2, 4, 5, 6)]
         cr = s.click_ord("BtnOrdCancelRest", 4)
         ws = [W(s, r) for r in range(1, 7)]
-        want = [PO, "Частично получено", "Просрочено", "Частично получено / остаток отменён", "Получено", "Получено без документов"]
-        R.add(c, "статусы D-047: частично получено и Q прошла — «Частично получено / просрочено», Q не прошла — «Частично получено»; ничего не получено — "
-                 "«Просрочено»; остаток отменён — просрочка не применяется; получено полностью — «Получено» / «Получено без документов»; "
-                 "Y исходной строки показывает «осталось 60»",
+        want = ["Частично получено", "Частично получено", "Ожидается", "Частично получено / остаток отменён", "Получено", "Получено без документов"]
+        R.add(c, "статусы без даты (D-089 вместо D-047): частично получено — «Частично получено» и при прошедшей Q; ничего не получено и Q "
+                 "прошла — «Ожидается»; остаток отменён — «Частично получено / остаток отменён»; получено полностью — «Получено» / «Получено без "
+                 "документов»; Y исходной строки показывает «осталось 60»",
               res == ["OK:1", "OK:2", "OK:3", "OK:4", "OK:5"] and cr.startswith("OK") and ws == want and "осталось 60" in s.ord(1, "Y")
               and "осталось 60" in s.ord(2, "Y"), f"{res}; {cr}; {ws}; Y1 {s.ord(1, 'Y')}")
         later = (TODAY + datetime.timedelta(days=40)).strftime("%d.%m.%Y")
@@ -1527,48 +1537,52 @@ def r45_partial_overdue():
         s.OU("BtnOrdRefresh")
         msg = s.U("TestUiLastMessage")
         ws2 = [W(s, r) for r in range(1, 7)]
-        R.add(c, "срок частично полученной позиции прошёл (дата через 40 дней, «Обновить статусы»): «Частично получено» → «Частично получено / просрочено», "
-                 "Y по-прежнему показывает, сколько осталось; остальные статусы не изменились",
-              ws2 == [PO, PO] + want[2:] and "осталось 60" in s.ord(2, "Y") and "частично получено и просрочено 2" in msg, f"{ws2}; {msg}")
+        R.add(c, "через 40 дней («Обновить статусы»): ни один статус не изменился — WMS продолжает ждать поставку; Y по-прежнему показывает, "
+                 "сколько осталось; в сообщении — позиций с прошедшей ожидаемой датой 3",
+              ws2 == want and "осталось 60" in s.ord(2, "Y") and "ожидаемых позиций 3, из них с прошедшей ожидаемой датой 3" in msg
+              and "обновлено статусов 0" in msg, f"{ws2}; {msg}")
         s.order_input(1, Q=(TODAY + datetime.timedelta(days=60)).strftime("%d.%m.%Y"))
         w_later = W(s, 1)
         s.order_input(1, Q=PAST)
         w_back = W(s, 1)
-        R.add(c, "Q исходной строки после прихода открыта: новая ожидаемая дата сразу меняет статус (позже текущей — «Частично получено», раньше — снова "
-                 "«Частично получено / просрочено»)", w_later == "Частично получено" and w_back == PO and s.ord_locks(1) == POSTED, f"{w_later}; {w_back}")
+        R.add(c, "Q исходной строки после прихода открыта: новая ожидаемая дата (позже и раньше текущей) статус не меняет — «Частично получено»",
+              w_later == "Частично получено" and w_back == "Частично получено" and s.ord_locks(1) == POSTED, f"{w_later}; {w_back}")
         m = more(s, 1, "60", c="УПД-9", o=D0)
         w_full = W(s, 1)
         nr = add_row_of(m) if m.startswith("OK") else None
         d = s.click_ord("BtnRcvDelete", nr) if nr else ""
         w_storno = W(s, 1)
-        R.add(c, "остаток пришёл («Ещё поступление» 60): «Получено», просрочки нет; сторно этого поступления — снова «Частично получено / просрочено», "
-                 "осталось 60", m.startswith("OK") and w_full == "Получено" and d.startswith("OK") and w_storno == PO and "осталось 60" in s.ord(1, "Y"),
+        R.add(c, "остаток пришёл («Ещё поступление» 60): «Получено»; сторно этого поступления — снова «Частично получено», осталось 60",
+              m.startswith("OK") and w_full == "Получено" and d.startswith("OK") and w_storno == "Частично получено" and "осталось 60" in s.ord(1, "Y"),
               f"{m}; {w_full}; {d}; {w_storno}; Y1 {s.ord(1, 'Y')}")
-        oracle(c, s, "частично получено / просрочено", today=later)
-        path1 = s.Od("TestRefreshPath")
-        s.Od("TestRefreshMode", 1)
+        oracle(c, s, "статусы без даты", today=later)
         s.Od("TestSetToday", "")
-        s.OU("BtnOrdRefresh")
-        # M6 §18: the cancelled delivery row of З-1 stays right under it (row 3 of the sheet); the positions follow
+        # a book of an earlier core: its date statuses become the statuses of the data (M6 §18: the cancelled delivery row of
+        # З-1 stays right under it — row 3 of the sheet; the positions follow)
         src_rows = (1, 3, 4, 5, 6, 7)
-        wa = [W(s, r) for r in src_rows]
-        s.Od("TestSetToday", later)
+        sh = s.doc.Sheets.getByName("Заказы")
+        sh.unprotect("wms")
+        sh.getCellByPosition(22, 1).setString("Частично получено / просрочено")
+        sh.getCellByPosition(22, 4).setString("Просрочено")
+        sh.protect("wms")
         s.OU("BtnOrdRefresh")
-        wb = [W(s, r) for r in src_rows]
-        path2 = s.Od("TestRefreshPath")
-        s.Od("TestRefreshMode", 0)
-        R.add(c, "«Обновить статусы» находит частично полученные строки одной формулой массива; запасной путь (чтение строк) даёт те же статусы "
-                 "в обе стороны (сегодня — «Частично получено», через 40 дней — «Частично получено / просрочено»)",
-              path1 == "FORMULA" and path2 == "ROWS" and wa == [PO, "Частично получено"] + want[2:] and wb == [PO, PO] + want[2:]
-              and W(s, 2) == "Поступление удалено (сторно)",
-              f"{path1}/{path2}; {wa}; {wb}")
-        s.Od("TestSetToday", "")
+        msg2 = s.U("TestUiLastMessage")
+        wa = [W(s, r) for r in src_rows]
+        R.add(c, "книга прежней версии (в W «Частично получено / просрочено», «Просрочено»): «Обновить статусы» делает их статусами по данным — "
+                 "«Частично получено», «Ожидается»; остальные строки не тронуты",
+              wa == want and W(s, 2) == "Поступление удалено (сторно)" and "статусов по дате прежней версии пересчитано 2" in msg2
+              and "обновлено статусов 2" in msg2, f"{wa}; {msg2}")
+        sh.unprotect("wms")
+        sh.getCellByPosition(22, 4).setString("Просрочено")
+        sh.protect("wms")
         s.close(save=True)
         s = ready(Session(p))
         rep = s.report()
-        ws3 = [W(s, r) for r in (1, 3, 4, 5, 6, 7)]
-        R.add(c, "повторное открытие (настоящая дата): статусы пересчитаны при запуске — у позиции со сроком в будущем снова «Частично получено»",
-              ws3 == [PO, "Частично получено"] + want[2:] and "частично получено и просрочено 1" in rep, f"{ws3}; {rep[-240:]}")
+        ws3 = [W(s, r) for r in src_rows]
+        R.add(c, "повторное открытие (настоящая дата): статус по дате прежней версии пересчитан при запуске («Просрочено» → «Ожидается»), "
+                 "остальные — как были; в отчёте запуска — позиций с прошедшей ожидаемой датой 2",
+              ws3 == want and "статусов по дате прежней версии пересчитано 1" in rep and "из них с прошедшей ожидаемой датой 2" in rep,
+              f"{ws3}; {rep[-320:]}")
         oracle(c, s, "статусы после открытия")
     finally:
         s.close()

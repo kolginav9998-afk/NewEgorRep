@@ -10,7 +10,8 @@ the result with every view of the book:
   «Заказы»    — every receipt EI in exactly one row (copies aside); F, H, V, X, W of each row; the status of every position
                 computed here from the rules of the task and D-047 (not taken from the book); a partly received
                 position shows on its source row (Y) how much is still to come; H only on the source row; cancelled
-                positions without EI; open rows show «Ожидается»/«Просрочено» by Q;
+                positions without EI; open rows show «Ожидается» whatever their expected date Q — since 0.7.2 no status
+                depends on the date (D-089): no row shows «Просрочено» or «Частично получено / просрочено»;
   «Выдачи»    — posted / cancelled issues against the journal (as tests/issue_oracle.py);
   counters    — NEXT_EI above every EI, NEXT_OL above every position, no EI created twice.
 The ten invariants of the task are checked explicitly (see INVARIANTS).
@@ -66,6 +67,7 @@ C = {c: i for i, c in enumerate(ORDER_COLS)}
 ST_WAITING, ST_OVERDUE, ST_PARTIAL, ST_RECEIVED = "Ожидается", "Просрочено", "Частично получено", "Получено"
 ST_NODOCS, ST_CANCELLED, ST_REST = "Получено без документов", "Отменено", "Частично получено / остаток отменён"
 ST_ADD, ST_ADD_STORNO = "Дополнительное поступление", "Поступление удалено (сторно)"
+# the date statuses of WMS before 0.7.2 (D-047): never allowed in a book of 0.7.2 (D-089)
 ST_PARTIAL_OVERDUE = "Частично получено / просрочено"
 
 INVARIANTS = {
@@ -88,15 +90,6 @@ def serial(d):
 
 def iso_serial(s):
     return serial(datetime.date.fromisoformat(s)) if s else None
-
-
-def today_serial(today=None):
-    if today is None:
-        return serial(datetime.date.today())
-    if isinstance(today, str):
-        dd, mm, yy = (int(x) for x in today.split("."))
-        return serial(datetime.date(yy, mm, dd))
-    return int(today)
 
 
 def ei_num(canon):
@@ -123,25 +116,21 @@ def num(x):
     return x if isinstance(x, float) else None
 
 
-DATE_MIN, DATE_MAX = serial(datetime.date(2000, 1, 1)), serial(datetime.date(2099, 12, 31))
 
 
-def position_status(ordq, rcv, nodoc, cancel, edate, today):
-    """the business status of an order position — the rules of the task and D-047, written independently:
-    the expected date Q is a valid date (2000–2099) before today → nothing received «Просрочено», partly received
-    «Частично получено / просрочено»; a cancelled rest and a fully received position are never overdue"""
-    overdue = edate is not None and DATE_MIN <= int(edate) <= DATE_MAX and int(edate) < today
+def position_status(ordq, rcv, nodoc, cancel):
+    """the business status of an order position — the rules of the task and D-089, written independently: it never
+    depends on the date; a position whose expected date has passed is still awaited («Ожидается», «Частично получено»)
+    until the goods arrive or the order is cancelled"""
     if cancel == "ORDER":
         return ST_CANCELLED
     if rcv <= EPS:
-        if cancel == "REST":
-            return ST_CANCELLED
-        return ST_OVERDUE if overdue else ST_WAITING
+        return ST_CANCELLED if cancel == "REST" else ST_WAITING
     if rcv >= ordq - EPS:
         return ST_NODOCS if nodoc > 0 else ST_RECEIVED
     if cancel == "REST":
         return ST_REST
-    return ST_PARTIAL_OVERDUE if overdue else ST_PARTIAL
+    return ST_PARTIAL
 
 
 def qty_text(x):
@@ -214,7 +203,7 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
         if inv:
             inv_fail.add(inv)
 
-    tday = today_serial(today)
+    # today: the day of the test — no status depends on it since 0.7.2 (D-089); kept for the callers
     entries, info = journal_oracle.read_journal(jdir)
     sysv = journal_oracle.sys_values(doc)
     inst = sysv["INSTANCE_ID"]
@@ -543,6 +532,8 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
         if r == 0:
             continue
         v, w, y = row[C["V"]], row[C["W"]], str(row[C["Y"]])
+        if w in (ST_OVERDUE, ST_PARTIAL_OVERDUE):
+            bad(f"«Заказы» строка {r + 1}: статус по дате «{w}» — в WMS 0.7.2 его нет (D-089)")
         if y.startswith("КОПИЯ"):
             copies += 1
             continue
@@ -558,12 +549,9 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
             cancelled_rows.append(r)
         elif any(str(x) != "" for x in row[:21]):
             open_rows += 1
-            if w not in ("", ST_WAITING, ST_OVERDUE):
-                bad(f"«Заказы» строка {r + 1}: непроведённая строка со статусом «{w}»")
-            q = num(row[C["Q"]])
-            want = ST_OVERDUE if (q is not None and DATE_MIN <= int(q) <= DATE_MAX and int(q) < tday) else ST_WAITING
-            if w and w != want:
-                bad(f"«Заказы» строка {r + 1}: статус «{w}», по дате ожидается «{want}»")
+            # an open row is awaited whatever its expected date Q (D-089)
+            if w not in ("", ST_WAITING):
+                bad(f"«Заказы» строка {r + 1}: непроведённая строка со статусом «{w}» (ожидается «{ST_WAITING}» при любой дате Q)")
             if isinstance(row[C["X"]], float):
                 bad(f"«Заказы» строка {r + 1}: у непроведённой строки заполнено «Наличие»")
     for ei, rec in receipts.items():
@@ -615,13 +603,13 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
                 continue
             r = cand[0]
         row = orders[r]
-        want = position_status(p["ord"], p["rcv"], p["nodoc"], p["cancel"], num(row[C["Q"]]), tday)
+        want = position_status(p["ord"], p["rcv"], p["nodoc"], p["cancel"])
         if row[C["W"]] != want:
             bad(f"позиция OLID {ol} строка {r + 1}: статус «{row[C['W']]}», по правилам «{want}»" + (" (инвариант 8)" if p["cancel"] == "REST" else ""),
                 8 if p["cancel"] == "REST" else None)
         if p["cancel"] == "REST" and row[C["W"]] in (ST_WAITING, ST_OVERDUE, ST_PARTIAL, ST_PARTIAL_OVERDUE):
             bad(f"позиция OLID {ol}: остаток отменён, но позиция показана ожидаемой", 8)
-        if want in (ST_PARTIAL, ST_PARTIAL_OVERDUE):
+        if want == ST_PARTIAL:
             rest = f"осталось {qty_text(p['ord'] - p['rcv'])}"
             if rest not in str(row[C["Y"]]):
                 bad(f"позиция OLID {ol} строка {r + 1}: «{want}», но Y не показывает «{rest}»: {row[C['Y']]!r}")

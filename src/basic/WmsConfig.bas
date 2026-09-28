@@ -3,9 +3,9 @@
 ' §2 and §14 fixed sheets «Выдачи», «Заказы», «Возврат», «Иной приход» and their service structures.
 Option Explicit
 
-Public Const WMS_CORE_VERSION = "0.7.1-legacy"
+Public Const WMS_CORE_VERSION = "0.7.2-hotfix"
 ' the product (the release of the whole WMS book and its tools; the snapshot for the tools names it)
-Public Const WMS_PRODUCT_VERSION = "0.7.1"
+Public Const WMS_PRODUCT_VERSION = "0.7.2"
 ' Phase 5 appended the counters of the special receipts (rows 19..24), Final Core the counter of the corrections (row 25),
 ' M6 the counter of the vehicle visits (row 26); a book of an earlier core has WMS-SYS-1 (Phase 1–4), WMS-SYS-2 (Phase 5)
 ' or WMS-SYS-3 (Final Core, release 0.6.0 — tools/upgrade.py brings it to this schema with its data)
@@ -182,7 +182,9 @@ Public Const ORDER_BLOCK_HEADER = "Блок (служебная)"
 Public Const ORDER_LOCKS_OPEN = "0000000000000000000001111001"
 Public Const ORDER_LOCKS_POSTED = "1111111111010111001011111001"
 
-' W «Статус»: the business status of an order position (on its source row only, spec §6, v0.1 §15)
+' W «Статус»: the business status of an order position (on its source row only, spec §6, v0.1 §15). It never depends on
+' the date (D-089): OS_OVERDUE and OS_PARTIAL_OVERDUE are the date statuses of books before 0.7.2, never computed now —
+' «Обновить статусы» (and the opening) turns them into the status of their data
 Public Const OS_WAITING = "Ожидается"
 Public Const OS_OVERDUE = "Просрочено"
 Public Const OS_PARTIAL = "Частично получено"

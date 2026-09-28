@@ -128,6 +128,8 @@ def main():
         sh.getCellByPosition(23, 1).setFormula("=$Выдачи.B2")                      # X2 «Наличие» from the old sheet «Выдачи»
         sh.getCellByPosition(10, 1).setFormula("=F2*J2")                           # K2 «Сумма»
         sh.getCellByPosition(22, 2).setFormula('=IF(Q3<TODAY();"Просрочено";"Ожидается")')   # W3 the old status formula
+        sh.getCellByPosition(22, 9).setString("Размещен")                          # W10: an old status of the table (0.7.2)
+        sh.getCellByPosition(16, 9).setString("1.9.26")                            # Q10: a short date written as text (0.7.2)
         d.storeToURL(uno.systemPathToFileUrl(old), props(FilterName="calc8"))
         d.close(True)
     finally:
@@ -178,12 +180,16 @@ def main():
         seen, m = run_button(o, ut, doc, "BtnLtCheck")
         x2 = tsh.getCellByPosition(23, 1)
         ad = [tuple(r) for r in tsh.getCellRangeByPosition(29, 0, 30, 3).getDataArray()]
+        ad10 = tuple(tsh.getCellRangeByPosition(29, 9, 30, 9).getDataArray()[0])
         chk = {r[0]: r[1] for r in doc.Sheets.getByName("2_Проверка").getCellRangeByPosition(0, 2, 2, 80).getDataArray() if r[0]}
         step("«2. ПРОВЕРИТЬ»: окно «блокирующих замечаний нет» (формул заменено значениями: 3); X2 — значение 60 вместо ссылки на старую книгу; "
              "результаты строк в AD:AE; «2_Проверка» — итог «Можно создавать тестовую WMS»",
              seen and "блокирующих замечаний нет" in m and "формул заменено значениями: 3" in m and x2.getType().value == "VALUE"
              and x2.getValue() == 60.0 and ad[0] == ("Результат проверки", "Что не так / что сделано") and ad[1][0] in ("Готово", "Проверить")
              and chk.get("ИТОГ") == "Можно создавать тестовую WMS" and not pm.Enabled, f"{seen[-1:]}; {m[:120]}; {ad[:2]}; {chk.get('ИТОГ')}")
+        step("старый статус «Размещен» и дата «1.9.26» текстом (строка 10) — не блокируют: строка «Готово», в AE — «дата «1.9.26» "
+             "прочитана как 01.09.2026» и «старый статус «Размещен» понят как «Ожидается»»",
+             ad10[0] == "Готово" and "прочитана как 01.09.2026" in ad10[1] and "«Размещен» понят как «Ожидается»" in ad10[1], str(ad10)[:300])
         seen, m = run_button(o, ut, doc, "BtnLtBuild")
         step("«3. СОЗДАТЬ ТЕСТОВУЮ WMS»: окно «Тестовая WMS создана и проверена», книга LEGACY_WORK/test/WMS_LEGACY_TEST.ods; кнопка «5» ещё "
              "недоступна", seen and "Тестовая WMS создана" in m and os.path.isfile(os.path.join(cd, "LEGACY_WORK", "test", "WMS_LEGACY_TEST.ods"))
