@@ -58,6 +58,8 @@ Function BlockHint(code As String) As String
             & "Иначе верните папку WMS_Journal рядом с книгой."
     Case "ROLLBACK_FAILED", "COMMIT_FAILED", "JOURNAL_UNCERTAIN", "JOURNAL_FOREIGN_WRITE", "STARTUP_ERROR"
         BlockHint = "Закройте книгу и откройте WMS заново — запуск сам разберёт незавершённую операцию."
+    Case "PROTECTION_FOREIGN"
+        BlockHint = ForeignProtectionHint() & " После этого WMS сама откатит незавершённую операцию."
     Case "NO_FILE", "READ_ONLY", "NOT_ODS"
         BlockHint = "Откройте рабочую книгу WMS (.ods) для записи."
     Case ""

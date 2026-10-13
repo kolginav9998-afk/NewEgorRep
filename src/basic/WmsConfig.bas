@@ -3,13 +3,15 @@
 ' §2 and §14 fixed sheets «Выдачи», «Заказы», «Возврат», «Иной приход» and their service structures.
 Option Explicit
 
-Public Const WMS_CORE_VERSION = "0.7.2-hotfix"
+Public Const WMS_CORE_VERSION = "0.8.0-prime"
 ' the product (the release of the whole WMS book and its tools; the snapshot for the tools names it)
-Public Const WMS_PRODUCT_VERSION = "0.7.2"
+Public Const WMS_PRODUCT_VERSION = "0.8.0"
 ' Phase 5 appended the counters of the special receipts (rows 19..24), Final Core the counter of the corrections (row 25),
 ' M6 the counter of the vehicle visits (row 26); a book of an earlier core has WMS-SYS-1 (Phase 1–4), WMS-SYS-2 (Phase 5)
-' or WMS-SYS-3 (Final Core, release 0.6.0 — tools/upgrade.py brings it to this schema with its data)
-Public Const WMS_SYS_SCHEMA = "WMS-SYS-4"
+' or WMS-SYS-3 (Final Core, release 0.6.0), WMS-SYS-4 (releases 0.7.0 … 0.7.2) — tools/upgrade.py brings them to this schema
+' with their data; PRIME 0.8 (WMS-SYS-5) added the source of an upgrade (row 27) and the registry of the transfer _LEG
+Public Const WMS_SYS_SCHEMA = "WMS-SYS-5"
+Public Const WMS_SYS_SCHEMA_07 = "WMS-SYS-4"
 Public Const WMS_SYS_SCHEMA_OLD = "WMS-SYS-1"
 Public Const WMS_SYS_SCHEMA_P5 = "WMS-SYS-2"
 Public Const WMS_SYS_SCHEMA_FC = "WMS-SYS-3"
@@ -56,7 +58,10 @@ Public Const SK_NEXT_OTH = 24
 Public Const SK_NEXT_ADJ = 25
 ' M6 (WMS-SYS-4): the № of the vehicle visits of «Приход авто»
 Public Const SK_NEXT_CAR = 26
-Public Const SYS_ROWS = 27
+' PRIME 0.8 (WMS-SYS-5): where this book was upgraded from — «папка|LAST_SEQ|SHA-256|дата» of the book of 0.7 (empty for a
+' new book): a start names the operations done in the old book after the upgrade
+Public Const SK_UPGRADE_FROM = 27
+Public Const SYS_ROWS = 28
 
 ' transaction marker states
 Public Const TX_NONE = "NONE"
@@ -541,7 +546,7 @@ Function SysKeyNames() As Variant
     SysKeyNames = Array("SCHEMA", "INSTANCE_ID", "MODE", "CORE_VERSION", "LAST_SEQ", "NEXT_EI", "NEXT_NO", "NEXT_RET", _
         "JOURNAL_POS", "REGISTERED_URL", "TX_STATE", "TX_SEQ", "TX_TYPE", "TX_TIME", "TX_BEFORE_IMAGE", _
         "SAVE_STAMP", "SAVE_SEQ", "MAX_QTY", "KEY_SHEETS", "NEXT_SPL", "NEXT_OFF", "NEXT_PROD", "NEXT_DET", "NEXT_OLD", "NEXT_OTH", "NEXT_ADJ", _
-        "NEXT_CAR")
+        "NEXT_CAR", "UPGRADE_FROM")
 End Function
 
 ' keys of _SYS that must hold numbers
@@ -625,3 +630,31 @@ Function AutoInputRestore() As String
 EH:
     AutoInputRestore = "ВНИМАНИЕ: не удалось восстановить автоввод Calc: " & Error$
 End Function
+
+' ---------------------------------------------------------------- PRIME 0.8: the registry of the transfer (_LEG)
+' One row per EI that came from the old table (row = EI number, like «Наличие»): the numbers of the transfer and what was
+' consumed before it. Written by the operations of the transfer (LEGACY_RECEIPT, LEGACY_RECEIPT_ADD, MIGRATE) and by the
+' corrections of the transfer; for a book transferred by 0.7.1/0.7.2 it is filled from the journal by tools/upgrade.py.
+' The rule «balance = movements» of a transferred receipt: balance = receipt − consumed before the transfer + the movements
+' of WMS after it (WmsLegacy.BalanceCheck).
+Public Const SH_LEG = "_LEG"
+Public Const LG_EI = 0
+Public Const LG_KIND = 1
+Public Const LG_QTY0 = 2
+Public Const LG_BAL0 = 3
+Public Const LG_PRE = 4
+Public Const LG_X = 5
+Public Const LG_SRC = 6
+Public Const LG_ORIGIN = 7
+Public Const LG_SEQ = 8
+Public Const LG_FIXES = 9
+Public Const LG_ACT = 10
+Public Const LG_LAST = 10
+Public Const LG_RECEIPT = "RECEIPT"
+Public Const LG_ADD = "ADD"
+Public Const LG_MIGRATE = "MIGRATE"
+' the sheet «Сверка переноса» (visible, read-only, rebuilt by its button)
+Public Const SH_LEGREP = "Сверка переноса"
+' «Сверка переноса»: rows 1–2 — the title and the summary, row 4 (index 3) — the header, the data below; 17 columns A..Q
+Public Const LEGREP_HEAD = 3
+Public Const LEGREP_COLS = 17

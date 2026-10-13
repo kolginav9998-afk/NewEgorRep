@@ -219,6 +219,8 @@ Function PreWorkCheck() As String
     mv = Movements()
     s = s & L(IIf(mv > PLANNED_MOVEMENTS * 0.8, "WARN", "OK"), "размер", mv & " строк движений" & IIf(mv > PLANNED_MOVEMENTS * 0.8, _
         " — близко к ориентиру " & PLANNED_MOVEMENTS & ": пора архивировать историю (WMS_ARCHIVE)", ""))
+    p = ForeignProtectedSheets()
+    If p <> "" Then s = s & L("FAIL", "пароли листов", "листы " & p & " защищены не паролем WMS — операции по ним не проводятся. " & ForeignProtectionHint())
     p = Protections()
     s = s & L(IIf(p = "", "OK", "WARN"), "защиты", IIf(p = "", "листы защищены, служебные листы скрыты, структура книги защищена", _
         p & " — сообщите ответственному за WMS: защита не даёт изменить учёт мимо WMS"))

@@ -547,6 +547,11 @@ Private Function FpCell(c As Object) As String
     End Select
 End Function
 
+' the fingerprint part of a cell (PRIME 0.8: POSITION_FIX composes the fingerprint of the corrected position)
+Function FpCellOf(c As Object) As String
+    FpCellOf = FpCell(c)
+End Function
+
 ' fingerprint of an order position A|D|B|E|H|I|L|P. For a row being posted H and P are passed as their normalized values
 ' (ordQty > 0; pDate = 0 when P is empty); for a posted row (ordQty < 0) the cells are read as they are.
 Function Fingerprint(r As Long, ordQty As Double, pDate As Double) As String

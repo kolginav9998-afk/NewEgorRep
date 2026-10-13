@@ -248,12 +248,18 @@ Sub BtnRcvMore(Optional oEvent As Variant)
 End Sub
 
 Sub BtnRcvFix(Optional oEvent As Variant)
-    Dim r As Long, why As String, res As String, kind As String, v(6) As String, sh As Object
+    Dim r As Long, why As String, res As String, kind As String, v(6) As String, sh As Object, menu As String
     If Not ActiveOrderRow(r, why) Then
         Refuse(why)
         Exit Sub
     End If
     kind = WmsOrders.OrderRowKind(r)
+    ' PRIME 0.8: «Исправить» offers everything that can be corrected in this row — the receipt, the position, the transfer,
+    ' the cancellation (WmsPrimeUi). The test mode keeps the direct receipt window unless a choice is preset.
+    If (gUiAuto = 0 Or gPrChoiceSet) And (kind = "RECEIVED" Or kind = "STORNO" Or kind = "CANCELLED") Then
+        menu = WmsPrimeUi.RcvFixMenu(r, kind)
+        If menu <> "RCV" Then Exit Sub
+    End If
     Select Case kind
     Case "RECEIVED"
     Case "OPEN"

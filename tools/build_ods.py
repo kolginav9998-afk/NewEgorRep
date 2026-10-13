@@ -33,12 +33,12 @@ SYS_KEYS = ["SCHEMA", "INSTANCE_ID", "MODE", "CORE_VERSION", "LAST_SEQ", "NEXT_E
             "JOURNAL_POS", "REGISTERED_URL", "TX_STATE", "TX_SEQ", "TX_TYPE", "TX_TIME", "TX_BEFORE_IMAGE",
             "SAVE_STAMP", "SAVE_SEQ", "MAX_QTY", "KEY_SHEETS",
             "NEXT_SPL", "NEXT_OFF", "NEXT_PROD", "NEXT_DET", "NEXT_OLD", "NEXT_OTH", "NEXT_ADJ",
-            "NEXT_CAR"]                                                               # WmsConfig.SysKeyNames() (WMS-SYS-4)
-SCHEMA = "WMS-SYS-4"                                                                  # WmsConfig.WMS_SYS_SCHEMA
+            "NEXT_CAR", "UPGRADE_FROM"]                                               # WmsConfig.SysKeyNames() (WMS-SYS-5)
+SCHEMA = "WMS-SYS-5"                                                                  # WmsConfig.WMS_SYS_SCHEMA
 SK_SAVE_STAMP = SYS_KEYS.index("SAVE_STAMP")
 MODULES = ["WmsConfig", "WmsCore", "WmsJournal", "WmsLock", "WmsBackup", "WmsRecovery", "WmsDiagnostics", "WmsIssue", "WmsUi",
            "WmsOrders", "WmsReceipt", "WmsOrdersUi", "WmsReturn", "WmsReturnUi", "WmsSpecial", "WmsSpecialUi", "WmsAdjust", "WmsAdjustUi",
-           "WmsCar", "WmsCarUi", "WmsExport", "WmsMigrate", "WmsStatus"]
+           "WmsCar", "WmsCarUi", "WmsExport", "WmsMigrate", "WmsStatus", "WmsLegacy", "WmsPrimeUi"]
 TEST_MODULES = ["WmsTestOps"]
 TEST_SHEET = "_TST"
 LAST_ROW = 1048575
@@ -116,6 +116,17 @@ ADJ_HEADERS = ["№", "Вид", "ЕИ", "Изменение остатка", "С
                "Фактический остаток", "Дата"]                                                   # WmsConfig AJ_*
 # «Приход авто» — the journal of vehicles (M6 PRIME §1; WmsConfig CP_*, CC_*, CR_*, CD_*): a panel of frozen rows 0..4 (two
 # input cells, the hint, the indicators, the threshold) above the table (header row 5, visit n on row 5 + n); _CAR — the visits
+# PRIME 0.8: the registry of the transfer (WmsConfig LG_*) and its report «Сверка переноса» (LEGREP_*)
+LEG = "_LEG"
+LEG_HEADERS = ["ЕИ", "Вид", "Приход при переносе", "Остаток при переносе", "Израсходовано до переноса", "Старое наличие (X)",
+               "Откуда взят остаток", "Строка старой таблицы", "Операция переноса (seq)", "Коррекций переноса", "Последняя коррекция"]
+LEGREP = "Сверка переноса"
+LEGREP_HEAD = 3                   # WmsConfig.LEGREP_HEAD
+LEGREP_HEADERS = ["ЕИ", "Наименование", "Ед.", "Откуда", "Приход при переносе", "Остаток при переносе", "Израсходовано до переноса",
+                  "Старое X", "Откуда взят остаток", "Движения после переноса", "Остаток по движениям", "Остаток в «Наличие»", "Разница",
+                  "Коррекций", "Последняя коррекция", "Место", "Что проверить"]
+LEGREP_WIDTHS = [3300, 6500, 1800, 3800, 2600, 2600, 2600, 2300, 3800, 2600, 2600, 2600, 2200, 2000, 6000, 2600, 12000]
+
 CARS = "Приход авто"
 CAR = "_CAR"
 CAR_HEAD_ROW = 5                  # WmsConfig.CAR_HEAD_ROW
@@ -520,6 +531,49 @@ def build_stock(doc, sh, rows):
     sh.getCellRangeByPosition(0, 1, 0, LAST_ROW).NumberFormat = number_format(doc, "@", ("ru", "RU"))
     if rows:
         sh.getCellRangeByPosition(0, 1, len(STOCK_HEADERS) - 1, len(rows)).setDataArray(rows)
+    stock_buttons(doc, sh)
+
+
+def stock_buttons(doc, sh):
+    """PRIME 0.8: the buttons of «Наличие» in the upper part of its header row (the registry stays read-only)"""
+    sh.getRows().getByIndex(0).Height = 1700
+    sh.getCellRangeByPosition(0, 0, len(STOCK_HEADERS) - 1, 0).VertJustify = 3
+    add_button(doc, sh, "btnMigrateFix", "Исправить ЕИ переноса", "WmsPrimeUi.BtnMigrateFix", 150, 120, 4600, 650)
+    add_button(doc, sh, "btnLegacyReport", "Сверка переноса", "WmsPrimeUi.BtnLegacyReport", 4900, 120, 3600, 650)
+
+
+def build_leg(doc, sh):
+    """PRIME 0.8: _LEG — the registry of the transfer, one row per EI that came from the old table (row = EI number)"""
+    for c, h in enumerate(LEG_HEADERS):
+        sh.getCellByPosition(c, 0).setString(h)
+    text = number_format(doc, "@", ("ru", "RU"))
+    for c in (0, 1, 5, 6, 7, 10):
+        sh.getCellRangeByPosition(c, 1, c, LAST_ROW).NumberFormat = text
+
+
+def build_legrep(doc, sh):
+    """PRIME 0.8: «Сверка переноса» — the read-only report of the transfer, rebuilt by its button (WmsLegacy.LegacyReport)"""
+    t = sh.getCellByPosition(0, 0)
+    t.setString("Сверка переноса и остатков")
+    t.CharWeight = 150
+    t.CharHeight = 14
+    sh.getRows().getByIndex(0).Height = 1000
+    sh.getCellByPosition(0, 1).setString("Нажмите «Обновить сверку»: WMS сравнит остаток каждого перенесённого ЕИ с переносом и движениями после него")
+    sh.getRows().getByIndex(1).Height = 1200
+    note = sh.getCellRangeByPosition(0, 1, len(LEGREP_HEADERS) - 1, 1)
+    note.merge(True)
+    note.IsTextWrapped = True
+    note.VertJustify = 1
+    for c, (h, w) in enumerate(zip(LEGREP_HEADERS, LEGREP_WIDTHS)):
+        cell = sh.getCellByPosition(c, LEGREP_HEAD)
+        cell.setString(h)
+        sh.getColumns().getByIndex(c).Width = w
+    rng = sh.getCellRangeByPosition(0, LEGREP_HEAD, len(LEGREP_HEADERS) - 1, LEGREP_HEAD)
+    rng.CharWeight = 150
+    rng.IsTextWrapped = True
+    rng.CellBackColor = 0xE7E6E6
+    sh.getCellRangeByPosition(len(LEGREP_HEADERS) - 1, LEGREP_HEAD + 1, len(LEGREP_HEADERS) - 1, LAST_ROW).IsTextWrapped = True
+    add_button(doc, sh, "btnLegacyRefresh", "Обновить сверку", "WmsPrimeUi.BtnLegacyReport", 9500, 100, 4200, 800, bold=True, back=0xDDEBF7)
 
 
 def order_separators(doc, sh):
@@ -786,6 +840,8 @@ def apply_views(doc):
     for name in (ORDERS, SPECIAL, ISSUES, RETURNS, ADJUST, STOCK, RCPT):
         ctl.setActiveSheet(sheets.getByName(name))
         ctl.freezeAtPosition(0, 1)
+    ctl.setActiveSheet(sheets.getByName(LEGREP))
+    ctl.freezeAtPosition(1, LEGREP_HEAD + 1)
     ctl.setActiveSheet(sheets.getByName(CARS))
     ctl.freezeAtPosition(0, CAR_HEAD_ROW + 1)
     ctl.select(sheets.getByName(CARS).getCellByPosition(2, 1))
@@ -823,8 +879,8 @@ def build(office, out_path, test=False, instance_id=None):
     sheets = doc.Sheets
     main = sheets.getByIndex(0)
     main.Name = MAIN
-    for i, name in enumerate((ORDERS, SPECIAL, CARS, ISSUES, RETURNS, ADJUST, STOCK, RCPT, HELP, ORD, RCV, SPR, ART, RET, ISS, ADJ, CAR, IDX,
-                              "_SYS"), start=1):
+    for i, name in enumerate((ORDERS, SPECIAL, CARS, ISSUES, RETURNS, ADJUST, STOCK, LEGREP, RCPT, HELP, ORD, RCV, SPR, ART, RET, ISS, ADJ,
+                              CAR, LEG, IDX, "_SYS"), start=1):
         sheets.insertNewByName(name, i)
     sys_sh = sheets.getByName("_SYS")
     values = {
@@ -835,6 +891,7 @@ def build(office, out_path, test=False, instance_id=None):
         "KEY_SHEETS": ISSUE_KEY_SPEC + ";" + ORDER_KEY_SPEC + ";" + RETURN_KEY_SPEC + ";" + SPECIAL_KEY_SPEC + ";" + ADJUST_KEY_SPEC
                       + (";" + TEST_KEY_SPEC if test else ""),
         "NEXT_SPL": 1, "NEXT_OFF": 1, "NEXT_PROD": 1, "NEXT_DET": 1, "NEXT_OLD": 1, "NEXT_OTH": 1, "NEXT_ADJ": 1, "NEXT_CAR": 1,
+        "UPGRADE_FROM": "",
     }
     registry = synthetic_registry() if test else []
     if registry:
@@ -855,6 +912,8 @@ def build(office, out_path, test=False, instance_id=None):
     build_cars(doc, sheets.getByName(CARS))
     build_car_service(doc, sheets.getByName(CAR))
     build_stock(doc, sheets.getByName(STOCK), registry)
+    build_leg(doc, sheets.getByName(LEG))
+    build_legrep(doc, sheets.getByName(LEGREP))
     build_recipients(sheets.getByName(RCPT), TEST_RECIPIENTS if test else [])
     build_help(sheets.getByName(HELP))
     build_service(doc, sheets)
@@ -894,9 +953,10 @@ def build(office, out_path, test=False, instance_id=None):
     bind_event(sheets.getByName(SPECIAL).Events, "OnChange", "WmsSpecial.OnSpecialChange")
     bind_event(sheets.getByName(ADJUST).Events, "OnChange", "WmsAdjust.OnAdjustChange")
     bind_event(sheets.getByName(RCPT).Events, "OnChange", "WmsIssue.OnRecipientsChange")
-    for name in (ORD, RCV, SPR, ART, RET, ISS, ADJ, CAR, IDX, "_SYS"):
+    for name in (ORD, RCV, SPR, ART, RET, ISS, ADJ, CAR, LEG, IDX, "_SYS"):
         sheets.getByName(name).IsVisible = False
-    for name in (MAIN, ORDERS, SPECIAL, CARS, ISSUES, RETURNS, ADJUST, STOCK, HELP, ORD, RCV, SPR, ART, RET, ISS, ADJ, CAR, IDX, "_SYS"):
+    for name in (MAIN, ORDERS, SPECIAL, CARS, ISSUES, RETURNS, ADJUST, STOCK, LEGREP, HELP, ORD, RCV, SPR, ART, RET, ISS, ADJ, CAR, LEG, IDX,
+                 "_SYS"):
         sheets.getByName(name).protect(PWD)
     doc.protect(PWD)
     if os.path.exists(out_path):

@@ -262,6 +262,12 @@ Function SysLayoutProblem() As String
             & WMS_CORE_VERSION & " её не открывает — обновите книгу программой tools/upgrade.py из комплекта WMS " & WMS_PRODUCT_VERSION & " (данные и журнал сохраняются)"
         Exit Function
     End If
+    If gSysSh.getCellByPosition(0, SK_SCHEMA).getString() = "SCHEMA" And SysStr(SK_SCHEMA) = WMS_SYS_SCHEMA_07 Then
+        SysLayoutProblem = "книга версии 0.7 (схема " & WMS_SYS_SCHEMA_07 & " без реестра переноса " & SH_LEG & "): ядро " & WMS_CORE_VERSION _
+            & " её не открывает — обновите книгу мастером «Обновление из текущей WMS» (WMS_UPGRADE.ods) комплекта WMS " & WMS_PRODUCT_VERSION _
+            & ": книга 0.7 не меняется, новая создаётся в новой папке со всеми данными и журналом"
+        Exit Function
+    End If
     For i = 0 To UBound(names)
         If gSysSh.getCellByPosition(0, i).getString() <> names(i) Then
             SysLayoutProblem = SYS_SHEET & ": строка " & (i + 1) & " — ожидался ключ " & names(i) & ", найдено «" & gSysSh.getCellByPosition(0, i).getString() & "»"
@@ -518,6 +524,64 @@ Function SameEnc(a As String, b As String) As Boolean
     Else
         SameEnc = (a = b)
     End If
+End Function
+
+' ================================================================ the protection password (PRIME 0.8)
+' WMS lifts the protection of a sheet with its own password to change the cell locks of a row, to empty a cell and to insert
+' the row of «Ещё поступление». A sheet protected with another password stops all of that half-way: up to 0.7.2 an
+' operation then failed after its marker, its rollback failed too and the book was blocked as MARKER_CORRUPT. The probe lifts
+' and restores the protection with the WMS password before anything is written and names a sheet it cannot lift.
+
+' "" when sheet sName is not protected or is protected with the WMS password (the protection is lifted and put back at
+' once); otherwise the problem. A foreign protection is left exactly as it is.
+Function ForeignProtection(sName As String) As String
+    Dim sh As Object
+    On Error GoTo FOREIGN
+    If Not gDoc.Sheets.hasByName(sName) Then Exit Function
+    sh = gDoc.Sheets.getByName(sName)
+    If Not sh.isProtected() Then Exit Function
+    sh.unprotect(PROTECT_PWD)
+    If sh.isProtected() Then GoTo FOREIGN
+    sh.protect(PROTECT_PWD)
+    ForeignProtection = ""
+    Exit Function
+FOREIGN:
+    ForeignProtection = "лист «" & sName & "» защищён не паролем WMS"
+End Function
+
+' the advice for a sheet protected with a foreign password (the messages of the operations, the startup, the check)
+Function ForeignProtectionHint() As String
+    ForeignProtectionHint = "Снимите эту защиту: «Сервис → Защитить лист» с паролем того, кто её поставил (или попросите его), " _
+        & "затем закройте книгу и откройте WMS снова. Свою защиту WMS ставит сама; свои пароли на листы WMS ставить нельзя."
+End Function
+
+' every sheet of the plan (and _SYS, whose marker the operation writes): "" when WMS can lift each protection, otherwise
+' the first sheet it cannot — nothing has been written yet
+Function PlanProtectionProblem() As String
+    Dim i As Long, seen As String, p As String
+    seen = "|"
+    p = ForeignProtection(SYS_SHEET)
+    For i = 0 To gPlanN - 1
+        If p <> "" Then Exit For
+        If InStr(seen, "|" & gPW_Sheet(i) & "|") = 0 Then
+            seen = seen & gPW_Sheet(i) & "|"
+            p = ForeignProtection(gPW_Sheet(i))
+        End If
+    Next i
+    PlanProtectionProblem = p
+End Function
+
+' every sheet of the book: the names of the sheets protected with a foreign password ("" — none), separated by «, »
+Function ForeignProtectedSheets() As String
+    Dim i As Integer, s As String, nm As String, wasModified As Boolean
+    ' lifting and restoring a protection is no change of the book: an unchanged book must not look modified after a start
+    wasModified = gDoc.isModified()
+    For i = 0 To gDoc.Sheets.getCount() - 1
+        nm = gDoc.Sheets.getByIndex(i).Name
+        If ForeignProtection(nm) <> "" Then s = s & IIf(s <> "", ", ", "") & "«" & nm & "»"
+    Next i
+    If Not wasModified And gDoc.isModified() Then gDoc.setModified(False)
+    ForeignProtectedSheets = s
 End Function
 
 ' ================================================================ plan builder
@@ -813,6 +877,12 @@ Function ApplyOperation(mode As Integer, replaySeq As Long) As String
             Exit Function
         End If
         seq = replaySeq
+    End If
+    ' PRIME 0.8: a sheet of the operation protected with a foreign password — refused before anything is written
+    why = PlanProtectionProblem()
+    If why <> "" Then
+        ApplyOperation = "ERR-RB:" & why & " — операция не проведена, ничего не изменено. " & ForeignProtectionHint()
+        Exit Function
     End If
     gBusy = True
     gHardStop = False

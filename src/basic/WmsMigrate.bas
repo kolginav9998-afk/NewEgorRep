@@ -2,9 +2,9 @@
 ' Одна операция MIGRATE на строку таблицы переноса («один физический остаток — одна строка»): ЕИ с его прежним
 ' номером (без перенумерации) → строка «Наличие» этого номера, индекс деталей _ART, NEXT_EI выше номера. Журнал хранит
 ' происхождение: файл таблицы, его SHA-256, строку таблицы, старую маркировку. Вызывается инструментом
-' tools/migrate.py (режим MIGRATE COPY) на копии книги, только после чистого dry-run. У переноса нет исправления и
-' сторно: ошибка переноса исправляется повтором на свежей копии до PROMOTE, после PROMOTE — обычными операциями
-' (корректировки, перемещение).
+' tools/migrate.py (режим MIGRATE COPY) на копии книги, только после чистого dry-run. Сторно у переноса нет; с PRIME 0.8
+' карточку и остаток на момент переноса исправляет MIGRATE_FIX («Исправить ЕИ переноса», WmsLegacy), остальное — обычные
+' операции (корректировки, перемещение). Реестр переноса _LEG хранит остаток, с которым ЕИ пришёл.
 Option Explicit
 
 ' «Тип источника» of a migrated EI («Наличие».J): the types of Phase 5 and the ordinary supplier
@@ -92,6 +92,8 @@ Function MigrateEI(sEI As String, sName As String, sArt As String, sUnit As Stri
     PlanField("ORIGIN", sOrigin)
     If n >= SysNum(SK_NEXT_EI) Then PlanSetValue(SYS_SHEET, SK_NEXT_EI, 1, n + 1, False)
     WmsSpecial.PlanNewStockRow(n, canon, q, sName, sArt, sUnit, sPlace, sCat, sState, sSrc, srcType)
+    ' PRIME 0.8: the registry of the transfer (the balance the EI came with; «Исправить ЕИ переноса» corrects it)
+    WmsLegacy.PlanLegRow(n, canon, LG_MIGRATE, q, q, "", "MIGRATE", sOrigin)
     If srcType = SRC_STYPES_PART Then
         PlanSetValue(SH_ART, aRow, AR_KEY, key, False)
         PlanSetValue(SH_ART, aRow, AR_EI, canon, False)

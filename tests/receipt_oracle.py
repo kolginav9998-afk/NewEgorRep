@@ -42,7 +42,8 @@ import re
 
 import journal_oracle
 
-RECEIPT_TYPES = ("RECEIPT", "RECEIPT_ADD", "RECEIPT_FIX", "RECEIPT_DEL", "ORDER_CANCEL", "ORDER_CANCEL_REST", "LEGACY_RECEIPT", "LEGACY_RECEIPT_ADD")
+RECEIPT_TYPES = ("RECEIPT", "RECEIPT_ADD", "RECEIPT_FIX", "RECEIPT_DEL", "ORDER_CANCEL", "ORDER_CANCEL_REST", "LEGACY_RECEIPT", "LEGACY_RECEIPT_ADD",
+                 "LEGACY_FIX", "POSITION_FIX", "ORDER_UNCANCEL")    # PRIME 0.8: the corrections of the transfer, the position, the cancellation
 # M7: a receipt of the old table transferred with its own EI and its current balance (≤ the received quantity: what was
 # consumed before the transfer counts as issued); the stock row names the transfer («Перенос: заказ <A>»)
 LEGACY_RECEIPTS = ("LEGACY_RECEIPT", "LEGACY_RECEIPT_ADD")
@@ -50,7 +51,7 @@ ISSUE_TYPES = ("ISSUE", "ISSUE_FIX", "ISSUE_DEL")
 RETURN_TYPES = ("RETURN", "RETURN_FIX", "RETURN_DEL")
 SPECIAL_TYPES = ("SP_RECEIPT", "SP_REFILL", "SP_FIX", "SP_DEL", "SP_IDENTIFY")
 ADJUST_TYPES = ("MOVE", "MOVE_FIX", "MOVE_DEL", "WRITE_OFF", "WRITE_OFF_FIX", "WRITE_OFF_DEL", "INV_ADJ", "INV_ADJ_FIX", "INV_ADJ_DEL")
-MIGRATE_TYPES = ("MIGRATE",)
+MIGRATE_TYPES = ("MIGRATE", "MIGRATE_FIX")
 MIGRATE_STYPES = ("Поставщик", "Офис", "Производство", "Детали", "Старый склад", "Иной приход")
 SP_CODES = ("OFF", "PROD", "DET", "OLD", "OTH")
 SP_NAME = {"OFF": "Офис", "PROD": "Производство", "DET": "Детали", "OLD": "Старый склад", "OTH": "Иной"}          # «Иной приход».B
@@ -357,8 +358,11 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
             if rec is None or rec["state"] != "LIVE":
                 bad(f"seq {sq} RECEIPT_DEL: нет действующего прихода {ei}")
                 continue
-            if bal[ei] < rec["qty"] - EPS:
-                bad(f"seq {sq} RECEIPT_DEL {ei}: сторно при выданных {rec['qty'] - bal[ei]} — остаток стал бы отрицательным", 6)
+            pre = rec.get("legacy_used", 0.0)            # PRIME 0.8: consumed before the transfer — cancelled with the receipt
+            if abs(float(f.get("PRE") or 0) - pre) > EPS:
+                bad(f"seq {sq} RECEIPT_DEL {ei}: PRE {f.get('PRE')} ≠ израсходованному до переноса {pre}")
+            if bal[ei] < rec["qty"] - pre - EPS:
+                bad(f"seq {sq} RECEIPT_DEL {ei}: сторно при выданных {rec['qty'] - pre - bal[ei]} — остаток стал бы отрицательным", 6)
             # D-069: no live issue and no live return of the EI may remain behind a cancelled receipt
             live_iss = [k for k, v in issues.items() if not v["deleted"] and v["ei"] == ei]
             live_ret = [n for n, v in returns.items() if v["state"] == "LIVE" and v["ei"] == ei]
@@ -367,7 +371,7 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
             live_adj = [n for n, v in adjs.items() if v["state"] == "LIVE" and v["ei"] == ei]
             if live_adj:
                 bad(f"seq {sq} RECEIPT_DEL {ei}: сторно прихода при действующих корректировках {live_adj[:5]} (D-069)", "R")
-            bal[ei] -= rec["qty"]
+            bal[ei] -= rec["qty"] - pre
             rec["state"] = "STORNO"
             p = positions[rec["ol"]]
             p["rcv"] -= rec["qty"]
@@ -385,6 +389,68 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
                 if p["cnt"] or p["rcv"] > EPS:
                     bad(f"seq {sq} ORDER_CANCEL: у позиции OLID {ol} есть действующие приходы", 9)
                 p["cancel"] = "ORDER"
+        elif t == "LEGACY_FIX":
+            n_rcpt_ops += 1
+            ei = f["EI"]
+            rec = receipts.get(ei)
+            if rec is None or rec["state"] != "LIVE" or not rec.get("legacy"):
+                bad(f"seq {sq} LEGACY_FIX: нет действующего перенесённого прихода {ei}")
+                continue
+            pre, q0 = rec.get("legacy_used", 0.0), rec["qty"]
+            q2, b2 = float(f["QTY"]), float(f["BAL0"])
+            if abs(float(f["OLD_QTY"]) - q0) > EPS or abs(float(f["OLD_BAL0"]) - (q0 - pre)) > EPS or abs(float(f["OLD_PRE"]) - pre) > EPS:
+                bad(f"seq {sq} LEGACY_FIX {ei}: прежние числа переноса в журнале ≠ расчётным ({q0}, {q0 - pre}, {pre})")
+            if not f.get("ACT") or not f.get("ACT_DATE"):
+                bad(f"seq {sq} LEGACY_FIX {ei}: коррекция переноса без акта", "L")
+            if b2 < -EPS or b2 > q2 + EPS:
+                bad(f"seq {sq} LEGACY_FIX {ei}: остаток при переносе {b2} вне 0…{q2}", "L")
+            if abs(float(f["BAL_BEFORE"]) - bal[ei]) > EPS:
+                bad(f"seq {sq} LEGACY_FIX {ei}: BAL_BEFORE {f['BAL_BEFORE']} ≠ {bal[ei]}", 3)
+            bal[ei] += b2 - (q0 - pre)
+            p = positions[rec["ol"]]
+            p["rcv"] += q2 - q0
+            rec.update(qty=q2, legacy_used=q2 - b2)
+            if abs(float(f["BAL_AFTER"]) - bal[ei]) > EPS:
+                bad(f"seq {sq} LEGACY_FIX {ei}: BAL_AFTER {f['BAL_AFTER']} ≠ {bal[ei]}", 3)
+            if abs(float(f["POS_RCV"]) - p["rcv"]) > EPS:
+                bad(f"seq {sq} LEGACY_FIX {ei}: POS_RCV {f['POS_RCV']} ≠ {p['rcv']}", 4)
+        elif t == "POSITION_FIX":
+            n_rcpt_ops += 1
+            ol = int(f["OL"])
+            p = positions.get(ol)
+            if p is None:
+                bad(f"seq {sq} POSITION_FIX: нет позиции OLID {ol}")
+                continue
+            if "ORD_QTY" in f:
+                if abs(float(f["OLD_ORD_QTY"]) - p["ord"]) > EPS:
+                    bad(f"seq {sq} POSITION_FIX OLID {ol}: OLD_ORD_QTY {f['OLD_ORD_QTY']} ≠ {p['ord']}")
+                p["ord"] = float(f["ORD_QTY"])
+            mine = [ei for ei, rec in receipts.items() if rec["ol"] == ol]
+            if sorted(mine) != sorted(x for x in f.get("EIS", "").split(",") if x):
+                bad(f"seq {sq} POSITION_FIX OLID {ol}: ЕИ позиции {sorted(mine)} ≠ записанным {f.get('EIS')}")
+            if "UNIT" in f:
+                moved = [k for k, v in issues.items() if not v["deleted"] and v["ei"] in mine]
+                moved += [n for n, v in returns.items() if v["state"] == "LIVE" and v["ei"] in mine]
+                moved += [n for n, v in adjs.items() if v["state"] == "LIVE" and v["ei"] in mine]
+                if moved:
+                    bad(f"seq {sq} POSITION_FIX OLID {ol}: единица изменена при действующих движениях {moved[:5]}", "U")
+            for ei in mine:
+                rec = receipts[ei]
+                for k, fk in (("name", "NAME"), ("art", "ART"), ("unit", "UNIT"), ("supplier", "SUPPLIER"), ("order", "ORDER")):
+                    if fk in f:
+                        rec[k] = f[fk]
+        elif t == "ORDER_UNCANCEL":
+            n_rcpt_ops += 1
+            ol = int(f["OL"])
+            p = positions.get(ol)
+            if p is None or p["cancel"] != f.get("WAS"):
+                bad(f"seq {sq} ORDER_UNCANCEL: позиция OLID {ol} не отменена так, как записано ({p and p['cancel']} ≠ {f.get('WAS')})")
+                continue
+            if f.get("MODE") == "ROW":
+                # a position cancelled before any receipt: the row is an order row again, the cancelled position stays as history
+                p["reopened"] = True
+            else:
+                p["cancel"] = ""
         elif t == "ORDER_CANCEL_REST":
             n_rcpt_ops += 1
             ol = int(f["OL"])
@@ -400,6 +466,8 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
             replay_special(t, f, sq, bal, sp, place, issues, returns, created, receipts, bad, adjs)
         elif t in ADJUST_TYPES:
             replay_adjust(t, f, sq, bal, adjs, place, touched_place, bad)
+        elif t == "MIGRATE_FIX":
+            replay_migrate_fix(f, sq, bal, sp, bad)
         elif t in MIGRATE_TYPES:
             replay_migrate(f, sq, bal, place, sp, created, bad)
         else:
@@ -596,6 +664,8 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
                 bad(f"позиция OLID {ol}: исходная строка ({p['key']}) не найдена")
                 continue
         else:
+            if p.get("reopened"):
+                continue
             fp = book_pos.get(ol, [None] * 9)[3]
             cand = cancelled_fp.get(fp, [])
             if len(cand) != 1:
@@ -615,9 +685,9 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
                 bad(f"позиция OLID {ol} строка {r + 1}: «{want}», но Y не показывает «{rest}»: {row[C['Y']]!r}")
         if p["cancel"] == "ORDER" and not p.get("key") and row[C["V"]]:
             bad(f"позиция OLID {ol}: отменённый заказ получил ЕИ", 9)
-    if len(cancelled_rows) != sum(1 for p in positions.values() if p["cancel"] == "ORDER" and not p.get("key")):
-        bad(f"строк «Отменено» без ЕИ {len(cancelled_rows)}, отменённых позиций без прихода "
-            f"{sum(1 for p in positions.values() if p['cancel'] == 'ORDER' and not p.get('key'))}", 9)
+    n_cancel_rows = sum(1 for p in positions.values() if p["cancel"] == "ORDER" and not p.get("key") and not p.get("reopened"))
+    if len(cancelled_rows) != n_cancel_rows:
+        bad(f"строк «Отменено» без ЕИ {len(cancelled_rows)}, отменённых позиций без прихода {n_cancel_rows}", 9)
 
     # ------------------------------------------------------------ 5. «Выдачи» (Phase 2)
     iss = read(doc, "Выдачи", 18)
@@ -1207,3 +1277,42 @@ def replay_migrate(f, sq, bal, place, sp, created, bad):
     sp["eis"][ei] = dict(code="MIG", stype=stype, name=f.get("NAME", ""), art=f.get("ART", ""), unit=f.get("UNIT", ""), cat=f.get("CAT", ""),
                          state=EI_REVIEW if stype == "Иной приход" else EI_ACTIVE,
                          src="Перенос" + (f" ({f['MARK']})" if f.get("MARK") else ""), artkey=key, part=part, first=None, migrated=q)
+
+
+def replay_migrate_fix(f, sq, bal, sp, bad):
+    """PRIME 0.8 MIGRATE_FIX: the card and the balance at the transfer of an EI the transfer brought without an order receipt;
+    the balance moves by the change of the balance at the transfer; a part keeps one EI per article."""
+    ei = f["EI"]
+    e = sp["eis"].get(ei)
+    if e is None or e.get("code") != "MIG":
+        bad(f"seq {sq} MIGRATE_FIX: {ei} не перенесён операцией MIGRATE")
+        return
+    b0, b2 = float(f["OLD_BAL0"]), float(f["BAL0"])
+    if abs(b0 - e["migrated"]) > EPS:
+        bad(f"seq {sq} MIGRATE_FIX {ei}: OLD_BAL0 {b0} ≠ остатку переноса {e['migrated']}")
+    if abs(float(f["BAL_BEFORE"]) - bal[ei]) > EPS:
+        bad(f"seq {sq} MIGRATE_FIX {ei}: BAL_BEFORE {f['BAL_BEFORE']} ≠ {bal[ei]}", 3)
+    if abs(b2 - b0) > EPS and (not f.get("ACT") or not f.get("ACT_DATE")):
+        bad(f"seq {sq} MIGRATE_FIX {ei}: остаток при переносе изменён без акта", "L")
+    bal[ei] += b2 - b0
+    e["migrated"] = b2
+    if abs(float(f["BAL_AFTER"]) - bal[ei]) > EPS:
+        bad(f"seq {sq} MIGRATE_FIX {ei}: BAL_AFTER {f['BAL_AFTER']} ≠ {bal[ei]}", 3)
+    for k, fk in (("name", "NAME"), ("art", "ART"), ("unit", "UNIT"), ("cat", "CAT")):
+        if fk in f:
+            e[k] = f[fk]
+    if "STYPE" in f:
+        e["stype"] = f["STYPE"]
+        e["state"] = EI_REVIEW if f["STYPE"] == "Иной приход" else EI_ACTIVE
+        e["part"] = f["STYPE"] == "Детали"
+    if e["part"] and ("ART" in f or "STYPE" in f):
+        key = article_key(e["art"])
+        if not key:
+            bad(f"seq {sq} MIGRATE_FIX {ei}: деталь без артикула", "M")
+        elif sp["index"].get(key, ei) != ei:
+            bad(f"seq {sq} MIGRATE_FIX {ei}: артикул «{key}» уже у {sp['index'][key]}", "M")
+        else:
+            if e.get("artkey") and e["artkey"] != key and sp["index"].get(e["artkey"]) == ei:
+                del sp["index"][e["artkey"]]
+            sp["index"][key] = ei
+            e["artkey"] = key

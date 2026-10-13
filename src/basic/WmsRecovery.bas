@@ -32,6 +32,7 @@ Sub Analyze()
     If p = "" Then p = WmsAdjust.AdjustSheetsProblem()
     If p = "" Then p = WmsCar.CarSheetsProblem()
     If p = "" Then p = WmsOrders.SheetsProblem()
+    If p = "" Then p = WmsLegacy.LegSheetProblem()
     If p <> "" Then
         SetBlocked("SYS_CORRUPT", p)
         Exit Sub
@@ -52,8 +53,17 @@ Sub Analyze()
     ' 5. this session owns the WMS from here on
     AddNote(WmsBackup.DailyIfNeeded())
     AddNote(WmsConfig.AutoInputDisable())
-    ' 6. transaction marker: an operation that did not reach COMMITTED is undone from its before-image
+    ' 5a. PRIME 0.8: sheets protected with a foreign password — an unfinished operation cannot be rolled back on them (up to
+    ' 0.7.2 this ended as MARKER_CORRUPT without the cause); otherwise the operations on these sheets are refused one by one
+    p = ForeignProtectedSheets()
     st = SysStr(SK_TX_STATE)
+    If p <> "" And st = TX_STARTED Then
+        SetBlocked("PROTECTION_FOREIGN", "листы " & p & " защищены не паролем WMS — незавершённую операцию seq " & SysStr(SK_TX_SEQ) _
+            & " нельзя откатить, пока эта защита стоит. " & ForeignProtectionHint())
+        Exit Sub
+    End If
+    If p <> "" Then AddNote("ВНИМАНИЕ: листы " & p & " защищены не паролем WMS — операции по ним не проводятся. " & ForeignProtectionHint())
+    ' 6. transaction marker: an operation that did not reach COMMITTED is undone from its before-image
     If st = TX_STARTED Then
         bi = SysStr(SK_TX_BI)
         p = BeforeImageProblem(bi)
@@ -132,8 +142,34 @@ Sub Analyze()
     End If
     ' written only when it changes: an unchanged book must not look modified after a start (LibreOffice would ask to save)
     If SysStr(SK_CORE_VERSION) <> WMS_CORE_VERSION Then SysPutStr(SK_CORE_VERSION, WMS_CORE_VERSION)
+    ' PRIME 0.8: the book of 0.7 this one was upgraded from must not be worked in any more — its journal is only looked at
+    AddNote(OldBookNote())
     gState = "CLEAN"
 End Sub
+
+' PRIME 0.8: "" or the warning that the journal of the book this one was upgraded from grew after the upgrade (operations were
+' posted in the old book: they are not in this one). UPGRADE_FROM = «папка|LAST_SEQ|SHA-256|дата|размер журнала».
+Function OldBookNote() As String
+    Dim a As Variant, url As String, files As Variant, i As Long, sz As Double, sfa As Object
+    On Error GoTo EH
+    If SysStr(SK_UPGRADE_FROM) = "" Then Exit Function
+    a = Split(SysStr(SK_UPGRADE_FROM), "|")
+    If UBound(a) < 4 Then Exit Function
+    url = ConvertToURL(a(0) & "/" & JOURNAL_DIR)
+    sfa = CreateUnoService("com.sun.star.ucb.SimpleFileAccess")
+    If Not sfa.isFolder(url) Then Exit Function
+    files = sfa.getFolderContents(url, False)
+    For i = 0 To UBound(files)
+        If InStr(files(i), "/" & JOURNAL_PREFIX) > 0 And Right(files(i), Len(JOURNAL_EXT)) = JOURNAL_EXT Then sz = sz + sfa.getSize(files(i))
+    Next i
+    If sz > Val(a(4)) Then
+        OldBookNote = "ВНИМАНИЕ: в старой книге (папка " & a(0) & ") после обновления " & a(3) & " проводились операции — их нет в этой WMS. " _
+            & "Работайте только в этой книге; проведённое в старой внесите сюда заново"
+    End If
+    Exit Function
+EH:
+    OldBookNote = ""
+End Function
 
 ' the tail must be re-read and re-checked by every action; "" when it can be processed
 Private Function TailProblem(lastSeq As Long) As String

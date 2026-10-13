@@ -80,6 +80,12 @@ Function InsertOrderRow(r As Long) As String
     Dim sh As Object, wasProt As Boolean
     On Error GoTo EH
     sh = OSh()
+    ' PRIME 0.8: a foreign protection of «Заказы» is named before the row is touched
+    InsertOrderRow = ForeignProtection(SH_ORDERS)
+    If InsertOrderRow <> "" Then
+        InsertOrderRow = InsertOrderRow & " — строка не вставлена. " & ForeignProtectionHint()
+        Exit Function
+    End If
     If Not OrderRowEmpty(MAX_SHEET_ROW) Then
         InsertOrderRow = "на листе «" & SH_ORDERS & "» нет места для новой строки (последняя строка листа занята)"
         Exit Function
@@ -679,7 +685,7 @@ Function ReceiptFixRow(r As Long, vFact As Variant, vDocQty As Variant, vDoc As 
     Dim why As String, kind As String, n As Long, canon As String, olid As Long, isSrc As Boolean, moved As Boolean, rv As Variant, od As Variant
     Dim oldF As Double, s As Double, issued As Double, newBal As Double, nodocOld As Double, nodocNew As Integer, rcv2 As Double, nodoc2 As Double
     Dim src As Long, srcMoved As Boolean, sKey As String, dup As String, res As String, sh As Object, own As String, st As String
-    Dim oldG As Object, oldO As Object, oldJ As Object, same As Boolean, oldPlace As String
+    Dim oldG As Object, oldO As Object, oldJ As Object, same As Boolean, oldPlace As String, pre As Double
     WmsInit()
     If r < 1 Or r > MAX_SHEET_ROW Then
         ReceiptFixRow = "ERR:выберите строку заказа (не заголовок)"
@@ -716,8 +722,17 @@ Function ReceiptFixRow(r As Long, vFact As Variant, vDocQty As Variant, vDoc As 
     End If
     issued = WmsIssue.Round3(oldF - s)
     If mFact < issued - 0.0000001 Then
-        ReceiptFixRow = "ERR:по " & canon & " уже выдано " & WmsIssue.QtyText(issued) & " " & Trim(Txt(r, OC_UNIT)) _
-            & " — приход нельзя уменьшить ниже выданного (сейчас остаток " & WmsIssue.QtyText(s) & ")"
+        pre = LegacyPre(n)
+        If pre > 0.0000001 Then
+            ' PRIME 0.8: a transferred receipt — what the old table consumed is not an issue of WMS; say so
+            ReceiptFixRow = "ERR:по " & canon & " израсходовано до переноса " & WmsIssue.QtyText(pre) & " " & Trim(Txt(r, OC_UNIT)) _
+                & IIf(issued - pre > 0.0000001, " и после переноса выдано или списано " & WmsIssue.QtyText(WmsIssue.Round3(issued - pre)), "") _
+                & " — приход нельзя сделать меньше " & WmsIssue.QtyText(issued) & " (сейчас остаток " & WmsIssue.QtyText(s) _
+                & "). Если неверно перенеслось израсходованное до переноса или сам приход — «Исправить» → «Коррекция переноса»"
+        Else
+            ReceiptFixRow = "ERR:по " & canon & " уже выдано " & WmsIssue.QtyText(issued) & " " & Trim(Txt(r, OC_UNIT)) _
+                & " — приход нельзя уменьшить ниже выданного (сейчас остаток " & WmsIssue.QtyText(s) & ")"
+        End If
         Exit Function
     End If
     ' nothing changed?
@@ -868,7 +883,7 @@ End Function
 Private Function RcvDelete(r As Long, checkOnly As Boolean) As String
     Dim why As String, kind As String, n As Long, canon As String, olid As Long, isSrc As Boolean, moved As Boolean, rv As Variant
     Dim od As Variant, s As Double, f As Double, newBal As Double, rcv2 As Double, nodoc2 As Double, src As Long, srcMoved As Boolean
-    Dim st As String, ctl As String, cancel As String, nIss As Long, nRet As Long, nAdj As Long
+    Dim st As String, ctl As String, cancel As String, nIss As Long, nRet As Long, nAdj As Long, pre As Double
     WmsInit()
     If r < 1 Or r > MAX_SHEET_ROW Then
         RcvDelete = "ERR:выберите строку заказа (не заголовок)"
@@ -925,12 +940,20 @@ Private Function RcvDelete(r As Long, checkOnly As Boolean) As String
             & "»: перемещения, списания, инвентаризация). Сначала выполните их сторно"
         Exit Function
     End If
-    If s < f - 0.0000001 Then
-        RcvDelete = "ERR:по " & canon & " уже выдано " & WmsIssue.QtyText(WmsIssue.Round3(f - s)) & " " & Trim(Txt(r, OC_UNIT)) _
-            & " — удаление прихода дало бы отрицательный остаток; сначала удалите (сторно) выдачи по этому ЕИ"
+    ' PRIME 0.8: a transferred receipt is cancelled together with what the old table consumed before the transfer (it has no
+    ' issues of WMS behind it): the balance goes back to 0 when nothing moved after the transfer
+    pre = LegacyPre(n)
+    If s < f - pre - 0.0000001 Then
+        If pre > 0.0000001 Then
+            RcvDelete = "ERR:после переноса из " & canon & " выдано или списано " & WmsIssue.QtyText(WmsIssue.Round3(f - pre - s)) & " " & Trim(Txt(r, OC_UNIT)) _
+                & " — удаление прихода дало бы отрицательный остаток; сначала удалите (сторно) эти выдачи и корректировки"
+        Else
+            RcvDelete = "ERR:по " & canon & " уже выдано " & WmsIssue.QtyText(WmsIssue.Round3(f - s)) & " " & Trim(Txt(r, OC_UNIT)) _
+                & " — удаление прихода дало бы отрицательный остаток; сначала удалите (сторно) выдачи по этому ЕИ"
+        End If
         Exit Function
     End If
-    newBal = WmsIssue.Round3(s - f)
+    newBal = WmsIssue.Round3(s - f + pre)
     rcv2 = WmsIssue.Round3(od(OD_RCV) - f)
     nodoc2 = od(OD_NODOC) - rv(RV_NODOC)
     cancel = CStr(od(OD_CANCEL))
@@ -954,6 +977,7 @@ Private Function RcvDelete(r As Long, checkOnly As Boolean) As String
     PlanField("OL", olid)
     PlanField("ROW", r + 1)
     PlanField("QTY", f)
+    If pre > 0.0000001 Then PlanField("PRE", pre)
     PlanField("BAL_BEFORE", s)
     PlanField("BAL_AFTER", newBal)
     PlanField("POS_RCV", rcv2)
@@ -1411,6 +1435,7 @@ Function ReceiptLegacyRow(r As Long, sEI As String, sBal As String, sPlaceNow As
     If n >= SysNum(SK_NEXT_EI) Then PlanSetValue(SYS_SHEET, SK_NEXT_EI, 1, n + 1, False)
     PlanStockRow(n, canon, bal, mName, sArt, mUnit, placeNow, Trim(Txt(r, OC_CAT)), "Перенос: заказ " & sOrder)
     PlanRcvRow(n, canon, olid, r, sKey, RV_SRC, mFact, nodoc)
+    WmsLegacy.PlanLegRow(n, canon, LG_RECEIPT, mFact, bal, sLegStock, sStockSrc, sOrigin)
     PlanSetValue(SH_ORD, 0, OD_NEXT_COL, olid + 1, False)
     PlanOrdRow(olid, r, canon, fp, mOrdQty, mFact, 1, nodoc, "")
     PlanOrderInputs(r)
@@ -1518,6 +1543,7 @@ Function ReceiptLegacyAdd(r As Long, srcRow As Long, sEI As String, sBal As Stri
     PlanStockRow(n, canon, bal, Trim(CStr(sd(OC_NAME))), Trim(CStr(sd(OC_ART))), Trim(CStr(sd(OC_UNIT))), placeNow, Trim(CStr(sd(OC_CAT))), _
         "Перенос: заказ " & Trim(CStr(sd(OC_ORDER))))
     PlanRcvRow(n, canon, olid, r, sKey, RV_ADD, mFact, nodoc)
+    WmsLegacy.PlanLegRow(n, canon, LG_ADD, mFact, bal, sLegStock, sStockSrc, sOrigin)
     PlanSetValue(SH_ORD, olid, OD_RCV, rcv2, False)
     PlanSetValue(SH_ORD, olid, OD_CNT, od(OD_CNT) + 1, False)
     PlanSetValue(SH_ORD, olid, OD_NODOC, nodoc2, False)
@@ -1546,4 +1572,644 @@ Function ReceiptLegacyAdd(r As Long, srcRow As Long, sEI As String, sBal As Stri
     Exit Function
 EH:
     ReceiptLegacyAdd = "ERR-SYS:внутренняя ошибка переноса поступления: " & Error$ & " (код " & Err & ", строка " & Erl & ")"
+End Function
+
+' PRIME 0.8: what the old table consumed from EI n before the transfer (0 for an EI that did not come from the transfer)
+Function LegacyPre(n As Long) As Double
+    Dim lg As Variant
+    If Not gDoc.Sheets.hasByName(SH_LEG) Then Exit Function
+    If Not WmsLegacy.LegRow(n, lg) Then Exit Function
+    If VarType(lg(LG_PRE)) = 5 Then LegacyPre = lg(LG_PRE)
+End Function
+
+' ================================================================ PRIME 0.8: the corrections that 0.7 did not have
+' «Исправить позицию» (POSITION_FIX), «Коррекция переноса» (LEGACY_FIX), «Снять отмену» (ORDER_UNCANCEL). Each is one
+' operation through ApplyOperation and one journal record; nothing of the history is rewritten: the rows of «Выдачи»,
+' «Возврат» and «Корректировки» keep what they had at their time.
+
+' "n:row;" for every receipt of position olid (_RCV, live or cancelled) with its row on «Заказы»; "" or the problem in why
+Private Function PositionReceipts(olid As Long, ByRef why As String) As String
+    Dim rcv As Object, last As Long, r0 As Long, r1 As Long, i As Long, d As Variant, n As Long, rr As Long, canon As String, s As String
+    rcv = WmsOrders.RcvSheet()
+    last = WmsOrders.LastRow(rcv)
+    why = ""
+    For r0 = 1 To last Step CHECK_CHUNK_ROWS
+        r1 = r0 + CHECK_CHUNK_ROWS - 1
+        If r1 > last Then r1 = last
+        d = rcv.getCellRangeByPosition(0, r0, RV_ROW, r1).getDataArray()
+        For i = 0 To r1 - r0
+            If VarType(d(i)(RV_OL)) = 5 Then
+                If CLng(d(i)(RV_OL)) = olid And CStr(d(i)(RV_EI)) <> "" Then
+                    n = r0 + i
+                    canon = WmsIssue.EiCanon(n)
+                    rr = WmsOrders.ReceiptRowOf(canon, d(i)(RV_ROW))
+                    If rr < 1 Then
+                        why = "строка прихода " & canon & " не найдена на листе «" & SH_ORDERS & "» — нужна самопроверка"
+                        Exit Function
+                    End If
+                    s = s & n & ":" & rr & ";"
+                End If
+            End If
+        Next i
+    Next r0
+    PositionReceipts = s
+End Function
+
+' the value a text field of the position is written as: a number when the cell held a number and the text is one (an order
+' № typed as a number stays a number), otherwise the text
+Private Function CellValueOf(oldCell As Object, s As String) As Variant
+    Dim x As Double
+    If oldCell.getType() = com.sun.star.table.CellContentType.VALUE And s <> "" Then
+        If IsNumeric(s) And InStr(s, " ") = 0 Then
+            x = Val(Replace(s, ",", "."))
+            If NumStr(x) = Replace(s, ",", ".") Then
+                CellValueOf = x
+                Exit Function
+            End If
+        End If
+    End If
+    CellValueOf = s
+End Function
+
+' the text of a cell as the dialogs show it (a number without a thousands separator)
+Private Function CellText(c As Object) As String
+    If c.getType() = com.sun.star.table.CellContentType.VALUE Then CellText = NumStr(c.getValue()) Else CellText = Trim(c.getString())
+End Function
+
+' the fingerprint part of a value (as WmsOrders.FpCell gives it for a cell holding that value)
+Private Function FpOf(v As Variant) As String
+    If VarType(v) = 5 Then
+        FpOf = "N" & NumStr(CDbl(v))
+    ElseIf CStr(v) = "" Then
+        FpOf = "E"
+    Else
+        FpOf = "S" & Esc(Trim(CStr(v)))
+    End If
+End Function
+
+' «Контроль» of the own receipt of row r with the unit u (RowOwnControl with a new unit)
+Private Function RowOwnControlU(r As Long, bStorno As Boolean, u As String) As String
+    Dim sh As Object, g As Object, hasG As Boolean, gq As Double
+    If bStorno Then
+        RowOwnControlU = "Приход удалён (сторно)"
+        Exit Function
+    End If
+    sh = OSh()
+    g = sh.getCellByPosition(OC_DOCQTY, r)
+    hasG = (g.getType() = com.sun.star.table.CellContentType.VALUE)
+    If hasG Then gq = g.getValue()
+    RowOwnControlU = WmsOrders.ReceiptControl(sh.getCellByPosition(OC_FACT, r).getValue(), hasG, gq, Trim(Txt(r, OC_DOC)) <> "", _
+        sh.getCellByPosition(OC_DDATE, r).getType() = com.sun.star.table.CellContentType.VALUE, u)
+End Function
+
+' the date of the antidubl key of receipt row r: O when given, otherwise N
+Private Function RowDupDate(r As Long) As Double
+    Dim c As Object
+    c = OSh().getCellByPosition(OC_DDATE, r)
+    If c.getType() = com.sun.star.table.CellContentType.VALUE Then RowDupDate = c.getValue() Else RowDupDate = OSh().getCellByPosition(OC_RDATE, r).getValue()
+End Function
+
+' «Исправить позицию» — POSITION_FIX. The identity of an order position after its receipts: № заказа (A), наименование (B),
+' № счёта (D), артикул (E), заказанное количество (H), единица (I), поставщик (L), дата заказа (P), категория (S). Written
+' on every row of the position (the source row and the rows of «Ещё поступление») and on the card of every EI of the
+' position in «Наличие» (name, article, unit, category, «Источник»); the status of the position follows H. The unit changes
+' only while no EI of the position has live issues, returns or corrections. Row r — any row of the position.
+' OK:<seq>, SKIP:<why>, ERR:<why> or an ApplyOperation error.
+Function PositionFixRow(r As Long, vOrder As Variant, vName As Variant, vInvoice As Variant, vArt As Variant, vOrdQty As Variant, _
+    vUnit As Variant, vSupplier As Variant, vOdate As Variant, vCat As Variant) As String
+    Dim why As String, kind As String, olid As Long, od As Variant, src As Long, sh As Object, list As String, items As Variant
+    Dim i As Long, n As Long, rr As Long, canon As String, msg As String, newOrd As Double, hasOdate As Boolean, newOdate As Double
+    Dim sOrder As String, sName As String, sInv As String, sArt As String, sUnit As String, sSup As String, sCat As String
+    Dim oOrder As String, oName As String, oInv As String, oArt As String, oUnit As String, oSup As String, oCat As String
+    Dim oOrdQ As Double, oOdate As Double, oHasOdate As Boolean, chg As String, nIss As Long, nRet As Long, nAdj As Long
+    Dim rv As Variant, eis As String, st As String, sKey As String, dup As String, p As Variant, vA As Variant, vD As Variant
+    Dim cancel As String, bStorno As Boolean, stk As Variant, sSrc As String, fp As String, oc As Object
+    WmsInit()
+    If r < 1 Or r > MAX_SHEET_ROW Then
+        PositionFixRow = "ERR:выберите строку заказа (не заголовок)"
+        Exit Function
+    End If
+    On Error GoTo EH
+    sh = OSh()
+    kind = WmsOrders.OrderRowKind(r)
+    Select Case kind
+    Case "RECEIVED", "STORNO"
+    Case "OPEN"
+        PositionFixRow = "ERR:строка не проведена — исправьте значения прямо в строке и нажмите «Провести приход»"
+        Exit Function
+    Case "CANCELLED"
+        PositionFixRow = "ERR:позиция отменена без прихода — снимите отмену («Исправить» → «Снять отмену») и исправьте строку"
+        Exit Function
+    Case Else
+        PositionFixRow = "ERR:" & ReceiptRowProblem(kind, "Исправить")
+        Exit Function
+    End Select
+    olid = gKol
+    If Not WmsOrders.OlValid(olid, od) Then
+        PositionFixRow = "ERR:позиция заказа (OLID " & olid & ") не найдена в служебной таблице — нужна самопроверка"
+        Exit Function
+    End If
+    If gKsrc Then
+        src = r
+    Else
+        src = WmsOrders.SourceRowOf(od)
+        If src < 1 Then
+            PositionFixRow = "ERR:исходная строка позиции (OLID " & olid & ") не найдена на листе «" & SH_ORDERS & "» — нужна самопроверка"
+            Exit Function
+        End If
+    End If
+    why = PostingBlockReason()
+    If why <> "" Then
+        PositionFixRow = why
+        Exit Function
+    End If
+    ' the new values
+    sOrder = Trim(CStr(vOrder))
+    sName = Trim(CStr(vName))
+    sInv = Trim(CStr(vInvoice))
+    sArt = Trim(CStr(vArt))
+    sUnit = Trim(CStr(vUnit))
+    sSup = Trim(CStr(vSupplier))
+    sCat = Trim(CStr(vCat))
+    If sOrder = "" Then
+        PositionFixRow = "ERR:не указан № заказа (A)"
+        Exit Function
+    End If
+    If sName = "" Then
+        PositionFixRow = "ERR:не указано наименование товара (B)"
+        Exit Function
+    End If
+    If sUnit = "" Then
+        PositionFixRow = "ERR:не указана единица измерения (I)"
+        Exit Function
+    End If
+    If Not WmsOrders.ParseQtyValueAs(vOrdQty, "Заказанное количество (H)", newOrd, msg) Then
+        PositionFixRow = "ERR:" & msg
+        Exit Function
+    End If
+    If WmsOrders.SpecialSupplier(sSup) <> "" Then
+        PositionFixRow = "ERR:«" & sSup & "» — специальный приход; поставщик позиции заказа не может быть специальным приходом"
+        Exit Function
+    End If
+    hasOdate = (Trim(CStr(vOdate)) <> "")
+    If hasOdate Then
+        If Not WmsOrders.ParseDateTextAs(CStr(vOdate), "дата заказа (P)", newOdate, msg) Then
+            PositionFixRow = "ERR:" & msg
+            Exit Function
+        End If
+    End If
+    ' the old values: the source row
+    oOrder = CellText(sh.getCellByPosition(OC_ORDER, src))
+    oName = Trim(Txt(src, OC_NAME))
+    oInv = CellText(sh.getCellByPosition(OC_INVOICE, src))
+    oArt = Trim(Txt(src, OC_ART))
+    oUnit = Trim(Txt(src, OC_UNIT))
+    oSup = Trim(Txt(src, OC_SUPPLIER))
+    oCat = Trim(Txt(src, OC_CAT))
+    oOrdQ = od(OD_ORD)
+    oc = sh.getCellByPosition(OC_ODATE, src)
+    oHasOdate = (oc.getType() = com.sun.star.table.CellContentType.VALUE)
+    If oHasOdate Then oOdate = oc.getValue()
+    If sOrder <> oOrder Then chg = chg & "A"
+    If sName <> oName Then chg = chg & "B"
+    If sInv <> oInv Then chg = chg & "D"
+    If sArt <> oArt Then chg = chg & "E"
+    If Abs(newOrd - oOrdQ) > 0.0000001 Then chg = chg & "H"
+    If sUnit <> oUnit Then chg = chg & "I"
+    If sSup <> oSup Then chg = chg & "L"
+    If hasOdate <> oHasOdate Then
+        chg = chg & "P"
+    ElseIf hasOdate And newOdate <> oOdate Then
+        chg = chg & "P"
+    End If
+    If sCat <> oCat Then chg = chg & "S"
+    If chg = "" Then
+        PositionFixRow = "SKIP:ничего не изменилось"
+        Exit Function
+    End If
+    list = PositionReceipts(olid, why)
+    If why <> "" Then
+        PositionFixRow = "ERR:" & why
+        Exit Function
+    End If
+    items = Split(list, ";")
+    ' the unit of an EI changes only while nothing was issued, returned or corrected from it
+    If InStr(chg, "I") > 0 Then
+        For i = 0 To UBound(items)
+            If items(i) <> "" Then
+                p = Split(items(i), ":")
+                canon = WmsIssue.EiCanon(CLng(p(0)))
+                If Not WmsReturn.LiveDependents(canon, nIss, nRet) Or Not WmsAdjust.LiveAdjustments(canon, nAdj) Then
+                    PositionFixRow = "ERR-SYS:не удалось проверить движения " & canon & " (формула движка Calc) — исправление не выполнено"
+                    Exit Function
+                End If
+                If nIss + nRet + nAdj > 0 Then
+                    PositionFixRow = "ERR:единицу измерения нельзя изменить: по " & canon & " есть действующие выдачи (" & nIss & "), возвраты (" & nRet _
+                        & ") или корректировки (" & nAdj & ") в «" & oUnit & "». Остальные поля можно исправить, оставив единицу как была"
+                    Exit Function
+                End If
+            End If
+        Next i
+    End If
+    cancel = CStr(od(OD_CANCEL))
+    PlanBegin("POSITION_FIX", "OL" & olid)
+    PlanField("OL", olid)
+    PlanField("ROW", src + 1)
+    PlanField("CHANGED", chg)
+    If InStr(chg, "A") > 0 Then
+        PlanField("OLD_ORDER", oOrder)
+        PlanField("ORDER", sOrder)
+    End If
+    If InStr(chg, "B") > 0 Then
+        PlanField("OLD_NAME", oName)
+        PlanField("NAME", sName)
+    End If
+    If InStr(chg, "D") > 0 Then
+        PlanField("OLD_INVOICE", oInv)
+        PlanField("INVOICE", sInv)
+    End If
+    If InStr(chg, "E") > 0 Then
+        PlanField("OLD_ART", oArt)
+        PlanField("ART", sArt)
+    End If
+    If InStr(chg, "H") > 0 Then
+        PlanField("OLD_ORD_QTY", oOrdQ)
+        PlanField("ORD_QTY", newOrd)
+    End If
+    If InStr(chg, "I") > 0 Then
+        PlanField("OLD_UNIT", oUnit)
+        PlanField("UNIT", sUnit)
+    End If
+    If InStr(chg, "L") > 0 Then
+        PlanField("OLD_SUPPLIER", oSup)
+        PlanField("SUPPLIER", sSup)
+    End If
+    If InStr(chg, "P") > 0 Then
+        PlanField("OLD_ORDER_DATE", IIf(oHasOdate, IsoDate(oOdate), ""))
+        PlanField("ORDER_DATE", IIf(hasOdate, IsoDate(newOdate), ""))
+    End If
+    If InStr(chg, "S") > 0 Then
+        PlanField("OLD_CAT", oCat)
+        PlanField("CAT", sCat)
+    End If
+    vA = CellValueOf(sh.getCellByPosition(OC_ORDER, src), sOrder)
+    vD = CellValueOf(sh.getCellByPosition(OC_INVOICE, src), sInv)
+    ' every row of the position: the identity columns; the source row first (it may hold no receipt of its own any more)
+    rr = src
+    For i = -1 To UBound(items)
+        If i >= 0 Then
+            If items(i) = "" Then GoTo NextRow
+            p = Split(items(i), ":")
+            n = CLng(p(0))
+            rr = CLng(p(1))
+            canon = WmsIssue.EiCanon(n)
+            eis = eis & IIf(eis <> "", ",", "") & canon
+            ' the source row got its identity at i = -1
+            If rr = src Then GoTo NextEI
+        End If
+        If InStr(chg, "A") > 0 Then PlanSetValue(SH_ORDERS, rr, OC_ORDER, vA, False)
+        If InStr(chg, "B") > 0 Then PlanSetValue(SH_ORDERS, rr, OC_NAME, sName, False)
+        If InStr(chg, "D") > 0 Then PlanSetValue(SH_ORDERS, rr, OC_INVOICE, vD, False)
+        If InStr(chg, "E") > 0 Then PlanSetValue(SH_ORDERS, rr, OC_ART, sArt, False)
+        If InStr(chg, "I") > 0 Then PlanSetValue(SH_ORDERS, rr, OC_UNIT, sUnit, False)
+        If InStr(chg, "L") > 0 Then PlanSetValue(SH_ORDERS, rr, OC_SUPPLIER, sSup, False)
+        If InStr(chg, "P") > 0 Then PlanSetValue(SH_ORDERS, rr, OC_ODATE, IIf(hasOdate, newOdate, ""), False)
+        If InStr(chg, "S") > 0 Then PlanSetValue(SH_ORDERS, rr, OC_CAT, sCat, False)
+NextEI:
+        If i >= 0 Then
+            ' the card of the EI in «Наличие» and the antidubl key of its receipt
+            stk = WmsIssue.StockSheet().getCellRangeByPosition(0, n, SC_LAST, n).getDataArray()(0)
+            If InStr(chg, "B") > 0 Then PlanSetValue(SH_STOCK, n, SC_NAME, sName, False)
+            If InStr(chg, "E") > 0 Then PlanSetValue(SH_STOCK, n, SC_ART, sArt, False)
+            If InStr(chg, "I") > 0 Then PlanSetValue(SH_STOCK, n, SC_UNIT, sUnit, False)
+            If InStr(chg, "S") > 0 Then PlanSetValue(SH_STOCK, n, SC_CAT, sCat, False)
+            If InStr(chg, "A") > 0 Then
+                sSrc = CStr(stk(SC_SRC))
+                If sSrc = "Заказ " & oOrder Then PlanSetValue(SH_STOCK, n, SC_SRC, "Заказ " & sOrder, False)
+                If sSrc = "Перенос: заказ " & oOrder Then PlanSetValue(SH_STOCK, n, SC_SRC, "Перенос: заказ " & sOrder, False)
+            End If
+            rv = WmsOrders.RcvRow(n)
+            bStorno = (CStr(rv(RV_STATE)) = RV_STORNO)
+            If (InStr(chg, "B") > 0 Or InStr(chg, "E") > 0 Or InStr(chg, "L") > 0) And Not bStorno Then
+                sKey = WmsOrders.DupKeyText(sSup, Trim(Txt(rr, OC_DOC)), sArt, sName, sh.getCellByPosition(OC_FACT, rr).getValue(), RowDupDate(rr))
+                dup = WmsOrders.FindDuplicate(sKey, n)
+                PlanSetValue(SH_RCV, n, RV_DUP, WmsOrders.DupHash(sKey), False)
+                PlanSetValue(SH_RCV, n, RV_DUPKEY, sKey, False)
+                PlanDerived(SH_ORDERS, rr, OC_DUP, IIf(dup <> "", "Возможный дубль: " & dup, ""))
+            End If
+            If InStr(chg, "I") > 0 And rr <> src Then PlanDerived(SH_ORDERS, rr, OC_CTL, RowOwnControlU(rr, bStorno, sUnit))
+        End If
+NextRow:
+    Next i
+    PlanField("EIS", eis)
+    ' the position: H, the fingerprint, the status and «Контроль» of the source row
+    If InStr(chg, "H") > 0 Then
+        PlanSetValue(SH_ORDERS, src, OC_ORDQTY, newOrd, False)
+        PlanSetValue(SH_ORD, olid, OD_ORD, newOrd, False)
+    End If
+    fp = PositionFingerprint(src, chg, vA, vD, sName, sArt, newOrd, sUnit, sSup, hasOdate, newOdate)
+    PlanSetValue(SH_ORD, olid, OD_FP, fp, False)
+    If src >= 1 Then
+        bStorno = False
+        If CStr(od(OD_KEY)) <> "" Then
+            If WmsOrders.StrictEI(CStr(od(OD_KEY)), n) Then
+                rv = WmsOrders.RcvRow(n)
+                bStorno = (CStr(rv(RV_STATE)) = RV_STORNO)
+            End If
+        End If
+        st = WmsOrders.PositionStatus(newOrd, od(OD_RCV), od(OD_NODOC), cancel)
+        PlanDerived(SH_ORDERS, src, OC_STATUS, st)
+        PlanDerived(SH_ORDERS, src, OC_CTL, WmsOrders.SourceControl(RowOwnControlU(src, bStorno, sUnit), newOrd, od(OD_RCV), cancel, sUnit))
+    End If
+    PositionFixRow = ApplyOperation(0, 0)
+    Exit Function
+EH:
+    PositionFixRow = "ERR:внутренняя ошибка проверки исправления позиции: " & Error$ & " (код " & Err & ", строка " & Erl & ")"
+End Function
+
+' the fingerprint of the position after POSITION_FIX: A|D|B|E|H|I|L|P with the new values where they change
+Private Function PositionFingerprint(src As Long, chg As String, vA As Variant, vD As Variant, sName As String, sArt As String, newOrd As Double, _
+    sUnit As String, sSup As String, hasOdate As Boolean, newOdate As Double) As String
+    Dim sh As Object, a As String, d As String
+    sh = OSh()
+    If InStr(chg, "A") > 0 Then a = FpOf(vA) Else a = WmsOrders.FpCellOf(sh.getCellByPosition(OC_ORDER, src))
+    If InStr(chg, "D") > 0 Then d = FpOf(vD) Else d = WmsOrders.FpCellOf(sh.getCellByPosition(OC_INVOICE, src))
+    PositionFingerprint = a & "|" & d & "|" & FpOf(sName) & "|" & FpOf(sArt) & "|N" & NumStr(newOrd) & "|" & FpOf(sUnit) & "|" & FpOf(sSup) _
+        & "|" & IIf(hasOdate, "N" & NumStr(newOdate), "E")
+End Function
+
+' ================================================================ «Коррекция переноса» — LEGACY_FIX (PRIME 0.8)
+' A receipt transferred from the old table (LEGACY_RECEIPT / LEGACY_RECEIPT_ADD) carries two numbers of the transfer: what
+' the old table received (F) and the balance at the transfer; their difference — «израсходовано до переноса» — has no
+' issues behind it. When one of them came over wrong, this correction sets both with the act: F (the receipt, the position,
+' «Заказы».F) and the balance at the transfer; the current balance moves by the change of the balance at the transfer, the
+' movements of WMS after the transfer stay as they are. Row r — the row of the transferred receipt.
+Function LegacyFixRow(r As Long, vQty As Variant, vBal0 As Variant, sAct As String, sActDate As String, sReason As String) As String
+    Dim why As String, kind As String, n As Long, canon As String, olid As Long, isSrc As Boolean, moved As Boolean, rv As Variant, od As Variant
+    Dim lg As Variant, s As Double, f As Double, pre As Double, q2 As Double, b2 As Double, pre2 As Double, s2 As Double, rcv2 As Double
+    Dim msg As String, dAct As Double, src As Long, srcMoved As Boolean, sh As Object, own As String, sKey As String, dup As String
+    Dim st As Integer, b0 As Double, fixes As Double, actText As String, g As Object, hasG As Boolean, gq As Double, u As String
+    WmsInit()
+    If r < 1 Or r > MAX_SHEET_ROW Then
+        LegacyFixRow = "ERR:выберите строку заказа (не заголовок)"
+        Exit Function
+    End If
+    On Error GoTo EH
+    sh = OSh()
+    kind = WmsOrders.OrderRowKind(r)
+    why = ReceiptRowProblem(kind, "Коррекция переноса")
+    If why <> "" Then
+        LegacyFixRow = "ERR:" & why
+        Exit Function
+    End If
+    n = gKn
+    canon = gKcanon
+    olid = gKol
+    isSrc = gKsrc
+    moved = gKmoved
+    If Not WmsLegacy.LegRow(n, lg) Then
+        LegacyFixRow = "ERR:" & canon & " не перенесён из старой таблицы — «Коррекция переноса» только для перенесённых приходов. " _
+            & "Количество прихода исправляет «Исправить» → «Количество, документ, дата, место, цена», остаток — «Корректировки» → «Инвентаризация»"
+        Exit Function
+    End If
+    If CStr(lg(LG_KIND)) <> LG_RECEIPT And CStr(lg(LG_KIND)) <> LG_ADD Then
+        LegacyFixRow = "ERR:" & canon & " перенесён без прихода по заказу — его исправляет кнопка «Исправить ЕИ переноса» на листе «" & SH_STOCK & "»"
+        Exit Function
+    End If
+    why = PostingBlockReason()
+    If why <> "" Then
+        LegacyFixRow = why
+        Exit Function
+    End If
+    why = ReceiptStateProblem(r, n, canon, olid, rv, od, s)
+    If why <> "" Then
+        LegacyFixRow = "ERR:" & why
+        Exit Function
+    End If
+    f = rv(RV_QTY)
+    If VarType(lg(LG_PRE)) = 5 Then pre = lg(LG_PRE)
+    b0 = WmsIssue.Round3(f - pre)
+    If Not WmsOrders.ParseQtyValueAs(vQty, "Получено по старой таблице (F)", q2, msg) Then
+        LegacyFixRow = "ERR:" & msg
+        Exit Function
+    End If
+    If Trim(CStr(vBal0)) = "" Then
+        LegacyFixRow = "ERR:не указан остаток на момент переноса"
+        Exit Function
+    End If
+    st = ParseQtyText(Trim(CStr(vBal0)), b2, msg)
+    If st = 5 And b2 = 0 And InStr(CStr(vBal0), "-") = 0 Then
+        b2 = 0
+    ElseIf st <> 0 Then
+        LegacyFixRow = "ERR:остаток на момент переноса «" & vBal0 & "» — " & msg
+        Exit Function
+    End If
+    If b2 > q2 + 0.0000001 Then
+        LegacyFixRow = "ERR:остаток на момент переноса " & WmsIssue.QtyText(b2) & " больше полученного " & WmsIssue.QtyText(q2) & " — так не бывает"
+        Exit Function
+    End If
+    If Trim(sAct) = "" Then
+        LegacyFixRow = "ERR:укажите № акта или другого документа — коррекция переноса проводится только с основанием"
+        Exit Function
+    End If
+    If Not WmsOrders.ParseDateTextAs(sActDate, "дата акта", dAct, msg) Then
+        LegacyFixRow = "ERR:" & msg
+        Exit Function
+    End If
+    pre2 = WmsIssue.Round3(q2 - b2)
+    If Abs(q2 - f) < 0.0000001 And Abs(b2 - b0) < 0.0000001 Then
+        LegacyFixRow = "SKIP:ничего не изменилось: получено " & WmsIssue.QtyText(f) & ", остаток на момент переноса " & WmsIssue.QtyText(b0)
+        Exit Function
+    End If
+    s2 = WmsIssue.Round3(s + b2 - b0)
+    u = Trim(Txt(r, OC_UNIT))
+    If s2 < -0.0000001 Then
+        LegacyFixRow = "ERR:после переноса из " & canon & " уже выдано или списано " & WmsIssue.QtyText(WmsIssue.Round3(b0 - s)) & " " & u _
+            & " — остаток на момент переноса не может быть меньше этого (сейчас остаток " & WmsIssue.QtyText(s) & ")"
+        Exit Function
+    End If
+    rcv2 = WmsIssue.Round3(od(OD_RCV) + q2 - f)
+    If isSrc Then
+        src = r
+        srcMoved = (CLng(od(OD_ROW)) <> r)
+    Else
+        src = WmsOrders.SourceRowOf(od)
+        srcMoved = gSmoved
+        If src < 1 Then
+            LegacyFixRow = "ERR:исходная строка позиции (OLID " & olid & ") не найдена на листе «" & SH_ORDERS & "» — нужна самопроверка"
+            Exit Function
+        End If
+    End If
+    actText = "акт № " & Trim(sAct) & " от " & Format(dAct, "DD.MM.YYYY") & IIf(Trim(sReason) <> "", ": " & Trim(sReason), "")
+    If VarType(lg(LG_FIXES)) = 5 Then fixes = lg(LG_FIXES)
+    g = sh.getCellByPosition(OC_DOCQTY, r)
+    hasG = (g.getType() = com.sun.star.table.CellContentType.VALUE)
+    If hasG Then gq = g.getValue()
+    own = WmsOrders.ReceiptControl(q2, hasG, gq, Trim(Txt(r, OC_DOC)) <> "", sh.getCellByPosition(OC_DDATE, r).getType() = com.sun.star.table.CellContentType.VALUE, u)
+    PlanBegin("LEGACY_FIX", canon)
+    PlanField("EI", canon)
+    PlanField("OL", olid)
+    PlanField("ROW", r + 1)
+    PlanField("OLD_QTY", f)
+    PlanField("QTY", q2)
+    PlanField("OLD_BAL0", b0)
+    PlanField("BAL0", b2)
+    PlanField("OLD_PRE", pre)
+    PlanField("PRE", pre2)
+    PlanField("BAL_BEFORE", s)
+    PlanField("BAL_AFTER", s2)
+    PlanField("POS_RCV", rcv2)
+    PlanField("ACT", Trim(sAct))
+    PlanField("ACT_DATE", IsoDate(dAct))
+    If Trim(sReason) <> "" Then PlanField("REASON", Trim(sReason))
+    If Abs(s2 - s) > 0.0000001 Then PlanSetValue(SH_STOCK, n, SC_QTY, s2, False)
+    If Abs(q2 - f) > 0.0000001 Then
+        sKey = WmsOrders.DupKeyText(Trim(Txt(r, OC_SUPPLIER)), Trim(Txt(r, OC_DOC)), Trim(Txt(r, OC_ART)), Trim(Txt(r, OC_NAME)), q2, RowDupDate(r))
+        dup = WmsOrders.FindDuplicate(sKey, n)
+        PlanSetValue(SH_RCV, n, RV_QTY, q2, False)
+        PlanSetValue(SH_RCV, n, RV_DUP, WmsOrders.DupHash(sKey), False)
+        PlanSetValue(SH_RCV, n, RV_DUPKEY, sKey, False)
+        PlanSetValue(SH_ORD, olid, OD_RCV, rcv2, False)
+        PlanSetValue(SH_ORDERS, r, OC_FACT, q2, False)
+        PlanDerived(SH_ORDERS, r, OC_DUP, IIf(dup <> "", "Возможный дубль: " & dup, ""))
+    End If
+    If moved Then PlanSetValue(SH_RCV, n, RV_ROW, r, False)
+    If srcMoved Then PlanSetValue(SH_ORD, olid, OD_ROW, src, False)
+    PlanSetValue(SH_LEG, n, LG_QTY0, q2, False)
+    PlanSetValue(SH_LEG, n, LG_BAL0, b2, False)
+    PlanSetValue(SH_LEG, n, LG_PRE, pre2, False)
+    PlanSetValue(SH_LEG, n, LG_FIXES, fixes + 1, False)
+    PlanSetValue(SH_LEG, n, LG_ACT, actText, False)
+    PlanDerived(SH_ORDERS, r, OC_STOCK, s2)
+    If isSrc Then
+        PlanDerived(SH_ORDERS, r, OC_STATUS, WmsOrders.PositionStatus(od(OD_ORD), rcv2, od(OD_NODOC), CStr(od(OD_CANCEL))))
+        PlanDerived(SH_ORDERS, r, OC_CTL, WmsOrders.SourceControl(own, od(OD_ORD), rcv2, CStr(od(OD_CANCEL)), u))
+    Else
+        PlanDerived(SH_ORDERS, r, OC_CTL, own)
+        PlanSourceStatus(src, od, rcv2, od(OD_NODOC), CStr(od(OD_CANCEL)))
+    End If
+    LegacyFixRow = ApplyOperation(0, 0)
+    Exit Function
+EH:
+    LegacyFixRow = "ERR:внутренняя ошибка проверки коррекции переноса: " & Error$ & " (код " & Err & ", строка " & Erl & ")"
+End Function
+
+' the numbers of the transfer of the receipt in row r for the window of «Коррекция переноса»: "F|остаток при переносе|
+' израсходовано до переноса|старое X|текущий остаток", or "" when the row holds no transferred receipt
+Function LegacyFixInfo(r As Long) As String
+    Dim kind As String, lg As Variant, rv As Variant, s As Double, pre As Double
+    WmsInit()
+    kind = WmsOrders.OrderRowKind(r)
+    If kind <> "RECEIVED" Then Exit Function
+    If Not WmsLegacy.LegRow(gKn, lg) Then Exit Function
+    If CStr(lg(LG_KIND)) <> LG_RECEIPT And CStr(lg(LG_KIND)) <> LG_ADD Then Exit Function
+    If Not WmsOrders.RcvRegistered(gKn, rv) Then Exit Function
+    If Not WmsIssue.StockQty(gKn, s) Then Exit Function
+    If VarType(lg(LG_PRE)) = 5 Then pre = lg(LG_PRE)
+    LegacyFixInfo = WmsIssue.QtyText(rv(RV_QTY)) & "|" & WmsIssue.QtyText(WmsIssue.Round3(rv(RV_QTY) - pre)) & "|" & WmsIssue.QtyText(pre) _
+        & "|" & CStr(lg(LG_X)) & "|" & WmsIssue.QtyText(s)
+End Function
+
+' ================================================================ «Снять отмену» — ORDER_UNCANCEL (PRIME 0.8)
+' A cancellation made by mistake is undone with the history kept:
+' - a position cancelled before any receipt (its row has no EI): the row becomes an order row again (status «Ожидается»,
+'   the inputs open); the cancelled position stays in _ORD as history, the next «Провести приход» makes a new position;
+' - a position whose receipts were all cancelled and which was then cancelled, or whose rest was cancelled: the mark of the
+'   cancellation is removed, the status follows the received quantity again.
+Function OrderUncancelRow(r As Long) As String
+    Dim why As String, kind As String, olid As Long, od As Variant, src As Long, sh As Object, was As String, st As String
+    Dim ordQ As Double, msg As String
+    WmsInit()
+    If r < 1 Or r > MAX_SHEET_ROW Then
+        OrderUncancelRow = "ERR:выберите строку заказа (не заголовок)"
+        Exit Function
+    End If
+    On Error GoTo EH
+    sh = OSh()
+    kind = WmsOrders.OrderRowKind(r)
+    Select Case kind
+    Case "CANCELLED"
+        olid = CancelledOpenOl(r)
+        If olid < 1 Then
+            OrderUncancelRow = "ERR:отменённая позиция этой строки не найдена в служебной таблице — нужна самопроверка"
+            Exit Function
+        End If
+        why = PostingBlockReason()
+        If why <> "" Then
+            OrderUncancelRow = why
+            Exit Function
+        End If
+        If Not WmsOrders.ParseQtyAs(sh.getCellByPosition(OC_ORDQTY, r), "Заказанное количество (H)", ordQ, msg) Then ordQ = 0
+        PlanBegin("ORDER_UNCANCEL", "OL" & olid)
+        PlanField("OL", olid)
+        PlanField("ROW", r + 1)
+        PlanField("WAS", OD_CANCEL_ORDER)
+        PlanField("MODE", "ROW")
+        PlanField("ORDER", Trim(Txt(r, OC_ORDER)))
+        PlanField("NAME", Trim(Txt(r, OC_NAME)))
+        PlanDerived(SH_ORDERS, r, OC_STATUS, IIf(ordQ > 0, WmsOrders.PositionStatus(ordQ, 0, 0, ""), ""))
+        PlanDerived(SH_ORDERS, r, OC_CTL, "Отмена снята — строку можно исправить и провести приход")
+        PlanLockBits(SH_ORDERS, r, 0, OC_LAST, ORDER_LOCKS_OPEN)
+    Case "RECEIVED", "STORNO"
+        olid = gKol
+        If Not WmsOrders.OlValid(olid, od) Then
+            OrderUncancelRow = "ERR:позиция заказа (OLID " & olid & ") не найдена в служебной таблице — нужна самопроверка"
+            Exit Function
+        End If
+        was = CStr(od(OD_CANCEL))
+        If was = "" Then
+            OrderUncancelRow = "SKIP:позиция не отменена — снимать нечего"
+            Exit Function
+        End If
+        src = WmsOrders.SourceRowOf(od)
+        If src < 1 Then
+            OrderUncancelRow = "ERR:исходная строка позиции (OLID " & olid & ") не найдена на листе «" & SH_ORDERS & "» — нужна самопроверка"
+            Exit Function
+        End If
+        why = PostingBlockReason()
+        If why <> "" Then
+            OrderUncancelRow = why
+            Exit Function
+        End If
+        PlanBegin("ORDER_UNCANCEL", "OL" & olid)
+        PlanField("OL", olid)
+        PlanField("ROW", src + 1)
+        PlanField("WAS", was)
+        PlanField("MODE", "POSITION")
+        PlanField("ORD_QTY", od(OD_ORD))
+        PlanField("RCV_QTY", od(OD_RCV))
+        PlanSetValue(SH_ORD, olid, OD_CANCEL, "", False)
+        If gSmoved Then PlanSetValue(SH_ORD, olid, OD_ROW, src, False)
+        PlanSourceStatus(src, od, od(OD_RCV), od(OD_NODOC), "")
+    Case "OPEN"
+        OrderUncancelRow = "SKIP:позиция не отменена — снимать нечего"
+        Exit Function
+    Case Else
+        OrderUncancelRow = "ERR:" & ReceiptRowProblem(kind, "Снять отмену")
+        Exit Function
+    End Select
+    OrderUncancelRow = ApplyOperation(0, 0)
+    Exit Function
+EH:
+    OrderUncancelRow = "ERR:внутренняя ошибка проверки снятия отмены: " & Error$ & " (код " & Err & ", строка " & Erl & ")"
+End Function
+
+' the OLID of the position cancelled before any receipt whose source row is r (no key; found by its row and fingerprint), or 0
+Private Function CancelledOpenOl(r As Long) As Long
+    Dim ords As Object, nOl As Long, r0 As Long, r1 As Long, i As Long, d As Variant
+    ords = WmsOrders.OrdSheet()
+    nOl = WmsOrders.NextOl()
+    For r0 = nOl - 1 To 1 Step -CHECK_CHUNK_ROWS
+        r1 = r0 - CHECK_CHUNK_ROWS + 1
+        If r1 < 1 Then r1 = 1
+        d = ords.getCellRangeByPosition(0, r1, OD_LAST, r0).getDataArray()
+        For i = r0 - r1 To 0 Step -1
+            If CStr(d(i)(OD_KEY)) = "" And CStr(d(i)(OD_CANCEL)) = OD_CANCEL_ORDER And VarType(d(i)(OD_ID)) = 5 Then
+                If WmsOrders.SourceRowOf(d(i)) = r Then
+                    CancelledOpenOl = CLng(d(i)(OD_ID))
+                    Exit Function
+                End If
+            End If
+        Next i
+    Next r0
 End Function
