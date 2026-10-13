@@ -9,6 +9,9 @@ OUT_DIR (it must not exist) gets:
   WMS_TOOLBOX/             the separate tools (tools/build_toolbox.py): it goes next to the working book;
   WMS_LEGACY_TRANSFER.ods  the transfer of the old table «Заказы» into this WMS (tools/build_transfer.py; M7): its buttons
                            run tools/legacy_transfer.py of this folder on a copy of WMS_PROD_CANDIDATE.ods;
+  WMS_UPGRADE.ods          the wizard «Обновление из текущей WMS» (tools/build_upgrade.py; PRIME 0.8): its buttons run
+                           tools/upgrade.py of this folder — the working book of 0.7 is only read, the new one is built in a
+                           new folder (by default WMS_WORK of this folder) and becomes working by its last button;
   docs/                    OPERATOR_GUIDE.md, RELEASE_NOTES.md, BACKUP_RECOVERY.md, EXPORT_CONTRACT.md, TOOLBOX.md,
                            PC_VALIDATION.md, LEGACY_TRANSFER.md;
   tools/                   migrate.py, migration_dryrun.py, wmslo.py — the transfer of the old warehouse (tools/migrate.py),
@@ -65,6 +68,7 @@ def build_release(out, name="WMS_PROD_CANDIDATE.ods"):
     import build_ods
     import build_toolbox
     import build_transfer
+    import build_upgrade
     out = os.path.abspath(out)
     if os.path.exists(out):
         raise ValueError(f"{out} уже существует — выпуск собирается в новую папку")
@@ -76,6 +80,7 @@ def build_release(out, name="WMS_PROD_CANDIDATE.ods"):
         build_ods.build(o, os.path.join(out, name), test=False)
         build_toolbox.build(o, out)
         build_transfer.build(o, out)
+        build_upgrade.build(o, out)
     finally:
         o.terminate()
         shutil.rmtree(prof, ignore_errors=True)

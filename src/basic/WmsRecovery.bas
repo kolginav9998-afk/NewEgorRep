@@ -83,6 +83,7 @@ Sub Analyze()
             Exit Sub
         End If
         AddNote("незавершённая операция seq " & SysStr(SK_TX_SEQ) & " (" & SysStr(SK_TX_TYPE) & ") отменена по снимку")
+        ProtectImageSheets(bi)
         ClearMarker()
     ElseIf st = TX_COMMITTED Or st = TX_NONE Then
         ' a completion interrupted after COMMITTED leaves the before-image (and TX_SEQ) behind: tidy up

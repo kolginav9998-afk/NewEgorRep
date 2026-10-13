@@ -22,7 +22,7 @@ CHECK    (dry run, nothing but WORK/check/ is written) — the whole transfer is
          (one article of «Детали» — one EI). Every finding has a level: BLOCK (red — the transfer is refused), WARN
          (yellow — transferred, look at it), OK (green). Output: summary.csv (sheet «2_Проверка»), errors.csv («3_Ошибки»),
          rows.csv (the result of every pasted row), plan.json (the exact plan), CHECK_REPORT.md.
-BUILD    only with 0 blocking findings: the clean candidate of the release (WMS_PROD_CANDIDATE.ods, schema WMS-SYS-4,
+BUILD    only with 0 blocking findings: the clean candidate of the release (WMS_PROD_CANDIDATE.ods, schema WMS-SYS-5,
          core with the transfer operations) is copied — the candidate itself is never changed — to WORK/test.part/, WMS
          opens the copy and the plan is executed by the operations of the core: the order rows are written like a user
          types them, every old receipt is posted by LEGACY_RECEIPT / LEGACY_RECEIPT_ADD (the old EI and its current
@@ -63,9 +63,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "tests"))
 
-TOOL_VERSION = "1.0.1"
-SCHEMA = "WMS-SYS-4"
-MIN_CORE = (0, 7, 2)
+TOOL_VERSION = "1.1.0"
+SCHEMA = "WMS-SYS-5"
+MIN_CORE = (0, 8, 0)
 SHEET_ORDERS = "1_Вставить_Заказы"
 SHEET_STOCK = "1B_Вставить_Наличие"
 SHEET_ISSUES = "1C_Вставить_Выдачи"
@@ -2047,7 +2047,7 @@ def inspect_candidate(o, path, allow_test=False):
         if isinstance(sysd.get("MAX_QTY"), float):
             info["max_qty"] = sysd["MAX_QTY"]
         if info["schema"] != SCHEMA:
-            P.append(f"книга-кандидат схемы «{info['schema']}», а этот инструмент переноса работает только со схемой {SCHEMA} (WMS 0.7): "
+            P.append(f"книга-кандидат схемы «{info['schema']}», а этот инструмент переноса работает только со схемой {SCHEMA} (WMS 0.8): "
                      "возьмите книгу-кандидат и WMS_LEGACY_TRANSFER.ods из одного выпуска")
         elif core_version_tuple(info["core"]) < MIN_CORE or info["legacy_ops"] is False:
             P.append(f"ядро книги-кандидата {info['core']} не умеет переносить старую таблицу по правилам этого инструмента — нужна "

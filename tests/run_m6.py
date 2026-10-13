@@ -1065,14 +1065,14 @@ def u01_upgrade_060():
         up = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "upgrade.py"), p], capture_output=True, text=True, timeout=900)
         again = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "upgrade.py"), p, "--check"], capture_output=True, text=True, timeout=600)
         backups = [f for f in os.listdir(os.path.join(d, "WMS_Backups")) if f.endswith("_preupgrade.ods")]
-        R.add(c, "tools/upgrade.py: --check без изменений; обновление с резервной копией *_preupgrade.ods; повторная проверка — «уже версии 0.7»",
+        R.add(c, "tools/upgrade.py: --check без изменений; обновление с резервной копией *_preupgrade.ods; повторная проверка — «уже версии 0.8»",
               chk.returncode == 0 and up.returncode == 0 and "Книга обновлена" in up.stdout and len(backups) == 1 and again.returncode == 1
-              and "уже версии 0.7" in again.stdout, f"{chk.returncode}/{up.returncode}/{again.returncode}; {up.stdout[-300:]}")
+              and "уже версии 0.8" in again.stdout, f"{chk.returncode}/{up.returncode}/{again.returncode}; {up.stdout[-300:]}")
         s = ready(Session(p))
         rep = s.B("StartupReport")
         sc = s.B("ActionSelfCheck")
-        R.add(c, "WMS 0.7 открывает обновлённую книгу там же: «работа разрешена», самопроверка без ошибок, схема WMS-SYS-4, журнал продолжается",
-              st(s)[0] == "CLEAN" and f"ядро {wms_versions()['WMS_CORE_VERSION']}" in rep and sc.startswith("САМОПРОВЕРКА WMS: ошибок 0") and s.sysv("SCHEMA") == "WMS-SYS-4"
+        R.add(c, "WMS 0.8 открывает обновлённую книгу там же: «работа разрешена», самопроверка без ошибок, схема WMS-SYS-5, журнал продолжается",
+              st(s)[0] == "CLEAN" and f"ядро {wms_versions()['WMS_CORE_VERSION']}" in rep and sc.startswith("САМОПРОВЕРКА WMS: ошибок 0") and s.sysv("SCHEMA") == "WMS-SYS-5"
               and s.sysv("NEXT_CAR") == 1.0, f"{rep[:120]}; {sc[:60]}")
         roracle(c, s, "журнал 0.6 после обновления")
         sh = s.doc.Sheets.getByName("Заказы")

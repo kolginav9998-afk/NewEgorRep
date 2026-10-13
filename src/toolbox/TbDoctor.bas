@@ -111,18 +111,18 @@ Function DoctorCollect(snap As String) As Variant
     DoctorCollect = r
 End Function
 
-' the schema of _SYS (WMS-SYS-4 — WMS 0.7; WMS-SYS-3 — WMS 0.6, read without the vehicles) and the contract of the
+' the schema of _SYS (WMS-SYS-5 — WMS 0.8 PRIME, WMS-SYS-4 — WMS 0.7; WMS-SYS-3 — WMS 0.6, read without the vehicles) and the contract of the
 ' snapshot (1.0 — no cars.csv; 1.1 — with «Приход авто»; a newer one — a newer WMS than this toolbox)
 Private Sub CheckVersions(snap As String)
     Dim sc As String, ct As String, info As String
     sc = TbManifestValue(snap, "schema")
     info = sc & ", ядро " & TbManifestValue(snap, "core_version") & ", продукт " & TbManifestValue(snap, "product_version")
-    If sc = "WMS-SYS-4" Then
+    If sc = "WMS-SYS-4" Or sc = "WMS-SYS-5" Then
         AddRow("OK", "версия схемы", info, "")
     ElseIf sc = "WMS-SYS-3" Then
         AddRow("OK", "версия схемы", info & " (WMS 0.6: «Приход авто» не ведётся)", "")
     Else
-        AddRow("WARN", "версия схемы", "схема «" & sc & "» — инструмент рассчитан на WMS-SYS-3 и WMS-SYS-4", "Обновите WMS_TOOLBOX до версии этой WMS")
+        AddRow("WARN", "версия схемы", "схема «" & sc & "» — инструмент рассчитан на WMS-SYS-3 … WMS-SYS-5", "Обновите WMS_TOOLBOX до версии этой WMS")
     End If
     ct = TbManifestValue(snap, "contract")
     If ct = "" Then ct = "1.0"

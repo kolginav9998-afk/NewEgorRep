@@ -40,6 +40,8 @@ Global gPW_Col() As String
 Global gPW_Before() As String
 Global gPW_After() As String
 Global gPW_Restorable() As Boolean
+' PRIME 0.8: the sheets whose protection the running operation lifted («|name|name|»)
+Global gWinSheets As String
 
 Private mUndoLocked As Boolean
 
@@ -555,21 +557,86 @@ Function ForeignProtectionHint() As String
         & "затем закройте книгу и откройте WMS снова. Свою защиту WMS ставит сама; свои пароли на листы WMS ставить нельзя."
 End Function
 
-' every sheet of the plan (and _SYS, whose marker the operation writes): "" when WMS can lift each protection, otherwise
-' the first sheet it cannot — nothing has been written yet
-Function PlanProtectionProblem() As String
-    Dim i As Long, seen As String, p As String
-    seen = "|"
-    p = ForeignProtection(SYS_SHEET)
+' The protection window of an operation: the sheets whose WMS protection the operation or its rollback must lift — a cell
+' lock changes, or a cell is emptied (written empty, or empty before: the rollback empties it) — are lifted once, before the
+' marker, and protected again before the commit point. A sheet protected with a foreign password is found here, before
+' anything is written; lifting each sheet once per operation also spares the repeated lifting of the writes themselves.
+Private Function PlanUnlockSheets() As String
+    Dim i As Long, s As String
+    s = "|"
     For i = 0 To gPlanN - 1
-        If p <> "" Then Exit For
-        If InStr(seen, "|" & gPW_Sheet(i) & "|") = 0 Then
-            seen = seen & gPW_Sheet(i) & "|"
-            p = ForeignProtection(gPW_Sheet(i))
+        If gPW_Kind(i) = "L" Or gPW_Before(i) = "E" Or gPW_After(i) = "E" Then
+            If InStr(s, "|" & gPW_Sheet(i) & "|") = 0 Then s = s & gPW_Sheet(i) & "|"
         End If
     Next i
-    PlanProtectionProblem = p
+    PlanUnlockSheets = s
 End Function
+
+' lifts the protection of the sheets of the window; "" or the problem (a foreign protection: every sheet is protected again)
+Function ProtectWindowOpen() As String
+    Dim a As Variant, i As Integer, sh As Object, nm As String
+    gWinSheets = "|"
+    a = Split(PlanUnlockSheets(), "|")
+    For i = 0 To UBound(a)
+        nm = a(i)
+        If nm <> "" Then
+            If gDoc.Sheets.hasByName(nm) Then
+                sh = gDoc.Sheets.getByName(nm)
+                If sh.isProtected() Then
+                    If Not LiftProtection(sh) Then
+                        ProtectWindowClose()
+                        ProtectWindowOpen = "лист «" & nm & "» защищён не паролем WMS"
+                        Exit Function
+                    End If
+                    gWinSheets = gWinSheets & nm & "|"
+                End If
+            End If
+        End If
+    Next i
+    ProtectWindowOpen = ""
+End Function
+
+' True when the WMS password lifted the protection of sh
+Private Function LiftProtection(sh As Object) As Boolean
+    On Error GoTo FOREIGN
+    sh.unprotect(PROTECT_PWD)
+    LiftProtection = Not sh.isProtected()
+    Exit Function
+FOREIGN:
+    LiftProtection = False
+End Function
+
+' every sheet of the window protected again with the WMS password
+Sub ProtectWindowClose()
+    Dim a As Variant, i As Integer
+    On Error Resume Next
+    a = Split(gWinSheets, "|")
+    For i = 0 To UBound(a)
+        If a(i) <> "" Then
+            If Not gDoc.Sheets.getByName(a(i)).isProtected() Then gDoc.Sheets.getByName(a(i)).protect(PROTECT_PWD)
+        End If
+    Next i
+    gWinSheets = "|"
+End Sub
+
+' after a crash in the middle of an operation the saved book may hold the sheets of its window unprotected: once the
+' operation is rolled back by its before-image, every sheet the image names is protected again
+Sub ProtectImageSheets(bi As String)
+    Dim recs As Variant, i As Long, p As Variant, nm As String, seen As String
+    On Error Resume Next
+    recs = Split(bi, "~")
+    seen = "|"
+    For i = 1 To UBound(recs)
+        p = Split(recs(i), "|")
+        nm = Unesc(CStr(p(1)))
+        If InStr(seen, "|" & nm & "|") = 0 Then
+            seen = seen & nm & "|"
+            If gDoc.Sheets.hasByName(nm) Then
+                If Not gDoc.Sheets.getByName(nm).isProtected() Then gDoc.Sheets.getByName(nm).protect(PROTECT_PWD)
+            End If
+        End If
+    Next i
+End Sub
 
 ' every sheet of the book: the names of the sheets protected with a foreign password ("" — none), separated by «, »
 Function ForeignProtectedSheets() As String
@@ -878,15 +945,17 @@ Function ApplyOperation(mode As Integer, replaySeq As Long) As String
         End If
         seq = replaySeq
     End If
-    ' PRIME 0.8: a sheet of the operation protected with a foreign password — refused before anything is written
-    why = PlanProtectionProblem()
-    If why <> "" Then
-        ApplyOperation = "ERR-RB:" & why & " — операция не проведена, ничего не изменено. " & ForeignProtectionHint()
-        Exit Function
-    End If
     gBusy = True
     gHardStop = False
     UndoBegin()
+    ' PRIME 0.8: the protection window — a sheet protected with a foreign password is refused before anything is written
+    why = ProtectWindowOpen()
+    If why <> "" Then
+        UndoEnd()
+        gBusy = False
+        ApplyOperation = "ERR-RB:" & why & " — операция не проведена, ничего не изменено. " & ForeignProtectionHint()
+        Exit Function
+    End If
     On Error GoTo RB
     ' phase 2.1: STARTED + before-image of everything the operation will change
     bi = BuildBeforeImage()
@@ -900,6 +969,7 @@ Function ApplyOperation(mode As Integer, replaySeq As Long) As String
     ' phase 2.2: mutations
     why = ApplyWrites(mode)
     If why <> "" Then GoTo WRITE_FAILED
+    ProtectWindowClose()
     ' phase 2.3: commit point
     If mode = 0 Then
         sLine = WmsJournal.BuildLine(seq, gPlanType, PlanJournalFields())
@@ -924,6 +994,7 @@ JOURNAL_REFUSED:
     Else
         SetBlocked("ROLLBACK_FAILED", "откат операции не удался — перезапустите WMS")
     End If
+    ProtectWindowClose()
     UndoEnd()
     gBusy = False
     ApplyOperation = "ERR-RB:" & why
@@ -946,6 +1017,7 @@ RB:
         Exit Function
     End If
     If jDone Then
+        ProtectWindowClose()
         ApplyOperation = FinishAfterJournal(seq, em)
         Exit Function
     End If
@@ -956,6 +1028,7 @@ RB:
             SetBlocked("ROLLBACK_FAILED", "откат операции не удался — перезапустите WMS")
         End If
     End If
+    ProtectWindowClose()
     UndoEnd()
     gBusy = False
     ApplyOperation = "ERR-RB:" & em

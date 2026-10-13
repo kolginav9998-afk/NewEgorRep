@@ -41,6 +41,7 @@ QUICK = [("candidate", "tests/run_candidate.py", "Книга-кандидат (C
          ("final_core", "tests/run_final_core.py", "Final Core (Y)", False),
          ("m6", "tests/run_m6.py", "Приход авто, разделители заказов, обновление 0.6 (M, S, U)", False),
          ("legacy", "tests/run_legacy_transfer.py", "Перенос старой таблицы «Заказы» (L)", False),
+         ("prime", "tests/run_prime.py", "PRIME 0.8: обновление из текущей WMS, исправления, мастер обновления (PR)", False),
          ("insights", "tests/run_insights.py", "Закономерности (I)", False),
          ("toolbox", "tests/run_toolbox.py", "Инструменты (K)", False),
          ("e2e", "tests/run_e2e.py", "Сквозной тест (E)", False),

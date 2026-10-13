@@ -18,7 +18,8 @@ from wmslo import Office  # noqa: E402
 PROBES = {"TbCommon": ("TbInStrRev", ("a/b", "/")), "TbInventory": ("NumText", (1.5,)), "TbAnalytics": ("AnProbe", ()),
           "TbManager": ("MgrProbe", ()), "TbSearch": ("SearchProbe", ()), "TbDoctor": ("DoctorProbe", ()), "TbLabels": ("Code128C", ("00000201",)),
           "TbDocs": ("DocsProbe", ()), "TbArchive": ("FieldOf", ("a;b;c", 1)), "TbImporter": ("DateText", ("2026-09-01", "")),
-          "TbLauncher": ("ToolList", ()), "LtMain": ("LtInStrRev", ("a/b", "/"))}
+          "TbLauncher": ("ToolList", ()), "LtMain": ("LtInStrRev", ("a/b", "/")),
+          "UpMain": ("UpInStrRev", ("a/b", "/"))}
 
 
 def main():
@@ -74,7 +75,10 @@ def main():
                 if dialogs or "e" in res or res.get("r") in (None, ""):
                     bad.append(f"{os.path.basename(book)} {m}.{fn}: {res} {dialogs[:2]}")
             doc.setModified(False)
-            doc.close(True)
+            try:
+                doc.close(True)
+            except Exception as e:      # a dialog still open (e.g. a compile error shown at the load)
+                bad.append(f"{os.path.basename(book)}: книга не закрылась ({str(e)[:80]}) — открыт диалог?")
     finally:
         o.terminate()
     print("COMPILE", "OK" if not bad else "FAILED")

@@ -25,7 +25,8 @@ PROMOTE  the new book unchanged since BUILD, the old book unchanged since BUILD 
          copy) and closed: WMS 0.8 opens the new book, it becomes the working file in its folder, self-check, saved, opened
          again. The old book is never touched — it is the rollback.
 Reports in NEW_FOLDER: UPGRADE_REPORT.md (everything), UPGRADE_SUMMARY.txt (without the data of the warehouse: counts,
-hashes, PASS/FAIL — it may be sent to the developer), UPGRADE_STATE.json, progress.txt (the step being done, written first).
+hashes, PASS/FAIL — it may be sent to the developer), UPGRADE_STATE.json (and the same as «key=value» lines in
+UPGRADE_STATE.txt for the wizard WMS_UPGRADE.ods), progress.txt (the step being done, written first).
 
 0.6 (WMS-SYS-3): the book is upgraded in place, as release 0.7 did it, all or nothing (the old form of the call):
     python3 tools/upgrade.py BOOK [--check]
@@ -59,10 +60,17 @@ LOCK_FILE = "wms.lock"
 SELF_CHECK_OK = "САМОПРОВЕРКА WMS: ошибок 0"
 IX_FIRST_CAR = 22                   # WmsConfig.IX_CO_MATCH: the first lookup row of the vehicles in _IDX
 STATE_NAME = "UPGRADE_STATE.json"
+STATE_TEXT = "UPGRADE_STATE.txt"
 REPORT_NAME = "UPGRADE_REPORT.md"
 SUMMARY_NAME = "UPGRADE_SUMMARY.txt"
 PROGRESS_NAME = "progress.txt"
 CHUNK = 20000
+
+
+def test_fault(point):
+    """a fault of the tests (WMS_UPGRADE_TEST_FAULT=<point>); inert otherwise"""
+    if os.environ.get("WMS_UPGRADE_TEST_FAULT") == point:
+        raise RuntimeError(f"тестовый сбой в точке «{point}»")
 
 
 class StopRun(Exception):
@@ -441,6 +449,15 @@ def check_source(o, book):
         if jmax > facts["last_seq"]:
             stops.append(f"в журнале {jmax - facts['last_seq']} операций, которых нет в книге (seq {facts['last_seq'] + 1}..{jmax}) — откройте книгу "
                          "в своей версии WMS и нажмите «Восстановить»")
+        import journal_oracle
+        entries, jinfo = journal_oracle.read_journal(jdir)
+        foreign = sum(1 for e in entries if e["inst"] != facts["instance"])
+        if foreign:
+            stops.append(f"в журнале {foreign} строк другой WMS (другой INSTANCE_ID) — в папке {JOURNAL_DIR} смешаны журналы разных книг; "
+                         "оставьте в ней только журнал этой книги")
+        if jinfo.get("damaged"):
+            warns.append(f"повреждённых строк журнала: {jinfo['damaged']} (обычно оборванная последняя строка после сбоя; WMS их пропускает)")
+        facts["journal_lines"] = len(entries)
         if facts["last_seq"] > 0 and jmax < facts["last_seq"]:
             stops.append(f"журнал отстаёт от книги (в книге seq {facts['last_seq']}, в журнале {jmax}) — нужна папка {JOURNAL_DIR} этой книги")
         counts = {}
@@ -511,23 +528,28 @@ def compare_books(old, new, leg_expected):
         ro, co = used(so)
         rn, cn = used(sn)
         lr, lc = max(ro, rn), max(co, cn)
-        vo, fo = sheet_cells(so, lr, lc)
-        vn, fn = sheet_cells(sn, lr, lc)
         bad = 0
-        for r in range(lr + 1):
-            if fo[r] == fn[r] and (vo[r] == vn[r] or any(str(x).startswith("=") for x in fo[r])):
-                if vo[r] == vn[r]:
+        # chunk by chunk: a book of hundreds of thousands of rows is never held in memory at once
+        for r0 in range(0, lr + 1, CHUNK):
+            r1 = min(lr, r0 + CHUNK - 1)
+            ro_ = so.getCellRangeByPosition(0, r0, lc, r1)
+            rn_ = sn.getCellRangeByPosition(0, r0, lc, r1)
+            vo, fo = ro_.getDataArray(), ro_.getFormulaArray()
+            vn, fn = rn_.getDataArray(), rn_.getFormulaArray()
+            for i in range(r1 - r0 + 1):
+                if fo[i] == fn[i] and vo[i] == vn[i]:
                     continue
-            for c in range(lc + 1):
-                # a formula is compared as its text (a volatile formula such as NOW() may show another value at every load)
-                if str(fo[r][c]).startswith("="):
-                    differs = fo[r][c] != fn[r][c]
-                else:
-                    differs = vo[r][c] != vn[r][c] or fo[r][c] != fn[r][c]
-                if differs and not allowed_change(name, r, c):
-                    bad += 1
-                    if bad <= 3:
-                        P.append(f"«{name}» {col_name(c)}{r + 1}: было «{fo[r][c]}», стало «{fn[r][c]}»")
+                r = r0 + i
+                for c in range(lc + 1):
+                    # a formula is compared as its text (a volatile formula such as NOW() may show another value at every load)
+                    if str(fo[i][c]).startswith("="):
+                        differs = fo[i][c] != fn[i][c]
+                    else:
+                        differs = vo[i][c] != vn[i][c] or fo[i][c] != fn[i][c]
+                    if differs and not allowed_change(name, r, c):
+                        bad += 1
+                        if bad <= 3:
+                            P.append(f"«{name}» {col_name(c)}{r + 1}: было «{fo[i][c]}», стало «{fn[i][c]}»")
         if bad > 3:
             P.append(f"«{name}»: всего отличающихся ячеек {bad}")
         stat["sheets"] += 1
@@ -576,6 +598,17 @@ class State:
         tmp = self.path + ".tmp"
         json.dump(self.d, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
         os.replace(tmp, self.path)
+        # the same, flat «key=value» lines: the wizard WMS_UPGRADE.ods reads them (Basic has no JSON)
+        b, pr = self.d.get("build", {}), self.d.get("promote", {})
+        flat = {"kind": self.d.get("kind", ""), "source": self.d.get("source", ""), "started": self.d.get("started", ""),
+                "build_ok": "1" if b.get("ok") else "0", "build_time": b.get("time", ""), "build_result": b.get("result", ""),
+                "rehearsal": "1" if b.get("rehearsal") or self.d.get("kind") == "rehearsal" else "0",
+                "promote_ok": "1" if pr.get("ok") else "0", "promote_time": pr.get("time", ""), "promote_book": pr.get("book", ""),
+                "promote_report": pr.get("report", "")}
+        tmp = os.path.join(os.path.dirname(self.path), STATE_TEXT + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write("".join(f"{k}={str(v).replace(chr(10), ' ')}\n" for k, v in flat.items()))
+        os.replace(tmp, os.path.join(os.path.dirname(self.path), STATE_TEXT))
 
 
 def progress(folder, text):
@@ -598,9 +631,24 @@ def write_reports(folder, rep, summary):
         f.write("\n".join(summary) + "\n")
 
 
+def release_problem():
+    """"" when this folder holds what an upgrade puts into a book (the Basic modules src/basic, the guides docs/ of «Справка»);
+    otherwise what is missing — checked before anything is read or copied"""
+    miss = [f"src/basic/{m}.bas" for m in B.MODULES if not os.path.isfile(os.path.join(B.SRC, m + ".bas"))]
+    miss += [f"docs/{d}" for d in B.HELP_DOCS if not os.path.isfile(os.path.join(B.ROOT, "docs", d))]
+    if miss:
+        return (f"папка выпуска {B.ROOT} неполная — нет {', '.join(miss[:4])}{' …' if len(miss) > 4 else ''}. Распакуйте архив выпуска "
+                "целиком и запускайте обновление из него")
+    return ""
+
+
 def cmd_check(book, out=print):
     from wmslo import Office
     book = os.path.abspath(book)
+    why = release_problem()
+    if why:
+        out(f"СТОП — обновлять нельзя, пока не исправлено:\n- {why}")
+        return 1
     prof = tempfile.mkdtemp(prefix="wms_upgrade_")
     o = Office(f"upgchk{os.getpid()}", prof)
     try:
@@ -614,7 +662,7 @@ def cmd_check(book, out=print):
     if stops:
         out("\n".join(lines + ["СТОП — обновлять нельзя, пока не исправлено:"] + [f"- {s}" for s in stops]))
         return 1
-    out("\n".join(lines + ["Проверки пройдены: книгу можно обновить (build КНИГА --to НОВАЯ_ПАПКА). Книга не изменена."]))
+    out("\n".join(lines + ["Проверки пройдены: книгу можно обновить — дальше «СОБРАТЬ И СВЕРИТЬ» (build КНИГА --to НОВАЯ_ПАПКА). Книга не изменена."]))
     return 0
 
 
@@ -627,6 +675,10 @@ def cmd_build(book, to, rehearsal=False, out=print):
         return 1
     if os.path.isdir(to) and os.listdir(to):
         out(f"СТОП: папка {to} не пуста — обновление делается только в новую пустую папку")
+        return 1
+    why = release_problem()
+    if why:
+        out(f"СТОП: {why}")
         return 1
     os.makedirs(to, exist_ok=True)
     t0 = time.time()
@@ -666,6 +718,7 @@ def cmd_build(book, to, rehearsal=False, out=print):
             raise RuntimeError("копия книги не совпадает с книгой")
         if journal_hashes(jdst) != facts["journal_hashes"]:
             raise RuntimeError("копия журнала не совпадает с журналом")
+        test_fault("after_copy")
         rep += ["## 2. Копия", "", f"- `{target}` — SHA-256 совпадает с исходной книгой", f"- `{jdst}` — {len(facts['journal_hashes'])} файлов, "
                 "SHA-256 каждого совпадает", ""]
         # 3. the changes of 0.8 on the copy
@@ -679,6 +732,7 @@ def cmd_build(book, to, rehearsal=False, out=print):
         allow_insert_rows_all(target)
         stamp_and_views(o, target)
         rep += ["## 3. Изменения", ""] + [f"- {x}" for x in done] + [""]
+        test_fault("after_changes")
         # 4. verification: the old book against the new one, then WMS 0.8 on a working copy of the new one
         progress(to, "4/5 сверка: каждая ячейка старой и новой книги")
         oldd = o.load(book, macros=0, hidden=True, ReadOnly=True)
@@ -694,6 +748,7 @@ def cmd_build(book, to, rehearsal=False, out=print):
         summary.append(f"compare sheets={stat['sheets']} cells={stat['cells']} legacy_eis={stat.get('leg', 0)} problems={len(P)}")
         if P:
             raise RuntimeError("сверка старой и новой книги: " + "; ".join(P[:3]))
+        test_fault("before_wms")
         progress(to, "5/5 сверка: WMS 0.8 открывает новую книгу (рабочая копия проверки)")
         vdir = os.path.join(to, ".verify")
         os.makedirs(vdir)
@@ -772,7 +827,7 @@ def cmd_promote(to, out=print):
         out(f"СТОП: новая книга уже рабочая с {state.d['promote']['time']}")
         return 1
     if not b.get("ok"):
-        out("СТОП: нет успешной сборки новой книги в этой папке — сначала «СОЗДАТЬ В НОВОЙ ПАПКЕ» (build)")
+        out("СТОП: нет успешной сборки новой книги в этой папке — сначала «3. СОБРАТЬ И СВЕРИТЬ» (build)")
         return 1
     if b.get("rehearsal"):
         out("СТОП: это репетиция — её книга рабочей не делается. Для перехода соберите новую книгу в другой папке без --rehearsal")
@@ -811,13 +866,22 @@ def cmd_promote(to, out=print):
     finally:
         o.terminate()
         shutil.rmtree(prof, ignore_errors=True)
-    state.d["promote"] = dict(ok=True, time=now(), book=target, report=lr)
+    # the tools of this release next to the new working book (the toolbox reads the book of its folder)
+    tb_src, tb_dst = os.path.join(os.path.dirname(HERE), "WMS_TOOLBOX"), os.path.join(to, "WMS_TOOLBOX")
+    toolbox = ""
+    if os.path.isdir(tb_src) and not os.path.exists(tb_dst):
+        try:
+            shutil.copytree(tb_src, tb_dst)
+            toolbox = tb_dst
+        except OSError as e:
+            toolbox = f"не скопированы ({e}) — скопируйте папку WMS_TOOLBOX выпуска рядом с книгой вручную"
+    state.d["promote"] = dict(ok=True, time=now(), book=target, report=lr, toolbox=toolbox)
     state.save()
     with open(os.path.join(to, "ПЕРЕХОД_ВЫПОЛНЕН.txt"), "w", encoding="utf-8") as f:
         f.write(f"Переход выполнен {now()}.\n\nРабочая WMS теперь: {target}\nОткрывайте только её.\n\n"
                 f"Старая книга {src} не изменена — это откат. Для работы её больше не открывайте: операции в ней не попадут в новую WMS\n"
                 "(новая WMS при запуске предупредит, если в старой книге что-то провели).\n\n"
-                f"Сверка переноса в новой книге: {lr}\n")
+                f"Сверка переноса в новой книге: {lr}\n" + (f"\nИнструменты выпуска (WMS_TOOLBOX): {toolbox}\n" if toolbox else ""))
     with open(os.path.join(to, REPORT_NAME), "a", encoding="utf-8") as f:
         f.write(f"\n## СДЕЛАТЬ РАБОЧЕЙ\n\n- {now()}: новая книга зарегистрирована рабочей в своей папке, самопроверка без ошибок, сохранена и "
                 f"открыта снова.\n- Сверка переноса: {lr}\n")

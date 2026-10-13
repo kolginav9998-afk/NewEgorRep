@@ -377,11 +377,11 @@ def upgrade_060(rel):
         s.close()
     step("E11", "склад на выпуске 0.6.0 (папка выпуска собрана из исходников его commit, книга в работе: иной приход, выдача) обновлён "
                 f"tools/upgrade.py папки выпуска {wms_versions()['WMS_PRODUCT_VERSION']} (без репозитория): проверка и обновление — код 0, резервная копия *_preupgrade.ods; "
-                "WMS 0.7 открывает книгу там же — «работа разрешена», самопроверка без ошибок, остаток и журнал сохранены (оракул), "
+                f"WMS {wms_versions()['WMS_PRODUCT_VERSION']} открывает книгу там же — «работа разрешена», самопроверка без ошибок, остаток и журнал сохранены (оракул), "
                 "«Приход авто» работает (оракул машин)",
          r6.returncode == 0 and "ядро 0.6.0" in v0 and r_sp.startswith("OK") and r_is.startswith("OK") and rc1 == 0 and rc2 == 0
          and len(backups) == 1 and st.get("STATE") == "CLEAN" and f"ядро {wms_versions()['WMS_CORE_VERSION']}" in v1 and sc.startswith("САМОПРОВЕРКА WMS: ошибок 0")
-         and stock1 == 2.0 and not P and ca.startswith("OK:") and cd.startswith("OK:") and not PC and schema == "WMS-SYS-4",
+         and stock1 == 2.0 and not P and ca.startswith("OK:") and cd.startswith("OK:") and not PC and schema == "WMS-SYS-5",
          f"{r6.returncode} {(r6.stderr or r6.stdout)[-120:]}; {r_sp}; {r_is}; {rc1}/{rc2} {o2[-200:]}; {st.get('STATE')}; {sc[:50]}; "
          f"остаток {stock1}; {P[:3]}; {ca}; {cd}; {PC[:3]}")
 

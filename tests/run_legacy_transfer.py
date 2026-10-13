@@ -949,19 +949,19 @@ def l34_version():
     c = "L34"
     cd = cdir("l34")
     st = staging(os.path.join(cd, "staging.ods"), full_rows()[:3])
-    fake = os.path.join(cd, "WMS_SYS5.ods")
+    fake = os.path.join(cd, "WMS_SYS6.ods")
     shutil.copy2(candidate(), fake)
     o = maker()
     doc = o.load(fake, macros=0, hidden=True)
     doc.Sheets.getByName("_SYS").unprotect("wms")
-    doc.Sheets.getByName("_SYS").getCellByPosition(1, 0).setString("WMS-SYS-5")
+    doc.Sheets.getByName("_SYS").getCellByPosition(1, 0).setString("WMS-SYS-6")
     doc.Sheets.getByName("_SYS").protect("wms")
     doc.store()
     doc.close(True)
     rc, out, _ = engine("check", os.path.join(cd, "W1"), st, fake)
     F = [f for f in findings(os.path.join(cd, "W1")) if f["kind"] == "книга-кандидат"]
-    R.add(c, "книга-кандидат другой схемы (WMS-SYS-5) — понятный отказ: инструмент работает только со схемой WMS-SYS-4",
-          rc == 1 and F and "WMS-SYS-5" in F[0]["text"] and "WMS-SYS-4" in F[0]["text"], str(F[:1]))
+    R.add(c, "книга-кандидат другой схемы (WMS-SYS-6) — понятный отказ: инструмент работает только со схемой WMS-SYS-5",
+          rc == 1 and F and "WMS-SYS-6" in F[0]["text"] and "WMS-SYS-5" in F[0]["text"], str(F[:1]))
     rc2, out2, _ = engine("build", os.path.join(cd, "W1"), st, fake)
     R.add(c, "и создание тестовой WMS с такой книгой — отказ, копии нет", rc2 == 1 and not os.path.exists(os.path.join(cd, "W1", "test")), out2[-160:])
     src = os.path.join(cd, "src070")
@@ -973,8 +973,9 @@ def l34_version():
                        timeout=900, env=ENV, cwd=src)
     rc3, out3, _ = engine("check", os.path.join(cd, "W2"), st, os.path.join(cd, "C070.ods"))
     F3 = [f for f in findings(os.path.join(cd, "W2")) if f["kind"] == "книга-кандидат"] if rc3 in (0, 1) else []
-    R.add(c, "книга-кандидат выпуска 0.7.0 (собрана из исходников e65f606: схема та же, операций переноса нет) — отказ «не умеет переносить»",
-          b.returncode == 0 and rc3 == 1 and F3 and "0.7.0" in F3[0]["text"] and "не умеет переносить" in F3[0]["text"], f"{b.stderr[-200:]}; {F3[:1]}")
+    R.add(c, "книга-кандидат выпуска 0.7.0 (собрана из исходников e65f606: схема WMS-SYS-4, операций переноса нет) — понятный отказ: "
+             "инструмент работает только с книгой своего выпуска (WMS-SYS-5)",
+          b.returncode == 0 and rc3 == 1 and F3 and "WMS-SYS-4" in F3[0]["text"] and "WMS-SYS-5" in F3[0]["text"], f"{b.stderr[-200:]}; {F3[:1]}")
 
 
 # ================================================================ L35 the balance and the rules
