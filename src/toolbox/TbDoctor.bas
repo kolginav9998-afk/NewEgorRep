@@ -139,14 +139,14 @@ End Sub
 ' «Проверка перед работой» of WMS (WmsStatus.Protections)
 Private Sub CheckProtections(snap As String)
     Dim lines As Variant, i As Long, f As Variant, p As String, n As Long, svc As String
-    svc = "|_ORD|_RCV|_SPR|_ART|_RET|_ISS|_ADJ|_CAR|_IDX|_SYS|"
+    svc = "|_ORD|_RCV|_SPR|_ART|_RET|_ISS|_ADJ|_CAR|_LEG|_PACK|_IDX|_SYS|"
     lines = Split(Replace(TbReadText(snap & "manifest.csv"), Chr(13), ""), Chr(10))
     For i = 0 To UBound(lines)
         f = Split(lines(i), ";")
         If UBound(f) >= 3 Then
             If f(0) = "sheet" Then
                 n = n + 1
-                If f(2) <> "1" And f(1) <> "Получатели" Then p = p & IIf(p <> "", "; ", "") & "лист «" & f(1) & "» не защищён"
+                If f(2) <> "1" And f(1) <> "Получатели" And f(1) <> "Топология" Then p = p & IIf(p <> "", "; ", "") & "лист «" & f(1) & "» не защищён"
                 If InStr(svc, "|" & f(1) & "|") > 0 And f(3) = "1" Then p = p & IIf(p <> "", "; ", "") & "служебный лист «" & f(1) & "» не скрыт"
             End If
         End If
@@ -157,7 +157,7 @@ Private Sub CheckProtections(snap As String)
     End If
     If TbManifestValue(snap, "structure") <> "1" Then p = p & IIf(p <> "", "; ", "") & "структура книги не защищена"
     If p = "" Then
-        AddRow("OK", "защиты", "листов " & n & ": защищены (кроме «Получатели»), служебные скрыты, структура книги защищена", "")
+        AddRow("OK", "защиты", "листов " & n & ": защищены (кроме «Получатели» и «Топология»), служебные скрыты, структура книги защищена", "")
     Else
         AddRow("WARN", "защиты", p, "Ответственный за WMS восстанавливает защиту: Сервис → Защитить лист / Защитить структуру книги " _
             & "(пароль WMS). Защита не даёт изменить учёт мимо WMS; пока её нет, проверяйте изменения «Самопроверкой»")

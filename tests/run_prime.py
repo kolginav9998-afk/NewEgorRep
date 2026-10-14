@@ -648,6 +648,10 @@ def pr11_upgrade_072():
         rep = s.report()
         R.add(c, "WMS 0.8 в новой папке: «работа разрешена», ядро 0.8.0-prime, предупреждений о старой книге нет",
               state(s) == ("CLEAN", "") and "ядро 0.8.0-prime" in rep and "старой книге" not in rep, rep[:200])
+        pw = [ln.split("\t") for ln in s.B("PreWorkCheck", module="WmsStatus").split("\n")]
+        prot = [f for f in pw if len(f) >= 3 and f[1] == "защиты"]
+        R.add(c, "«Проверка перед работой» обновлённой книги: защиты без замечаний («Топология» и «Получатели» — листы ввода, не защищаются; "
+                 "_LEG и _PACK скрыты)", len(prot) == 1 and prot[0][0] == "OK", str(prot))
         osh = s.doc.Sheets.getByName("Заказы")
         r427 = [r for r in range(1, 40) if osh.getCellByPosition(21, r).getString() == "ЕИ-00000427"][0]
         lf = s.Rc("LegacyFixRow", r427, "100", "58", "А-1", TODAY, "пересчёт")
@@ -1553,6 +1557,58 @@ def pr23_many_places():
         oracle(c, s, "несколько мест у ЕИ — только место, учёт не тронут")
     finally:
         s.close()
+
+
+@case
+def pr24_parts_recovery():
+    """D-099 и сбой: фасовка EI_PACK, выдача, возврат, списание частями и процентом — сбой до журнала (откат) и после журнала
+    («Восстановить» доводит операцию из журнала, вместе с частями)"""
+    c = "PR24"
+    out = []
+    for op in ("EI_PACK", "ISSUE", "RETURN", "WRITE_OFF"):
+        for point in (2, 3):
+            p = new_wms(f"pr24_{op}_{point}")
+            s = ready(Session(p))
+            order(s, 1, "1", "Незамерзайка -30 (4 канистры)", qty="1")
+            receive(s, 1, "1", place="1-1-1")
+            ant = ords(s, 1)[21]
+            if op != "EI_PACK":
+                s.B("PackSet", ant, "4", "кан", "", module="WmsPack")
+            if op == "RETURN":
+                issue(s, 1, ant, "2 кан")
+            s.B("TestSetFault", point, 2)
+            if op == "EI_PACK":
+                r = s.B("PackSet", ant, "4", "кан", "", module="WmsPack")
+            elif op == "ISSUE":
+                r = issue(s, 1, ant, "1 кан")
+            elif op == "RETURN":
+                put(s, "Возврат", 1, B="1", F="1 кан", H=serial(), I="егр")
+                r = s.B("ReturnPostRow", 1, module="WmsReturn")
+            else:
+                put(s, "Корректировки", 1, B="Списание", C=ant, G="25%", K=serial(), L="разлили")
+                r = s.B("AdjustPostRow", 1, module="WmsAdjust")
+            s = reopen(p, s)
+            st1 = state(s)
+            if st1[1] == "TAIL":
+                s.B("ActionRecover")
+            P, inf, _ = s.adjcheck(0)
+            pk = list(s.doc.Sheets.getByName("_PACK").getCellRangeByPosition(0, ei_row(ant), 2, ei_row(ant)).getDataArray()[0])
+            bal = s.stock(ei_row(ant))
+            if point == 3:
+                # done from the journal: the balance in the unit of the document, the journal keeps how it was given
+                j = journal_last(s, op)
+                ok = {"EI_PACK": pk == [ant, "кан", 4.0] and bal == 1.0 and j.get("N") == "4",
+                      "ISSUE": bal == 0.75 and j.get("PARTS") == "1" and j.get("PART_UNIT") == "кан",
+                      "RETURN": bal == 0.75 and j.get("PARTS") == "1",
+                      "WRITE_OFF": bal == 0.75 and j.get("PCT") == "25"}[op]
+            else:
+                # rolled back: nothing of the operation is left
+                ok = {"EI_PACK": pk == ["", "", ""] and bal == 1.0, "ISSUE": bal == 1.0, "RETURN": bal == 0.5, "WRITE_OFF": bal == 1.0}[op]
+            out.append((op, point, r, st1, state(s), ok, bal, not P, P[:2]))
+            s.close()
+    R.add(c, "сбой фасовки и движений частями до журнала (операции нет, остаток и фасовка как были) и после журнала («Восстановить» "
+             "доводит её: остаток в единице документа, в журнале — части или процент): «работа разрешена», оракул без расхождений",
+          all(x[2] == "CRASH-SIM" and x[4] == ("CLEAN", "") and x[5] and x[7] for x in out), str(out))
 
 
 def main():
