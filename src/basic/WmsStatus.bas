@@ -226,6 +226,9 @@ Function PreWorkCheck() As String
         p & " — сообщите ответственному за WMS: защита не даёт изменить учёт мимо WMS"))
     k = WmsIssue.UnpostedCount()
     If k > 0 Then s = s & L("INFO", "непроведённые", "выдачи: " & k & " строк(и) без № — проверьте перед началом работы")
+    ' PRIME 0.8: the packing of the EIs (_PACK) — every row on its own EI, a positive number of parts
+    p = WmsPack.PackProblems()
+    If p <> "" Then s = s & L("WARN", "фасовка", p)
     ' M6: a vehicle that stays «на территории» since an earlier day — most likely УЕХАЛ was forgotten
     If gDoc.Sheets.hasByName(SH_CAR) And gState = "CLEAN" Then
         k = WmsCar.StaleOpen()

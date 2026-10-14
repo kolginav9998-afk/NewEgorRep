@@ -1443,6 +1443,37 @@ def pr22_parts():
         R.add(c, "«Количество в %» (F): 50% (1 шт) больше остатка — отказ с остатком в метрах; 10% = 0,2 шт; E и F вместе — «заполните что-то одно»",
               f1.startswith("ERR:") and "4,5 м" in f1 and f2.startswith("OK") and s.iss(10)[4] == 0.2 and f3.startswith("ERR:") and "что-то одно" in f3,
               f"{f1}; {f2}; {f3}")
+        # the receipt: «по документу 1 шт, в наименовании 4 канистры, факт 4» — asked: by the document and the packing, or as typed
+        order(s, 5, "5", "Незамерзайка зимняя, 4 канистры", qty="1")
+        put(s, "Заказы", 5, G=1.0)
+        rk1 = receive(s, 5, "4", place="1-3-1")
+        w1 = ords(s, 5)[21]
+        pk1 = list(s.doc.Sheets.getByName("_PACK").getCellRangeByPosition(0, ei_row(w1), 2, ei_row(w1)).getDataArray()[0])
+        order(s, 6, "6", "Незамерзайка зимняя, 4 канистры", qty="1")
+        put(s, "Заказы", 6, G=1.0)
+        s.U("TestUiAuto", 2)
+        rk2 = receive(s, 6, "4", place="1-3-1")
+        s.U("TestUiAuto", 1)
+        w2 = ords(s, 6)[21]
+        R.add(c, "приход «по документу 1 шт, факт 4, в наименовании 4 канистры» — вопрос: «Да» — проведено 1 шт и фасовка «в 1 шт — 4 кан»; "
+                 "«Нет» — 4 шт как есть, без фасовки",
+              rk1.startswith("OK") and s.stock(ei_row(w1)) == 1.0 and ords(s, 5)[5] == 1.0 and pk1 == [w1, "кан", 4.0]
+              and rk2.startswith("OK") and s.stock(ei_row(w2)) == 4.0 and s.B("PackLine", ei_row(w2), "шт", module="WmsPack") == "",
+              f"{rk1}; {s.stock(ei_row(w1))}; {pk1}; {rk2}; {s.stock(ei_row(w2))}")
+        # a whole number without a unit for an EI with a packing: asked — «1» is 1 шт (4 бан) or 1 бан
+        order(s, 4, "4", "Краска (4 банки)", qty="2")
+        receive(s, 4, "2", place="1-2-2")
+        paint = ords(s, 4)[21]
+        s.B("PackSet", paint, "4", "бан", "", module="WmsPack")
+        s.U("TestUiAuto", 2)
+        put(s, "Выдачи", 12, L=paint, E=1.0, H=serial(), I="егр")
+        q1 = s.I("IssuePostRow", 12)
+        s.U("TestUiAuto", 1)
+        put(s, "Выдачи", 13, L=paint, E=1.0, H=serial(), I="егр")
+        q2 = s.I("IssuePostRow", 13)
+        R.add(c, "у ЕИ с фасовкой целое число без единицы — вопрос «1 шт (4 бан) или 1 бан?»: «Нет» — 1 бан (0,25 шт), «Да» — 1 шт",
+              q1.startswith("OK") and s.iss(12)[4] == 0.25 and q2.startswith("OK") and s.iss(13)[4] == 1.0 and s.stock(ei_row(paint)) == 0.75,
+              f"{q1}; {s.iss(12)[4]}; {q2}; {s.iss(13)[4]}; {s.stock(ei_row(paint))}")
         # «Исправить» in parts, a return, a write-off and a count in parts
         fx = s.I("IssueFixRow", 7, prof, "2 м", "егр", serial())
         R.add(c, "«Исправить» выдачи частями: «2 м» вместо 1,5 м — 0,333 шт, остаток пересчитан", fx.startswith("OK") and s.iss(7)[4] == 0.333

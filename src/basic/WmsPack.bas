@@ -119,6 +119,17 @@ Function UnitMatch(ByVal w As String, ByVal u As String) As Boolean
     UnitMatch = (Left(sw, Len(su)) = su) Or (Left(su, Len(sw)) = sw)
 End Function
 
+' a unit word: it starts with a letter («кан», «м») or is the percent sign
+Private Function PkIsWord(w As String) As Boolean
+    Dim ch As String
+    ch = Left(w, 1)
+    PkIsWord = (ch = "%") Or (LCase(ch) <> UCase(ch))
+    ' «1e3» stays a number in the exponent form (refused by the strict parser), not «1 e3»
+    If (ch = "e" Or ch = "E") And Len(w) > 1 Then
+        If Mid(w, 2, 1) >= "0" And Mid(w, 2, 1) <= "9" Then PkIsWord = False
+    End If
+End Function
+
 ' «1,5 м» → the number «1,5» and the word «м»; «25%» → «25» and «%»; «2» → «2» and ""
 Private Sub PkSplit(ByVal s As String, ByRef sNum As String, ByRef sWord As String)
     Dim i As Long, ch As String
@@ -147,15 +158,12 @@ Function QtyEIText(ByVal s As String, n As Long, b As Double, sUnit As String, s
     info = ""
     gPkKind = ""
     PkSplit(s, sNum, sWord)
-    If sWord = "" Then
+    ' a number and a word after it («1 кан», «25%»); anything else — the strict parser of a quantity with its own messages
+    ' («-1»: отрицательное, «1/2»: дробь, «abc»: недопустимый символ)
+    If sWord = "" Or sNum = "" Or Not PkIsWord(sWord) Then
         st = ParseQtyText(s, q, msg)
         If st = 0 Then info = PlainInfo(n, q, sUnit)
         QtyEIText = st
-        Exit Function
-    End If
-    If sNum = "" Then
-        msg = "«" & Trim(s) & "»: сначала число, потом единица — например 1 кан или 1,5 м"
-        QtyEIText = 2
         Exit Function
     End If
     If sMode = "FACT" And Replace(Replace(Replace(sNum, "0", ""), ",", ""), ".", "") = "" Then
@@ -322,6 +330,7 @@ Private Function QtyPercent(pct As Double, n As Long, sUnit As String, sMode As 
         Exit Function
     End If
     info = WmsIssue.QtyText(pct) & "% от пришедших " & WmsIssue.QtyText(qIn) & " " & sUnit & " = " & WmsIssue.QtyText(q) & " " & sUnit
+    If pct < 1 Then info = info & " — проверьте: это меньше 1% (25% пишется как 25)"
     If PackOf(n, pu, pn) Then info = info & " (" & PartsText(PartsOf(q, pn), pu) & ")"
     gPkKind = "PCT"
     gPkPct = pct
@@ -563,6 +572,10 @@ Function PackEI() As String
             v(0) = WmsIssue.QtyText(gn)
             v(1) = gu
             info = "По наименованию похоже: в 1 " & d(SC_UNIT) & " — " & PartsText(gn, gu) & ". Проверьте и нажмите «Записать»."
+        ElseIf InStr(LCase(CStr(d(SC_CAT))), "метал") > 0 Then
+            v(0) = ""
+            v(1) = "м"
+            info = "Металл: укажите длину одного прутка, трубы или профиля в метрах (в 1 шт — 6 м) и выдавайте метрами: «1,5 м»."
         Else
             v(0) = ""
             v(1) = ""
@@ -589,6 +602,27 @@ Function PackEI() As String
     Else
         PackEI = res
         If Left(res, 5) = "SKIP:" Then gUiLastMsg = res
+    End If
+End Function
+
+' "" when every row of _PACK is the packing of its own EI with a positive number of parts and a name; otherwise what is wrong
+' (a row moved or typed by hand: WMS ignores it, «Фасовка ЕИ» writes it again)
+Function PackProblems() As String
+    Dim sh As Object, last As Long, a As String, s As String
+    sh = PackSheet()
+    If IsNull(sh) Then
+        PackProblems = "нет листа фасовки " & SH_PACK & " — книга не обновлена до 0.8"
+        Exit Function
+    End If
+    last = WmsOrders.LastRow(sh)
+    If last < 1 Then Exit Function
+    a = WmsView.ColRng(SH_PACK, PK_EI, 1, last)
+    s = WmsView.Eng("SUMPRODUCT((" & a & "<>"""")*(((" & a & "<>""" & EI_PREFIX & """&TEXT(ROW(" & a & ")-1;""00000000""))+NOT(ISNUMBER(" _
+        & WmsView.ColRng(SH_PACK, PK_N, 1, last) & "))+(" & WmsView.ColRng(SH_PACK, PK_UNIT, 1, last) & "=""""))>0))")
+    If s = "" Then
+        PackProblems = "фасовка не проверена (формула Calc)"
+    ElseIf Val(s) > 0 Then
+        PackProblems = "строк фасовки не на своём ЕИ или без числа частей: " & s & " — такие строки WMS не использует; задайте фасовку этих ЕИ заново кнопкой «Фасовка ЕИ»"
     End If
 End Function
 

@@ -728,6 +728,12 @@ Function IssuePostRow(r As Long) As String
         IssuePostRow = "ERR:" & why
         Exit Function
     End If
+    ' D-099: a whole number without a unit for an EI with a packing — «1» may mean 1 шт (4 кан) or 1 кан: asked before posting
+    why = PackQuestion(r)
+    If why <> "" Then
+        IssuePostRow = why
+        Exit Function
+    End If
     ' phase 2: one operation — the row, the registry balance and the counter change together
     k = CLng(SysNum(SK_NEXT_NO))
     s2 = Round3(mCstock - mCqty)
@@ -759,6 +765,36 @@ EH:
     On Error Resume Next
     mInHandler = False
     SetStatus(r, "Не проведено: " & Mid(IssuePostRow, 5))
+End Function
+
+' "" to post as checked; SKIP:… when the storekeeper cancelled; ERR:… when the parts do not fit. A whole number typed in E
+' for an EI with a packing: «Да» — the unit of the document, «Нет» — that many parts (the candidate is checked again)
+Private Function PackQuestion(r As Long) As String
+    Dim pu As String, pn As Double, c As Object, ans As Integer, q As Double, info As String, msg As String, u As String
+    If gPkKind <> "" Or mCqty < 1 Or Abs(mCqty - Int(mCqty)) > 0.0000001 Then Exit Function
+    If Not WmsPack.PackOf(mCn, pu, pn) Then Exit Function
+    c = IssuesSheet().getCellByPosition(IC_QTY, r)
+    If c.getType() = com.sun.star.table.CellContentType.TEXT Then
+        If Trim(c.getString()) <> QtyText(mCqty) Then Exit Function
+    End If
+    u = CStr(mCdata(SC_UNIT))
+    ans = WmsUi.UiAsk3(mCcanon & " «" & mCdata(SC_NAME) & "»: в 1 " & u & " — " & WmsPack.PartsText(pn, pu) & "." & Chr(10) & Chr(10) _
+        & "Выдать " & QtyText(mCqty) & " " & u & " (это " & WmsPack.PartsText(WmsPack.PartsOf(mCqty, pn), pu) & ")?" & Chr(10) & Chr(10) _
+        & "«Да» — " & QtyText(mCqty) & " " & u & ",   «Нет» — " & WmsPack.PartsText(mCqty, pu) & ",   «Отмена» — не проводить")
+    If ans = 2 Then
+        SetStatus(r, "Не проведено: выдача отменена — уточните количество: «" & QtyText(mCqty) & " " & u & "» или «" & WmsPack.PartsText(mCqty, pu) & "»")
+        PackQuestion = "SKIP:выдача не проведена — количество не подтверждено"
+        Exit Function
+    End If
+    If ans = 7 Then
+        If WmsPack.QtyEIText(QtyText(mCqty) & " " & pu, mCn, mCstock, u, "OUT", 0, q, info, msg) <> 0 Then
+            SetStatus(r, "Не проведено: " & msg)
+            PackQuestion = "ERR:" & msg
+            Exit Function
+        End If
+        mCqty = q
+        mCinfo = info
+    End If
 End Function
 
 ' the values of a posted row from the candidate: A key, product data, E F? H I L, balances P Q, status R

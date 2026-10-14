@@ -407,6 +407,7 @@ End Sub
 ' nothing done), BLOCKED:<why> or an ApplyOperation error (ERR-RB, ERR-CRITICAL). IsSystemResult tells them apart.
 Function ReceiptPostRow(r As Long) As String
     Dim why As String, kind As String, n As Long, canon As String, olid As Long, res As String, sKey As String, dup As String
+    Dim packN As Double, packU As String
     Dim fp As String, st As String, ctl As String, nodoc As Integer, own As String, sOrder As String, sArt As String, sSupplier As String
     WmsInit()
     If r < 1 Or r > MAX_SHEET_ROW Then
@@ -447,6 +448,11 @@ Function ReceiptPostRow(r As Long) As String
     If why <> "" Then
         SetCtl(r, "Не проведено: " & why)
         ReceiptPostRow = "ERR:" & why
+        Exit Function
+    End If
+    why = PackFromReceipt(r, packN, packU)
+    If why <> "" Then
+        ReceiptPostRow = why
         Exit Function
     End If
     ' the new EI and the new position number must be safe: a failure here is a problem of WMS, not of this row (D-059)
@@ -496,6 +502,11 @@ Function ReceiptPostRow(r As Long) As String
     PlanLockBits(SH_ORDERS, r, 0, OC_LAST, ORDER_LOCKS_POSTED)
     res = ApplyOperation(0, 0)
     If Left(res, 6) = "ERR-RB" Then SetCtl(r, "Не проведено: " & Mid(res, 8))
+    ' the packing of the new EI (its own operation EI_PACK): if it fails, the receipt stands and «Фасовка ЕИ» sets it later
+    If Left(res, 3) = "OK:" And packN > 0 Then
+        why = WmsPack.PackSet(canon, WmsIssue.QtyText(packN), packU, "по документу " & WmsIssue.QtyText(mDocQty) & " " & mUnit & ", факт частями")
+        If Left(why, 3) <> "OK:" Then gUiLastMsg = canon & ": фасовка не записана (" & why & ") — задайте её кнопкой «Фасовка ЕИ»"
+    End If
     ReceiptPostRow = res
     Exit Function
 EH:
@@ -503,6 +514,35 @@ EH:
     ReceiptPostRow = "ERR-SYS:внутренняя ошибка проверки строки: " & Error$ & " (код " & Err & ", строка " & Erl & ")"
     On Error Resume Next
     SetCtl(r, "Не проведено: " & Mid(ReceiptPostRow, 9))
+End Function
+
+' D-099: «в документе 1 шт, в наименовании 4 канистры, факт 4» — the fact was counted in parts. Asked: «Да» — the receipt by
+' the document (G) and the packing from the name, «Нет» — the fact as typed, «Отмена» — nothing. "" to go on, SKIP:… cancelled
+Private Function PackFromReceipt(r As Long, ByRef pn As Double, ByRef pu As String) As String
+    Dim gn As Double, gu As String, ans As Integer, u As String
+    pn = 0
+    pu = ""
+    If Not mHasDocQty Then Exit Function
+    If mDocQty <= 0 Or Abs(mFact - mDocQty) < 0.0000001 Then Exit Function
+    WmsPack.PackGuess(mName, gn, gu)
+    If gn <= 1 Then Exit Function
+    If Abs(mFact - WmsIssue.Round3(mDocQty * gn)) > 0.0000001 Then Exit Function
+    u = IIf(mUnit <> "", mUnit, "шт")
+    ans = WmsUi.UiAsk3("«" & mName & "»: по документу " & WmsIssue.QtyText(mDocQty) & " " & u & ", факт " & WmsIssue.QtyText(mFact) _
+        & " — а в наименовании " & WmsPack.PartsText(gn, gu) & " в 1 " & u & ": похоже, факт посчитан частями." & Chr(10) & Chr(10) _
+        & "Учёт ведётся по документу." & Chr(10) & "«Да» — провести " & WmsIssue.QtyText(mDocQty) & " " & u & " и записать фасовку «в 1 " & u & " — " _
+        & WmsPack.PartsText(gn, gu) & "» (выдавать можно по 1 " & gu & ")," & Chr(10) & "«Нет» — провести " & WmsIssue.QtyText(mFact) & " " & u _
+        & " как есть,   «Отмена» — не проводить")
+    If ans = 2 Then
+        SetCtl(r, "Не проведено: уточните факт (F) — по документу " & WmsIssue.QtyText(mDocQty) & " " & u & ", в 1 " & u & " — " & WmsPack.PartsText(gn, gu))
+        PackFromReceipt = "SKIP:приход не проведён — факт не подтверждён"
+        Exit Function
+    End If
+    If ans = 6 Then
+        mFact = mDocQty
+        pn = gn
+        pu = gu
+    End If
 End Function
 
 ' D-059: True when a result means that WMS itself failed, not the row: posting blocked (fail-closed) or busy, a rollback
