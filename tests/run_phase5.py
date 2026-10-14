@@ -1083,8 +1083,10 @@ def x26_protection_buttons_panel():
             code = ev[0].ScriptCode if ev else ""
             names[form.getByIndex(i).Label] = code.split("Standard.", 1)[1].split("?")[0] if "Standard." in code else code
         want = {"Проверить": "WmsSpecialUi.BtnSpcCheck", "Провести": "WmsSpecialUi.BtnSpcPost", "Исправить": "WmsSpecialUi.BtnSpcFix",
-                "Удалить": "WmsSpecialUi.BtnSpcDelete", "Разобрать": "WmsSpecialUi.BtnSpcIdentify", "Очистить": "WmsSpecialUi.BtnSpcClear"}
-        R.add(c, "6 кнопок листа «Иной приход» привязаны к макросам", names == want, str(names))
+                "Удалить": "WmsSpecialUi.BtnSpcDelete", "Разобрать": "WmsSpecialUi.BtnSpcIdentify", "Очистить": "WmsSpecialUi.BtnSpcClear",
+                # PRIME 0.8: the place for the goods by the map of the warehouse (no posting, no data)
+                "Куда положить?": "WmsMap.BtnWherePut"}
+        R.add(c, "6 кнопок листа «Иной приход» привязаны к макросам (и кнопка 0.8 «Куда положить?»)", names == want, str(names))
         line(s, 1, "Офис", "Стол", "2")
         post(s, 1)
         before = s.spc(1)
