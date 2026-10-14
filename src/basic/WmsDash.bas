@@ -19,23 +19,17 @@ Public Const DB_DAYS_HEAD = 35
 Public Const DB_DAYS = 37
 Public Const DB_DAYS_N = 14
 Public Const DB_FOOT = 52
-' hidden service cells of column O: the state code, the LAST_SEQ and the day of the last refresh
+' hidden service cells of column O: the state code, the LAST_SEQ, the day and the time (ms) of the last refresh
 Public Const DB_SVC_COL = 14
 Public Const DB_STALE_DAYS = 90
+' a page counted longer than this is not counted again by itself when it is shown (a big book): «Обновить» counts it
+Public Const DB_AUTO_MAX_MS = 5000
 
 Global gDbBusy As Boolean
 
 Private Sub PutRow(sh As Object, r As Long, c0 As Integer, v As Variant)
     sh.getCellRangeByPosition(c0, r, c0 + UBound(v), r).setDataArray(Array(v))
 End Sub
-
-Private Function WaitingStatus(s As String) As Boolean
-    WaitingStatus = (s = OS_WAITING Or s = OS_PARTIAL Or s = OS_OVERDUE Or s = OS_PARTIAL_OVERDUE)
-End Function
-
-Private Function DashPosted(v As Variant) As Boolean
-    DashPosted = (Left(CStr(v), Len(ST_POSTED)) = ST_POSTED)
-End Function
 
 ' «Обновить» on «Дашборд»
 Sub BtnDashRefresh(Optional oEvent As Variant)
@@ -44,213 +38,209 @@ Sub BtnDashRefresh(Optional oEvent As Variant)
     If Left(s, 4) = "ERR:" Then WmsUi.UiMessage(Mid(s, 5))
 End Sub
 
-' the page was shown: counted again when an operation was posted since the last count or the day changed
+' the page was shown: counted again when an operation was posted since the last count or the day changed — by itself only
+' while a count is quick; otherwise the line at the bottom says the figures are older than the last operations
 Sub OnDashFocus(Optional oEvent As Variant)
-    Dim sh As Object
+    Dim sh As Object, ms As Double
     On Error GoTo EH
     WmsInit()
     If gDbBusy Then Exit Sub
     sh = gDoc.Sheets.getByName(SH_DASH)
     If CStr(sh.getCellByPosition(DB_SVC_COL, 1).getValue()) = CStr(SysNum(SK_LAST_SEQ)) And sh.getCellByPosition(DB_SVC_COL, 2).getValue() = Today0() _
         And sh.getCellByPosition(DB_SVC_COL, 0).getString() = gState & "|" & gBlock Then Exit Sub
+    ms = sh.getCellByPosition(DB_SVC_COL, 3).getValue()
+    If ms > DB_AUTO_MAX_MS And sh.getCellByPosition(DB_SVC_COL, 2).getValue() = Today0() Then
+        sh = ViewOpen(SH_DASH)
+        If Left(sh.getCellByPosition(1, DB_FOOT).getString(), 1) <> "⚠" Then
+            sh.getCellByPosition(1, DB_FOOT).setString("⚠ После подсчёта были новые операции — цифры могут отставать. Книга большая (подсчёт около " _
+                & Format(ms / 1000, "0") & " с), поэтому страница не пересчитывается сама: нажмите «Обновить»")
+        End If
+        ViewDone(sh)
+        Exit Sub
+    End If
     DashRefresh()
 EH:
 End Sub
 
-' Counts and writes the page. OK:<what was counted, ms> or ERR:<why>
+' Counts and writes the page. OK:<what was counted, ms> or ERR:<why>. The sheets are counted by formulas of the Calc
+' engine (WmsView.Eng): only the rows they find — the positions we wait for, the issues of 30 days — are read by Basic.
 Function DashRefresh() As String
-    Dim sh As Object, today As Double, nextEI As Long, last As Long, r0 As Long, r1 As Long, i As Long, d As Variant, n As Long
-    Dim qty() As Double, lastMv() As Double, isLive() As Boolean, nEI As Long, nPos As Long, nReview As Long
-    Dim nWait As Long, nLate As Long, nToday As Long, nNoDate As Long, wKey() As Double, wRow() As Long, wIdx() As Long, nW As Long
+    Dim sh As Object, today As Double, nextEI As Long, last As Long, i As Long, k As Long, n As Long, s As String, a As Variant, nItems As Long
+    Dim nEI As Long, nPos As Long, nReview As Long, nWait As Long, nLate As Long, nToday As Long, nNoDate As Long, wKey(DB_LIST1_N - 1) As Double, nW As Long
     Dim rcvToday As Long, splToday As Long, issToday As Long, retToday As Long, adjToday As Long, carsIn As Long, carsArr As Long, carsDep As Long
-    Dim whoToday As String, nWho As Long, dayIss(13) As Long, dayRcv(13) As Long, k As Long, dt As Double, s As String, ok As Boolean
-    Dim top As Object, tName() As String, tCnt() As Double, tQty() As Double, tUnit() As String, nTop As Long, key As String, j As Long
-    Dim unposted As Long, balBad As Long, attention As Long, stKey() As Double, stIdx() As Long, nSt As Long
-    Dim osh As Object, rows(), mx As Double, ord As Variant, tIdx() As Long
+    Dim who As Object, nWho As Long, dayIss(13) As Long, dayRcv(13) As Long, dt As Double, key As Double, r As Long
+    Dim top As Object, tName() As String, tCnt() As Double, tQty() As Double, tUnit() As String, nTop As Long, j As Long, nm As String
+    Dim unposted As Long, attention As Long, recent() As Boolean, nSt As Long, stN(DB_LIST2_N - 1) As Long, nStShown As Long, stDay As Variant
+    Dim osh As Object, rows(), mx As Double, ord As Variant, tIdx() As Long, d As Variant, cond As String, dq As String, rg As String, rd As String
+    Dim row As Variant, cD As Integer, cW As Integer, cN As Integer, cU As Integer, cQ As Integer, nList As Long
     If gDbBusy Then Exit Function
     gDbBusy = True
     On Error GoTo EH
     sh = ViewOpen(SH_DASH)
+    gVwEngFail = ""
     today = Today0()
     nextEI = CLng(SysNum(SK_NEXT_EI))
-    ReDim qty(nextEI)
-    ReDim lastMv(nextEI)
-    ReDim isLive(nextEI)
     ' ---------------------------------------------------------------- «Наличие» (row = EI)
     last = nextEI - 1
-    For r0 = 1 To last Step CHECK_CHUNK_ROWS
-        r1 = r0 + CHECK_CHUNK_ROWS - 1
-        If r1 > last Then r1 = last
-        d = WmsIssue.StockSheet().getCellRangeByPosition(0, r0, SC_STATE, r1).getDataArray()
-        For i = 0 To r1 - r0
-            If CStr(d(i)(SC_EI)) <> "" Then
-                n = r0 + i
-                nEI = nEI + 1
-                If CStr(d(i)(SC_STATE)) <> EI_ST_STORNO Then
-                    isLive(n) = True
-                    If VarType(d(i)(SC_QTY)) = 5 Then qty(n) = d(i)(SC_QTY)
-                    If qty(n) > 0.0000005 Then nPos = nPos + 1
-                End If
-                If CStr(d(i)(SC_STATE)) = EI_ST_REVIEW Then nReview = nReview + 1
-            End If
-        Next i
-    Next r0
-    ' ---------------------------------------------------------------- «Заказы»: receipts and the positions we wait for
+    If last >= 1 Then
+        rg = ColRng(SH_STOCK, SC_QTY, 1, last)
+        rd = ColRng(SH_STOCK, SC_STATE, 1, last)
+        a = Split(Eng("SUMPRODUCT((" & ColRng(SH_STOCK, SC_EI, 1, last) & "<>"""")*1)&""|""&SUMPRODUCT(ISNUMBER(" & rg & ")*(" & rg & ">0.0000005)*(" _
+            & rd & "<>""" & EI_ST_STORNO & """))&""|""&SUMPRODUCT((" & rd & "=""" & EI_ST_REVIEW & """)*1)"), "|")
+        nEI = ListNum(a, 0)
+        nPos = ListNum(a, 1)
+        nReview = ListNum(a, 2)
+    End If
+    ' ---------------------------------------------------------------- «Заказы»: the positions we wait for, the receipts
     osh = gDoc.Sheets.getByName(SH_ORDERS)
     last = WmsOrders.LastRow(osh)
-    ReDim wKey(IIf(last > 0, last, 0))
-    ReDim wRow(IIf(last > 0, last, 0))
-    For r0 = 1 To last Step CHECK_CHUNK_ROWS
-        r1 = r0 + CHECK_CHUNK_ROWS - 1
-        If r1 > last Then r1 = last
-        d = osh.getCellRangeByPosition(0, r0, OC_CTL, r1).getDataArray()
-        For i = 0 To r1 - r0
-            s = CStr(d(i)(OC_EI))
-            If s <> "" Then
-                n = EiNo(s, nextEI)
-                dt = DateOf(d(i)(OC_RDATE))
-                If n > 0 And dt > lastMv(n) Then lastMv(n) = dt
-                If dt = today Then rcvToday = rcvToday + 1
-                k = CLng(today - dt)
-                If dt > 0 And k >= 0 And k <= 13 Then dayRcv(k) = dayRcv(k) + 1
-            End If
-            ' a position still expected: a partly received one (its first receipt is on its own row) or an order row without a
-            ' receipt — by its data, as the status of «Заказы» is computed (a row typed while the macros were off has no status yet)
-            ok = False
-            If s <> "" Then
-                ok = WaitingStatus(CStr(d(i)(OC_STATUS)))
-            ElseIf CStr(d(i)(OC_STATUS)) <> OS_CANCELLED And Left(CStr(d(i)(OC_CTL)), 5) <> "КОПИЯ" Then
-                ok = (CStr(d(i)(OC_ORDER)) <> "" Or CStr(d(i)(OC_NAME)) <> "" Or CStr(d(i)(OC_ORDQTY)) <> "")
-            End If
-            If ok Then
-                nWait = nWait + 1
-                dt = DateOf(d(i)(OC_EDATE))
-                If dt <= 0 Then
-                    nNoDate = nNoDate + 1
-                Else
-                    If dt < today Then nLate = nLate + 1
-                    If dt = today Then nToday = nToday + 1
-                    wKey(nW) = dt
-                    wRow(nW) = r0 + i
-                    nW = nW + 1
+    If last >= 1 Then
+        ' a position still expected: a partly received one (its first receipt is on its own row) or an order row without a
+        ' receipt — by its data, as the status of «Заказы» is computed (a row typed while the macros were off has no status yet)
+        rg = ColRng(SH_ORDERS, OC_STATUS, 1, last)
+        cond = "(((" & ColRng(SH_ORDERS, OC_EI, 1, last) & "<>"""")*((" & rg & "=""" & OS_WAITING & """)+(" & rg & "=""" & OS_PARTIAL & """)+(" & rg _
+            & "=""" & OS_OVERDUE & """)+(" & rg & "=""" & OS_PARTIAL_OVERDUE & """))+(" & ColRng(SH_ORDERS, OC_EI, 1, last) & "="""")*(" & rg & "<>""" _
+            & OS_CANCELLED & """)*(LEFT(" & ColRng(SH_ORDERS, OC_CTL, 1, last) & ";5)<>""КОПИЯ"")*(((" & ColRng(SH_ORDERS, OC_ORDER, 1, last) _
+            & "<>"""")+(" & ColRng(SH_ORDERS, OC_NAME, 1, last) & "<>"""")+(" & ColRng(SH_ORDERS, OC_ORDQTY, 1, last) & "<>""""))>0))>0)"
+        ' the expected date (a date, or a date typed as text): key = day × 2^20 + row
+        rg = ColRng(SH_ORDERS, OC_EDATE, 1, last)
+        dq = "IF(ISNUMBER(" & rg & ");INT(" & rg & ");IFERROR(DATEVALUE(" & rg & ");0))"
+        a = EngList("TEXTJOIN("";"";1;IF(" & cond & ";" & dq & "*1048576+ROW(" & rg & ")-1;""""))", nItems)
+        nList = DB_LIST1_N
+        For i = 0 To nItems - 1
+            key = CDbl(a(i))
+            dt = Int(key / 1048576)
+            nWait = nWait + 1
+            If dt <= 0 Then
+                nNoDate = nNoDate + 1
+            Else
+                If dt < today Then nLate = nLate + 1
+                If dt = today Then nToday = nToday + 1
+                If nW < nList Then
+                    TopPush(wKey, nW, nList, key)
+                ElseIf key < wKey(nList - 1) Then
+                    TopPush(wKey, nW, nList, key)
                 End If
             End If
         Next i
-    Next r0
+        ' the receipts of 14 days by day (today first)
+        rg = ColRng(SH_ORDERS, OC_RDATE, 1, last)
+        a = Split(Eng("TEXTJOIN("";"";0;FREQUENCY(IF((" & ColRng(SH_ORDERS, OC_EI, 1, last) & "<>"""")*" & DaysExpr(rg, today - 13, today) & ";" _
+            & Format(today, "0") & "-INT(" & rg & ");99);ROW($A$1:$A$14)-1))"), ";")
+        For k = 0 To 13
+            dayRcv(k) = dayRcv(k) + ListNum(a, k)
+        Next k
+        rcvToday = ListNum(a, 0)
+    End If
     ' ---------------------------------------------------------------- «Иной приход»
     If gDoc.Sheets.hasByName(SH_SPECIAL) Then
         last = WmsOrders.LastRow(gDoc.Sheets.getByName(SH_SPECIAL))
-        For r0 = 1 To last Step CHECK_CHUNK_ROWS
-            r1 = r0 + CHECK_CHUNK_ROWS - 1
-            If r1 > last Then r1 = last
-            d = gDoc.Sheets.getByName(SH_SPECIAL).getCellRangeByPosition(0, r0, XC_STATUS, r1).getDataArray()
-            For i = 0 To r1 - r0
-                If DashPosted(d(i)(XC_STATUS)) Then
-                    n = EiNo(CStr(d(i)(XC_EI)), nextEI)
-                    dt = DateOf(d(i)(XC_DATE))
-                    If n > 0 And dt > lastMv(n) Then lastMv(n) = dt
-                    If dt = today Then splToday = splToday + 1
-                    k = CLng(today - dt)
-                    If dt > 0 And k >= 0 And k <= 13 Then dayRcv(k) = dayRcv(k) + 1
-                End If
-            Next i
-        Next r0
+        If last >= 1 Then
+            rg = ColRng(SH_SPECIAL, XC_DATE, 1, last)
+            a = Split(Eng("TEXTJOIN("";"";0;FREQUENCY(IF(" & PostedExpr(ColRng(SH_SPECIAL, XC_STATUS, 1, last)) & "*" & DaysExpr(rg, today - 13, today) & ";" _
+                & Format(today, "0") & "-INT(" & rg & ");99);ROW($A$1:$A$14)-1))"), ";")
+            For k = 0 To 13
+                dayRcv(k) = dayRcv(k) + ListNum(a, k)
+            Next k
+            splToday = ListNum(a, 0)
+        End If
     End If
-    ' ---------------------------------------------------------------- «Выдачи»: today, 14 days, the most issued in 30 days
+    ' ---------------------------------------------------------------- «Выдачи» of 30 days: today, 14 days, the most issued
     top = New Collection
+    who = New Collection
     ReDim tName(1000)
     ReDim tCnt(1000)
     ReDim tQty(1000)
     ReDim tUnit(1000)
     last = WmsOrders.LastRow(WmsIssue.IssuesSheet())
-    For r0 = 1 To last Step CHECK_CHUNK_ROWS
-        r1 = r0 + CHECK_CHUNK_ROWS - 1
-        If r1 > last Then r1 = last
-        d = WmsIssue.IssuesSheet().getCellRangeByPosition(0, r0, IC_CTL, r1).getDataArray()
-        For i = 0 To r1 - r0
-            If DashPosted(d(i)(IC_CTL)) And VarType(d(i)(IC_NO)) = 5 Then
-                n = EiNo(CStr(d(i)(IC_EI)), nextEI)
-                dt = DateOf(d(i)(IC_DATE))
-                If n > 0 And dt > lastMv(n) Then lastMv(n) = dt
-                If dt = today Then
-                    issToday = issToday + 1
-                    s = "|" & LCase(Trim(CStr(d(i)(IC_WHO)))) & "|"
-                    If InStr(whoToday, s) = 0 Then
-                        whoToday = whoToday & s
-                        nWho = nWho + 1
-                    End If
+    If last >= 1 Then
+        rg = ColRng(SH_ISSUES, IC_DATE, 1, last)
+        a = EngList("TEXTJOIN("";"";1;IF(" & PostedExpr(ColRng(SH_ISSUES, IC_CTL, 1, last)) & "*ISNUMBER(" & ColRng(SH_ISSUES, IC_NO, 1, last) & ")*" _
+            & DaysExpr(rg, today - 29, today) & ";ROW(" & rg & ")-1;""""))", nItems)
+        d = RowsData(WmsIssue.IssuesSheet(), a, nItems, IC_WHO)
+        ' the columns copied once: a name of another module costs 15–25 µs on each use inside a loop
+        cD = IC_DATE
+        cW = IC_WHO
+        cN = IC_NAME
+        cU = IC_UNIT
+        cQ = IC_QTY
+        For i = 0 To nItems - 1
+            row = d(i)
+            k = CLng(today - Int(row(cD)))
+            If k <= 13 Then dayIss(k) = dayIss(k) + 1
+            If k = 0 Then
+                issToday = issToday + 1
+                If CollPut(who, 1, LCase(Trim(CStr(row(cW))))) Then nWho = nWho + 1
+            End If
+            nm = Trim(CStr(row(cN)))
+            If nm <> "" Then
+                j = CollGet(top, LCase(nm))
+                If j < 0 And nTop <= UBound(tName) Then
+                    j = nTop
+                    CollPut(top, j, LCase(nm))
+                    tName(j) = nm
+                    tUnit(j) = CStr(row(cU))
+                    nTop = nTop + 1
                 End If
-                k = CLng(today - dt)
-                If dt > 0 And k >= 0 And k <= 13 Then dayIss(k) = dayIss(k) + 1
-                If dt > 0 And k >= 0 And k < 30 And Trim(CStr(d(i)(IC_NAME))) <> "" Then
-                    key = LCase(Trim(CStr(d(i)(IC_NAME))))
-                    j = CollGet(top, key)
-                    If j < 0 And nTop <= UBound(tName) Then
-                        j = nTop
-                        CollPut(top, j, key)
-                        tName(j) = Trim(CStr(d(i)(IC_NAME)))
-                        tUnit(j) = CStr(d(i)(IC_UNIT))
-                        nTop = nTop + 1
-                    End If
-                    If j >= 0 Then
-                        tCnt(j) = tCnt(j) + 1
-                        If VarType(d(i)(IC_QTY)) = 5 Then tQty(j) = tQty(j) + d(i)(IC_QTY)
-                    End If
+                If j >= 0 Then
+                    tCnt(j) = tCnt(j) + 1
+                    If VarType(row(cQ)) = 5 Then tQty(j) = tQty(j) + row(cQ)
                 End If
             End If
         Next i
-    Next r0
-    ' ---------------------------------------------------------------- «Возврат», «Корректировки»
+    End If
+    ' ---------------------------------------------------------------- «Возврат», «Корректировки» today
     last = WmsOrders.LastRow(gDoc.Sheets.getByName(SH_RETURNS))
-    For r0 = 1 To last Step CHECK_CHUNK_ROWS
-        r1 = r0 + CHECK_CHUNK_ROWS - 1
-        If r1 > last Then r1 = last
-        d = gDoc.Sheets.getByName(SH_RETURNS).getCellRangeByPosition(0, r0, RC_CTL, r1).getDataArray()
-        For i = 0 To r1 - r0
-            If DashPosted(d(i)(RC_CTL)) Then
-                n = EiNo(CStr(d(i)(RC_EI)), nextEI)
-                dt = DateOf(d(i)(RC_DATE))
-                If n > 0 And dt > lastMv(n) Then lastMv(n) = dt
-                If dt = today Then retToday = retToday + 1
-            End If
-        Next i
-    Next r0
+    If last >= 1 Then retToday = ListNum(Array(Eng("SUMPRODUCT(" & PostedExpr(ColRng(SH_RETURNS, RC_CTL, 1, last)) & "*" _
+        & DaysExpr(ColRng(SH_RETURNS, RC_DATE, 1, last), today, today) & ")")), 0)
     If gDoc.Sheets.hasByName(SH_ADJUST) Then
         last = WmsOrders.LastRow(gDoc.Sheets.getByName(SH_ADJUST))
-        For r0 = 1 To last Step CHECK_CHUNK_ROWS
-            r1 = r0 + CHECK_CHUNK_ROWS - 1
-            If r1 > last Then r1 = last
-            d = gDoc.Sheets.getByName(SH_ADJUST).getCellRangeByPosition(0, r0, AC_CTL, r1).getDataArray()
-            For i = 0 To r1 - r0
-                If DashPosted(d(i)(AC_CTL)) Then
-                    n = EiNo(CStr(d(i)(AC_EI)), nextEI)
-                    dt = DateOf(d(i)(AC_DATE))
-                    If n > 0 And dt > lastMv(n) Then lastMv(n) = dt
-                    If dt = today Then adjToday = adjToday + 1
-                End If
-            Next i
-        Next r0
+        If last >= 1 Then adjToday = ListNum(Array(Eng("SUMPRODUCT(" & PostedExpr(ColRng(SH_ADJUST, AC_CTL, 1, last)) & "*" _
+            & DaysExpr(ColRng(SH_ADJUST, AC_DATE, 1, last), today, today) & ")")), 0)
     End If
     ' ---------------------------------------------------------------- «Приход авто»
     If gDoc.Sheets.hasByName(SH_CARS) Then
         last = WmsOrders.LastRow(gDoc.Sheets.getByName(SH_CARS))
         If last >= CAR_FIRST Then
-            d = gDoc.Sheets.getByName(SH_CARS).getCellRangeByPosition(0, CAR_FIRST, CC_STATUS, last).getDataArray()
-            For i = 0 To UBound(d)
-                s = CStr(d(i)(CC_STATUS))
-                If s = CS_OPEN Then carsIn = carsIn + 1
-                If DateOf(d(i)(CC_DATE)) = today And (s = CS_OPEN Or s = CS_GONE) Then
-                    carsArr = carsArr + 1
-                    If s = CS_GONE Then carsDep = carsDep + 1
-                End If
-            Next i
+            rg = ColRng(SH_CARS, CC_STATUS, CAR_FIRST, last)
+            rd = DaysExpr(ColRng(SH_CARS, CC_DATE, CAR_FIRST, last), today, today)
+            a = Split(Eng("SUMPRODUCT((" & rg & "=""" & CS_OPEN & """)*1)&""|""&SUMPRODUCT(" & rd & "*((" & rg & "=""" & CS_OPEN & """)+(" & rg & "=""" _
+                & CS_GONE & """)))&""|""&SUMPRODUCT(" & rd & "*(" & rg & "=""" & CS_GONE & """))"), "|")
+            carsIn = ListNum(a, 0)
+            carsArr = ListNum(a, 1)
+            carsDep = ListNum(a, 2)
         End If
     End If
-    ' ---------------------------------------------------------------- attention: unposted rows, «Требует разбора», balance ≠ movements
+    ' ---------------------------------------------------------------- without movement 90+ days: EIs with a balance that did not
+    ' move in 90 days (the oldest EIs first)
+    ReDim recent(nextEI)
+    MarkRecent(recent, nextEI, today - DB_STALE_DAYS + 1)
+    last = nextEI - 1
+    If last >= 1 Then
+        rg = ColRng(SH_STOCK, SC_QTY, 1, last)
+        a = EngList("TEXTJOIN("";"";1;IF(ISNUMBER(" & rg & ")*(" & rg & ">0.0000005)*(" & ColRng(SH_STOCK, SC_STATE, 1, last) & "<>""" & EI_ST_STORNO _
+            & """);ROW(" & rg & ")-1;""""))", nItems)
+        nList = DB_LIST2_N
+        For i = 0 To nItems - 1
+            n = CLng(a(i))
+            If Not recent(n) Then
+                nSt = nSt + 1
+                If nStShown < nList Then
+                    stN(nStShown) = n
+                    nStShown = nStShown + 1
+                End If
+            End If
+        Next i
+    End If
+    ' ---------------------------------------------------------------- attention: unposted rows, «Требует разбора»
     unposted = WmsIssue.UnpostedCount()
-    WmsLegacy.BalanceCheck()
-    balBad = gLgBad
-    attention = unposted + nReview + balBad
+    attention = unposted + nReview
+    If gVwEngFail <> "" Then
+        DashRefresh = "ERR:дашборд не обновлён: " & gVwEngFail
+        ViewDone(sh)
+        gDbBusy = False
+        Exit Function
+    End If
     ' ================================================================ the page
     sh.getCellRangeByPosition(1, DB_TILE_VAL, 12, DB_TILE_SUB).clearContents(1 + 2 + 4)
     sh.getCellByPosition(1, DB_TITLE_ROW).setString("Склад сегодня · " & Format(Now(), "DD.MM.YYYY"))
@@ -269,20 +259,13 @@ Function DashRefresh() As String
     PutTile(sh, 2, rcvToday + splToday, "по заказам " & NumText(rcvToday) & " · иной приход " & NumText(splToday))
     PutTile(sh, 3, issToday, "получателей " & NumText(nWho) & " · возвратов " & NumText(retToday) & " · корректировок " & NumText(adjToday))
     PutTile(sh, 4, carsIn, "приехало сегодня " & NumText(carsArr) & " · уехало " & NumText(carsDep))
-    PutTile(sh, 5, attention, IIf(attention = 0, "всё в порядке", "непроведённых " & NumText(unposted) & " · разбор " & NumText(nReview) _
-        & " · остаток ≠ движениям " & NumText(balBad)))
+    PutTile(sh, 5, attention, IIf(attention = 0, "всё в порядке", "непроведённых " & NumText(unposted) & " · требует разбора " & NumText(nReview)))
     ' list 1: the positions by the expected date (the earliest first)
-    ReDim wIdx(IIf(nW > 0, nW - 1, 0))
-    For i = 0 To nW - 1
-        wIdx(i) = i
-    Next i
-    SortIdx(wKey, wIdx, nW, False)
     sh.getCellRangeByPosition(1, DB_LIST1, 6, DB_LIST1 + DB_LIST1_N - 1).clearContents(1 + 2 + 4)
-    For i = 0 To DB_LIST1_N - 1
-        If i >= nW Then Exit For
-        r0 = wRow(wIdx(i))
-        ord = osh.getCellRangeByPosition(0, r0, OC_EDATE, r0).getDataArray()(0)
-        dt = wKey(wIdx(i))
+    For i = 0 To nW - 1
+        dt = Int(wKey(i) / 1048576)
+        r = CLng(wKey(i) - dt * 1048576)
+        ord = osh.getCellRangeByPosition(0, r, OC_EDATE, r).getDataArray()(0)
         k = CLng(today - dt)
         If k > 0 Then
             s = "просрочено " & k & " дн."
@@ -313,25 +296,15 @@ Function DashRefresh() As String
     Else
         sh.getCellByPosition(1, DB_LIST2).setString("за 30 дней выдач нет")
     End If
-    ' list 4: what lies without movement (a balance, the last movement longest ago; 90 days and more)
-    ReDim stKey(nextEI)
-    ReDim stIdx(nextEI)
-    For n = 1 To nextEI - 1
-        If isLive(n) And qty(n) > 0.0000005 And lastMv(n) > 0 And today - lastMv(n) >= DB_STALE_DAYS Then
-            stKey(n) = lastMv(n)
-            stIdx(nSt) = n
-            nSt = nSt + 1
-        End If
-    Next n
-    SortIdx(stKey, stIdx, nSt, False)
-    For i = 0 To DB_LIST2_N - 1
-        If i >= nSt Then Exit For
-        n = stIdx(i)
-        d = WmsIssue.StockSheet().getCellRangeByPosition(0, n, SC_UNIT, n).getDataArray()(0)
-        PutRow(sh, DB_LIST2 + i, 7, Array(CStr(d(SC_EI)), CStr(d(SC_NAME)), "", "", qty(n), CLng(today - lastMv(n))))
+    ' list 4: what lies without movement (the oldest EIs first; the days since their last movement on the sheets)
+    stDay = LastMoveDays(stN, nStShown)
+    For i = 0 To nStShown - 1
+        n = stN(i)
+        d = WmsIssue.StockSheet().getCellRangeByPosition(0, n, SC_QTY, n).getDataArray()(0)
+        PutRow(sh, DB_LIST2 + i, 7, Array(CStr(d(SC_EI)), CStr(d(SC_NAME)), "", "", d(SC_QTY), IIf(stDay(i) > 0, CLng(today - stDay(i)), "нет движений")))
     Next i
     If nSt = 0 Then sh.getCellByPosition(8, DB_LIST2).setString("ЕИ без движения " & DB_STALE_DAYS & "+ дней нет")
-    sh.getCellByPosition(7, DB_LIST2_HEAD).setString("Лежит без движения " & DB_STALE_DAYS & "+ дней" & IIf(nSt > 0, " — ЕИ: " & NumText(nSt), ""))
+    sh.getCellByPosition(7, DB_LIST2_HEAD).setString("Лежит без движения " & DB_STALE_DAYS & "+ дней" & IIf(nSt > 0, " — ЕИ: " & NumText(nSt) & ", старые первыми", ""))
     ' the last 14 days: today first
     mx = 1
     For k = 0 To 13
@@ -347,6 +320,7 @@ Function DashRefresh() As String
     sh.getCellRangeByPosition(1, DB_DAYS, 12, DB_DAYS + 13).setDataArray(rows)
     sh.getCellByPosition(DB_SVC_COL, 1).setValue(SysNum(SK_LAST_SEQ))
     sh.getCellByPosition(DB_SVC_COL, 2).setValue(today)
+    sh.getCellByPosition(DB_SVC_COL, 3).setValue(ViewMs())
     sh.getCellByPosition(1, DB_FOOT).setString("Обновлено " & Format(Now(), "DD.MM.YYYY HH:MM") & " за " & ViewMs() & " мс · считается по листам книги при " _
         & "открытии страницы и после каждой операции; страница ничего не изменяет")
     ViewDone(sh)

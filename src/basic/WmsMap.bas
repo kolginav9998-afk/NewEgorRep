@@ -11,6 +11,8 @@ Public Const MP_INFO_ROW = 4
 Public Const MP_SUM_ROW = 3
 Public Const MP_LEGEND_ROW = 5
 Public Const MP_MAX_PLACES = 20000
+' the hidden sorted table of the texts of the places (MapKeys): text | number of the place (1-based)
+Public Const MP_KEY_COL = 1100
 
 Global gMpLayer As String
 Global gMpN As Long
@@ -28,6 +30,11 @@ End Function
 
 ' a place of the topology: the whole text is three numbers (5-12-3); a number alone (a label of a row) is not a place
 Function IsPlaceText(s As String) As Boolean
+    IsPlaceText = (PlaceTextKey(s) <> "")
+End Function
+
+' the key of a place of the topology (5-12-3), "" when the text is not a place
+Function PlaceTextKey(ByVal s As String) As String
     Dim k As String, a As Variant, i As Integer, nNum As Integer
     s = Trim(s)
     If Len(s) < 5 Or Len(s) > 20 Then Exit Function
@@ -38,7 +45,7 @@ Function IsPlaceText(s As String) As Boolean
     For i = 0 To 2
         If IsNumeric(a(i)) Then nNum = nNum + 1
     Next i
-    IsPlaceText = (nNum >= 2)
+    If nNum >= 2 Then PlaceTextKey = k
 End Function
 
 ' ================================================================ buttons
@@ -72,7 +79,7 @@ End Sub
 
 ' «Не на карте»: the EIs with a balance whose place is not a place of the map — on «Поиск» (their card by a double click)
 Sub BtnMapOff(Optional oEvent As Variant)
-    Dim rows() As Variant, i As Long, n As Long, s As String
+    Dim rows() As Variant, i As Long, n As Long, s As String, k As Long, st As Variant, why As String
     WmsInit()
     If gMpN = 0 Or gMpStatSeq <> SysNum(SK_LAST_SEQ) Then MapBuild(IIf(gMpLayer <> "", gMpLayer, "OCC"))
     If gMpN = 0 Then
@@ -84,8 +91,14 @@ Sub BtnMapOff(Optional oEvent As Variant)
     If n > 0 Then
         ReDim rows(n - 1)
         For i = 0 To n - 1
-            rows(i) = Array(SH_STOCK, gMpOff(i)(6) + 1, gMpOff(i)(0), gMpOff(i)(1), gMpOff(i)(2), gMpOff(i)(3), gMpOff(i)(4), gMpOff(i)(5), "", _
-                SH_STOCK, gMpOff(i)(6), gMpOff(i)(0))
+            k = gMpOff(i)(0)
+            st = WmsIssue.StockSheet().getCellRangeByPosition(0, k, SC_PLACE, k).getDataArray()(0)
+            Select Case gMpOff(i)(1)
+            Case 0: why = "место не указано"
+            Case -3: why = "место без яруса — уточните «ряд-секция-ярус»"
+            Case Else: why = "такого места нет на карте"
+            End Select
+            rows(i) = Array(SH_STOCK, k + 1, CStr(st(SC_EI)), CStr(st(SC_NAME)), st(SC_QTY), CStr(st(SC_UNIT)), CStr(st(SC_PLACE)), why, "", SH_STOCK, k, CStr(st(SC_EI)))
         Next i
     End If
     s = WmsFind.ShowRows("ЕИ с остатком не на карте: " & NumText(gMpNOff), IIf(gMpNOff > 0, "Место не совпадает ни с одним местом карты — " _
@@ -237,6 +250,8 @@ Global gMpAtt() As Integer
 Global gMpOff() As Variant
 Global gMpNOff As Long
 Global gMpNoLvl As Long
+Global gMpKeyN As Long
+Global gMpPlaceOf As Variant
 
 ' builds (or recolours) the map in the layer sLayer (OCC, ISS, STALE, ATT, FREE). OK:<counts> / ERR:<why>
 Function MapBuild(sLayer As String, Optional bForce As Variant) As String
@@ -254,7 +269,16 @@ Function MapBuild(sLayer As String, Optional bForce As Variant) As String
         MapBuild = "ERR:" & why
         Exit Function
     End If
-    If force Or gMpStatSeq <> SysNum(SK_LAST_SEQ) Or UBound(gMpOcc) < gMpN Then MapStats()
+    If force Or gMpStatSeq <> SysNum(SK_LAST_SEQ) Or UBound(gMpOcc) < gMpN Then
+        MapStats()
+        If gVwEngFail <> "" Then
+            gMpStatSeq = -1
+            MapFail(mp, "карта не посчитана: " & gVwEngFail)
+            gMpBusy = False
+            MapBuild = "ERR:карта не посчитана: " & gVwEngFail
+            Exit Function
+        End If
+    End If
     MapPaint(mp, sLayer)
     For i = 0 To gMpN - 1
         If gMpOcc(i) > 0 Then nOcc = nOcc + 1 Else nFree = nFree + 1
@@ -264,8 +288,8 @@ Function MapBuild(sLayer As String, Optional bForce As Variant) As String
     Select Case sLayer
     Case "OCC": lbl = "Занятость: сколько ЕИ с остатком лежит на месте"
     Case "ISS": lbl = "Выдачи за 30 дней: сколько раз выдавали ЕИ, что лежат на месте"
-    Case "STALE": lbl = "Без движения: сколько дней не двигался самый «старый» ЕИ места"
-    Case "ATT": lbl = "Требует внимания: «Требует разбора» — жёлтый, остаток ≠ движениям — красный"
+    Case "STALE": lbl = "Без движения: сколько ЕИ места не двигались 90 дней и больше"
+    Case "ATT": lbl = "Требует внимания: места, где лежит ЕИ «Требует разбора»"
     Case Else: lbl = "Свободные места: зелёные — пустые, серые — занятые"
     End Select
     mp.getCellByPosition(0, MP_SUM_ROW).setString(lbl & "   ·   мест " & NumText(gMpN) & ", занято " & NumText(nOcc) & " (" _
@@ -289,6 +313,7 @@ End Function
 Private Function MapLayout(mp As Object, force As Boolean) As String
     Dim topo As Object, cur As Object, r0 As Long, c0 As Long, r1 As Long, c1 As Long, d As Variant, r As Long, c As Long, pk As String
     Dim sig As String, nPl As Long, oldLast As Long, dest As New com.sun.star.table.CellAddress, srcA As New com.sun.star.table.CellRangeAddress
+    Dim nTx As Long, pkR() As Long, pkC() As Long, pkK() As String, i As Long
     topo = TopoSheet()
     cur = topo.createCursor()
     cur.gotoStartOfUsedArea(False)
@@ -306,10 +331,27 @@ Private Function MapLayout(mp As Object, force As Boolean) As String
     For r = 0 To UBound(d)
         For c = 0 To UBound(d(r))
             If VarType(d(r)(c)) = 8 Then
-                If IsPlaceText(CStr(d(r)(c))) Then
+                nTx = nTx + 1
+                sig = sig & r & "," & c & "=" & d(r)(c) & ";"
+                If Len(sig) > 60000 Then sig = CStr(Len(sig)) & Right(sig, 200)
+            End If
+        Next c
+    Next r
+    sig = r0 & ":" & c0 & ":" & r1 & ":" & c1 & ":" & nTx & ":" & sig
+    If Not force And sig = gMpSig And gMpN > 0 Then Exit Function
+    ' the places: the key of each text read once
+    ReDim pkR(nTx)
+    ReDim pkC(nTx)
+    ReDim pkK(nTx)
+    For r = 0 To UBound(d)
+        For c = 0 To UBound(d(r))
+            If VarType(d(r)(c)) = 8 Then
+                pk = PlaceTextKey(CStr(d(r)(c)))
+                If pk <> "" Then
+                    pkR(nPl) = r
+                    pkC(nPl) = c
+                    pkK(nPl) = pk
                     nPl = nPl + 1
-                    sig = sig & r & "," & c & "=" & d(r)(c) & ";"
-                    If Len(sig) > 60000 Then sig = CStr(Len(sig)) & Right(sig, 200)
                 End If
             End If
         Next c
@@ -320,8 +362,6 @@ Private Function MapLayout(mp As Object, force As Boolean) As String
             & "или нажмите «Загрузить топологию…» и выберите её файл"
         Exit Function
     End If
-    sig = r0 & ":" & c0 & ":" & r1 & ":" & c1 & ":" & nPl & ":" & sig
-    If Not force And sig = gMpSig And gMpN > 0 Then Exit Function
     ' the previous map: its rows removed whole (contents, colours, merged cells, the hidden grid)
     oldLast = WmsOrders.LastRow(mp)
     If oldLast >= MP_TOP Then mp.getRows().removeByIndex(MP_TOP, oldLast - MP_TOP + 1)
@@ -330,19 +370,13 @@ Private Function MapLayout(mp As Object, force As Boolean) As String
     ReDim gMpKey(nPl)
     ReDim gMpRow(nPl)
     ReDim gMpCol(nPl)
-    For r = 0 To UBound(d)
-        For c = 0 To UBound(d(r))
-            If VarType(d(r)(c)) = 8 Then
-                If IsPlaceText(CStr(d(r)(c))) Then
-                    gMpKey(gMpN) = PlaceKey(CStr(d(r)(c)))
-                    gMpRow(gMpN) = MP_TOP + r
-                    gMpCol(gMpN) = c
-                    CollPut(gMpCells, gMpN, (MP_TOP + r) & ":" & c)
-                    gMpN = gMpN + 1
-                End If
-            End If
-        Next c
-    Next r
+    For i = 0 To nPl - 1
+        gMpKey(gMpN) = pkK(i)
+        gMpRow(gMpN) = MP_TOP + pkR(i)
+        gMpCol(gMpN) = pkC(i)
+        CollPut(gMpCells, gMpN, (MP_TOP + pkR(i)) & ":" & pkC(i))
+        gMpN = gMpN + 1
+    Next i
     dest.Sheet = SheetIndex(SH_MAP)
     dest.Column = 0
     dest.Row = MP_TOP
@@ -363,9 +397,59 @@ Private Function MapLayout(mp As Object, force As Boolean) As String
     For c = MP_GRID_COL To MP_GRID_COL + gMpCols - 1
         mp.getColumns().getByIndex(c).IsVisible = False
     Next c
+    MapKeys(mp, d)
     gMpSig = sig
     gMpStatSeq = -1
 End Function
+
+' The sorted table of the texts of the places in hidden columns of the map: the key of each place (5-12-3) and its text in
+' «Топология» when it is written otherwise (05-12-03), with the number of the place (1-based; a key met twice — the first
+' place). MapStats finds the place of every EI in it by a binary search of the Calc engine (LOOKUP); the table is sorted by
+' Calc itself, so its order is the one LOOKUP expects.
+Private Sub MapKeys(mp As Object, d As Variant)
+    Dim first As Object, seen As Object, keys() As Variant, n As Long, i As Long, raw As String, j As Long, um As Object, rng As Object
+    Dim desc As Variant, k As Integer, sortF(0) As New com.sun.star.table.TableSortField
+    first = New Collection
+    seen = New Collection
+    ReDim keys(2 * gMpN)
+    For i = 0 To gMpN - 1
+        j = CollGet(first, gMpKey(i))
+        If j < 0 Then
+            j = i
+            CollPut(first, i, gMpKey(i))
+        End If
+        If CollPut(seen, 1, gMpKey(i)) Then
+            keys(n) = Array(gMpKey(i), j + 1)
+            n = n + 1
+        End If
+        raw = Trim(CStr(d(gMpRow(i) - MP_TOP)(gMpCol(i))))
+        If CollPut(seen, 1, raw) Then
+            keys(n) = Array(raw, j + 1)
+            n = n + 1
+        End If
+    Next i
+    gMpKeyN = 0
+    If n = 0 Then Exit Sub
+    ReDim Preserve keys(n - 1)
+    um = gDoc.getUndoManager()
+    um.lock()
+    mp.getCellRangeByPosition(MP_KEY_COL, 0, MP_KEY_COL + 1, MP_TOP).clearContents(1 + 2 + 4)
+    rng = mp.getCellRangeByPosition(MP_KEY_COL, 0, MP_KEY_COL + 1, n - 1)
+    rng.setDataArray(keys)
+    sortF(0).Field = 0
+    sortF(0).IsAscending = True
+    sortF(0).IsCaseSensitive = False
+    desc = rng.createSortDescriptor()
+    For k = 0 To UBound(desc)
+        If desc(k).Name = "SortFields" Then desc(k).Value = sortF
+        If desc(k).Name = "ContainsHeader" Then desc(k).Value = False
+    Next k
+    rng.sort(desc)
+    um.unlock()
+    mp.getColumns().getByIndex(MP_KEY_COL).IsVisible = False
+    mp.getColumns().getByIndex(MP_KEY_COL + 1).IsVisible = False
+    gMpKeyN = n
+End Sub
 
 ' the colours of the map in the layer: a place whose code in the hidden grid is k gets the style MAP_<layer>_k
 Private Sub MapConditions(mp As Object, sLayer As String)
@@ -429,57 +513,126 @@ Private Sub EnsureMapStyles()
     If opened Then gDoc.protect(PROTECT_PWD)
 End Sub
 
-' the warehouse per place: EIs with a balance, issues in 30 days, the oldest movement, the checks; the EIs not on the map
+' The warehouse per place: EIs with a balance, issues in 30 days, EIs without movement 90+ days, «Требует разбора»; the EIs
+' not on the map. The Calc engine finds the place of every EI (a binary search in the table of MapKeys) and the rows that
+' matter; Basic reads only the EIs whose place is written otherwise (PlaceKey) and the issues of 30 days.
 Private Sub MapStats()
-    Dim nextEI As Long, today As Double, lastMv() As Double, iss30() As Long, ex() As Double, mv() As Double, src() As Integer, places As Object
-    Dim r As Long, r1x As Long, i As Long, n As Long, st As Variant, pk As String, idx As Long
+    Dim nextEI As Long, today As Double, last As Long, rgQ As String, rgF As String, cond As String, keyR As String, numR As String, lk As String
+    Dim pl As Variant, nPl As Long, a As Variant, nItems As Long, d As Variant, i As Long, n As Long, k As Long, v As String, pk As String, idx As Long
+    Dim places As Object, cache As Object, recent() As Boolean, occ() As Long, iss() As Long, stale() As Double, att() As Integer, eis() As String
+    Dim nOff As Long, off() As Variant, offRows() As Long, noLvl As Long, cE As Integer
     nextEI = CLng(SysNum(SK_NEXT_EI))
     today = Today0()
-    places = New Collection
-    For i = 0 To gMpN - 1
-        CollPut(places, i, gMpKey(i))
-    Next i
-    ReDim gMpOcc(gMpN)
-    ReDim gMpIss(gMpN)
-    ReDim gMpStale(gMpN)
-    ReDim gMpAtt(gMpN)
-    ReDim gMpEIs(gMpN)
-    gMpNOff = 0
-    gMpNoLvl = 0
-    ReDim gMpOff(IIf(nextEI > 1, nextEI - 1, 1))
-    CollectMoves(nextEI, today, lastMv, iss30)
-    WmsLegacy.ExpectedBalances(ex, mv, src, nextEI)
-    For r = 1 To nextEI - 1 Step CHECK_CHUNK_ROWS
-        r1x = r + CHECK_CHUNK_ROWS - 1
-        If r1x > nextEI - 1 Then r1x = nextEI - 1
-        st = WmsIssue.StockSheet().getCellRangeByPosition(0, r, SC_STATE, r1x).getDataArray()
-        For i = 0 To r1x - r
-            n = r + i
-            If CStr(st(i)(SC_EI)) <> "" And CStr(st(i)(SC_STATE)) <> EI_ST_STORNO And VarType(st(i)(SC_QTY)) = 5 Then
-                If st(i)(SC_QTY) > 0.0000005 Then
-                    pk = PlaceKey(CStr(st(i)(SC_PLACE)))
-                    idx = -1
-                    If pk <> "" Then idx = CollGet(places, pk)
-                    If idx >= 0 Then
-                        gMpOcc(idx) = gMpOcc(idx) + 1
-                        gMpIss(idx) = gMpIss(idx) + iss30(n)
-                        If lastMv(n) > 0 And today - lastMv(n) > gMpStale(idx) Then gMpStale(idx) = today - lastMv(n)
-                        If CStr(st(i)(SC_STATE)) = EI_ST_REVIEW And gMpAtt(idx) < 1 Then gMpAtt(idx) = 1
-                        If src(n) <> 0 And Abs(WmsIssue.Round3(st(i)(SC_QTY) - ex(n))) > 0.0000005 Then gMpAtt(idx) = 2
-                        If Len(gMpEIs(idx)) < 4000 Then gMpEIs(idx) = gMpEIs(idx) & n & ","
-                    Else
-                        gMpOff(gMpNOff) = Array(CStr(st(i)(SC_EI)), CStr(st(i)(SC_NAME)), st(i)(SC_QTY), CStr(st(i)(SC_UNIT)), CStr(st(i)(SC_PLACE)), _
-                            IIf(Trim(CStr(st(i)(SC_PLACE))) = "", "место не указано", IIf(pk <> "" And UBound(Split(pk, "-")) = 1, _
-                            "место без яруса — уточните «ряд-секция-ярус»", "такого места нет на карте")), n)
-                        If pk <> "" And UBound(Split(pk, "-")) = 1 Then gMpNoLvl = gMpNoLvl + 1
-                        gMpNOff = gMpNOff + 1
-                    End If
+    ReDim occ(gMpN)
+    ReDim iss(gMpN)
+    ReDim stale(gMpN)
+    ReDim att(gMpN)
+    ReDim eis(gMpN)
+    ReDim off(IIf(nextEI > 1, nextEI - 1, 1))
+    gVwEngFail = ""
+    last = nextEI - 1
+    If last >= 1 And gMpKeyN > 0 Then
+        rgQ = ColRng(SH_STOCK, SC_QTY, 1, last)
+        rgF = ColRng(SH_STOCK, SC_PLACE, 1, last)
+        cond = "ISNUMBER(" & rgQ & ")*(" & rgQ & ">0.0000005)*(" & ColRng(SH_STOCK, SC_STATE, 1, last) & "<>""" & EI_ST_STORNO & """)"
+        keyR = mp_KeyRange(0)
+        numR = mp_KeyRange(1)
+        lk = "IFERROR(LOOKUP(" & rgF & ";" & keyR & ";" & keyR & ")=" & rgF & ";0)"
+        ' every EI (row = EI): −1 — no balance; the number of its place when its place is written as on the map; 0 — a balance,
+        ' the place written otherwise or not on the map (read below)
+        pl = EngList("TEXTJOIN("";"";0;" & cond & "*(" & lk & "*IFERROR(LOOKUP(" & rgF & ";" & keyR & ";" & numR & ");0)+1)-1)", nPl)
+        If gVwEngFail = "" And nPl = last Then
+            ReDim recent(nextEI)
+            MarkRecent(recent, nextEI, today - 89)
+            ReDim offRows(last)
+            ' occupancy, EIs without movement 90+ days, the EIs of each place
+            For i = 0 To last - 1
+                v = pl(i)
+                If v = "0" Then
+                    offRows(nOff) = i + 1
+                    nOff = nOff + 1
+                ElseIf v <> "-1" Then
+                    k = CLng(v) - 1
+                    occ(k) = occ(k) + 1
+                    If Not recent(i + 1) Then stale(k) = stale(k) + 1
+                    If Len(eis(k)) < 4000 Then eis(k) = eis(k) & (i + 1) & ","
                 End If
+            Next i
+            ' the EIs whose place is written otherwise: read as people write places (PlaceKey); the others are not on the map
+            places = New Collection
+            For i = 0 To gMpN - 1
+                CollPut(places, i, gMpKey(i))
+            Next i
+            cache = New Collection
+            d = RowsCol(WmsIssue.StockSheet(), offRows, nOff, SC_PLACE)
+            n = nOff
+            nOff = 0
+            For i = 0 To n - 1
+                v = Trim(CStr(d(i)))
+                idx = CollGet(cache, "~" & v)
+                If idx = -1 Then
+                    pk = PlaceKey(v)
+                    idx = -2
+                    If pk <> "" Then
+                        idx = CollGet(places, pk)
+                        If idx < 0 Then idx = IIf(UBound(Split(pk, "-")) = 1, -3, -2)
+                    End If
+                    CollPut(cache, idx, "~" & v)
+                End If
+                If idx >= 0 Then
+                    k = offRows(i)
+                    pl(k - 1) = CStr(idx + 1)
+                    occ(idx) = occ(idx) + 1
+                    If Not recent(k) Then stale(idx) = stale(idx) + 1
+                    If Len(eis(idx)) < 4000 Then eis(idx) = eis(idx) & k & ","
+                Else
+                    ' the EI and why (−2: no such place, −3: a place without its level; "" — no place)
+                    off(nOff) = Array(offRows(i), IIf(v = "", 0, idx))
+                    If idx = -3 Then noLvl = noLvl + 1
+                    nOff = nOff + 1
+                End If
+            Next i
+            ' the issues of 30 days, each on the place where its EI lies now
+            n = WmsOrders.LastRow(WmsIssue.IssuesSheet())
+            If n >= 1 Then
+                a = EngList("TEXTJOIN("";"";1;IF(" & PostedExpr(ColRng(SH_ISSUES, IC_CTL, 1, n)) & "*" & DaysExpr(ColRng(SH_ISSUES, IC_DATE, 1, n), today - 29, today) _
+                    & ";ROW(" & ColRng(SH_ISSUES, IC_EI, 1, n) & ")-1;""""))", nItems)
+                d = RowsCol(WmsIssue.IssuesSheet(), a, nItems, IC_EI)
+                For i = 0 To nItems - 1
+                    n = EiFast(CStr(d(i)), nextEI)
+                    If n > 0 Then
+                        v = pl(n - 1)
+                        If v <> "0" And v <> "-1" Then
+                            k = CLng(v) - 1
+                            iss(k) = iss(k) + 1
+                        End If
+                    End If
+                Next i
             End If
-        Next i
-    Next r
+            ' «Требует разбора»
+            a = EngList("TEXTJOIN("";"";1;IF(" & ColRng(SH_STOCK, SC_STATE, 1, last) & "=""" & EI_ST_REVIEW & """;ROW(" & rgQ & ")-1;""""))", nItems)
+            For i = 0 To nItems - 1
+                v = pl(CLng(a(i)) - 1)
+                If v <> "0" And v <> "-1" Then att(CLng(v) - 1) = 1
+            Next i
+        End If
+    End If
+    gMpOcc = occ
+    gMpIss = iss
+    gMpStale = stale
+    gMpAtt = att
+    gMpEIs = eis
+    gMpOff = off
+    gMpNOff = nOff
+    gMpNoLvl = noLvl
+    If IsArray(pl) Then gMpPlaceOf = pl
     gMpStatSeq = SysNum(SK_LAST_SEQ)
 End Sub
+
+' the column i (0 — the texts, 1 — the numbers of the places) of the table of MapKeys
+Private Function mp_KeyRange(i As Integer) As String
+    mp_KeyRange = ColRng(SH_MAP, MP_KEY_COL + i, 0, gMpKeyN - 1)
+End Function
 
 ' the colour codes of the layer into the hidden grid, the colours of the styles, the list of the EIs not on the map
 Private Sub MapPaint(mp As Object, sLayer As String)
@@ -518,10 +671,10 @@ Private Function Bucket(sLayer As String, i As Long) As Integer
         If gMpOcc(i) = 0 Then
             Bucket = 0
         Else
-            Bucket = IIf(v < 90, 1, IIf(v < 180, 2, IIf(v < 365, 3, 4)))
+            Bucket = IIf(v = 0, 1, IIf(v = 1, 2, IIf(v <= 4, 3, 4)))
         End If
     Case "ATT"
-        Bucket = IIf(gMpOcc(i) = 0, 0, IIf(gMpAtt(i) = 2, 3, IIf(gMpAtt(i) = 1, 2, 1)))
+        Bucket = IIf(gMpOcc(i) = 0, 0, IIf(gMpAtt(i) = 1, 2, 1))
     Case Else
         Bucket = IIf(gMpOcc(i) = 0, 1, 0)
     End Select
@@ -566,8 +719,8 @@ Private Sub Legend(mp As Object, sLayer As String)
     Select Case sLayer
     Case "OCC": txt = Array("пусто", "1 ЕИ", "2 ЕИ", "3–4 ЕИ", "5 и больше")
     Case "ISS": txt = Array("не выдавали", "1–2 раза", "3–5 раз", "6–10 раз", "больше 10")
-    Case "STALE": txt = Array("пусто", "меньше 90 дней", "90–179 дней", "180–364 дня", "год и больше")
-    Case "ATT": txt = Array("пусто", "в порядке", "требует разбора", "остаток ≠ движениям", "")
+    Case "STALE": txt = Array("пусто", "всё двигалось", "1 ЕИ без движения", "2–4 ЕИ", "5 и больше")
+    Case "ATT": txt = Array("пусто", "в порядке", "требует разбора", "", "")
     Case Else: txt = Array("занято", "свободно", "", "", "")
     End Select
     cell = mp.getCellByPosition(0, MP_LEGEND_ROW)
@@ -582,44 +735,6 @@ Private Sub Legend(mp As Object, sLayer As String)
             cur.gotoEnd(False)
             cur.CharColor = RGB(55, 71, 79)
             tx.insertString(cur, txt(i) & "        ", False)
-        End If
-    Next i
-End Sub
-
-' the last movement of every EI and its issues in the last 30 days (posted rows of the sheets of movements)
-Sub CollectMoves(nextEI As Long, today As Double, ByRef lastMv() As Double, ByRef iss30() As Long)
-    Dim specs As Variant, i As Integer, sh As Object, last As Long, r0 As Long, r1 As Long, j As Long, d As Variant, n As Long, dt As Double
-    Dim cEI As Integer, cDate As Integer, cCtl As Integer, cMax As Integer
-    ReDim lastMv(nextEI)
-    ReDim iss30(nextEI)
-    ' sheet | EI | date | control (posted) — the receipts of «Заказы» have no control column: their EI is posted
-    specs = Array(Array(SH_ISSUES, IC_EI, IC_DATE, IC_CTL), Array(SH_RETURNS, RC_EI, RC_DATE, RC_CTL), Array(SH_SPECIAL, XC_EI, XC_DATE, XC_STATUS), _
-        Array(SH_ADJUST, AC_EI, AC_DATE, AC_CTL), Array(SH_ORDERS, OC_EI, OC_RDATE, -1))
-    For i = 0 To UBound(specs)
-        If gDoc.Sheets.hasByName(specs(i)(0)) Then
-            sh = gDoc.Sheets.getByName(specs(i)(0))
-            cEI = specs(i)(1)
-            cDate = specs(i)(2)
-            cCtl = specs(i)(3)
-            cMax = cEI
-            If cDate > cMax Then cMax = cDate
-            If cCtl > cMax Then cMax = cCtl
-            last = WmsOrders.LastRow(sh)
-            For r0 = 1 To last Step CHECK_CHUNK_ROWS
-                r1 = r0 + CHECK_CHUNK_ROWS - 1
-                If r1 > last Then r1 = last
-                d = sh.getCellRangeByPosition(0, r0, cMax, r1).getDataArray()
-                For j = 0 To r1 - r0
-                    n = EiNo(CStr(d(j)(cEI)), nextEI)
-                    If n > 0 Then
-                        If cCtl < 0 Or Left(CStr(d(j)(IIf(cCtl < 0, 0, cCtl))), Len(ST_POSTED)) = ST_POSTED Then
-                            dt = DateOf(d(j)(cDate))
-                            If dt > lastMv(n) Then lastMv(n) = dt
-                            If i = 0 And dt > 0 And today - dt < 30 And today - dt >= 0 Then iss30(n) = iss30(n) + 1
-                        End If
-                    End If
-                Next j
-            Next r0
         End If
     Next i
 End Sub

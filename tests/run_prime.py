@@ -661,6 +661,13 @@ def pr11_upgrade_072():
                  "дашборд считается; карточка ЕИ-00000427 — остаток сходится с движениями переноса и 0.7.2",
               names[:2] == ["Дашборд", "Главная"] and "Поиск" in names and "Карта склада" in names and "Топология" in names and main_btn == 20
               and db.startswith("OK") and fd.startswith("OK:ЕИ-00000427") and card.startswith("✓"), f"{names}; {main_btn}; {db}; {fd}; {card}")
+        btns = {}
+        for n in ("Заказы", "Иной приход", "Выдачи", "Корректировки"):
+            fm = s.doc.Sheets.getByName(n).DrawPage.Forms.getByIndex(0)
+            btns[n] = [fm.getByIndex(i).Name for i in range(fm.Count)]
+        R.add(c, "в обновлённой книге и на старых листах — кнопки 0.8: «Куда положить?» («Заказы», «Иной приход»), «Подобрать ЕИ» («Выдачи», "
+                 "«Корректировки»), каждая один раз", all(btns[n].count("btnWherePut") == 1 for n in ("Заказы", "Иной приход"))
+              and all(btns[n].count("btnPickEI") == 1 for n in ("Выдачи", "Корректировки")), str(btns))
         oracle(c, s, "журнал 0.7.2 + 0.8 в обновлённой книге", initial={}, legacy_mn_empty=False)
     finally:
         s.close(save=True)
@@ -1270,6 +1277,69 @@ def pr20_hands():
         s.close()
 
 
+@case
+def pr21_pick_ei():
+    """«Подобрать ЕИ»: the EIs with a balance by a name, an article or a place, the oldest first, written into the row"""
+    c = "PR21"
+    p = new_wms("pr21")
+    s = ready(Session(p))
+    try:
+        order(s, 1, "1", "Перчатки нитриловые", qty="10", unit="пар")
+        rc = receive(s, 1, "10", place="D-02")
+        cand = s.B("PickCandidates", "перчатки", module="WmsFind").split("\n")
+        new_ei = cand[-1].split("|")[0]
+        R.add(c, "по части наименования — ЕИ с остатком, старый первым (ЕИ-00000004, затем новый приход); в строке — товар, остаток и место",
+              rc.startswith("OK") and len(cand) == 2 and cand[0].startswith("ЕИ-00000004|ЕИ-00000004 · Перчатки нитриловые · 12 пар · D-01")
+              and new_ei != "ЕИ-00000004" and cand[1].endswith("· 10 пар · D-02"), f"{rc}; {cand}")
+        many = s.B("PickCandidates", "товар", module="WmsFind").split("\n")
+        by_art = s.B("PickCandidates", "pn-9", module="WmsFind")
+        by_place = s.B("PickCandidates", "D-02", module="WmsFind")
+        R.add(c, "по артикулу (без учёта регистра) и по месту; длинный список — не больше 15 строк, старые первыми",
+              by_art.startswith("ЕИ-00000004|") and "\n" not in by_art and by_place.startswith(new_ei + "|") and len(many) == 15
+              and many[0].startswith("ЕИ-00000007|") and many[1].startswith("ЕИ-00000008|"), f"{by_art}; {by_place}; {many[:2]}; {len(many)}")
+        zero = s.B("PickCandidates", "лампа", module="WmsFind")
+        empty = s.B("PickCandidates", "", module="WmsFind")
+        R.add(c, "товар без остатка и пустой запрос — понятный отказ, а не пустой список",
+              zero.startswith("ERR:ЕИ с остатком по «лампа» нет") and empty.startswith("ERR:ничего не вписано"), f"{zero}; {empty}")
+        j0 = njournal(s)
+        s.goto("Выдачи", "$B$2")
+        s.B("TestPrimeForm", "перчатки", module="WmsPrimeUi")
+        s.B("TestPrimeChoice", 1, module="WmsPrimeUi")
+        res = s.B("PickEI", module="WmsFind")
+        cell = s.doc.Sheets.getByName("Выдачи").getCellByPosition(11, 1).getString()
+        R.add(c, "«Выдачи»: выбран второй ЕИ — записан в «ЕИ» непроведённой строки 2 (это ввод, не операция: журнал не тронут)",
+              res == f"OK:{new_ei} записан в строку 2" and cell == new_ei and njournal(s) == j0, f"{res}; {cell}")
+        put(s, "Выдачи", 1, E="3", H=serial(), I="егр")
+        iss = s.I("IssuePostRow", 1)
+        s.goto("Выдачи", "$B$2")
+        res2 = s.B("PickEI", module="WmsFind")
+        R.add(c, "строка проводится с подобранным ЕИ; в проведённой строке ЕИ не подбирается — подсказка «Исправить»",
+              iss.startswith("OK") and res2.startswith("ERR:строка 2 уже проведена") and "«Исправить»" in res2, f"{iss}; {res2}")
+        s.goto("Корректировки", "$B$2")
+        s.B("TestPrimeForm", "PN-9", module="WmsPrimeUi")
+        s.B("TestPrimeChoice", 0, module="WmsPrimeUi")
+        res3 = s.B("PickEI", module="WmsFind")
+        adj = s.doc.Sheets.getByName("Корректировки").getCellByPosition(2, 1).getString()
+        R.add(c, "«Корректировки»: ЕИ по артикулу записан в «ЕИ» строки 2", res3 == "OK:ЕИ-00000004 записан в строку 2" and adj == "ЕИ-00000004",
+              f"{res3}; {adj}")
+        s.goto("Выдачи", "$B$3")
+        closed = s.B("PickEI", module="WmsFind")
+        s.B("TestPrimeForm", "перчатки", module="WmsPrimeUi")
+        s.B("TestPrimeChoice", -1, module="WmsPrimeUi")
+        nochoice = s.B("PickEI", module="WmsFind")
+        s.goto("Заказы", "$B$3")
+        other = s.B("PickEI", module="WmsFind")
+        R.add(c, "окно закрыто или ЕИ не выбран — строка не тронута; на другом листе — понятный отказ",
+              closed.startswith("SKIP") and nochoice.startswith("SKIP") and s.doc.Sheets.getByName("Выдачи").getCellByPosition(11, 2).getString() == ""
+              and other.startswith("ERR:") and "«Выдачи»" in other and "«Корректировки»" in other, f"{closed}; {nochoice}; {other}")
+        forms = {n: [s.doc.Sheets.getByName(n).DrawPage.Forms.getByIndex(0).getByIndex(i).Name
+                     for i in range(s.doc.Sheets.getByName(n).DrawPage.Forms.getByIndex(0).Count)] for n in ("Выдачи", "Корректировки")}
+        R.add(c, "кнопка «Подобрать ЕИ» есть на «Выдачи» и «Корректировки»", all("btnPickEI" in v for v in forms.values()), str(forms))
+        oracle(c, s, "«Подобрать ЕИ» ничего не провёл, кроме выдачи строки 2")
+    finally:
+        s.close()
+
+
 def main():
     sel = [a.lower() for a in sys.argv[1:]]
     for fn in CASES:
@@ -1281,7 +1351,7 @@ def main():
             R.error(fn.__name__.split("_")[0].upper(), e)
     R.save(os.path.join(OUT, "results_prime.json"))
     items = R.items
-    lines = ["# PRIME 0.8 — этап 1: результаты", "", f"PASS {sum(1 for x in items if x['status'] == 'PASS')}, "
+    lines = ["# PRIME 0.8 — результаты", "", f"PASS {sum(1 for x in items if x['status'] == 'PASS')}, "
              f"FAIL {sum(1 for x in items if x['status'] == 'FAIL')}, SKIP {sum(1 for x in items if x['status'] == 'SKIP')}", ""]
     lines += [f"- [{x['status']}] {x['case']} {x['test']}" for x in items]
     open(os.path.join(OUT, "TEST_REPORT_prime.md"), "w", encoding="utf-8").write("\n".join(lines) + "\n")

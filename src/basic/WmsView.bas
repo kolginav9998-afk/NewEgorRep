@@ -309,3 +309,259 @@ Function CollPut(c As Object, v As Long, key As String) As Boolean
 Taken:
     CollPut = False
 End Function
+
+' ================================================================ formulas of the Calc engine over the sheets (spec §25)
+' The pages count the sheets of movements by array formulas evaluated at once in the scratch cell of _IDX
+' (WmsOrders.ScratchEval): the engine filters and counts 100 000 rows in tens of milliseconds, a Basic loop takes
+' 30–300 µs a row. Only what the formula found (a few rows, a list of numbers) is read by Basic. Inside IF the branches
+' are plain references or arithmetic: an IF over whole columns with a lookup in its branch is evaluated element by element.
+
+Global gVwEngFail As String
+Global gVwEngBody As String
+
+' the absolute address of column c (0-based) of sheet sName, rows r0 … r1 (0-based)
+Function ColRng(sName As String, c As Integer, r0 As Long, r1 As Long) As String
+    Dim L As String
+    L = ColLetters(c)
+    ColRng = "$'" & sName & "'.$" & L & "$" & (r0 + 1) & ":$" & L & "$" & (r1 + 1)
+End Function
+
+Function ColLetters(ByVal c As Long) As String
+    Dim s As String
+    c = c + 1
+    Do While c > 0
+        s = Chr(65 + (c - 1) Mod 26) & s
+        c = (c - 1) \ 26
+    Loop
+    ColLetters = s
+End Function
+
+' «the row was posted by WMS» for the control column rng (Проведено, Проведено (исправлено))
+Function PostedExpr(rng As String) As String
+    PostedExpr = "(LEFT(" & rng & ";" & Len(ST_POSTED) & ")=""" & ST_POSTED & """)"
+End Function
+
+' a date column rng within the days [d0, d1] (whole days; a text or an empty cell is not a date)
+Function DaysExpr(rng As String, d0 As Double, d1 As Double) As String
+    DaysExpr = "ISNUMBER(" & rng & ")*(" & rng & ">=" & Format(d0, "0") & ")*(" & rng & "<" & Format(d1 + 1, "0") & ")"
+End Function
+
+' the text result of a formula; "" and gVwEngFail set when the engine could not be used
+Function Eng(body As String) As String
+    Dim ok As Boolean, s As String
+    s = WmsOrders.ScratchEval(body, ok)
+    If Not ok Then
+        If gVwEngFail = "" Then
+            gVwEngFail = "формула Calc не вычислена (лист " & SH_IDX & ")"
+            gVwEngBody = Left(body, 400)
+        End If
+        Exit Function
+    End If
+    Eng = s
+End Function
+
+' the numbers of a TEXTJOIN list as a Split array; nItems — how many ("" → 0)
+Function EngList(body As String, ByRef nItems As Long) As Variant
+    Dim s As String
+    s = Eng(body)
+    If s = "" Then
+        nItems = 0
+        EngList = Array()
+    Else
+        EngList = Split(s, ";")
+        nItems = UBound(EngList) + 1
+    End If
+End Function
+
+' the field i of a list of numbers «a;b;c» (0 when absent)
+Function ListNum(a As Variant, i As Long) As Double
+    If i <= UBound(a) Then
+        If a(i) <> "" Then ListNum = CDbl(a(i))
+    End If
+End Function
+
+' the number of a canonical EI text («ЕИ-00000427» — what WMS writes into a posted row), otherwise EiNo
+Function EiFast(e As String, nextEI As Long) As Long
+    Dim n As Long
+    If Len(e) = EI_DIGITS + 3 And Left(e, 3) = EI_PREFIX Then
+        n = Val(Mid(e, 4))
+        If n >= 1 And n < nextEI Then EiFast = n
+    Else
+        EiFast = EiNo(e, nextEI)
+    End If
+End Function
+
+' The sheets of movements: name | EI column | date column | control column (-1: every row with an EI is a movement — the
+' receipts of «Заказы») — the same as the card of an EI reads them
+Function MoveSpecs() As Variant
+    MoveSpecs = Array(Array(SH_ORDERS, OC_EI, OC_RDATE, -1), Array(SH_SPECIAL, XC_EI, XC_DATE, XC_STATUS), Array(SH_ISSUES, IC_EI, IC_DATE, IC_CTL), _
+        Array(SH_RETURNS, RC_EI, RC_DATE, RC_CTL), Array(SH_ADJUST, AC_EI, AC_DATE, AC_CTL))
+End Function
+
+' the movement condition of a spec over its data rows 1 … last
+Function MoveCond(sp As Variant, last As Long) As String
+    If sp(3) < 0 Then
+        MoveCond = "(" & ColRng(sp(0), sp(1), 1, last) & "<>"""")"
+    Else
+        MoveCond = PostedExpr(ColRng(sp(0), sp(3), 1, last))
+    End If
+End Function
+
+' recent(n) = True for every EI that moved on day dFrom or later (the EI texts of those rows, one formula a sheet)
+Sub MarkRecent(recent() As Boolean, nextEI As Long, dFrom As Double)
+    Dim specs As Variant, i As Integer, sh As Object, last As Long, a As Variant, k As Long, nItems As Long, n As Long, dR As String, e As String
+    Dim pfx As String, ln As Integer
+    ' the constants of WmsConfig copied once: a name of another module costs 15–25 µs on each use inside a loop
+    pfx = EI_PREFIX
+    ln = EI_DIGITS + 3
+    specs = MoveSpecs()
+    For i = 0 To UBound(specs)
+        If gDoc.Sheets.hasByName(specs(i)(0)) Then
+            sh = gDoc.Sheets.getByName(specs(i)(0))
+            last = WmsOrders.LastRow(sh)
+            If last >= 1 Then
+                dR = ColRng(specs(i)(0), specs(i)(2), 1, last)
+                a = EngList("TEXTJOIN("";"";1;IF(" & MoveCond(specs(i), last) & "*ISNUMBER(" & dR & ")*(" & dR & ">=" & Format(dFrom, "0") & ");" _
+                    & ColRng(specs(i)(0), specs(i)(1), 1, last) & ";""""))", nItems)
+                ' a posted row holds the canonical EI (ЕИ-00000427): its number is read directly
+                For k = 0 To nItems - 1
+                    e = a(k)
+                    If Len(e) = ln And Left(e, 3) = pfx Then n = Val(Mid(e, 4)) Else n = EiNo(e, nextEI)
+                    If n > 0 And n < nextEI Then recent(n) = True
+                Next k
+            End If
+        End If
+    Next i
+End Sub
+
+' the day of the last movement of each EI of eis(0 … n − 1) on the sheets (0 — no movement on the sheets): one formula a
+' sheet finds the movement rows of these EIs, Basic takes the latest day of each
+Function LastMoveDays(eis() As Long, n As Long) As Variant
+    Dim specs As Variant, i As Integer, j As Long, sh As Object, last As Long, f As String, eR As String, out() As Double, a As Variant, nItems As Long
+    Dim d As Variant, k As Long, m As Long, dt As Double, canon() As String
+    ReDim out(IIf(n > 0, n - 1, 0))
+    LastMoveDays = out
+    If n = 0 Then Exit Function
+    ReDim canon(n - 1)
+    For j = 0 To n - 1
+        canon(j) = WmsIssue.EiCanon(eis(j))
+    Next j
+    specs = MoveSpecs()
+    For i = 0 To UBound(specs)
+        If gDoc.Sheets.hasByName(specs(i)(0)) Then
+            sh = gDoc.Sheets.getByName(specs(i)(0))
+            last = WmsOrders.LastRow(sh)
+            If last >= 1 Then
+                eR = ColRng(specs(i)(0), specs(i)(1), 1, last)
+                f = ""
+                For j = 0 To n - 1
+                    f = f & IIf(f <> "", "+", "") & "(" & eR & "=""" & canon(j) & """)"
+                Next j
+                a = EngList("TEXTJOIN("";"";1;IF(" & MoveCond(specs(i), last) & "*(" & f & ");ROW(" & eR & ")-1;""""))", nItems)
+                m = specs(i)(1)
+                If specs(i)(2) > m Then m = specs(i)(2)
+                d = RowsData(sh, a, nItems, m)
+                For k = 0 To nItems - 1
+                    If VarType(d(k)(specs(i)(2))) = 5 Then
+                        dt = Int(d(k)(specs(i)(2)))
+                        For j = 0 To n - 1
+                            If CStr(d(k)(specs(i)(1))) = canon(j) Then
+                                If dt > out(j) Then out(j) = dt
+                            End If
+                        Next j
+                    End If
+                Next k
+            End If
+        End If
+    Next i
+    LastMoveDays = out
+End Function
+
+' x into the kMax smallest keys kept sorted in keys(0 … n − 1)
+Sub TopPush(keys() As Double, ByRef n As Long, kMax As Long, x As Double)
+    Dim i As Long
+    If n >= kMax Then
+        If x >= keys(n - 1) Then Exit Sub
+        i = n - 1
+    Else
+        i = n
+        n = n + 1
+    End If
+    Do While i > 0
+        If keys(i - 1) <= x Then Exit Do
+        keys(i) = keys(i - 1)
+        i = i - 1
+    Loop
+    keys(i) = x
+End Sub
+
+' the values of column c of the rows rows(0 … n − 1) (numbers of the data rows, ascending) of sheet sh: read as one block
+' when they lie close together, one by one otherwise
+Function RowsCol(sh As Object, rows As Variant, n As Long, c As Integer) As Variant
+    Dim out() As Variant, i As Long, r0 As Long, r1 As Long, d As Variant, k As Long, b0 As Long, b1 As Long
+    If n = 0 Then
+        RowsCol = Array()
+        Exit Function
+    End If
+    ReDim out(n - 1)
+    r0 = CLng(rows(0))
+    r1 = CLng(rows(n - 1))
+    If r1 - r0 + 1 <= 20 * n + 200 Then
+        k = 0
+        For b0 = r0 To r1 Step CHECK_CHUNK_ROWS
+            b1 = b0 + CHECK_CHUNK_ROWS - 1
+            If b1 > r1 Then b1 = r1
+            d = sh.getCellRangeByPosition(c, b0, c, b1).getDataArray()
+            Do While k < n
+                i = CLng(rows(k))
+                If i > b1 Then Exit Do
+                out(k) = d(i - b0)(0)
+                k = k + 1
+            Loop
+        Next b0
+    Else
+        For k = 0 To n - 1
+            i = CLng(rows(k))
+            out(k) = sh.getCellRangeByPosition(c, i, c, i).getDataArray()(0)(0)
+        Next k
+    End If
+    RowsCol = out
+End Function
+
+' the data of the rows rows(0 … n − 1) (numbers of the data rows, ascending) of sheet sh, columns 0 … c1: read as one block
+' when they lie close together, one by one otherwise
+Function RowsData(sh As Object, rows As Variant, n As Long, c1 As Integer) As Variant
+    Dim out() As Variant, i As Long, r0 As Long, r1 As Long, d As Variant, k As Long, b0 As Long, b1 As Long
+    If n = 0 Then
+        RowsData = Array()
+        Exit Function
+    End If
+    ReDim out(n - 1)
+    r0 = CLng(rows(0))
+    r1 = CLng(rows(n - 1))
+    If r1 - r0 + 1 <= 4 * n + 200 Then
+        k = 0
+        For b0 = r0 To r1 Step CHECK_CHUNK_ROWS
+            b1 = b0 + CHECK_CHUNK_ROWS - 1
+            If b1 > r1 Then b1 = r1
+            d = sh.getCellRangeByPosition(0, b0, c1, b1).getDataArray()
+            Do While k < n
+                i = CLng(rows(k))
+                If i > b1 Then Exit Do
+                out(k) = d(i - b0)
+                k = k + 1
+            Loop
+        Next b0
+    Else
+        For k = 0 To n - 1
+            i = CLng(rows(k))
+            out(k) = sh.getCellRangeByPosition(0, i, c1, i).getDataArray()(0)
+        Next k
+    End If
+    RowsData = out
+End Function
+
+' the start of the formula that could not be evaluated (diagnostics of the tests)
+Function TestEngLast() As String
+    TestEngLast = gVwEngBody
+End Function

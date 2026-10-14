@@ -680,6 +680,122 @@ Private Function FindPosted(v As Variant) As Boolean
     FindPosted = (Left(CStr(v), Len(ST_POSTED)) = ST_POSTED)
 End Function
 
+' ================================================================ «Подобрать ЕИ» («Выдачи», «Корректировки»)
+' The storekeeper knows the goods, not the number of the EI: a name, an article or a place → the EIs with a balance (the oldest
+' first) → the chosen EI is written into the EI cell of the row under the cursor (an input cell of a row not yet posted).
+
+Sub BtnPickEI(Optional oEvent As Variant)
+    Dim s As String
+    WmsInit()
+    s = PickEI()
+    If Left(s, 4) = "ERR:" Then WmsUi.UiMessage(Mid(s, 5))
+End Sub
+
+Function PickEI() As String
+    Dim sName As String, r As Long, sh As Object, cEI As Integer, cNo As Integer, v(0) As String, lines As Variant, opts() As String, c As Integer
+    Dim s As String, n As Integer, k As Integer
+    sName = gDoc.getCurrentController().getActiveSheet().Name
+    If sName = SH_ISSUES Then
+        cEI = IC_EI
+        cNo = IC_NO
+    ElseIf sName = SH_ADJUST Then
+        cEI = AC_EI
+        cNo = AC_NO
+    Else
+        PickEI = "ERR:«Подобрать ЕИ» работает на листах «" & SH_ISSUES & "» и «" & SH_ADJUST & "»"
+        Exit Function
+    End If
+    r = ViewRow(sName)
+    If r < 1 Then
+        PickEI = "ERR:встаньте на строку, в которую нужен ЕИ, и нажмите «Подобрать ЕИ» снова"
+        Exit Function
+    End If
+    sh = gDoc.Sheets.getByName(sName)
+    If sh.getCellByPosition(cNo, r).getString() <> "" Then
+        PickEI = "ERR:строка " & (r + 1) & " уже проведена — ЕИ в ней меняется кнопкой «Исправить»"
+        Exit Function
+    End If
+    v(0) = ""
+    If Not WmsPrimeUi.UiForm("Подобрать ЕИ", "Впишите наименование (или его часть), артикул или место — WMS покажет ЕИ с остатком, старые первыми.", _
+        Array("Что ищем"), v, Array(""), "Найти") Then
+        gUiLastMsg = "SKIP:окно закрыто"
+        PickEI = gUiLastMsg
+        Exit Function
+    End If
+    s = PickCandidates(Trim(v(0)))
+    If Left(s, 4) = "ERR:" Then
+        PickEI = s
+        Exit Function
+    End If
+    lines = Split(s, Chr(10))
+    n = UBound(lines) + 1
+    ReDim opts(n - 1)
+    For k = 0 To n - 1
+        opts(k) = Mid(lines(k), InStr(lines(k), "|") + 1)
+    Next k
+    c = WmsPrimeUi.UiChoose("Подобрать ЕИ — «" & v(0) & "»", "ЕИ с остатком (старые первыми — их и выдавать первыми). Выберите и нажмите «Выбрать»:", opts)
+    If c < 0 Or c >= n Then
+        gUiLastMsg = "SKIP:ЕИ не выбран"
+        PickEI = gUiLastMsg
+        Exit Function
+    End If
+    sh.getCellByPosition(cEI, r).setString(Left(lines(c), InStr(lines(c), "|") - 1))
+    gUiLastMsg = "OK:" & Left(lines(c), InStr(lines(c), "|") - 1) & " записан в строку " & (r + 1)
+    PickEI = gUiLastMsg
+End Function
+
+' EIs with a balance whose name, article or place holds sWhat: lines «EI|EI · name · balance unit · place», the oldest first, at most 15
+Function PickCandidates(sWhat As String) As String
+    Dim sh As Object, last As Long, desc As Object, found As Object, addrs As Variant, k As Long, r As Long, d As Variant, seen() As Boolean, out As String
+    Dim nOut As Integer, i As Long
+    If sWhat = "" Then
+        PickCandidates = "ERR:ничего не вписано — впишите наименование, артикул или место"
+        Exit Function
+    End If
+    sh = WmsIssue.StockSheet()
+    last = CLng(SysNum(SK_NEXT_EI)) - 1
+    If last < 1 Then
+        PickCandidates = "ERR:в «" & SH_STOCK & "» ещё нет ЕИ"
+        Exit Function
+    End If
+    desc = sh.createSearchDescriptor()
+    desc.SearchString = sWhat
+    desc.SearchCaseSensitive = False
+    desc.SearchWords = False
+    desc.SearchRegularExpression = False
+    ReDim seen(last)
+    ' the name, the article (B, C) and the place (F)
+    For i = 0 To 1
+        If i = 0 Then found = sh.getCellRangeByPosition(SC_NAME, 1, SC_ART, last).findAll(desc) Else found = sh.getCellRangeByPosition(SC_PLACE, 1, SC_PLACE, last).findAll(desc)
+        If Not IsNull(found) Then
+            addrs = found.getRangeAddresses()
+            For k = 0 To UBound(addrs)
+                For r = addrs(k).StartRow To addrs(k).EndRow
+                    seen(r) = True
+                Next r
+            Next k
+        End If
+    Next i
+    ' the oldest EI first (the row is the number of the EI)
+    For r = 1 To last
+        If seen(r) And nOut < 15 Then
+            d = sh.getCellRangeByPosition(0, r, SC_STATE, r).getDataArray()(0)
+            If VarType(d(SC_QTY)) = 5 Then
+                If d(SC_QTY) > 0.0000005 And CStr(d(SC_STATE)) <> EI_ST_STORNO Then
+                    out = out & IIf(out <> "", Chr(10), "") & d(SC_EI) & "|" & d(SC_EI) & " · " & d(SC_NAME) & " · " & WmsIssue.QtyText(CDbl(d(SC_QTY))) _
+                        & " " & d(SC_UNIT) & IIf(CStr(d(SC_PLACE)) <> "", " · " & d(SC_PLACE), "")
+                    nOut = nOut + 1
+                End If
+            End If
+        End If
+    Next r
+    If out = "" Then
+        PickCandidates = "ERR:ЕИ с остатком по «" & sWhat & "» нет — проверьте написание или поищите на странице «" & SH_FIND & "»"
+    Else
+        PickCandidates = out
+    End If
+End Function
+
 ' ================================================================ test seam
 
 Function TestFind(sQuery As String) As String
