@@ -1478,6 +1478,19 @@ def pr22_parts():
         R.add(c, "у ЕИ с фасовкой целое число без единицы — вопрос «1 шт (4 бан) или 1 бан?»: «Нет» — 1 бан (0,25 шт), «Да» — 1 шт",
               q1.startswith("OK") and s.iss(12)[4] == 0.25 and q2.startswith("OK") and s.iss(13)[4] == 1.0 and s.stock(ei_row(paint)) == 0.75,
               f"{q1}; {s.iss(12)[4]}; {q2}; {s.iss(13)[4]}; {s.stock(ei_row(paint))}")
+        # a packing that is not a whole number: a pipe of 1 шт came by weight, 23,5 кг — «5 кг», then the rest closes exactly
+        order(s, 7, "7", "Труба 57х3,5", qty="1")
+        receive(s, 7, "1", place="1-3-2")
+        pipe = ords(s, 7)[21]
+        pw = s.B("PackSet", pipe, "23,5", "кг", "", module="WmsPack")
+        put(s, "Выдачи", 14, L=pipe, E="5 кг", H=serial(), I="егр")
+        w1 = s.I("IssuePostRow", 14)
+        b1 = s.stock(ei_row(pipe))
+        put(s, "Выдачи", 15, L=pipe, E="18,5 кг", H=serial(), I="егр")
+        w2 = s.I("IssuePostRow", 15)
+        R.add(c, "дробная фасовка «в 1 шт — 23,5 кг»: «5 кг» — 0,213 шт, остаток 18,5 кг; «18,5 кг» закрывает остаток ровно в 0",
+              pw.startswith("OK") and w1.startswith("OK") and s.iss(14)[4] == 0.213 and b1 == 0.787 and w2.startswith("OK")
+              and s.stock(ei_row(pipe)) == 0.0, f"{pw}; {w1}; {s.iss(14)[4]}; {b1}; {w2}; {s.stock(ei_row(pipe))}")
         # «Исправить» in parts, a return, a write-off and a count in parts
         fx = s.I("IssueFixRow", 7, prof, "2 м", "егр", serial())
         R.add(c, "«Исправить» выдачи частями: «2 м» вместо 1,5 м — 0,333 шт, остаток пересчитан", fx.startswith("OK") and s.iss(7)[4] == 0.333
