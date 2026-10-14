@@ -31,7 +31,7 @@ V = wms_versions()
 CASES = []
 REL = os.path.join(OUT, "release")
 BOOK = "WMS_PROD_CANDIDATE.ods"
-STATUS_ROW = 24                                 # WmsStatus.STATUS_ROW
+STATUS_ROW = 17                                 # WmsStatus.STATUS_ROW
 
 
 def case(fn):
@@ -122,7 +122,8 @@ def c02_candidate_book():
                  "версия продукта, ядра и схемы; листы по порядку, последний видимый — «Справка»",
               st.get("STATE") == "CLEAN" and st.get("REG") == "own" and sys_mode == "PROD" and f"версия {V['WMS_PRODUCT_VERSION']}" in ver
               and V["WMS_SYS_SCHEMA"] in ver
-              and names == ["Главная", "Заказы", "Иной приход", "Приход авто", "Выдачи", "Возврат", "Корректировки", "Наличие", "Получатели", "Справка"]
+              and names == ["Дашборд", "Главная", "Заказы", "Иной приход", "Приход авто", "Выдачи", "Возврат", "Корректировки", "Наличие", "Поиск",
+                           "Карта склада", "Сверка переноса", "Получатели", "Топология", "Справка"]
               and s.sysv("NEXT_EI") == 1.0, f"{st}; {sys_mode}; «{ver}»; {names}")
         R.add(c, "«Справка»: руководство кладовщика, примечания к выпуску и руководство по резервным копиям и восстановлению (без разметки "
                  "Markdown); лист защищён",

@@ -6,13 +6,13 @@
 Option Explicit
 
 ' «Главная»: column B of these rows (0-based) holds the values, column A the captions (written by tools/build_ods.py)
-Private Const MR_STATE = 2
-Private Const MR_REASON = 3
-Private Const MR_HINT = 4
-Private Const MR_UNPOSTED = 5
-Private Const MR_NOTES = 6
-Private Const MR_LAST = 7
-Private Const MR_TIME = 8
+Private Const MR_STATE = 7
+Private Const MR_REASON = 8
+Private Const MR_HINT = 9
+Private Const MR_UNPOSTED = 10
+Private Const MR_NOTES = 11
+Private Const MR_LAST = 12
+Private Const MR_TIME = 13
 
 ' test seam (TEST books only): 0 interactive, 1 confirmations answer «Да», 2 answer «Нет»; messages are only recorded.
 ' Global on purpose: LibreOffice Basic resets module-level Private variables at every new macro call.
@@ -484,6 +484,31 @@ End Sub
 
 Sub NavStock(Optional oEvent As Variant)
     GoSheet(SH_STOCK, -1)
+End Sub
+
+' PRIME 0.8: the view sheets (the field of «Поиск» is selected — typing starts at once)
+Sub NavFind(Optional oEvent As Variant)
+    WmsInit()
+    WmsView.GoCell(SH_FIND, 3, 2)
+    gUiLastMsg = "OK:" & SH_FIND
+End Sub
+
+Sub NavMap(Optional oEvent As Variant)
+    WmsInit()
+    WmsView.GoCell(SH_MAP, 4, 0)
+    gUiLastMsg = "OK:" & SH_MAP
+End Sub
+
+Sub NavDash(Optional oEvent As Variant)
+    WmsInit()
+    WmsView.GoCell(SH_DASH, 0, 0)
+    gUiLastMsg = "OK:" & SH_DASH
+End Sub
+
+Sub NavMain(Optional oEvent As Variant)
+    WmsInit()
+    WmsView.GoCell(SH_MAIN, 7, 1)
+    gUiLastMsg = "OK:" & SH_MAIN
 End Sub
 
 ' ================================================================ test seam (inert unless _SYS MODE = TEST)

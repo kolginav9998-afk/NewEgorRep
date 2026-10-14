@@ -190,7 +190,7 @@ class Session:
 
     def main_status(self):
         sh = self.doc.Sheets.getByName("Главная")
-        return [sh.getCellByPosition(1, r).getString() for r in range(2, 9)]
+        return [sh.getCellByPosition(1, r).getString() for r in range(7, 14)]          # WmsUi.MR_STATE … MR_TIME
 
     def active_sheet(self):
         return self.doc.getCurrentController().getActiveSheet().getName()

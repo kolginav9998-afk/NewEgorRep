@@ -20,7 +20,7 @@ from harness import new_wms, PROFILES, unique, wms_versions  # noqa: E402
 from wmslo import Office  # noqa: E402
 from gui_phase4 import step, run_msg, RESULTS  # noqa: E402
 
-STATUS_ROW = 24                                   # WmsStatus.STATUS_ROW
+STATUS_ROW = 17                                   # WmsStatus.STATUS_ROW
 
 
 def section(doc):

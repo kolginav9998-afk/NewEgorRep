@@ -65,6 +65,7 @@ def main():
     th.join(20)
     o.terminate()
     ok = res.get("r") is True
+    __import__("shutil").rmtree(tmp, ignore_errors=True)
     print("COMPILE", "OK" if ok else "FAILED", res.get("r"), res.get("e", ""))
     for d in dialogs:
         print("DIALOG:", " | ".join(d)[:600])

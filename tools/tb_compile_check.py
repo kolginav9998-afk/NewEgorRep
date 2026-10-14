@@ -81,6 +81,7 @@ def main():
                 bad.append(f"{os.path.basename(book)}: книга не закрылась ({str(e)[:80]}) — открыт диалог?")
     finally:
         o.terminate()
+        __import__("shutil").rmtree(tmp, ignore_errors=True)
     print("COMPILE", "OK" if not bad else "FAILED")
     for b in bad:
         print(b[:700])

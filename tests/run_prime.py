@@ -652,6 +652,15 @@ def pr11_upgrade_072():
         lf = s.Rc("LegacyFixRow", r427, "100", "58", "А-1", TODAY, "пересчёт")
         R.add(c, "в обновлённой книге «Коррекция переноса» ЕИ-00000427 (перенесён с остатком 60, выдано 5 в 0.7.2): остаток 55 → 53",
               lf.startswith("OK") and s.stock(427) == 53.0, f"{lf}; {s.stock(427)}")
+        names = [s.doc.Sheets.getByIndex(i).Name for i in range(s.doc.Sheets.getCount()) if s.doc.Sheets.getByIndex(i).IsVisible]
+        db = s.B("DashRefresh", module="WmsDash")
+        fd = s.B("FindRun", "427", module="WmsFind")
+        card = page(s, "Поиск", 9, 9)[0][1]
+        main_btn = s.doc.Sheets.getByName("Главная").getDrawPage().getCount()
+        R.add(c, "обновлённая книга — с новыми страницами: «Дашборд» первым, «Поиск», «Карта склада», «Топология»; «Главная» 0.8 (20 кнопок над строками состояния); "
+                 "дашборд считается; карточка ЕИ-00000427 — остаток сходится с движениями переноса и 0.7.2",
+              names[:2] == ["Дашборд", "Главная"] and "Поиск" in names and "Карта склада" in names and "Топология" in names and main_btn == 20
+              and db.startswith("OK") and fd.startswith("OK:ЕИ-00000427") and card.startswith("✓"), f"{names}; {main_btn}; {db}; {fd}; {card}")
         oracle(c, s, "журнал 0.7.2 + 0.8 в обновлённой книге", initial={}, legacy_mn_empty=False)
     finally:
         s.close(save=True)
@@ -947,6 +956,316 @@ def pr14_wizard():
     try:
         R.add(c, "новая WMS после мастера: «работа разрешена», ядро 0.8, самопроверка без ошибок", state(s) == ("CLEAN", "")
               and s.B("ActionSelfCheck").startswith("САМОПРОВЕРКА WMS: ошибок 0"), s.report()[:200])
+    finally:
+        s.close()
+
+
+# ================================================================ PR15 … PR18 the pages of PRIME: «Дашборд», «Поиск», «Карта склада»
+
+def page(s, name, r0, r1, c0=0, c1=13):
+    sh = s.doc.Sheets.getByName(name)
+    return [[sh.getCellByPosition(c, r).getString() for c in range(c0, c1 + 1)] for r in range(r0, r1 + 1)]
+
+
+def unmodified_call(s, func, *a, module):
+    """a view refreshed on a book saved just before: (result, the book still not «modified», the journal untouched)"""
+    s.doc.store()
+    j0 = njournal(s)
+    res = s.B(func, *a, module=module)
+    return res, not s.doc.isModified(), njournal(s) == j0
+
+
+@case
+def pr15_dashboard():
+    c = "PR15"
+    p = new_wms("pr15")
+    s = ready(Session(p))
+    try:
+        order(s, 1, "1", "Болт", qty="100", Q=serial(-3))
+        receive(s, 1, "40")
+        order(s, 2, "1", "Гайка", qty="50", Q=serial(0))
+        order(s, 3, "1", "Шайба", qty="5", Q=serial(4))
+        order(s, 4, "1", "Винт", qty="5")
+        iss = [issue(s, 1, "ЕИ-00000001", "2", who="Петров"), issue(s, 2, "ЕИ-00000001", "1", who="Сидоров"), issue(s, 3, "ЕИ-00000002", "1", who="Петров")]
+        put(s, "Выдачи", 4, L="ЕИ-00000003", E="1", I="Петров")          # typed, not posted
+        r, unmod, nj = unmodified_call(s, "DashRefresh", module="WmsDash")
+        v = page(s, "Дашборд", 0, 52, 0, 14)
+        tiles = [v[4][1 + 2 * i] for i in range(6)]
+        R.add(c, "дашборд считается по листам книги: плитки — ЕИ с остатком, ожидается позиций (частично полученная тоже), пришло и выдано сегодня, "
+                 "машины, внимание (непроведённая строка выдачи); книга не помечена изменённой, журнал не тронут",
+              r.startswith("OK") and all(x.startswith("OK") for x in iss) and tiles[1] == "4" and tiles[2] == "1" and tiles[3] == "3" and tiles[5] == "1"
+              and "непроведённых 1" in v[5][11] and "получателей 2" in v[5][7] and unmod and nj, f"{r}; {tiles}; {v[5]}")
+        lst = [row[1:7] for row in v[9:13]]
+        R.add(c, "«Ожидается»: позиции по ожидаемой дате (Q), раньше — выше: просрочено 3 дн., сегодня, через 4 дн.; без даты — в счётчике плитки",
+              lst[0][1] == "Болт" and "просрочено 3 дн." == lst[0][5] and lst[1][1] == "Гайка" and lst[1][5] == "сегодня" and lst[2][5] == "через 4 дн."
+              and "без даты 1" in v[5][3], str(lst))
+        ops = [row[7:13] for row in v[9:14]]
+        R.add(c, "«Последние операции» — из журнала, новые сверху: выдача, кому, количество с единицей", ops[0][1] == "Выдача" and "ЕИ-00000002" in ops[0][3]
+              and "Петров" in ops[0][3] and ops[0][5].startswith("1 "), str(ops[:3]))
+        top = [row[1:7] for row in v[24:26]]
+        R.add(c, "«Чаще всего выдают — 30 дней»: по числу выдач, с количеством и единицей", top[0][3] == "2" and top[0][4] == "3", str(top))
+        days = v[37]
+        R.add(c, "«Последние 14 дней»: сегодня первым, число выдач и полоска", days[2] == "3" and "█" in days[3] and days[8] == "1", str(days[:10]))
+        R.add(c, "в шапке — состояние WMS: «Работа разрешена»", "Работа разрешена" in v[0][8] and v[0][14].startswith("CLEAN"), v[0][8])
+        # the page shown again with no new operation: nothing recounted; after an operation: recounted
+        foot0 = v[52][1]
+        s.B("OnDashFocus", module="WmsDash")
+        same = page(s, "Дашборд", 52, 52)[0][1] == foot0
+        issue(s, 5, "ЕИ-00000002", "1", who="Иванов")
+        s.B("OnDashFocus", module="WmsDash")
+        v2 = page(s, "Дашборд", 4, 4)[0]
+        R.add(c, "показ страницы без новых операций — не пересчитывается; после выдачи — пересчитана (выдано сегодня 4)", same and v2[7] == "4", f"{same}; {v2[7]}")
+        oracle(c, s, "дашборд ничего не провёл и не изменил")
+    finally:
+        s.close()
+
+
+@case
+def pr16_find_card():
+    c = "PR16"
+    p = new_wms("pr16")
+    s = ready(Session(p))
+    try:
+        order(s, 1, "7", "Кабель UTP", qty="100", supplier="Сеть")
+        rr = receive(s, 1, "100", doc="УПД-77", place="5-12-3")
+        ei = ords(s, 1)[21]
+        n = int(ei[3:]) if ei.startswith("ЕИ-") else 0
+        i1 = issue(s, 1, ei, "30", who="Петров")
+        i2 = issue(s, 2, ei, "5", who="Сидоров")
+        d2 = s.I("IssueDeleteRow", 2)
+        put(s, "Возврат", 1, B="1", F="10", H=serial(), I="Петров")
+        rt = s.B("ReturnPostRow", 1, module="WmsReturn")
+        put(s, "Корректировки", 1, B="Списание", C=ei, G="2", K=serial(), L="брак")
+        wo = s.B("AdjustPostRow", 1, module="WmsAdjust")
+        put(s, "Корректировки", 2, B="Перемещение", C=ei, J="5-12-4", K=serial(), L="переложили")
+        mv = s.B("AdjustPostRow", 2, module="WmsAdjust")
+        r, unmod, nj = unmodified_call(s, "FindRun", str(n), module="WmsFind")
+        v = page(s, "Поиск", 6, 20, 0, 12)
+        moves = [row[1:9] for row in v[6:12]]
+        R.add(c, "«Поиск» номера ЕИ → карточка: приход по заказу +100, выдача −30, удалённая выдача серым без влияния, возврат +10, списание −2, "
+                 "перемещение без влияния; бегущий остаток 100 → 70 → 70 → 80 → 78 → 78; «✓ Остаток сходится»; книга не изменена",
+              all(x.startswith("OK") for x in (rr, i1, i2, d2, rt, wo, mv, r)) and moves[0][1].startswith("Приход по заказу") and moves[0][4] == "100"
+              and moves[1][5] == "30" and moves[2][5] == "" and "удалена" in moves[2][7] and moves[3][4] == "10" and moves[4][5] == "2"
+              and [m[6] for m in moves] == ["100", "70", "70", "80", "78", "78"] and v[3][1].startswith("✓") and unmod and nj,
+              f"{r}; {moves}; {v[3][1][:80]}")
+        R.add(c, "шапка карточки: ЕИ, наименование, остаток, место (после перемещения), откуда", v[0][1].startswith(ei) and "Кабель UTP" in v[0][1]
+              and "Остаток 78" in v[1][1] and "5-12-4" in v[1][1], f"{v[0][1]}; {v[1][1]}")
+        for q in ("ЕИ-" + str(n), f"еи {n}", ei):
+            s.B("FindRun", q, module="WmsFind")
+        same = page(s, "Поиск", 6, 6)[0][1].startswith(ei)
+        R.add(c, "ЕИ понимается в любой записи: «ЕИ-427», «еи 427», «ЕИ-00000427», «427»", same, "")
+        rh = s.B("FindRun", "петров", module="WmsFind")
+        R.add(c, "имя получателя → «На руках у …»", rh.startswith("OK:на руках у Петров"), rh)
+        r2 = s.B("FindRun", "петров*", module="WmsFind")
+        v2 = page(s, "Поиск", 6, 20, 0, 12)
+        sheets_found = sorted({row[1] for row in v2[6:] if row[1]})
+        R.add(c, "поиск слова (без учёта регистра) по всем листам: выдачи и возврат Петрова, получатель; строка — номер строки листа",
+              r2.startswith("OK") and "Выдачи" in sheets_found and "Возврат" in sheets_found and v2[0][1].startswith("Найдено «петров»"), f"{r2}; {sheets_found}")
+        r3 = s.B("FindRun", "5-12-4", module="WmsFind")
+        v3 = page(s, "Поиск", 6, 14, 0, 12)
+        R.add(c, "поиск места: ЕИ на месте и итог «в «Наличие» по найденному»", r3.startswith("OK") and any(row[3] == ei for row in v3[6:]) and "ЕИ 1" in v3[1][1],
+              f"{r3}; {v3[1][1]}")
+        r4 = s.B("FindRun", "нет-такого-слова", module="WmsFind")
+        R.add(c, "ничего не найдено — понятная строка, таблица пуста", r4.startswith("OK:найдено 0") and page(s, "Поиск", 6, 6)[0][1].startswith("Ничего не найдено"), r4)
+        # «Перейти к строке» and the double click
+        s.B("FindRun", "петров*", module="WmsFind")
+        s.goto("Поиск", "$B$13")
+        s.B("BtnFindGo", module="WmsFind")
+        R.add(c, "«Перейти к строке» открывает лист найденной строки", s.active_sheet() in ("Выдачи", "Возврат", "Получатели") and s.U("TestUiLastMessage").startswith("OK:"),
+              f"{s.active_sheet()}; {s.U('TestUiLastMessage')}")
+        s.B("FindRun", "кабель utp", module="WmsFind")
+        cell = s.doc.Sheets.getByName("Поиск").getCellByPosition(1, 12)
+        dc = s.B("OnFindDoubleClick", cell, module="WmsFind")
+        R.add(c, "двойной щелчок по найденной строке с ЕИ — карточка ЕИ (ячейка не редактируется)", dc is True and page(s, "Поиск", 6, 6)[0][1].startswith(ei),
+              f"{dc}; {page(s, 'Поиск', 6, 6)[0][1]}")
+        r5 = s.B("FindRun", "1", module="WmsFind")
+        R.add(c, "ЕИ начальных данных книги без прихода — карточка без ложной ошибки «не сходится»", "Первичного прихода в книге нет" in page(s, "Поиск", 9, 9)[0][1],
+              page(s, "Поиск", 9, 9)[0][1])
+        oracle(c, s, "поиск и карточка ничего не провели")
+    finally:
+        s.close()
+
+
+def topology(s, rows):
+    """a small layout on «Топология»: rows {ряд: (секций, ярусов)}; between the rows an empty line and a wall"""
+    t = s.doc.Sheets.getByName("Топология")
+    t.getCellByPosition(0, 0).setString("")
+    r = 1
+    for R_, (S, L) in rows.items():
+        t.getCellByPosition(0, r).setString(str(R_))
+        for lv in range(L, 0, -1):
+            for sec in range(1, S + 1):
+                t.getCellByPosition(sec, r).setString(f"{R_}-{sec}-{lv}")
+            r += 1
+        for sec in range(1, S + 1):
+            t.getCellByPosition(sec, r).CellBackColor = 0x000000
+        r += 2
+
+
+@case
+def pr17_map():
+    c = "PR17"
+    p = new_wms("pr17")
+    s = ready(Session(p))
+    try:
+        e0 = s.B("MapBuild", "OCC", module="WmsMap")
+        R.add(c, "топология не задана — понятная причина (вставить или загрузить), без ошибки", e0.startswith("ERR:") and "Загрузить топологию" in e0
+              and "ряд-секция-ярус" in e0, e0)
+        topology(s, {1: (6, 3), 2: (6, 3)})
+        b0 = s.B("MapBuild", "OCC", module="WmsMap")
+        off0 = int(b0.split("не на карте ")[1].split(",")[0]) if "не на карте " in b0 else -1
+        places = {}
+        for k, (pl_text, f) in enumerate([("1-2-3", "10"), ("01.02.03", "5"), ("Р1 С2 Я3", "4"), ("2/6/1", "3"), ("1-5", "2"), ("Офис", "1"), ("2-6-1", "8")]):
+            order(s, 1 + k, "1", f"Товар {k}", qty=f)
+            places[pl_text] = receive(s, 1 + k, f, place=pl_text)
+        r1, unmod, nj = unmodified_call(s, "MapBuild", "OCC", module="WmsMap")
+        R.add(c, "карта по топологии: 36 мест; «1-2-3», «01.02.03», «Р1 С2 Я3» — одно место (3 ЕИ), «2/6/1» и «2-6-1» — другое; «1-5» без яруса и «Офис» "
+                 "— не на карте (+2 к ЕИ начальных данных книги); книга не изменена, журнал не тронут",
+              all(x.startswith("OK") for x in places.values()) and r1.startswith("OK:мест 36, занято 2, свободно 34") and off0 >= 0
+              and f"не на карте {off0 + 2}," in r1 and unmod and nj, f"{b0}; {r1}; {places}")
+        rc = s.B("TestMapPlace", "1-2-3", module="WmsMap").split(":")
+        info = s.B("TestMapClick", int(rc[0]), int(rc[1]), module="WmsMap")
+        R.add(c, "щелчок по месту 1-2-3 — что на нём лежит: три ЕИ с остатками", info.startswith("OK:1-2-3:") and info.count("ЕИ-") == 3 and "10 шт" in info, info)
+        rc2 = s.B("TestMapPlace", "1-1-1", module="WmsMap").split(":")
+        info2 = s.B("TestMapClick", int(rc2[0]), int(rc2[1]), module="WmsMap")
+        R.add(c, "пустое место — «пусто — место свободно»", "свободно" in info2, info2)
+        mp = s.doc.Sheets.getByName("Карта склада")
+        grid = mp.getCellByPosition(600 + int(rc[1]), int(rc[0])).getValue()
+        R.add(c, "место на карте — текст топологии как есть; код цвета слоя «Занятость» для 3 ЕИ — 3", grid == 3.0
+              and mp.getCellByPosition(int(rc[1]), int(rc[0])).getString() == "1-2-3", f"{grid}")
+        res = {}
+        for layer in ("ISS", "STALE", "ATT", "FREE", "OCC"):
+            res[layer] = s.B("MapBuild", layer, module="WmsMap")
+        R.add(c, "слои переключаются (выдачи 30 дней, без движения, внимание, свободные, занятость) — каждый с легендой", all(x.startswith("OK") for x in res.values())
+              and "■■" in mp.getCellByPosition(0, 5).getString(), str({k: v[:30] for k, v in res.items()}))
+        s.B("BtnMapOff", module="WmsMap")
+        off = page(s, "Поиск", 6, 12 + off0 + 3, 0, 12)
+        mine = {row[4]: row[7] for row in off[6:] if row[4] in ("Товар 4", "Товар 5")}
+        R.add(c, "«Не на карте» — список на «Поиск»: «Товар 4» (место «1-5», без яруса) и «Товар 5» («Офис», такого места нет), с подсказкой, как поправить",
+              off[0][1].startswith(f"ЕИ с остатком не на карте: {off0 + 2}") and mine.get("Товар 4") == "1-5" and mine.get("Товар 5") == "Офис"
+              and "Перемещение" in off[1][1], f"{off[0][1]}; {mine}")
+        ei = ords(s, 6)[21]
+        put(s, "Корректировки", 1, B="Перемещение", C=ei, J="1-1-1", K=serial(), L="на место")
+        mv = s.B("AdjustPostRow", 1, module="WmsAdjust")
+        r2 = s.B("MapBuild", "OCC", module="WmsMap")
+        R.add(c, "после перемещения на место карты — ЕИ на карте (занято 3, не на карте на один меньше)", mv.startswith("OK") and "занято 3" in r2
+              and f"не на карте {off0 + 1}," in r2, f"{mv}; {r2}")
+        keys = [s.B("PlaceKey", x, module="WmsView") for x in ("5.12.3", "05/12/03", "Р5 С12 Я3", "R5-S12-L3", "A-01-1", "B-01-1", "5-12", "Офис", "12")]
+        R.add(c, "место читается как его пишут: 5.12.3, 05/12/03, «Р5 С12 Я3», R5-S12-L3 → 5-12-3; буквы ряда сохраняются (A-1-1 ≠ B-1-1); 5-12 — без яруса",
+              keys == ["5-12-3"] * 4 + ["A-1-1", "B-1-1", "5-12", "", ""], str(keys))
+        oracle(c, s, "карта ничего не провела")
+    finally:
+        s.close()
+
+
+@case
+def pr18_topology_file():
+    """«Загрузить топологию…»: the sheet of a file with the most places becomes «Топология» (cells, colours, sizes, merged cells)"""
+    c = "PR18"
+    p = new_wms("pr18")
+    f = os.path.join(os.path.dirname(p), "topo.ods")
+    s0 = Session(new_wms("pr18_src"), macros=0)
+    try:
+        doc = s0.o.new_calc()
+        sh = doc.Sheets.getByIndex(0)
+        sh.Name = "Схема"
+        for sec in range(1, 9):
+            for lv in (1, 2):
+                cell = sh.getCellByPosition(sec, 3 - lv)
+                cell.setString(f"3-{sec}-{lv}")
+                cell.CellBackColor = 0xDDEEFF
+        sh.getCellRangeByPosition(1, 4, 8, 4).CellBackColor = 0x000000
+        sh.getCellByPosition(0, 1).setString("3")
+        sh.getCellRangeByPosition(0, 1, 0, 2).merge(True)
+        sh.getColumns().getByIndex(3).Width = 1500
+        doc.Sheets.insertNewByName("Прочее", 1)
+        doc.Sheets.getByName("Прочее").getCellByPosition(0, 0).setString("1-1-1")
+        doc.storeToURL(__import__("uno").systemPathToFileUrl(f), ())
+        doc.close(True)
+        empty = s0.o.new_calc()
+        empty.Sheets.getByIndex(0).getCellByPosition(0, 0).setString("просто таблица")
+        empty.storeToURL(__import__("uno").systemPathToFileUrl(os.path.join(os.path.dirname(p), "empty.ods")), ())
+        empty.close(True)
+    finally:
+        s0.close()
+    s = ready(Session(p))
+    try:
+        r = s.B("TopoLoad", __import__("uno").systemPathToFileUrl(f), module="WmsMap")
+        t = s.doc.Sheets.getByName("Топология")
+        R.add(c, "из файла взят лист с местами (16 мест, лист «Схема»), он стал «Топология» на своём месте, книга защищена как была",
+              r.startswith("OK:мест 16") and "«Схема»" in r and t.getCellByPosition(3, 1).getString() == "3-3-2"
+              and abs(t.getColumns().getByIndex(3).Width - 1500) <= 20 and s.doc.isProtected()
+              and [s.doc.Sheets.getByIndex(i).Name for i in range(s.doc.Sheets.getCount())].index("Топология")
+              == [s.doc.Sheets.getByIndex(i).Name for i in range(s.doc.Sheets.getCount())].index("Справка") - 1,
+              f"{r}; {t.getCellByPosition(3, 1).getString()}; {t.getColumns().getByIndex(3).Width}; {s.doc.isProtected()}")
+        m = s.B("MapBuild", "OCC", module="WmsMap")
+        R.add(c, "карта по загруженной топологии: 16 мест", m.startswith("OK:мест 16"), m)
+        bad = os.path.join(os.path.dirname(p), "empty.ods")
+        r2 = s.B("TopoLoad", __import__("uno").systemPathToFileUrl(bad), module="WmsMap")
+        R.add(c, "файл без мест «ряд-секция-ярус» — отказ «это не топология склада», прежняя «Топология» на месте",
+              r2.startswith("ERR:") and "не топология" in r2 and s.doc.Sheets.getByName("Топология").getCellByPosition(3, 1).getString() == "3-3-2", r2)
+        oracle(c, s, "загрузка топологии ничего не провела")
+    finally:
+        s.close()
+
+
+@case
+def pr19_where_put():
+    """«Куда положить?»: where the goods already lie, then the free places of the map nearest to them"""
+    c = "PR19"
+    p = new_wms("pr19")
+    s = ready(Session(p))
+    try:
+        topology(s, {1: (6, 3), 2: (6, 3)})
+        order(s, 1, "1", "Перчатки", qty="10")
+        r1 = receive(s, 1, "10", place="1-3-2")
+        order(s, 2, "2", "Перчатки", qty="5")
+        sug = s.B("WhereSuggest", "Перчатки", "", module="WmsMap").split("\n")
+        R.add(c, "подсказка: сначала место, где уже лежит этот товар (1-3-2), затем свободные рядом — того же ряда и секции (1-3-1, 1-3-3)",
+              r1.startswith("OK") and sug[0].startswith("1-3-2|") and "уже лежит" in sug[0] and sug[1].split("|")[0] in ("1-3-1", "1-3-3")
+              and sug[2].split("|")[0] in ("1-3-1", "1-3-3") and len(sug) == 8, str(sug[:4]))
+        s.goto("Заказы", "$B$3")
+        s.B("TestPrimeChoice", 1, module="WmsPrimeUi")
+        res = s.B("WherePut", module="WmsMap")
+        R.add(c, "выбор второго варианта — место записано в «Место хранения» непроведённой строки (это ввод, не операция: журнал не тронут)",
+              res.startswith("OK:место 1-3-") and ords(s, 2)[20] == sug[1].split("|")[0], f"{res}; {ords(s, 2)[20]}")
+        rr = receive(s, 2, "5", place=ords(s, 2)[20])
+        s.goto("Заказы", "$B$2")
+        s.B("TestPrimeChoice", 0, module="WmsPrimeUi")
+        res2 = s.B("WherePut", module="WmsMap")
+        R.add(c, "для проведённой строки место не пишется — подсказка «Корректировки» → «Перемещение»", rr.startswith("OK") and "Перемещение" in res2
+              and ords(s, 1)[20] == "1-3-2", res2)
+        s.goto("Заказы", "$B$2")
+        s.B("TestPrimeChoice", -1, module="WmsPrimeUi")
+        res3 = s.B("WherePut", module="WmsMap")
+        s.goto("Выдачи", "$B$2")
+        res4 = s.B("WherePut", module="WmsMap")
+        R.add(c, "окно закрыто — ничего не записано; на другом листе — понятный отказ", res3.startswith("SKIP") and res4.startswith("ERR:") and "«Заказы»" in res4,
+              f"{res3}; {res4}")
+        oracle(c, s, "«Куда положить?» ничего не провёл")
+    finally:
+        s.close()
+
+
+@case
+def pr20_hands():
+    """«На руках»: the issues of a recipient minus the returns of each of them"""
+    c = "PR20"
+    p = new_wms("pr20")
+    s = ready(Session(p))
+    try:
+        put(s, "Получатели", 30, A="пв", B="Петров Василий")
+        a = [issue(s, 1, "ЕИ-00000001", "5", who="пв"), issue(s, 2, "ЕИ-00000002", "2", who="Петров Василий"), issue(s, 3, "ЕИ-00000004", "1", who="егр")]
+        put(s, "Возврат", 1, B="1", F="5", H=serial(), I="Петров Василий")
+        b = s.B("ReturnPostRow", 1, module="WmsReturn")
+        r, unmod, nj = unmodified_call(s, "FindRun", "пв", module="WmsFind")
+        v = page(s, "Поиск", 6, 15, 0, 12)
+        R.add(c, "«пв» (сокращение) → «На руках у Петров Василий»: 1 выдача не возвращена (ЕИ-00000002, 2), возвращённая ниже; книга не изменена",
+              all(x.startswith("OK") for x in a + [b]) and r.startswith("OK:на руках у Петров Василий: 1 из 2") and v[6][3] == "ЕИ-00000002"
+              and v[6][7] == "2" and v[7][3] == "ЕИ-00000001" and v[7][7] == "0" and v[7][6] == "5" and unmod and nj, f"{r}; {a}; {b}; {v[6][1:9]}; {v[7][1:9]}")
+        r2 = s.B("FindRun", "пв*", module="WmsFind")
+        R.add(c, "«пв*» — поиск текста по листам, а не «на руках»", r2.startswith("OK:найдено") and page(s, "Поиск", 6, 6)[0][1].startswith("Найдено «пв»"), r2)
+        oracle(c, s, "«на руках» ничего не провёл")
     finally:
         s.close()
 

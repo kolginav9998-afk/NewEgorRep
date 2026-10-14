@@ -655,6 +655,11 @@ Public Const LG_ADD = "ADD"
 Public Const LG_MIGRATE = "MIGRATE"
 ' the sheet «Сверка переноса» (visible, read-only, rebuilt by its button)
 Public Const SH_LEGREP = "Сверка переноса"
+' PRIME 0.8 — the view sheets (D-094, D-095): built from the data, never journaled
+Public Const SH_DASH = "Дашборд"
+Public Const SH_FIND = "Поиск"
+Public Const SH_MAP = "Карта склада"
+Public Const SH_TOPO = "Топология"
 ' «Сверка переноса»: rows 1–2 — the title and the summary, row 4 (index 3) — the header, the data below; 17 columns A..Q
 Public Const LEGREP_HEAD = 3
 Public Const LEGREP_COLS = 17

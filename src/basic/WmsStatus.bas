@@ -10,7 +10,7 @@ Public Const TESTED_LO = "24.2|26.2"
 ' the oldest major version WMS is expected to work on (the functions and the sheet protection options it uses)
 Private Const MIN_LO_MAJOR = 7
 ' «Главная»: the section of this module (0-based row of its title; column A — check, B — result)
-Public Const STATUS_ROW = 24
+Public Const STATUS_ROW = 17
 Private Const STATUS_ROWS = 30
 ' the book size WMS is planned for (spec §27): about 250k movements
 Private Const PLANNED_MOVEMENTS = 250000

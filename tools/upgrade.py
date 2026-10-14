@@ -16,7 +16,8 @@ BUILD    after a clean CHECK, into NEW_FOLDER (it must not exist or be empty): a
          modules, _SYS (schema WMS-SYS-5, UPGRADE_FROM), the registry of the transfer _LEG filled from the journal, the sheet
          «Сверка переноса», the buttons of «Наличие», «Главная» and «Справка» of 0.8, every protection as before. Then VERIFY:
          every cell of every sheet of the old book against the new one (only the cells of the upgrade may differ: the schema,
-         the version and help of «Главная», «Справка»), the protections and the visibility of the sheets, the journal byte for
+         the save stamp, UPGRADE_FROM; «Главная» and «Справка» — pages without data — are those of 0.8; the pages «Дашборд»,
+         «Поиск», «Карта склада», «Топология» are new), the protections and the visibility of the sheets, the journal byte for
          byte, _LEG against the journal; a working copy of the new book opened by WMS 0.8 («работа разрешена», self-check
          without errors, «остаток = сумма движений», the independent oracle replaying the journal — a discrepancy the old book
          already had is named, a new one stops); the old book and its journal are hashed again (they must be unchanged). Any
@@ -294,7 +295,24 @@ def step_08(doc, leg, from_text, done):
     done.append(f"реестр переноса {B.LEG}: {len(leg)} ЕИ из журнала (приходы переноса и перенос ЕИ без заказа)")
     B.stock_buttons(doc, sheets.getByName(B.STOCK))
     done.append(f"лист «{B.LEGREP}», кнопки «Исправить ЕИ переноса» и «Сверка переноса» на «{B.STOCK}»")
-    return [B.LEGREP, B.LEG]
+    # the view sheets: «Дашборд» first, «Поиск» and «Карта склада» after «Наличие», «Топология» before «Справка»
+    names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+    for need in B.VIEW_SHEETS:
+        if need in names:
+            raise RuntimeError(f"в книге уже есть лист «{need}»")
+    sheets.insertNewByName(B.DASH, 0)
+    names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+    sheets.insertNewByName(B.FIND, names.index(B.STOCK) + 1)
+    sheets.insertNewByName(B.MAP, names.index(B.STOCK) + 2)
+    names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+    sheets.insertNewByName(B.TOPO, names.index(B.HELP))
+    B.build_views(doc, sheets)
+    B.view_events(sheets)
+    B.status_colors(doc, sheets)
+    B.where_buttons(doc, sheets)
+    B.rebuild_main(doc, sheets.getByName(B.MAIN))
+    done.append(f"страницы «{B.DASH}», «{B.FIND}», «{B.MAP}» и лист «{B.TOPO}» (вставьте туда схему склада); «{B.MAIN}» этого выпуска (кнопки к страницам)")
+    return [B.LEGREP, B.LEG, B.DASH, B.FIND, B.MAP]
 
 
 def finish_doc(doc, was_protected, new_sheets, done):
@@ -304,7 +322,6 @@ def finish_doc(doc, was_protected, new_sheets, done):
     msh = sheets.getByName(B.MAIN)
     msh.getCellByPosition(1, 0).setString(B.version_text())
     msh.getCellByPosition(0, B.MAIN_HELP_ROW).setString(B.main_help_text())
-    msh.getRows().getByIndex(B.MAIN_HELP_ROW).Height = 7000
     hsh = sheets.getByName(B.HELP)
     hsh.getCellRangeByPosition(0, 0, 3, 5000).clearContents(1023)
     B.build_help(hsh)
@@ -513,7 +530,7 @@ def compare_books(old, new, leg_expected):
     if missing:
         P.append("в новой книге нет листов: " + ", ".join(missing))
     extra = [n for n in new_names if n not in old_names]
-    if sorted(extra) != sorted([B.LEG, B.LEGREP] + [x for x in (B.CARS, B.CAR) if x in extra]):
+    if sorted(extra) != sorted([B.LEG, B.LEGREP] + B.VIEW_SHEETS + [x for x in (B.CARS, B.CAR) if x in extra]):
         P.append("в новой книге лишние листы: " + ", ".join(extra))
     for name in old_names:
         if name not in new_names:
@@ -523,7 +540,8 @@ def compare_books(old, new, leg_expected):
             P.append(f"«{name}»: защита {so.isProtected()} → {sn.isProtected()}")
         if so.IsVisible != sn.IsVisible:
             P.append(f"«{name}»: видимость {so.IsVisible} → {sn.IsVisible}")
-        if name == B.HELP:
+        if name in (B.HELP, B.MAIN):
+            # «Справка» and «Главная» of this release: pages without data (WMS writes the state of «Главная» at every start)
             continue
         ro, co = used(so)
         rn, cn = used(sn)

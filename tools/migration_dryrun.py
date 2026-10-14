@@ -184,6 +184,7 @@ class Calc:
 
     def terminate(self):
         self.o.terminate()
+        __import__("shutil").rmtree(self.tmp, ignore_errors=True)
 
 
 def read_book(calc, path):

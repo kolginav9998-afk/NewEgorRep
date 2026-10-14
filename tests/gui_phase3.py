@@ -78,7 +78,12 @@ def run_dialog(o, ut, doc, macro, title_part, button):
         try:
             w = ut.getTopFocusWindow()
             title = str(state(w).get("Text", ""))
-            if title_part in title and button in list(w.getChildren()):
+            kids = list(w.getChildren())
+            if title.startswith("Исправить — строка") and "ok" in kids and title_part not in title:
+                # PRIME 0.8: «Исправить» first asks what to correct; the first choice (preselected) is the receipt itself
+                w.getChild("ok").executeAction("CLICK", ())
+                continue
+            if title_part in title and button in kids:
                 w.getChild(button).executeAction("CLICK", ())
                 break
         except Exception:
