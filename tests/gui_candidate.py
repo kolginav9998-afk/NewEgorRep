@@ -41,7 +41,7 @@ def main():
         ver = main_sh.getCellByPosition(1, 0).getString()
         form = main_sh.getDrawPage().getForms().getByIndex(0)
         labels = [form.getByIndex(i).Label for i in range(form.getCount())]
-        state = main_sh.getCellByPosition(1, 2).getString()
+        state = main_sh.getCellByPosition(1, 7).getString()          # WmsUi.MR_STATE: B8 since 0.8 (the buttons above the rows of the state)
         step("«Главная» рабочей книги: «Работа разрешена», версия рядом с заголовком, кнопки «Состояние системы» и «Проверка перед работой»",
              state == "Работа разрешена" and ver.startswith("версия " + wms_versions()["WMS_PRODUCT_VERSION"]) and "Состояние системы" in labels and "Проверка перед работой" in labels,
              f"{state}; «{ver}»; {labels}")
