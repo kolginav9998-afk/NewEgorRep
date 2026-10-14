@@ -1564,6 +1564,13 @@ def main():
             fn()
         except Exception as e:
             R.error(fn.__name__.split("_")[0].upper(), e)
+        # the staging office of the transfer tests (run_legacy_transfer.maker) is not left running after a case
+        lt = sys.modules.get("run_legacy_transfer")
+        if lt is not None and "o" in lt._mk:
+            try:
+                lt._mk.pop("o").terminate()
+            except Exception:
+                pass
     R.save(os.path.join(OUT, "results_prime.json"))
     items = R.items
     lines = ["# PRIME 0.8 — результаты", "", f"PASS {sum(1 for x in items if x['status'] == 'PASS')}, "
