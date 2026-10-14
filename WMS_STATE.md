@@ -152,7 +152,7 @@ python3 tools/legacy_transfer.py check --staging КОПИЯ.ods --work LEGACY_WO
 WMS_TEST_OUT=/tmp/wms_m6 python3 tests/run_m6.py [m01 s02 u01 ...]  # «Приход авто», блоки заказов, обновление 0.6
 WMS_TEST_OUT=/tmp/wms_ins python3 tests/run_insights.py            # Pattern Engine
 WMS_TEST_OUT=/tmp/wms_gm6 python3 tests/gui_m6.py --display :99
-WMS_TEST_OUT=/tmp/wms_pr python3 tests/run_prime.py [pr01 pr22 ...] # PRIME 0.8 (PR01–PR24)
+WMS_TEST_OUT=/tmp/wms_pr python3 tests/run_prime.py [pr01 pr22 ...] # PRIME 0.8 (PR01–PR25)
 WMS_TEST_OUT=/tmp/wms_bp python3 tests/bench_prime.py [100000 250000] # страницы-виды на больших книгах
 python3 tools/upgrade.py check|build|promote|status WMS_PROD.ods --to НОВАЯ_ПАПКА   # книга 0.7.x → 0.8 (мастер — WMS_UPGRADE.ods)
 python3 tools/build_upgrade.py ПАПКА                                # книга-мастер WMS_UPGRADE.ods

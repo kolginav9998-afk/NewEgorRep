@@ -862,12 +862,26 @@ def status_colors(doc, sheets):
         sh = sheets.getByName(sheet)
         letter = chr(65 + c) if c < 26 else "A" + chr(65 + c - 26)
         rng = sh.getCellRangeByPosition(c, first, c, LAST_ROW)
+        if sheet == ORDERS:
+            # «Заказы» already carries the line above every order (order_separators) and a conditional format applies its
+            # first true entry only: the start of an order with a status gets both (the line and the colour), then the line
+            # alone, then the colour alone — as Q does with its mark of a passed date
+            cf = rng.ConditionalFormat
+            cf.clear()
+            rng.ConditionalFormat = cf
+            start = 'ROW()>2;TRIM($A2)="1";$AC2=""'
+            line = border_line(88, 0x1F3864)
+            for test, style in rules:
+                st = doc.StyleFamilies.getByName("CellStyles").getByName(style)
+                cell_style(doc, style + "_Line", CellBackColor=st.CellBackColor, CharColor=st.CharColor, TopBorder=line)
+                add_cond(sh, rng, f"AND({start};{test.replace('X', f'${letter}{first + 1}')})", style + "_Line", c, first)
+            add_cond(sh, rng, f"AND({start})", "WMS_OrderStart", c, first)
         for test, style in rules:
             add_cond(sh, rng, test.replace("X", f"${letter}{first + 1}"), style, c, first)
 
     posted = [('LEFT(X;9)="Проведено"', "ST_Done"), ('LEFT(X;7)="Удалено"', "ST_Gray"), ('LEFT(X;5)="КОПИЯ"', "ST_Bad"),
               ('LEFT(X;12)="Не проведено"', "ST_Bad")]
-    col(ORDERS, 22, [('LEFT(X;8)="Получено"', "ST_Done"), ('X="Ожидается"', "ST_Wait"), ('LEFT(X;9)="Частично"', "ST_Part"),
+    col(ORDERS, 22, [('OR(LEFT(X;8)="Получено";X="Дополнительное поступление")', "ST_Done"), ('X="Ожидается"', "ST_Wait"), ('LEFT(X;8)="Частично"', "ST_Part"),
                      ('OR(X="Отменено";LEFT(X;19)="Поступление удалено")', "ST_Gray")])
     col(ORDERS, 24, [('LEFT(X;5)="КОПИЯ"', "ST_Bad"), ('LEFT(X;12)="Не проведено"', "ST_Bad")])
     col(ISSUES, 17, posted)
@@ -875,7 +889,7 @@ def status_colors(doc, sheets):
     col(ADJUST, 16, posted)
     col(SPECIAL, 16, posted)
     col(SPECIAL, 17, [('LEFT(X;5)="КОПИЯ"', "ST_Bad"), ('LEFT(X;12)="Не проведено"', "ST_Bad")])
-    col(STOCK, 7, [('X="Требует разбора"', "ST_Part"), ('LEFT(X;14)="Приход удалён"', "ST_Gray")])
+    col(STOCK, 7, [('X="Требует разбора"', "ST_Part"), ('LEFT(X;13)="Приход удалён"', "ST_Gray")])
 
 
 def where_buttons(doc, sheets):

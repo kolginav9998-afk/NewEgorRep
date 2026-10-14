@@ -770,19 +770,32 @@ BLOCK_RULE = [('AND(ROW()>2;TRIM($A2)="1";$AC2="")', "WMS_OrderStart")]
 Q_STYLES = ["WMS_OrderStartLate", "WMS_OrderStart", "WMS_LateDate"]
 
 
+# PRIME 0.8: the status W and the control Y of «Заказы» are coloured; their own formats keep the line of an order: the start of
+# an order with a status (the line and the colour), the line, the colour
+W_STYLES = ["ST_Done_Line", "ST_Wait_Line", "ST_Part_Line", "ST_Gray_Line", "WMS_OrderStart", "ST_Done", "ST_Wait", "ST_Part", "ST_Gray"]
+Y_STYLES = ["ST_Bad_Line", "ST_Bad_Line", "WMS_OrderStart", "ST_Bad", "ST_Bad"]
+
+
 def order_cf(sh):
     """the conditional formats of «Заказы» rows 2… as [(formula, style)]: A:P, Q (the expected date: its own format since
-    0.7.2 — the separator with the mark of a passed date, the separator, the mark) and R:AB"""
+    0.7.2 — the separator with the mark of a passed date, the separator, the mark), R:V, W (the status, 0.8), X, Y (the
+    control, 0.8), Z:AB"""
     def entries(c0, c1):
         cf = sh.getCellRangeByPosition(c0, 1, c1, 1048575).ConditionalFormat
         return [(cf.getByIndex(k).getFormula1(), cf.getByIndex(k).getStyleName()) for k in range(cf.getCount())]
-    return entries(0, 15), entries(16, 16), entries(17, 27)
+    return entries(0, 15), entries(16, 16), entries(17, 21), entries(22, 22), entries(23, 23), entries(24, 24), entries(25, 27)
 
 
 def order_cf_ok(sh):
-    left, q, right = order_cf(sh)
-    return (left == BLOCK_RULE and right == BLOCK_RULE and [x[1] for x in q] == Q_STYLES and q[1] == BLOCK_RULE[0]
-            and q[0][0].startswith(BLOCK_RULE[0][0][:-1] + ";") and "TODAY()" in q[0][0] and "TODAY()" in q[2][0])
+    left, q, rv, w, x, y, zab = order_cf(sh)
+    start = BLOCK_RULE[0][0][:-1] + ";"
+
+    def own(lst, styles):
+        n = styles.index("WMS_OrderStart")
+        return ([e[1] for e in lst] == styles and lst[n] == BLOCK_RULE[0] and all(e[0].startswith(start) for e in lst[:n])
+                and all(lst[n + 1 + k][0] in lst[k][0] for k in range(n)))
+    return (left == rv == x == zab == BLOCK_RULE and [e[1] for e in q] == Q_STYLES and q[1] == BLOCK_RULE[0]
+            and q[0][0].startswith(start) and "TODAY()" in q[0][0] and "TODAY()" in q[2][0] and own(w, W_STYLES) and own(y, Y_STYLES))
 
 
 def rendered_lines(path_ods, first_col_x=None):
@@ -839,8 +852,10 @@ def s01_structure():
         R.add(c, "«Заказы»: условное оформление A2:AB — правило «A = 1 и строка не «Ещё поступление» (AC пуста), кроме первой строки» → "
                  "стиль с заметной верхней линией на всю ширину; у Q (0.7.2) своё оформление: та же линия и отметка прошедшей ожидаемой "
                  "даты — сначала «начало заказа и дата прошла» (линия и отметка), затем линия, затем отметка (оформление применяет "
-                 "первое верное условие)",
+                 "первое верное условие); у статуса W и «Контроля» Y (0.8) — так же: начало заказа со статусом (линия и цвет), линия, цвет",
               order_cf_ok(sh) and tb.OuterLineWidth + tb.InnerLineWidth >= 70 and tb.Color == 0x1F3864 and both.TopBorder.Color == 0x1F3864
+              and styles.getByName("ST_Done_Line").TopBorder.Color == 0x1F3864
+              and styles.getByName("ST_Done_Line").CellBackColor == styles.getByName("ST_Done").CellBackColor
               and both.TopBorder.OuterLineWidth == tb.OuterLineWidth and both.CellBackColor == styles.getByName("WMS_LateDate").CellBackColor == 0xFFEB9C,
               f"{order_cf(sh)}; ширина {tb.OuterLineWidth}, цвет {tb.Color:06X}")
         R.add(c, "служебная колонка AC «Блок (служебная)»: скрыта, защищена, вне автофильтра A:AB",

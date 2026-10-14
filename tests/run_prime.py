@@ -674,6 +674,13 @@ def pr11_upgrade_072():
                  "(«Выдачи», «Корректировки»), «Фасовка ЕИ» на «Наличие», каждая один раз", all(btns[n].count("btnWherePut") == 1 for n in ("Заказы", "Иной приход"))
               and all(btns[n].count("btnPickEI") == 1 and btns[n].count("btnPackEI") == 1 for n in ("Выдачи", "Корректировки"))
               and btns["Наличие"].count("btnPackEI") == 1, str(btns))
+        wcf = s.doc.Sheets.getByName("Заказы").getCellRangeByPosition(22, 1, 22, 1048575).ConditionalFormat
+        wst = [wcf.getByIndex(k).getStyleName() for k in range(wcf.getCount())]
+        acf = s.doc.Sheets.getByName("Заказы").getCellRangeByPosition(0, 1, 15, 1048575).ConditionalFormat
+        R.add(c, "в обновлённой книге статус W «Заказов» — в цвете, и линия начала заказа на нём осталась (начало заказа со статусом — "
+                 "линия и цвет, затем линия, затем цвет); A:P — линия заказа, как в 0.7.2",
+              wst == ["ST_Done_Line", "ST_Wait_Line", "ST_Part_Line", "ST_Gray_Line", "WMS_OrderStart", "ST_Done", "ST_Wait", "ST_Part", "ST_Gray"]
+              and acf.getCount() == 1 and acf.getByIndex(0).getStyleName() == "WMS_OrderStart", str(wst))
         pk = s.B("PackSet", "ЕИ-00000427", "4", "кан", "", module="WmsPack")
         put(s, "Выдачи", 300, L="ЕИ-00000427", E="2 кан", H=serial(), I="Петров")
         pi = s.I("IssuePostRow", 300)
@@ -1622,6 +1629,46 @@ def pr24_parts_recovery():
     R.add(c, "сбой фасовки и движений частями до журнала (операции нет, остаток и фасовка как были) и после журнала («Восстановить» "
              "доводит её: остаток в единице документа, в журнале — части или процент): «работа разрешена», оракул без расхождений",
           all(x[2] == "CRASH-SIM" and x[4] == ("CLEAN", "") and x[5] and x[7] for x in out), str(out))
+
+
+@case
+def pr25_status_colours():
+    """«Цвет статуса» (0.8): every rule of the colour evaluated by Calc itself on the real texts of the statuses — the first true
+    rule gives the colour; the start of an order keeps its line"""
+    c = "PR25"
+    p = new_wms("pr25")
+    s = ready(Session(p))
+    try:
+        topo = s.doc.Sheets.getByName("Топология")
+        cell = topo.getCellByPosition(1000, 0)
+
+        def first_style(sheet, col, text):
+            cf = s.doc.Sheets.getByName(sheet).getCellRangeByPosition(col, 1, col, 1048575).ConditionalFormat
+            letter = chr(65 + col) if col < 26 else "A" + chr(65 + col - 26)
+            for k in range(cf.getCount()):
+                f = cf.getByIndex(k).getFormula1()
+                if f.startswith("AND(ROW()>2"):
+                    continue                      # the start of an order: checked by S01 (the same test with the line)
+                cell.setFormula("=" + f.replace(f"${letter}2", '"' + text.replace('"', '""') + '"'))
+                if cell.getValue() == 1:
+                    return cf.getByIndex(k).getStyleName()
+            return ""
+        exp = {("Заказы", 22): {"Получено": "ST_Done", "Получено без документов": "ST_Done", "Дополнительное поступление": "ST_Done",
+                                "Ожидается": "ST_Wait", "Частично получено": "ST_Part", "Частично получено / остаток отменён": "ST_Part",
+                                "Отменено": "ST_Gray", "Поступление удалено (сторно)": "ST_Gray", "Заказ": ""},
+               ("Заказы", 24): {"КОПИЯ строки 5": "ST_Bad", "Не проведено: нет количества": "ST_Bad", "Проведено": ""},
+               ("Наличие", 7): {"Требует разбора": "ST_Part", "Приход удалён (сторно)": "ST_Gray", "Активен": ""},
+               ("Выдачи", 17): {"Проведено": "ST_Done", "Проведено, исправлено": "ST_Done", "Удалено (сторно)": "ST_Gray",
+                                "КОПИЯ строки 3": "ST_Bad", "Не проведено: остаток 1 кан": "ST_Bad", "К выдаче: 1 кан = 0,25 шт": ""}}
+        got = {k: {t: first_style(k[0], k[1], t) for t in v} for k, v in exp.items()}
+        cell.setString("")
+        bad = {k: {t: (got[k][t], v[t]) for t in v if got[k][t] != v[t]} for k, v in exp.items()}
+        R.add(c, "цвет статуса — первое верное правило на настоящих текстах: получено (и без документов, и доп. поступление) — зелёный, "
+                 "ожидается — синий, частично (и с отменённым остатком) — жёлтый, отменено и сторно — серый; «Требует разбора» — жёлтый, "
+                 "«Приход удалён (сторно)» — серый; копия и не проведено — красный; прочее — без цвета",
+              all(not v for v in bad.values()), str(bad))
+    finally:
+        s.close()
 
 
 def main():
