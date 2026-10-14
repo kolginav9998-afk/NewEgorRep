@@ -39,8 +39,8 @@ SCHEMA = "WMS-SYS-5"                                                            
 SK_SAVE_STAMP = SYS_KEYS.index("SAVE_STAMP")
 MODULES = ["WmsConfig", "WmsCore", "WmsJournal", "WmsLock", "WmsBackup", "WmsRecovery", "WmsDiagnostics", "WmsIssue", "WmsUi",
            "WmsOrders", "WmsReceipt", "WmsOrdersUi", "WmsReturn", "WmsReturnUi", "WmsSpecial", "WmsSpecialUi", "WmsAdjust", "WmsAdjustUi",
-           "WmsCar", "WmsCarUi", "WmsExport", "WmsMigrate", "WmsStatus", "WmsLegacy", "WmsPrimeUi", "WmsView", "WmsDash", "WmsFind",
-           "WmsMap"]
+           "WmsCar", "WmsCarUi", "WmsExport", "WmsMigrate", "WmsStatus", "WmsLegacy", "WmsPrimeUi", "WmsView", "WmsPack", "WmsDash",
+           "WmsFind", "WmsMap"]
 TEST_MODULES = ["WmsTestOps"]
 TEST_SHEET = "_TST"
 LAST_ROW = 1048575
@@ -122,6 +122,9 @@ ADJ_HEADERS = ["№", "Вид", "ЕИ", "Изменение остатка", "С
 LEG = "_LEG"
 LEG_HEADERS = ["ЕИ", "Вид", "Приход при переносе", "Остаток при переносе", "Израсходовано до переноса", "Старое наличие (X)",
                "Откуда взят остаток", "Строка старой таблицы", "Операция переноса (seq)", "Коррекций переноса", "Последняя коррекция"]
+# PRIME 0.8 — the packing of an EI (WmsConfig SH_PACK, PK_*): row = EI, written only by the operation EI_PACK (D-099)
+PACK = "_PACK"
+PACK_HEADERS = ["ЕИ", "Часть (как называть)", "Частей в 1 единице документа", "Примечание"]
 # PRIME 0.8 — the view sheets (WmsConfig SH_DASH … SH_TOPO): built from the data, never journaled
 DASH = "Дашборд"
 FIND = "Поиск"
@@ -548,6 +551,7 @@ def stock_buttons(doc, sh):
     sh.getCellRangeByPosition(0, 0, len(STOCK_HEADERS) - 1, 0).VertJustify = 3
     add_button(doc, sh, "btnMigrateFix", "Исправить ЕИ переноса", "WmsPrimeUi.BtnMigrateFix", 150, 120, 4600, 650)
     add_button(doc, sh, "btnLegacyReport", "Сверка переноса", "WmsPrimeUi.BtnLegacyReport", 4900, 120, 3600, 650)
+    add_button(doc, sh, "btnPackEI", "Фасовка ЕИ", "WmsPack.BtnPackEI", 8650, 120, 3000, 650, back=0xC6E0B4)
 
 
 def build_leg(doc, sh):
@@ -556,6 +560,15 @@ def build_leg(doc, sh):
         sh.getCellByPosition(c, 0).setString(h)
     text = number_format(doc, "@", ("ru", "RU"))
     for c in (0, 1, 5, 6, 7, 10):
+        sh.getCellRangeByPosition(c, 1, c, LAST_ROW).NumberFormat = text
+
+
+def build_pack(doc, sh):
+    """PRIME 0.8: _PACK — the packing of an EI («в 1 шт — 4 кан», «1 шт = 6 м»), one row per EI (row = EI number)"""
+    for c, h in enumerate(PACK_HEADERS):
+        sh.getCellByPosition(c, 0).setString(h)
+    text = number_format(doc, "@", ("ru", "RU"))
+    for c in (0, 1, 3):
         sh.getCellRangeByPosition(c, 1, c, LAST_ROW).NumberFormat = text
 
 
@@ -797,6 +810,7 @@ def build_find(doc, sh):
     add_button(doc, sh, "btnFind", "Найти", "WmsFind.BtnFind", x + 80, y + 90, 2600, 720, bold=True, back=0xC6E0B4)
     add_button(doc, sh, "btnFindCard", "Карточка ЕИ", "WmsFind.BtnFindCard", x + 2760, y + 90, 3300, 720, back=0xDDEBF7)
     add_button(doc, sh, "btnFindGo", "Перейти к строке", "WmsFind.BtnFindGo", x + 6140, y + 90, 3800, 720, back=0xDDEBF7)
+    add_button(doc, sh, "btnFindPack", "Фасовка ЕИ", "WmsPack.BtnPackEI", x + 10020, y + 90, 3000, 720, back=0xDDEBF7)
     sh.getCellRangeByPosition(0, 0, 12, 3100).CellProtection = protection(True)
     sh.getCellByPosition(2, 3).CellProtection = protection(False)
 
@@ -874,6 +888,9 @@ def where_buttons(doc, sheets):
     # «Подобрать ЕИ»: the EI by a name, an article or a place («Выдачи» after its four buttons, «Корректировки» after its own)
     add_button(doc, sheets.getByName(ISSUES), "btnPickEI", "Подобрать ЕИ", "WmsFind.BtnPickEI", 150 + 4 * 2900, 120, 2750, 650, back=0xC6E0B4)
     add_button(doc, sheets.getByName(ADJUST), "btnPickEI", "Подобрать ЕИ", "WmsFind.BtnPickEI", 150 + 5 * 2900, 120, 2750, 650, back=0xC6E0B4)
+    # «Фасовка ЕИ»: how the EI of the row is handed out («в 1 шт — 4 кан», «1 шт = 6 м»)
+    add_button(doc, sheets.getByName(ISSUES), "btnPackEI", "Фасовка ЕИ", "WmsPack.BtnPackEI", 150 + 5 * 2900, 120, 2750, 650, back=0xC6E0B4)
+    add_button(doc, sheets.getByName(ADJUST), "btnPackEI", "Фасовка ЕИ", "WmsPack.BtnPackEI", 150 + 6 * 2900, 120, 2750, 650, back=0xC6E0B4)
 
 
 def view_events(sheets):
@@ -1243,7 +1260,7 @@ def build(office, out_path, test=False, instance_id=None):
     main = sheets.getByIndex(0)
     main.Name = MAIN
     for i, name in enumerate((ORDERS, SPECIAL, CARS, ISSUES, RETURNS, ADJUST, STOCK, FIND, MAP, LEGREP, RCPT, TOPO, HELP, ORD, RCV, SPR, ART,
-                              RET, ISS, ADJ, CAR, LEG, IDX, "_SYS"), start=1):
+                              RET, ISS, ADJ, CAR, LEG, PACK, IDX, "_SYS"), start=1):
         sheets.insertNewByName(name, i)
     sheets.insertNewByName(DASH, 0)
     sys_sh = sheets.getByName("_SYS")
@@ -1277,6 +1294,7 @@ def build(office, out_path, test=False, instance_id=None):
     build_car_service(doc, sheets.getByName(CAR))
     build_stock(doc, sheets.getByName(STOCK), registry)
     build_leg(doc, sheets.getByName(LEG))
+    build_pack(doc, sheets.getByName(PACK))
     build_legrep(doc, sheets.getByName(LEGREP))
     build_recipients(sheets.getByName(RCPT), TEST_RECIPIENTS if test else [])
     build_help(sheets.getByName(HELP))
@@ -1321,9 +1339,9 @@ def build(office, out_path, test=False, instance_id=None):
     bind_event(sheets.getByName(ADJUST).Events, "OnChange", "WmsAdjust.OnAdjustChange")
     bind_event(sheets.getByName(RCPT).Events, "OnChange", "WmsIssue.OnRecipientsChange")
     view_events(sheets)
-    for name in (ORD, RCV, SPR, ART, RET, ISS, ADJ, CAR, LEG, IDX, "_SYS"):
+    for name in (ORD, RCV, SPR, ART, RET, ISS, ADJ, CAR, LEG, PACK, IDX, "_SYS"):
         sheets.getByName(name).IsVisible = False
-    for name in (MAIN, ORDERS, SPECIAL, CARS, ISSUES, RETURNS, ADJUST, STOCK, LEGREP, HELP, ORD, RCV, SPR, ART, RET, ISS, ADJ, CAR, LEG, IDX,
+    for name in (MAIN, ORDERS, SPECIAL, CARS, ISSUES, RETURNS, ADJUST, STOCK, LEGREP, HELP, ORD, RCV, SPR, ART, RET, ISS, ADJ, CAR, LEG, PACK, IDX,
                  "_SYS", DASH, FIND, MAP):
         sheets.getByName(name).protect(PWD)
     doc.protect(PWD)

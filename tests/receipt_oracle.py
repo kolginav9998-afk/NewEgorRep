@@ -729,6 +729,39 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
         if row is not None and row[5] != place.get(ei):
             bad(f"{ei}: место в «Наличие» {row[5]!r}, по движениям {place.get(ei)!r}", "R")
 
+    # ------------------------------------------------------------ 8. PRIME 0.8: the packing of the EIs (_PACK) — the last EI_PACK of each EI
+    packs = {}
+    for e in applied:
+        if e["seq"] in abandoned or e["type"] != "EI_PACK":
+            continue
+        f = e["fields"]
+        try:
+            pn = float(f.get("N") or 0)
+        except ValueError:
+            bad(f"seq {e['seq']} EI_PACK {f.get('EI')}: N «{f.get('N')}» не число", "K")
+            continue
+        if pn < 0 or pn > 1000 or (pn > 0 and not f.get("UNIT")):
+            bad(f"seq {e['seq']} EI_PACK {f.get('EI')}: фасовка {pn} «{f.get('UNIT')}» вне правил", "K")
+        packs[f.get("EI")] = (f.get("UNIT", ""), pn)
+    if doc.Sheets.hasByName("_PACK"):
+        psh = doc.Sheets.getByName("_PACK")
+        plast = max([ei_num(k) or 0 for k in packs] + [used_rows(psh)])
+        rows = psh.getCellRangeByPosition(0, 0, 3, plast).getDataArray() if plast >= 1 else ()
+        for r in range(1, len(rows)):
+            cn = canon(r)
+            want = packs.get(cn)
+            got_ei, got_u, got_n = rows[r][0], rows[r][1], rows[r][2]
+            if want is None:
+                if (got_ei or got_u or got_n != "") and base is None:
+                    bad(f"_PACK строка {r + 1}: фасовка «{got_ei} {got_n} {got_u}» без операции EI_PACK", "K")
+            elif want[1] > 0:
+                if got_ei != cn or got_u != want[0] or not isinstance(got_n, float) or abs(got_n - want[1]) > EPS:
+                    bad(f"{cn}: фасовка в _PACK «{got_n} {got_u}», по журналу «{want[1]} {want[0]}»", "K")
+            elif got_ei or got_u or got_n != "":
+                bad(f"{cn}: фасовка снята журналом, в _PACK осталось «{got_n} {got_u}»", "K")
+    elif packs:
+        bad("в журнале есть EI_PACK, а листа _PACK нет", "K")
+
     info.update(dict(ops=len(ops), receipt_ops=n_rcpt_ops, receipts=len(receipts), live=sum(1 for x in receipts.values() if x["state"] == "LIVE"),
                      positions=len(positions), open_rows=open_rows, copies=copies, last_seq=last, journal_max=mx, return_ops=n_ret_ops,
                      invariants_failed=sorted(inv_fail, key=str)))

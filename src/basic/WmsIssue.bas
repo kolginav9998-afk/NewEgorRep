@@ -30,6 +30,8 @@ Private mCqty As Double
 Private mCwho As String
 Private mCwhoNote As String
 Private mCdate As Double
+' PRIME 0.8: how the quantity was given (WmsPack: parts «1 кан», a percent «25%») — a line for people and for the journal
+Private mCinfo As String
 
 ' ================================================================ sheets
 
@@ -398,10 +400,12 @@ Private Function CheckInputs(vEI As Variant, oQty As Object, vQty As Variant, oD
         CheckInputs = "остаток " & mCcanon & " равен 0 — выдача невозможна"
         Exit Function
     End If
+    mCinfo = ""
+    gPkKind = ""
     If Not (oQty Is Nothing) Then
-        st = ParseQtyCell(oQty, mCqty, msg)
+        st = WmsPack.QtyEICell(oQty, mCn, s, CStr(mCdata(SC_UNIT)), "OUT", 0, mCqty, mCinfo, msg)
     ElseIf VarType(vQty) = 8 Then
-        st = ParseQtyText(CStr(vQty), mCqty, msg)
+        st = WmsPack.QtyEIText(CStr(vQty), mCn, s, CStr(mCdata(SC_UNIT)), "OUT", 0, mCqty, mCinfo, msg)
     Else
         ' a number (dialog or test): the same contract as the parser — positive, at most 3 decimals
         x = CDbl(vQty)
@@ -425,7 +429,8 @@ Private Function CheckInputs(vEI As Variant, oQty As Object, vQty As Variant, oD
         Exit Function
     End If
     If mCqty > s + 0.0000001 Then
-        CheckInputs = "недостаточно: остаток " & mCcanon & " — " & QtyText(s) & " " & mCdata(SC_UNIT) & ", запрошено " & QtyText(mCqty)
+        CheckInputs = "недостаточно: остаток " & mCcanon & " — " & WmsPack.QtyWithParts(mCn, s, CStr(mCdata(SC_UNIT))) & ", запрошено " & QtyText(mCqty) _
+            & " " & mCdata(SC_UNIT)
         Exit Function
     End If
     If oDate Is Nothing Then
@@ -537,7 +542,7 @@ End Sub
 Sub PreviewRow(r As Long, bKeyTouched As Boolean, bWhoTouched As Boolean)
     Dim sh As Object, kind As String, n As Long, canon As String, msg As String, p As String, d As Variant, s As Double
     Dim status As String, warn As String, who As String, full As String, note As String, st As Integer, q As Double, dt As Double
-    Dim cEI As Object, cQty As Object, cDate As Object, known As Boolean
+    Dim cEI As Object, cQty As Object, cDate As Object, known As Boolean, cPct As Object, info As String
     sh = IssuesSheet()
     kind = RowKind(r)
     If kind = "FOREIGN" Or (bKeyTouched And (kind = "POSTED" Or kind = "DELETED")) Then
@@ -573,18 +578,27 @@ Sub PreviewRow(r As Long, bKeyTouched As Boolean, bWhoTouched As Boolean)
             If s <= 0 Then status = "остаток " & canon & " равен 0 — выдача невозможна"
         End If
     End If
-    ' quantity
+    ' quantity: E (a number, «1 кан», «1,5 м», «25%») or F «Количество в %» (PRIME 0.8, D-099)
     cQty = sh.getCellByPosition(IC_QTY, r)
-    If status = "" And cQty.getType() <> com.sun.star.table.CellContentType.EMPTY Then
-        st = ParseQtyCell(cQty, q, msg)
-        If st <> 0 Then
-            status = msg
-        ElseIf known And q > s + 0.0000001 Then
-            status = "недостаточно: остаток " & canon & " — " & QtyText(s) & " " & d(SC_UNIT) & ", запрошено " & QtyText(q)
+    cPct = sh.getCellByPosition(IC_PCT, r)
+    If status = "" And cQty.getType() <> com.sun.star.table.CellContentType.EMPTY And cPct.getType() <> com.sun.star.table.CellContentType.EMPTY Then
+        status = "заполните что-то одно: «Количество» (E) или «Количество в %» (F)"
+    ElseIf status = "" And (cQty.getType() <> com.sun.star.table.CellContentType.EMPTY Or cPct.getType() <> com.sun.star.table.CellContentType.EMPTY) Then
+        If Not known Then
+            If cQty.getType() <> com.sun.star.table.CellContentType.EMPTY Then st = ParseQtyCell(cQty, q, msg) Else st = 0
+            If st <> 0 And cQty.getType() <> com.sun.star.table.CellContentType.TEXT Then status = msg
+        Else
+            If cQty.getType() <> com.sun.star.table.CellContentType.EMPTY Then
+                st = WmsPack.QtyEICell(cQty, n, s, CStr(d(SC_UNIT)), "OUT", 0, q, info, msg)
+            Else
+                st = WmsPack.QtyEIText(PctText(cPct), n, s, CStr(d(SC_UNIT)), "OUT", 0, q, info, msg)
+            End If
+            If st <> 0 Then
+                status = msg
+            ElseIf q > s + 0.0000001 Then
+                status = "недостаточно: остаток " & canon & " — " & WmsPack.QtyWithParts(n, s, CStr(d(SC_UNIT))) & ", запрошено " & QtyText(q) & " " & d(SC_UNIT)
+            End If
         End If
-    End If
-    If status = "" And sh.getCellByPosition(IC_PCT, r).getString() <> "" Then
-        status = "«Количество в %» пока не используется — укажите количество в «Количество»"
     End If
     ' date
     cDate = sh.getCellByPosition(IC_DATE, r)
@@ -602,11 +616,29 @@ Sub PreviewRow(r As Long, bKeyTouched As Boolean, bWhoTouched As Boolean)
     If status <> "" Then
         SetStatus(r, "Ошибка: " & status)
     ElseIf warn <> "" Then
-        SetStatus(r, "Внимание: " & warn)
+        SetStatus(r, "Внимание: " & warn & IIf(info <> "", " · к выдаче " & info, ""))
+    ElseIf info <> "" Then
+        SetStatus(r, "К выдаче: " & info)
     Else
         SetStatus(r, "")
     End If
 End Sub
+
+' «Количество в %» (F) as the text of a percent: 25 → «25%»; a number Calc formatted as a percent (25% typed) — the same
+Function PctText(c As Object) As String
+    Dim ft As Long
+    If c.getType() = com.sun.star.table.CellContentType.VALUE Then
+        ft = gDoc.getNumberFormats().getByKey(c.NumberFormat).Type
+        If (ft And 128) <> 0 Then
+            PctText = QtyText(Round3(c.getValue() * 100)) & "%"
+        Else
+            PctText = QtyText(c.getValue()) & "%"
+        End If
+    Else
+        PctText = Trim(c.getString())
+        If Right(PctText, 1) <> "%" Then PctText = PctText & "%"
+    End If
+End Function
 
 Private Sub SetIfDiff(c As Object, v As Variant)
     Select Case VarType(v)
@@ -679,8 +711,14 @@ Function IssuePostRow(r As Long) As String
         IssuePostRow = why
         Exit Function
     End If
-    If sh.getCellByPosition(IC_PCT, r).getString() <> "" Then
-        why = "«Количество в %» пока не используется — укажите количество в «Количество»"
+    If sh.getCellByPosition(IC_PCT, r).getType() <> com.sun.star.table.CellContentType.EMPTY Then
+        ' «Количество в %» (F): a percent of what came in by the EI; with E filled too it is not clear which one counts
+        If sh.getCellByPosition(IC_QTY, r).getType() <> com.sun.star.table.CellContentType.EMPTY Then
+            why = "заполните что-то одно: «Количество» (E) или «Количество в %» (F)"
+        Else
+            why = CheckInputs(sh.getCellByPosition(IC_EI, r).getString(), Nothing, PctText(sh.getCellByPosition(IC_PCT, r)), sh.getCellByPosition(IC_DATE, r), _
+                Empty, sh.getCellByPosition(IC_WHO, r).getString(), 0, 0)
+        End If
     Else
         why = CheckInputs(sh.getCellByPosition(IC_EI, r).getString(), sh.getCellByPosition(IC_QTY, r), Empty, sh.getCellByPosition(IC_DATE, r), Empty, _
             sh.getCellByPosition(IC_WHO, r).getString(), 0, 0)
@@ -704,6 +742,7 @@ Function IssuePostRow(r As Long) As String
     PlanField("ROW", r + 1)
     PlanField("BAL_BEFORE", mCstock)
     PlanField("BAL_AFTER", s2)
+    WmsPack.PlanQtyFields()
     PlanRowValues(r, k, mCstock, s2, ST_POSTED)
     PlanLockBits(SH_ISSUES, r, 0, IC_LAST, ISSUE_LOCKS_POSTED)
     PlanSetValue(SH_STOCK, mCn, SC_QTY, s2, False)
@@ -834,6 +873,7 @@ Function IssueFixRow(r As Long, vEI As Variant, vQty As Variant, vWho As Variant
     PlanField("ROW", r + 1)
     PlanField("BAL_BEFORE", pNew)
     PlanField("BAL_AFTER", qNew)
+    WmsPack.PlanQtyFields()
     PlanRowValues(r, k, pNew, qNew, ST_FIXED)
     PlanLockBits(SH_ISSUES, r, 0, IC_LAST, ISSUE_LOCKS_POSTED)
     If mCn = n1 Then

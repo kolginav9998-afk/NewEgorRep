@@ -79,6 +79,52 @@ Function EiNo(ByVal s As String, nextEI As Long) As Long
     If x >= 1 And x < nextEI Then EiNo = CLng(x)
 End Function
 
+' PRIME 0.8 (D-100): the places of an EI as the storekeeper wrote them — one («5-12-3») or several when the goods take more
+' than one cell («1-2-3, 1-2-4», «1-2-3; 1-2-4», «1-2-3 + 1-2-4»); each as PlaceKey reads it. Array() when none can be read
+Function PlaceList(ByVal s As String) As Variant
+    Dim k As String, parts As Variant, out() As String, n As Integer, i As Integer, sep As Variant
+    s = Trim(s)
+    k = PlaceKey(s)
+    If k <> "" Then
+        PlaceList = Array(k)
+        Exit Function
+    End If
+    ' a list: the parts that are places (a note in the list — «1-2-3, у стены» — is left out)
+    For Each sep In Array(";", "+", ",")
+        If InStr(s, sep) > 0 Then
+            parts = Split(s, sep)
+            ReDim out(UBound(parts))
+            n = 0
+            For i = 0 To UBound(parts)
+                If Trim(parts(i)) <> "" Then
+                    k = PlaceKey(Trim(parts(i)))
+                    If k <> "" And PlHasDigit(k) Then
+                        out(n) = k
+                        n = n + 1
+                    End If
+                End If
+            Next i
+            If n > 0 Then
+                ReDim Preserve out(n - 1)
+                PlaceList = out
+                Exit Function
+            End If
+        End If
+    Next sep
+    PlaceList = Array()
+End Function
+
+Private Function PlHasDigit(s As String) As Boolean
+    Dim i As Integer, ch As String
+    For i = 1 To Len(s)
+        ch = Mid(s, i, 1)
+        If ch >= "0" And ch <= "9" Then
+            PlHasDigit = True
+            Exit Function
+        End If
+    Next i
+End Function
+
 ' a place as the storekeeper typed it → «ряд-секция-ярус»: 5-12-3 for «5.12.3», «05/12/03», «5 12 3», «Р5 С12 Я3», «R5-S12-L3»;
 ' letters of an address stay (A-01-1 → A-1-1, not the same place as B-01-1); two parts → «ряд-секция» (no level); "" for one part
 ' or more than three (a word, a number alone)

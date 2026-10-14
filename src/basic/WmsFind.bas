@@ -22,6 +22,8 @@ Global gFdBusy As Boolean
 Global gFdMode As String
 Global gFdQuery As String
 Global gFdSpecial As Boolean
+' the EI of the card shown on the page (0 — no card)
+Global gFdCardEI As Long
 
 Private Function FindSheet() As Object
     FindSheet = gDoc.Sheets.getByName(SH_FIND)
@@ -475,7 +477,7 @@ End Function
 Function CardShow(n As Long) As String
     Dim sh As Object, st As Variant, canon As String, mKey() As Double, mRow() As Variant, nM As Long, idx() As Long, i As Long
     Dim bal As Double, rows() As Variant, sumIn As Double, sumOut As Double, q As Variant, ok As Boolean, lg As Variant, rv As Variant
-    Dim hasSrc As Boolean
+    Dim hasSrc As Boolean, hasPack As Boolean, pu As String, pn As Double, note As String
     gFdBusy = True
     On Error GoTo EH
     sh = ViewOpen(SH_FIND)
@@ -483,6 +485,7 @@ Function CardShow(n As Long) As String
     st = WmsIssue.StockSheet().getCellRangeByPosition(0, n, SC_LAST, n).getDataArray()(0)
     canon = CStr(st(SC_EI))
     gFdMode = "CARD"
+    gFdCardEI = IIf(canon <> "", n, 0)
     If canon = "" Then
         sh.getCellByPosition(1, FD_HEAD).setString("ЕИ-" & Format(n, "00000000") & " нет в «" & SH_STOCK & "»")
         ViewDone(sh)
@@ -515,20 +518,24 @@ Function CardShow(n As Long) As String
     Next i
     SortIdx(mKey, idx, nM, False)
     ReDim rows(IIf(nM > 0, nM - 1, 0))
+    hasPack = WmsPack.PackOf(n, pu, pn)
     For i = 0 To nM - 1
         q = mRow(idx(i))
         bal = WmsIssue.Round3(bal + q(4) - q(5))
         sumIn = sumIn + q(4)
         sumOut = sumOut + q(5)
-        rows(i) = Array(q(0), q(1), q(2), q(3), IIf(q(4) <> 0, q(4), ""), IIf(q(5) <> 0, q(5), ""), bal, q(8), "", q(6), q(7), "")
+        note = q(8)
+        ' D-099: the movement in the parts of the packing too («1 кан»)
+        If hasPack And (q(4) <> 0 Or q(5) <> 0) Then note = WmsPack.PartsText(WmsPack.PartsOf(IIf(q(4) <> 0, q(4), q(5)), pn), pu) & IIf(note <> "", " · " & note, "")
+        rows(i) = Array(q(0), q(1), q(2), q(3), IIf(q(4) <> 0, q(4), ""), IIf(q(5) <> 0, q(5), ""), bal, note, "", q(6), q(7), "")
     Next i
     q = st(SC_QTY)
     ok = (VarType(q) = 5)
     If ok Then ok = (Abs(WmsIssue.Round3(q - bal)) < 0.0000005)
     sh.getCellByPosition(1, FD_HEAD).setString(canon & " · " & st(SC_NAME))
-    sh.getCellByPosition(1, FD_INFO).setString(JoinParts(Array("Остаток " & WmsIssue.QtyText(IIf(VarType(q) = 5, q, 0)) & " " & st(SC_UNIT), _
-        "место " & IIf(CStr(st(SC_PLACE)) <> "", st(SC_PLACE), "не указано"), st(SC_STATE), IIf(CStr(st(SC_ART)) <> "", "артикул " & st(SC_ART), ""), _
-        st(SC_CAT)), "   ·   "))
+    sh.getCellByPosition(1, FD_INFO).setString(JoinParts(Array("Остаток " & WmsPack.QtyWithParts(n, IIf(VarType(q) = 5, q, 0), CStr(st(SC_UNIT))), _
+        WmsPack.PackLine(n, CStr(st(SC_UNIT))), "место " & IIf(CStr(st(SC_PLACE)) <> "", st(SC_PLACE), "не указано"), st(SC_STATE), _
+        IIf(CStr(st(SC_ART)) <> "", "артикул " & st(SC_ART), ""), st(SC_CAT)), "   ·   "))
     sh.getCellByPosition(1, FD_INFO + 1).setString(JoinParts(Array("Откуда: " & IIf(CStr(st(SC_SRC)) <> "", st(SC_SRC), "—") _
         & IIf(CStr(st(SC_STYPE)) <> "", " (" & st(SC_STYPE) & ")", ""), "пришло " & WmsIssue.QtyText(sumIn), "ушло " & WmsIssue.QtyText(sumOut), _
         "движений " & nM), "   ·   "))
@@ -782,8 +789,8 @@ Function PickCandidates(sWhat As String) As String
             d = sh.getCellRangeByPosition(0, r, SC_STATE, r).getDataArray()(0)
             If VarType(d(SC_QTY)) = 5 Then
                 If d(SC_QTY) > 0.0000005 And CStr(d(SC_STATE)) <> EI_ST_STORNO Then
-                    out = out & IIf(out <> "", Chr(10), "") & d(SC_EI) & "|" & d(SC_EI) & " · " & d(SC_NAME) & " · " & WmsIssue.QtyText(CDbl(d(SC_QTY))) _
-                        & " " & d(SC_UNIT) & IIf(CStr(d(SC_PLACE)) <> "", " · " & d(SC_PLACE), "")
+                    out = out & IIf(out <> "", Chr(10), "") & d(SC_EI) & "|" & d(SC_EI) & " · " & d(SC_NAME) & " · " _
+                        & WmsPack.QtyWithParts(r, CDbl(d(SC_QTY)), CStr(d(SC_UNIT))) & IIf(CStr(d(SC_PLACE)) <> "", " · " & d(SC_PLACE), "")
                     nOut = nOut + 1
                 End If
             End If
@@ -794,6 +801,11 @@ Function PickCandidates(sWhat As String) As String
     Else
         PickCandidates = out
     End If
+End Function
+
+' the EI of the card shown on «Поиск» ("" — the page shows no card)
+Function FindCardEI() As String
+    If gFdMode = "CARD" And gFdCardEI > 0 Then FindCardEI = WmsIssue.EiCanon(gFdCardEI)
 End Function
 
 ' ================================================================ test seam

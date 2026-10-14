@@ -257,7 +257,7 @@ End Function
 
 ' a fact (actual balance) of an inventory count: 0 is allowed (nothing was found)
 Private Function ParseFact(c As Object, ByRef q As Double, ByRef msg As String) As Boolean
-    Dim s As String, ft As Long
+    Dim s As String, ft As Long, info As String
     If c.getType() = com.sun.star.table.CellContentType.TEXT Then
         s = Trim(c.getString())
         If s = "0" Or s = "0,0" Or s = "0.0" Or s = "0,00" Or s = "0.00" Or s = "0,000" Or s = "0.000" Then
@@ -273,12 +273,13 @@ Private Function ParseFact(c As Object, ByRef q As Double, ByRef msg As String) 
             Exit Function
         End If
     End If
-    ParseFact = WmsOrders.ParseQtyAs(c, "фактический остаток (H)", q, msg)
+    ' PRIME 0.8: a count in the parts of the packing of the EI («3 кан») is a balance in the unit of its document
+    ParseFact = WmsPack.QtyAsEI(c, Empty, "фактический остаток (H)", mEi, mSbal, CStr(mSdata(SC_UNIT)), "FACT", 0, q, info, msg)
 End Function
 
 ' the same for a value of a window or a test: a text or a number, 0 allowed
 Private Function ParseFactValue(v As Variant, ByRef q As Double, ByRef msg As String) As Boolean
-    Dim s As String
+    Dim s As String, info As String
     If VarType(v) = 8 Then
         s = Trim(CStr(v))
         If s = "0" Or s = "0,0" Or s = "0.0" Or s = "0,00" Or s = "0.00" Or s = "0,000" Or s = "0.000" Then
@@ -291,7 +292,7 @@ Private Function ParseFactValue(v As Variant, ByRef q As Double, ByRef msg As St
         ParseFactValue = True
         Exit Function
     End If
-    ParseFactValue = WmsOrders.ParseQtyValueAs(v, "фактический остаток", q, msg)
+    ParseFactValue = WmsPack.QtyAsEI(Nothing, v, "фактический остаток", mEi, mSbal, CStr(mSdata(SC_UNIT)), "FACT", 0, q, info, msg)
 End Function
 
 Private Function IsBlank(c As Object) As Boolean
@@ -307,7 +308,7 @@ End Function
 ' Validates the inputs of row r: "" or the reason; fills m*. bNeedAll: posting needs every field of the kind (the
 ' preview checks only what is filled).
 Private Function CheckRowInputs(r As Long, bNeedAll As Boolean) As String
-    Dim sh As Object, why As String, c As Object, msg As String, x As Double
+    Dim sh As Object, why As String, c As Object, msg As String, x As Double, info As String
     sh = AdjustSheet()
     mKind = KindCode(sh.getCellByPosition(AC_KIND, r).getString())
     If mKind = "" Then
@@ -351,7 +352,7 @@ Private Function CheckRowInputs(r As Long, bNeedAll As Boolean) As String
         End If
         c = sh.getCellByPosition(AC_QTY, r)
         If Not IsBlank(c) Or bNeedAll Then
-            If Not WmsOrders.ParseQtyAs(c, "количество списания (G)", mQty, msg) Then
+            If Not WmsPack.QtyAsEI(c, Empty, "количество списания (G)", mEi, mSbal, CStr(mSdata(SC_UNIT)), "OUT", 0, mQty, info, msg) Then
                 CheckRowInputs = msg
                 Exit Function
             End If
@@ -539,12 +540,14 @@ Function AdjustPostRow(r As Long) As String
         PlanField("QTY", mQty)
         PlanField("BAL_BEFORE", mSbal)
         PlanField("BAL_AFTER", b2)
+        WmsPack.PlanQtyFields()
     Case "INV_ADJ"
         PlanField("BOOK", mBook)
         PlanField("FACT", mFact)
         PlanField("DIFF", mDiff)
         PlanField("BAL_BEFORE", mSbal)
         PlanField("BAL_AFTER", b2)
+        WmsPack.PlanQtyFields()
     End Select
     ' one operation, the writes grouped by sheet: _SYS → «Наличие» → _ADJ → «Корректировки» → «Заказы».X
     PlanSetValue(SYS_SHEET, SK_NEXT_ADJ, 1, n + 1, False)
@@ -690,7 +693,7 @@ End Function
 Function AdjustFixRow(r As Long, vMain As Variant, vDate As Variant, vReason As Variant) As String
     Dim why As String, kind As String, n As Long, rd As Variant, msg As String, sh As Object, res As String
     Dim q1 As Double, d1 As Double, reason1 As String, to1 As String, from1 As String, delta1 As Double, delta2 As Double
-    Dim before As Double, b2 As Double
+    Dim before As Double, b2 As Double, info As String
     WmsInit()
     If r < 1 Or r > MAX_SHEET_ROW Then
         AdjustFixRow = "ERR:выберите строку корректировки (не заголовок)"
@@ -766,7 +769,7 @@ Function AdjustFixRow(r As Long, vMain As Variant, vDate As Variant, vReason As 
         PlanSetValue(SH_ADJUST, r, AC_PLACE, mPlace, False)
     Case "WRITE_OFF"
         q1 = -delta1
-        If Not WmsOrders.ParseQtyValueAs(vMain, "количество списания", mQty, msg) Then
+        If Not WmsPack.QtyAsEI(Nothing, vMain, "количество списания", mEi, WmsIssue.Round3(mSbal + q1), CStr(mSdata(SC_UNIT)), "OUT", 0, mQty, info, msg) Then
             AdjustFixRow = "ERR:" & msg
             Exit Function
         End If
@@ -788,6 +791,7 @@ Function AdjustFixRow(r As Long, vMain As Variant, vDate As Variant, vReason As 
         PlanField("QTY", mQty)
         PlanField("OLD_DATE", Format(d1, "YYYY-MM-DD"))
         PlanField("OLD_REASON", reason1)
+        WmsPack.PlanQtyFields()
         PlanField("BAL_BEFORE", mSbal)
         PlanField("BAL_AFTER", b2)
         If Abs(b2 - mSbal) > 0.0000001 Then PlanSetValue(SH_STOCK, mEi, SC_QTY, b2, False)
@@ -828,6 +832,7 @@ Function AdjustFixRow(r As Long, vMain As Variant, vDate As Variant, vReason As 
         PlanField("DIFF", delta2)
         PlanField("OLD_DATE", Format(d1, "YYYY-MM-DD"))
         PlanField("OLD_REASON", reason1)
+        WmsPack.PlanQtyFields()
         PlanField("BAL_BEFORE", mSbal)
         PlanField("BAL_AFTER", b2)
         If Abs(b2 - mSbal) > 0.0000001 Then PlanSetValue(SH_STOCK, mEi, SC_QTY, b2, False)

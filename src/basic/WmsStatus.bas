@@ -245,7 +245,7 @@ End Function
 Function Protections() As String
     Dim i As Integer, sh As Object, p As String, svc As String
     svc = "|" & SH_ORD & "|" & SH_RCV & "|" & SH_SPR & "|" & SH_ART & "|" & SH_RET & "|" & SH_ISS & "|" & SH_ADJ & "|" & SH_CAR & "|" & SH_IDX & "|" _
-        & SYS_SHEET & "|"
+        & SYS_SHEET & "|" & SH_LEG & "|" & SH_PACK & "|"
     For i = 0 To gDoc.Sheets.getCount() - 1
         sh = gDoc.Sheets.getByIndex(i)
         If Not sh.isProtected() And sh.Name <> SH_RCPT Then p = p & IIf(p <> "", "; ", "") & "лист «" & sh.Name & "» не защищён"

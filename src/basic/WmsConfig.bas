@@ -655,6 +655,17 @@ Public Const LG_ADD = "ADD"
 Public Const LG_MIGRATE = "MIGRATE"
 ' the sheet «Сверка переноса» (visible, read-only, rebuilt by its button)
 Public Const SH_LEGREP = "Сверка переноса"
+' ---------------------------------------------------------------- PRIME 0.8: the packing of an EI (_PACK, D-099)
+' The balance of an EI is in the unit of its document (1 шт); its packing says how it is handed out: «в 1 шт — 4 кан»,
+' «1 шт = 6 м». One row per EI (row = EI number, like «Наличие»), written only by the operation EI_PACK (WmsPack).
+Public Const SH_PACK = "_PACK"
+Public Const PK_EI = 0
+Public Const PK_UNIT = 1
+Public Const PK_N = 2
+Public Const PK_NOTE = 3
+Public Const PK_LAST = 3
+' at most this many parts in one unit of the document (a profile — in metres, not in millimetres)
+Public Const PACK_MAX_N = 1000
 ' PRIME 0.8 — the view sheets (D-094, D-095): built from the data, never journaled
 Public Const SH_DASH = "Дашборд"
 Public Const SH_FIND = "Поиск"

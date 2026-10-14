@@ -276,7 +276,7 @@ def step_08(doc, leg, from_text, done):
     if from_text:
         sy.getCellByPosition(1, k).setString(from_text)
     names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
-    for need in (B.LEG, B.LEGREP):
+    for need in (B.LEG, B.LEGREP, B.PACK):
         if need in names:
             raise RuntimeError(f"в книге уже есть лист «{need}»")
     sheets.insertNewByName(B.LEGREP, names.index(B.STOCK) + 1)
@@ -293,6 +293,12 @@ def step_08(doc, leg, from_text, done):
             if x == "":
                 leg_sh.getCellByPosition(c, n).clearContents(1 + 2 + 4 + 16)
     done.append(f"реестр переноса {B.LEG}: {len(leg)} ЕИ из журнала (приходы переноса и перенос ЕИ без заказа)")
+    # the packing of the EIs («в 1 шт — 4 кан»): empty, filled by the operation EI_PACK of WMS 0.8
+    names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+    sheets.insertNewByName(B.PACK, names.index(B.LEG) + 1)
+    B.build_pack(doc, sheets.getByName(B.PACK))
+    sheets.getByName(B.PACK).IsVisible = False
+    done.append(f"лист фасовки {B.PACK} (пустой: фасовку ЕИ задают кнопкой «Фасовка ЕИ»)")
     B.stock_buttons(doc, sheets.getByName(B.STOCK))
     done.append(f"лист «{B.LEGREP}», кнопки «Исправить ЕИ переноса» и «Сверка переноса» на «{B.STOCK}»")
     # the view sheets: «Дашборд» first, «Поиск» and «Карта склада» after «Наличие», «Топология» before «Справка»
@@ -312,7 +318,7 @@ def step_08(doc, leg, from_text, done):
     B.where_buttons(doc, sheets)
     B.rebuild_main(doc, sheets.getByName(B.MAIN))
     done.append(f"страницы «{B.DASH}», «{B.FIND}», «{B.MAP}» и лист «{B.TOPO}» (вставьте туда схему склада); «{B.MAIN}» этого выпуска (кнопки к страницам)")
-    return [B.LEGREP, B.LEG, B.DASH, B.FIND, B.MAP]
+    return [B.LEGREP, B.LEG, B.PACK, B.DASH, B.FIND, B.MAP]
 
 
 def finish_doc(doc, was_protected, new_sheets, done):
@@ -530,7 +536,7 @@ def compare_books(old, new, leg_expected):
     if missing:
         P.append("в новой книге нет листов: " + ", ".join(missing))
     extra = [n for n in new_names if n not in old_names]
-    if sorted(extra) != sorted([B.LEG, B.LEGREP] + B.VIEW_SHEETS + [x for x in (B.CARS, B.CAR) if x in extra]):
+    if sorted(extra) != sorted([B.LEG, B.LEGREP, B.PACK] + B.VIEW_SHEETS + [x for x in (B.CARS, B.CAR) if x in extra]):
         P.append("в новой книге лишние листы: " + ", ".join(extra))
     for name in old_names:
         if name not in new_names:

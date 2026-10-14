@@ -21,6 +21,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from harness import OUT, ROOT, Results, Session, new_wms  # noqa: E402
+import journal_oracle as jo  # noqa: E402
 
 R = Results()
 CASES = []
@@ -629,13 +630,13 @@ def pr11_upgrade_072():
     try:
         sv = {k: s.sysv(k) for k in ("SCHEMA", "UPGRADE_FROM", "LAST_SEQ", "NEXT_EI")}
         legn = sum(1 for r in s.doc.Sheets.getByName("_LEG").getCellRangeByPosition(0, 1, 0, 6000).getDataArray() if r[0])
-        has = all(s.doc.Sheets.hasByName(n) for n in ("_LEG", "Сверка переноса"))
-        prot = all(s.doc.Sheets.getByName(n).isProtected() for n in ("_LEG", "Сверка переноса", "Наличие", "Заказы", "Выдачи"))
-        hidden = not s.doc.Sheets.getByName("_LEG").IsVisible
+        has = all(s.doc.Sheets.hasByName(n) for n in ("_LEG", "Сверка переноса", "_PACK"))
+        prot = all(s.doc.Sheets.getByName(n).isProtected() for n in ("_LEG", "Сверка переноса", "Наличие", "Заказы", "Выдачи", "_PACK"))
+        hidden = not s.doc.Sheets.getByName("_LEG").IsVisible and not s.doc.Sheets.getByName("_PACK").IsVisible
     finally:
         s.close()
     R.add(c, "новая книга: схема WMS-SYS-5, UPGRADE_FROM (папка, seq, хэш, дата, размер журнала), реестр переноса из журнала (14 ЕИ), лист "
-             "«Сверка переноса»; листы защищены, реестр скрыт", sv["SCHEMA"] == "WMS-SYS-5" and str(sv["UPGRADE_FROM"]).count("|") == 4
+             "«Сверка переноса», лист фасовки _PACK; листы защищены, служебные скрыты", sv["SCHEMA"] == "WMS-SYS-5" and str(sv["UPGRADE_FROM"]).count("|") == 4
           and has and prot and hidden and legn == 14, f"{sv}; leg {legn}")
     rc2, o2 = upgrade("promote", "--to", new)
     rc3, o3 = upgrade("promote", "--to", new)
@@ -662,12 +663,18 @@ def pr11_upgrade_072():
               names[:2] == ["Дашборд", "Главная"] and "Поиск" in names and "Карта склада" in names and "Топология" in names and main_btn == 20
               and db.startswith("OK") and fd.startswith("OK:ЕИ-00000427") and card.startswith("✓"), f"{names}; {main_btn}; {db}; {fd}; {card}")
         btns = {}
-        for n in ("Заказы", "Иной приход", "Выдачи", "Корректировки"):
+        for n in ("Заказы", "Иной приход", "Выдачи", "Корректировки", "Наличие"):
             fm = s.doc.Sheets.getByName(n).DrawPage.Forms.getByIndex(0)
             btns[n] = [fm.getByIndex(i).Name for i in range(fm.Count)]
-        R.add(c, "в обновлённой книге и на старых листах — кнопки 0.8: «Куда положить?» («Заказы», «Иной приход»), «Подобрать ЕИ» («Выдачи», "
-                 "«Корректировки»), каждая один раз", all(btns[n].count("btnWherePut") == 1 for n in ("Заказы", "Иной приход"))
-              and all(btns[n].count("btnPickEI") == 1 for n in ("Выдачи", "Корректировки")), str(btns))
+        R.add(c, "в обновлённой книге и на старых листах — кнопки 0.8: «Куда положить?» («Заказы», «Иной приход»), «Подобрать ЕИ» и «Фасовка ЕИ» "
+                 "(«Выдачи», «Корректировки»), «Фасовка ЕИ» на «Наличие», каждая один раз", all(btns[n].count("btnWherePut") == 1 for n in ("Заказы", "Иной приход"))
+              and all(btns[n].count("btnPickEI") == 1 and btns[n].count("btnPackEI") == 1 for n in ("Выдачи", "Корректировки"))
+              and btns["Наличие"].count("btnPackEI") == 1, str(btns))
+        pk = s.B("PackSet", "ЕИ-00000427", "4", "кан", "", module="WmsPack")
+        put(s, "Выдачи", 300, L="ЕИ-00000427", E="2 кан", H=serial(), I="Петров")
+        pi = s.I("IssuePostRow", 300)
+        R.add(c, "в обновлённой книге фасовка и выдача частями работают: в 1 шт — 4 кан, «2 кан» — 0,5 шт", pk.startswith("OK") and pi.startswith("OK")
+              and s.iss(300)[4] == 0.5, f"{pk}; {pi}; {s.iss(300)[4]}")
         oracle(c, s, "журнал 0.7.2 + 0.8 в обновлённой книге", initial={}, legacy_mn_empty=False)
     finally:
         s.close(save=True)
@@ -1336,6 +1343,183 @@ def pr21_pick_ei():
                      for i in range(s.doc.Sheets.getByName(n).DrawPage.Forms.getByIndex(0).Count)] for n in ("Выдачи", "Корректировки")}
         R.add(c, "кнопка «Подобрать ЕИ» есть на «Выдачи» и «Корректировки»", all("btnPickEI" in v for v in forms.values()), str(forms))
         oracle(c, s, "«Подобрать ЕИ» ничего не провёл, кроме выдачи строки 2")
+    finally:
+        s.close()
+
+
+def ei_row(canon):
+    """the row of «Наличие» (= the number) of an EI"""
+    return int(str(canon)[3:])
+
+
+def journal_last(s, typ):
+    """the fields of the last journal line of type typ"""
+    entries, _ = jo.read_journal(s.jdir)
+    for e in reversed(entries):
+        if e["type"] == typ:
+            return e["fields"]
+    return {}
+
+
+@case
+def pr22_parts():
+    """D-099: учёт по документу, выдача частями — фасовка ЕИ («в 1 шт — 4 кан», «1 шт = 6 м»), «1 кан», «1,5 м», 25%, 0,25;
+    возврат, списание, инвентаризация и «Исправить» частями; без «хвостов»"""
+    c = "PR22"
+    p = new_wms("pr22")
+    s = ready(Session(p))
+    try:
+        order(s, 1, "1", "Незамерзайка -30 (4 канистры по 5 л)", qty="1")
+        rc1 = receive(s, 1, "1", place="1-1-1")
+        ant = ords(s, 1)[21]
+        guess = [s.B("TestPackGuess", x, module="WmsPack") for x in ("Незамерзайка -30 (4 канистры по 5 л)", "Профиль 40х20 L=6000 мм",
+                                                                    "Профиль 40х20, 6 м", "Масло 3 бут.", "Болт М8")]
+        R.add(c, "фасовка угадывается по наименованию: 4 канистры → 4 кан, L=6000 мм → 6 м, 6 м → 6 м, 3 бут. → 3 бут; «Болт М8» — ничего",
+              guess == ["4|кан", "6|м", "6|м", "3|бут", "0|"], str(guess))
+        s.goto("Наличие", f"$A${ei_row(ant) + 1}")
+        s.B("TestPrimeForm", "", module="WmsPrimeUi")
+        pk = s.B("PackEI", module="WmsPack")
+        prow = list(s.doc.Sheets.getByName("_PACK").getCellRangeByPosition(0, ei_row(ant), 3, ei_row(ant)).getDataArray()[0])
+        R.add(c, "«Фасовка ЕИ» на строке «Наличие»: предложено по наименованию, записано операцией EI_PACK (в журнале), остаток не тронут",
+              rc1.startswith("OK") and pk.startswith("OK:" + ant + ": в 1 шт — 4 кан") and prow[:3] == [ant, "кан", 4.0] and s.stock(ei_row(ant)) == 1.0
+              and journal_last(s, "EI_PACK").get("N") == "4", f"{pk}; {prow}")
+        put(s, "Выдачи", 1, L=ant, E="1 кан", H=serial(), I="егр")
+        s.I("PreviewRow", 1, False, False)
+        prev = s.iss(1)[17]
+        a1 = s.I("IssuePostRow", 1)
+        j1 = journal_last(s, "ISSUE")
+        R.add(c, "«1 кан» в «Количество»: до проведения в «Контроле» — «К выдаче: 1 кан = 0,25 шт»; проведено 0,25 шт (учёт по документу), в журнале — 1 кан",
+              prev == "К выдаче: 1 кан = 0,25 шт" and a1.startswith("OK") and s.iss(1)[4] == 0.25 and s.stock(ei_row(ant)) == 0.75
+              and j1.get("QTY") == "0.25" and j1.get("PARTS") == "1" and j1.get("PART_UNIT") == "кан", f"{prev}; {a1}; {s.iss(1)[4]}; {j1}")
+        put(s, "Выдачи", 2, L=ant, E="2 канистры", H=serial(), I="егр")
+        a2 = s.I("IssuePostRow", 2)
+        put(s, "Выдачи", 3, L=ant, E="1 к", H=serial(), I="егр")
+        a3 = s.I("IssuePostRow", 3)
+        put(s, "Выдачи", 3, E="1 бут")
+        a3b = s.I("IssuePostRow", 3)
+        put(s, "Выдачи", 3, E="2 кан")
+        a3c = s.I("IssuePostRow", 3)
+        put(s, "Выдачи", 3, E="1 кан")
+        a3d = s.I("IssuePostRow", 3)
+        R.add(c, "«2 канистры» — 0,5 шт; непонятная единица («1 к», «1 бут») и больше остатка («2 кан» при 1) — понятный отказ; последняя канистра закрывает остаток ровно в 0",
+              a2.startswith("OK") and a3.startswith("ERR:") and a3b.startswith("ERR:") and "«кан»" in a3b and "«шт»" in a3b
+              and a3c.startswith("ERR:") and "остаток 1 кан" in a3c and a3d.startswith("OK") and s.stock(ei_row(ant)) == 0.0,
+              f"{a2}; {a3}; {a3b}; {a3c}; {a3d}; {s.stock(ei_row(ant))}")
+        # three parts that 0,001 cannot hold exactly: 1/3 each, no remainder after the third
+        order(s, 2, "2", "Масло 3 бут.", qty="1")
+        receive(s, 2, "1", place="1-1-2")
+        oil = ords(s, 2)[21]
+        ps = s.B("PackSet", oil, "3", "бут", "", module="WmsPack")
+        bals = []
+        for r in (4, 5, 6):
+            put(s, "Выдачи", r, L=oil, E="1 бут", H=serial(), I="егр")
+            bals.append((s.I("IssuePostRow", r)[:2], s.iss(r)[4], s.stock(ei_row(oil))))
+        R.add(c, "3 бут в 1 шт: каждая бутылка — 0,333 или 0,334 шт, после третьей остаток ровно 0 (без «хвоста» 0,001)",
+              ps.startswith("OK") and [b[0] for b in bals] == ["OK"] * 3 and bals[2][2] == 0.0 and abs(sum(b[1] for b in bals) - 1.0) < 1e-9, str(bals))
+        # metal: a profile cut into parts
+        order(s, 3, "3", "Профиль 40х20, 6 м", qty="2", unit="шт")
+        receive(s, 3, "2", place="1-2-1")
+        prof = ords(s, 3)[21]
+        s.B("PackSet", prof, "6", "м", "профиль по 6 м", module="WmsPack")
+        put(s, "Выдачи", 7, L=prof, E="1,5 м", H=serial(), I="егр")
+        m1 = s.I("IssuePostRow", 7)
+        put(s, "Выдачи", 8, L=prof, E="0,5", H=serial(), I="егр")
+        m2 = s.I("IssuePostRow", 8)
+        put(s, "Выдачи", 9, L=prof, E="25%", H=serial(), I="егр")
+        s.I("PreviewRow", 9, False, False)
+        prev9 = s.iss(9)[17]
+        m3 = s.I("IssuePostRow", 9)
+        j3 = journal_last(s, "ISSUE")
+        R.add(c, "металл: «1,5 м» профиля 6 м — 0,25 шт; 0,5 шт числом; «25%» — от пришедших 2 шт = 0,5 шт (4,5 м остатка видно в подсказке)",
+              m1.startswith("OK") and s.iss(7)[4] == 0.25 and m2.startswith("OK") and m3.startswith("OK") and s.iss(9)[4] == 0.5
+              and prev9.startswith("К выдаче: 25% от пришедших 2 шт = 0,5 шт (3 м)") and j3.get("PCT") == "25" and s.stock(ei_row(prof)) == 0.75,
+              f"{m1}; {m2}; {prev9}; {m3}; {j3}; {s.stock(ei_row(prof))}")
+        put(s, "Выдачи", 10, L=prof, F=50.0, H=serial(), I="егр")
+        f1 = s.I("IssuePostRow", 10)
+        put(s, "Выдачи", 10, F=10.0)
+        f2 = s.I("IssuePostRow", 10)
+        put(s, "Выдачи", 11, L=prof, E="5 м", F=10.0, H=serial(), I="егр")
+        f3 = s.I("IssuePostRow", 11)
+        R.add(c, "«Количество в %» (F): 50% (1 шт) больше остатка — отказ с остатком в метрах; 10% = 0,2 шт; E и F вместе — «заполните что-то одно»",
+              f1.startswith("ERR:") and "4,5 м" in f1 and f2.startswith("OK") and s.iss(10)[4] == 0.2 and f3.startswith("ERR:") and "что-то одно" in f3,
+              f"{f1}; {f2}; {f3}")
+        # «Исправить» in parts, a return, a write-off and a count in parts
+        fx = s.I("IssueFixRow", 7, prof, "2 м", "егр", serial())
+        R.add(c, "«Исправить» выдачи частями: «2 м» вместо 1,5 м — 0,333 шт, остаток пересчитан", fx.startswith("OK") and s.iss(7)[4] == 0.333
+              and abs(s.stock(ei_row(prof)) - 0.467) < 1e-9, f"{fx}; {s.iss(7)[4]}; {s.stock(ei_row(prof))}")
+        put(s, "Возврат", 1, B="1", F="1 кан", H=serial(), I="егр")
+        rt = s.B("ReturnPostRow", 1, module="WmsReturn")
+        put(s, "Корректировки", 1, B="Списание", C=ant, G="1 кан", K=serial(), L="разлили")
+        wo = s.B("AdjustPostRow", 1, module="WmsAdjust")
+        put(s, "Корректировки", 2, B="Инвентаризация", C=oil, H="2 бут", K=serial(), L="нашли")
+        inv = s.B("AdjustPostRow", 2, module="WmsAdjust")
+        R.add(c, "возврат «1 кан» по выдаче 1 кан — ровно 0,25 шт (выдача закрыта); списание «1 кан»; инвентаризация «2 бут» — остаток 0,667 шт",
+              rt.startswith("OK") and wo.startswith("OK") and inv.startswith("OK") and s.stock(ei_row(ant)) == 0.0 and s.stock(ei_row(oil)) == 0.667
+              and s.doc.Sheets.getByName("Возврат").getCellByPosition(5, 1).getValue() == 0.25, f"{rt}; {wo}; {inv}; {s.stock(ei_row(ant))}; {s.stock(ei_row(oil))}")
+        e1 = s.B("TestQtyEI", "1 кан", 1, "OUT", 0.0, module="WmsPack")
+        e2 = s.B("TestQtyEI", "25%", 1, "OUT", 0.0, module="WmsPack")
+        e3 = s.B("TestQtyEI", "2 шт", 1, "OUT", 0.0, module="WmsPack")
+        e4 = s.B("TestQtyEI", "1500 мм", ei_row(prof), "OUT", 0.0, module="WmsPack")
+        R.add(c, "у ЕИ без фасовки «1 кан» — подсказка «задайте фасовку»; процент без прихода в книге — понятный отказ; «2 шт» — единица документа; "
+                 "«1500 мм» при фасовке в метрах — отказ, а не 1500 м", e1.startswith("ERR:") and "Фасовка ЕИ" in e1 and e2.startswith("ERR:")
+              and "нет прихода" in e2 and e3.startswith("OK:2|") and e4.startswith("ERR:"), f"{e1}; {e2}; {e3}; {e4}")
+        bad = [s.B("PackSet", prof, x, u, "", module="WmsPack") for x, u in (("2000", "мм"), ("4", "4кан"), ("4", "шт"), ("4", ""))]
+        off = s.B("PackSet", prof, "", "", "", module="WmsPack")
+        prow2 = list(s.doc.Sheets.getByName("_PACK").getCellRangeByPosition(0, ei_row(prof), 3, ei_row(prof)).getDataArray()[0])
+        R.add(c, "фасовка с ошибкой не записывается (больше 1000, цифры в названии, та же единица, без названия); пустое число — фасовка снята",
+              all(x.startswith("ERR:") for x in bad) and off.startswith("OK") and prow2 == ["", "", "", ""], f"{bad}; {off}; {prow2}")
+        cd = s.B("FindRun", oil, module="WmsFind")
+        v = page(s, "Поиск", 7, 20, 0, 9)
+        notes = [row[8] for row in v if row[2].startswith("Выдача")]
+        R.add(c, "карточка ЕИ на «Поиске»: остаток и частями, фасовка «в 1 шт — 3 бут», у каждой выдачи — сколько бутылок",
+              cd.startswith("OK") and "(2 бут)" in v[0][1] and "в 1 шт — 3 бут" in v[0][1] and notes[:3] == ["1 бут"] * 3, f"{cd}; {v[0][1]}; {notes}")
+        oracle(c, s, "выдачи, возвраты, списания и пересчёт частями; фасовка в _PACK — по журналу")
+    finally:
+        s.close()
+
+
+@case
+def pr23_many_places():
+    """D-100: одна позиция на нескольких местах («1-2-3, 1-3-3»): карта, выдачи по местам, «Куда положить?» добавляет место, перемещение списком"""
+    c = "PR23"
+    p = new_wms("pr23")
+    s = ready(Session(p))
+    try:
+        topology(s, {1: (6, 3), 2: (6, 3)})
+        keys = [s.B("PlaceList", x, module="WmsView") for x in ("1-2-3, 1-3-3", "1-2-3; 1-3-3", "1-2-3 + 1-3-3", "1-2-3,1-3-3", "5,12,3", "Офис", "1-2-3, у стены")]
+        R.add(c, "место читается списком: «1-2-3, 1-2-4», «;», «+», без пробела — два места; «5,12,3» — одно место 5-12-3; «Офис» — не место; «1-2-3, у стены» — место 1-2-3 (пометка не мешает)",
+              [list(k) for k in keys] == [["1-2-3", "1-3-3"]] * 4 + [["5-12-3"], [], ["1-2-3"]], str(keys))
+        order(s, 1, "1", "Незамерзайка (4 канистры)", qty="1")
+        rc = receive(s, 1, "1", place="1-2-3, 1-3-3")
+        ei = ords(s, 1)[21]
+        b0 = s.B("MapBuild", "OCC", module="WmsMap")
+        m3, m4 = s.B("TestMapEIs", "1-2-3", module="WmsMap"), s.B("TestMapEIs", "1-3-3", module="WmsMap")
+        n = str(ei_row(ei))
+        R.add(c, "ЕИ на двух местах — на карте занято оба (места 1-2-3 и 1-3-3 показывают этот ЕИ), ЕИ не в «Не на карте»",
+              rc.startswith("OK") and "занято 2," in b0 and n in m3.split("|")[1].split(",") and n in m4.split("|")[1].split(","), f"{b0}; {m3}; {m4}")
+        put(s, "Выдачи", 1, L=ei, E="0,25", H=serial(), I="егр")
+        iss = s.I("IssuePostRow", 1)
+        s.B("MapBuild", "ISS", module="WmsMap", )
+        mp = s.doc.Sheets.getByName("Карта склада")
+        rc3 = s.B("TestMapPlace", "1-2-3", module="WmsMap").split(":")
+        rc4 = s.B("TestMapPlace", "1-3-3", module="WmsMap").split(":")
+        g3 = mp.getCellByPosition(600 + int(rc3[1]), int(rc3[0])).getValue()
+        g4 = mp.getCellByPosition(600 + int(rc4[1]), int(rc4[0])).getValue()
+        R.add(c, "слой «Выдачи 30 дней»: выдача ЕИ видна на обоих его местах", iss.startswith("OK") and g3 == 1.0 and g4 == 1.0, f"{iss}; {g3}; {g4}")
+        order(s, 2, "2", "Незамерзайка (4 канистры)", qty="2", U="1-1-1")
+        s.goto("Заказы", "$B$3")
+        s.B("TestPrimeChoice", 0, module="WmsPrimeUi")
+        wp = s.B("WherePut", module="WmsMap")
+        u = ords(s, 2)[20]
+        R.add(c, "«Куда положить?» при уже указанном месте — вопрос «добавить или заменить»; «Да» — товар займёт несколько мест («1-1-1, 1-2-3»)",
+              wp.startswith("OK:место 1-1-1, ") and u.startswith("1-1-1, 1-2-"), f"{wp}; {u}")
+        put(s, "Корректировки", 1, B="Перемещение", C=ei, J="2-1-1, 2-1-2", K=serial(), L="не влезло")
+        mv = s.B("AdjustPostRow", 1, module="WmsAdjust")
+        b2 = s.B("MapBuild", "OCC", module="WmsMap")
+        m21 = s.B("TestMapEIs", "2-1-2", module="WmsMap")
+        R.add(c, "перемещение списком мест: ЕИ теперь на 2-1-1 и 2-1-2 (1-2-3 и 1-3-3 свободны)", mv.startswith("OK") and n in m21.split("|")[1].split(",")
+              and n not in s.B("TestMapEIs", "1-2-3", module="WmsMap").split("|")[1].split(","), f"{mv}; {b2}; {m21}")
+        oracle(c, s, "несколько мест у ЕИ — только место, учёт не тронут")
     finally:
         s.close()
 

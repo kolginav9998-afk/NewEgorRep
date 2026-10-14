@@ -520,7 +520,8 @@ Private Sub MapStats()
     Dim nextEI As Long, today As Double, last As Long, rgQ As String, rgF As String, cond As String, keyR As String, numR As String, lk As String
     Dim pl As Variant, nPl As Long, a As Variant, nItems As Long, d As Variant, i As Long, n As Long, k As Long, v As String, pk As String, idx As Long
     Dim places As Object, cache As Object, recent() As Boolean, occ() As Long, iss() As Long, stale() As Double, att() As Integer, eis() As String
-    Dim nOff As Long, off() As Variant, offRows() As Long, noLvl As Long, cE As Integer
+    Dim nOff As Long, off() As Variant, offRows() As Long, noLvl As Long, cE As Integer, cval() As String, nC As Long, ci As Long, code As String, j As Long
+    Dim b As Variant
     nextEI = CLng(SysNum(SK_NEXT_EI))
     today = Today0()
     ReDim occ(gMpN)
@@ -564,31 +565,36 @@ Private Sub MapStats()
                 CollPut(places, i, gMpKey(i))
             Next i
             cache = New Collection
+            ReDim cval(nOff)
+            nC = 0
             d = RowsCol(WmsIssue.StockSheet(), offRows, nOff, SC_PLACE)
             n = nOff
             nOff = 0
             For i = 0 To n - 1
                 v = Trim(CStr(d(i)))
-                idx = CollGet(cache, "~" & v)
-                If idx = -1 Then
-                    pk = PlaceKey(v)
-                    idx = -2
-                    If pk <> "" Then
-                        idx = CollGet(places, pk)
-                        If idx < 0 Then idx = IIf(UBound(Split(pk, "-")) = 1, -3, -2)
-                    End If
-                    CollPut(cache, idx, "~" & v)
+                ci = CollGet(cache, "~" & v)
+                If ci = -1 Then
+                    ci = nC
+                    CollPut(cache, ci, "~" & v)
+                    cval(ci) = PlacesOn(v, places)
+                    nC = nC + 1
                 End If
-                If idx >= 0 Then
+                code = cval(ci)
+                If Left(code, 1) <> "-" And code <> "0" Then
+                    ' on the map: one place or several («1-2-3, 1-2-4» — the goods take more than one cell)
                     k = offRows(i)
-                    pl(k - 1) = CStr(idx + 1)
-                    occ(idx) = occ(idx) + 1
-                    If Not recent(k) Then stale(idx) = stale(idx) + 1
-                    If Len(eis(idx)) < 4000 Then eis(idx) = eis(idx) & k & ","
+                    pl(k - 1) = code
+                    a = Split(code, ",")
+                    For j = 0 To UBound(a)
+                        idx = CLng(a(j)) - 1
+                        occ(idx) = occ(idx) + 1
+                        If Not recent(k) Then stale(idx) = stale(idx) + 1
+                        If Len(eis(idx)) < 4000 Then eis(idx) = eis(idx) & k & ","
+                    Next j
                 Else
-                    ' the EI and why (−2: no such place, −3: a place without its level; "" — no place)
-                    off(nOff) = Array(offRows(i), IIf(v = "", 0, idx))
-                    If idx = -3 Then noLvl = noLvl + 1
+                    ' the EI and why (−2: no such place, −3: a place without its level, 0 — no place)
+                    off(nOff) = Array(offRows(i), CLng(code))
+                    If code = "-3" Then noLvl = noLvl + 1
                     nOff = nOff + 1
                 End If
             Next i
@@ -603,8 +609,15 @@ Private Sub MapStats()
                     If n > 0 Then
                         v = pl(n - 1)
                         If v <> "0" And v <> "-1" Then
-                            k = CLng(v) - 1
-                            iss(k) = iss(k) + 1
+                            If InStr(v, ",") = 0 Then
+                                k = CLng(v) - 1
+                                iss(k) = iss(k) + 1
+                            Else
+                                a = Split(v, ",")
+                                For j = 0 To UBound(a)
+                                    iss(CLng(a(j)) - 1) = iss(CLng(a(j)) - 1) + 1
+                                Next j
+                            End If
                         End If
                     End If
                 Next i
@@ -613,7 +626,12 @@ Private Sub MapStats()
             a = EngList("TEXTJOIN("";"";1;IF(" & ColRng(SH_STOCK, SC_STATE, 1, last) & "=""" & EI_ST_REVIEW & """;ROW(" & rgQ & ")-1;""""))", nItems)
             For i = 0 To nItems - 1
                 v = pl(CLng(a(i)) - 1)
-                If v <> "0" And v <> "-1" Then att(CLng(v) - 1) = 1
+                If v <> "0" And v <> "-1" Then
+                    b = Split(v, ",")
+                    For j = 0 To UBound(b)
+                        att(CLng(b(j)) - 1) = 1
+                    Next j
+                End If
             Next i
         End If
     End If
@@ -628,6 +646,32 @@ Private Sub MapStats()
     If IsArray(pl) Then gMpPlaceOf = pl
     gMpStatSeq = SysNum(SK_LAST_SEQ)
 End Sub
+
+' the places of the map a place text of «Наличие» names: «3» or «3,7» (numbers of the places, 1-based); −2 — no such place,
+' −3 — a place without its level (5-12), 0 — no place written
+Private Function PlacesOn(v As String, places As Object) As String
+    Dim keys As Variant, i As Integer, idx As Long, out As String, noLevel As Boolean
+    If v = "" Then
+        PlacesOn = "0"
+        Exit Function
+    End If
+    keys = PlaceList(v)
+    For i = 0 To UBound(keys)
+        idx = CollGet(places, keys(i))
+        If idx >= 0 Then
+            If InStr("," & out & ",", "," & (idx + 1) & ",") = 0 Then out = out & IIf(out <> "", ",", "") & (idx + 1)
+        ElseIf UBound(Split(keys(i), "-")) = 1 Then
+            noLevel = True
+        End If
+    Next i
+    If out <> "" Then
+        PlacesOn = out
+    ElseIf noLevel Then
+        PlacesOn = "-3"
+    Else
+        PlacesOn = "-2"
+    End If
+End Function
 
 ' the column i (0 — the texts, 1 — the numbers of the places) of the table of MapKeys
 Private Function mp_KeyRange(i As Integer) As String
@@ -766,7 +810,7 @@ Sub OnMapSelect(Optional oSel As Variant)
         n = CLng(eis(i))
         st = WmsIssue.StockSheet().getCellRangeByPosition(0, n, SC_PLACE, n).getDataArray()(0)
         rows(i) = Array(CStr(st(SC_EI)), CStr(st(SC_NAME)), st(SC_QTY), CStr(st(SC_UNIT)), "")
-        s = s & IIf(s <> "", "; ", "") & st(SC_EI) & " " & st(SC_NAME) & " — " & WmsIssue.QtyText(CDbl(st(SC_QTY))) & " " & st(SC_UNIT)
+        s = s & IIf(s <> "", "; ", "") & st(SC_EI) & " " & st(SC_NAME) & " — " & WmsPack.QtyWithParts(n, CDbl(st(SC_QTY)), CStr(st(SC_UNIT)))
     Next i
     If UBound(eis) <= 0 Then s = "пусто — место свободно"
     mp.getCellByPosition(0, MP_INFO_ROW).setString("Место " & gMpKey(idx) & ": " & s & IIf(UBound(eis) > 20, " … ещё " & (UBound(eis) - 20), ""))
@@ -800,7 +844,7 @@ End Sub
 
 Function WherePut() As String
     Dim sName As String, r As Long, sh As Object, nm As String, art As String, cPlace As Integer, posted As Boolean, lines As Variant, opts() As String
-    Dim k As Integer, c As Integer, n As Integer, pick As String, s As String
+    Dim k As Integer, c As Integer, n As Integer, pick As String, s As String, cur As String, ans As Integer
     sName = gDoc.getCurrentController().getActiveSheet().Name
     If sName <> SH_ORDERS And sName <> SH_SPECIAL Then
         WherePut = "ERR:«Куда положить?» работает на листах «" & SH_ORDERS & "» и «" & SH_SPECIAL & "»: встаньте на строку товара"
@@ -850,6 +894,18 @@ Function WherePut() As String
         gUiLastMsg = "OK:строка уже проведена: чтобы переложить ЕИ на " & pick & ", проведите «" & SH_ADJUST & "» → «Перемещение» (новое место " & pick & ")"
         WmsUi.UiMessage(Mid(gUiLastMsg, 4))
     Else
+        cur = Trim(sh.getCellByPosition(cPlace, r).getString())
+        If cur <> "" And InStr(", " & LCase(cur) & ",", ", " & LCase(pick) & ",") = 0 And LCase(cur) <> LCase(pick) Then
+            ' D-100: the goods may take more than one cell — the place is added to the list or replaces it
+            ans = WmsUi.UiAsk3("В строке " & (r + 1) & " уже указано место «" & cur & "».  «Да» — добавить " & pick & " (товар займёт несколько мест: «" _
+                & cur & ", " & pick & "»),  «Нет» — заменить на " & pick & ",  «Отмена» — ничего не менять.")
+            If ans = 2 Then
+                gUiLastMsg = "SKIP:место не изменено"
+                WherePut = gUiLastMsg
+                Exit Function
+            End If
+            If ans = 6 Then pick = cur & ", " & pick
+        End If
         sh.getCellByPosition(cPlace, r).setString(pick)
         gUiLastMsg = "OK:место " & pick & " записано в строку " & (r + 1)
     End If
@@ -860,7 +916,7 @@ End Function
 Function WhereSuggest(nm As String, art As String) As String
     Dim nextEI As Long, r As Long, r1x As Long, i As Long, st As Variant, same As Object, sKeys() As String, sCnt() As Long, nS As Long, idx As Long
     Dim pk As String, out As String, nOut As Integer, j As Long, best As Long, bestD As Double, d As Double, a As Variant, b As Variant, used() As Boolean
-    Dim anchorKey As String, k As Integer
+    Dim anchorKey As String, k As Integer, pls As Variant
     nextEI = CLng(SysNum(SK_NEXT_EI))
     same = New Collection
     ReDim sKeys(50)
@@ -874,8 +930,11 @@ Function WhereSuggest(nm As String, art As String) As String
             If VarType(st(i)(SC_QTY)) = 5 Then
                 If st(i)(SC_QTY) > 0.0000005 And CStr(st(i)(SC_STATE)) <> EI_ST_STORNO Then
                     If (art <> "" And LCase(Trim(CStr(st(i)(SC_ART)))) = LCase(art)) Or (art = "" And LCase(Trim(CStr(st(i)(SC_NAME)))) = LCase(nm)) Then
-                        pk = Trim(CStr(st(i)(SC_PLACE)))
-                        If pk <> "" Then
+                        ' an EI on several places («1-2-3, 1-2-4») counts on each of them
+                        pls = PlaceList(Trim(CStr(st(i)(SC_PLACE))))
+                        If UBound(pls) < 0 And Trim(CStr(st(i)(SC_PLACE))) <> "" Then pls = Array(Trim(CStr(st(i)(SC_PLACE))))
+                        For j = 0 To UBound(pls)
+                            pk = pls(j)
                             idx = CollGet(same, LCase(pk))
                             If idx < 0 And nS <= 50 Then
                                 idx = nS
@@ -884,7 +943,7 @@ Function WhereSuggest(nm As String, art As String) As String
                                 nS = nS + 1
                             End If
                             If idx >= 0 Then sCnt(idx) = sCnt(idx) + 1
-                        End If
+                        Next j
                     End If
                 End If
             End If

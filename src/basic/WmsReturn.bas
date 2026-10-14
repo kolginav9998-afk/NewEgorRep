@@ -379,7 +379,7 @@ End Sub
 ' the quantity and the date (the preview checks only what is filled).
 Private Function CheckRowInputs(r As Long, bNeedAll As Boolean) As String
     Dim sh As Object, k As Long, why As String, n As Long, canon As String, msg As String, c As Object, who As String, full As String
-    Dim note As String, st As Integer, av As Double
+    Dim note As String, st As Integer, av As Double, info As String
     sh = ReturnsSheet()
     k = IssueNoOf(sh.getCellByPosition(RC_ISSUE, r))
     If k = 0 Then
@@ -422,7 +422,8 @@ Private Function CheckRowInputs(r As Long, bNeedAll As Boolean) As String
     av = Available(0)
     c = sh.getCellByPosition(RC_QTY, r)
     If c.getType() <> com.sun.star.table.CellContentType.EMPTY Or bNeedAll Then
-        If Not WmsOrders.ParseQtyAs(c, "количество возврата (F)", mRqty, msg) Then
+        ' PRIME 0.8: «1 кан», «1,5 м» — parts of the packing of the EI (the whole issue returned in parts closes it exactly)
+        If Not WmsPack.QtyAsEI(c, Empty, "количество возврата (F)", mIei, mSbal, mIunit, "IN", av, mRqty, info, msg) Then
             CheckRowInputs = msg
             Exit Function
         End If
@@ -567,6 +568,7 @@ Function ReturnPostRow(r As Long) As String
     PlanField("ROW", r + 1)
     PlanField("BAL_BEFORE", mSbal)
     PlanField("BAL_AFTER", b2)
+    WmsPack.PlanQtyFields()
     ' one operation, the writes grouped by sheet: _SYS → «Наличие» → _RET → _ISS → «Возврат» → «Заказы».X
     PlanSetValue(SYS_SHEET, SK_NEXT_RET, 1, n + 1, False)
     PlanSetValue(SH_STOCK, mIei, SC_QTY, b2, False)
@@ -637,7 +639,7 @@ End Function
 
 Function ReturnFixRow(r As Long, vQty As Variant, vDate As Variant, vPlace As Variant) As String
     Dim why As String, kind As String, n As Long, rd As Variant, k As Long, q1 As Double, d1 As Double, p1 As String, msg As String
-    Dim sh As Object, res As String, before As Double, b2 As Double, place0 As String
+    Dim sh As Object, res As String, before As Double, b2 As Double, place0 As String, info As String
     WmsInit()
     If r < 1 Or r > MAX_SHEET_ROW Then
         ReturnFixRow = "ERR:выберите строку возврата (не заголовок)"
@@ -674,7 +676,7 @@ Function ReturnFixRow(r As Long, vQty As Variant, vDate As Variant, vPlace As Va
     End If
     d1 = sh.getCellByPosition(RC_DATE, r).getValue()
     p1 = sh.getCellByPosition(RC_PLACE, r).getString()
-    If Not WmsOrders.ParseQtyValueAs(vQty, "количество возврата", mRqty, msg) Then
+    If Not WmsPack.QtyAsEI(Nothing, vQty, "количество возврата", mIei, WmsIssue.Round3(mSbal - q1), mIunit, "IN", Available(q1), mRqty, info, msg) Then
         ReturnFixRow = "ERR:" & msg
         Exit Function
     End If
@@ -723,6 +725,7 @@ Function ReturnFixRow(r As Long, vQty As Variant, vDate As Variant, vPlace As Va
     PlanField("ROW", r + 1)
     PlanField("BAL_BEFORE", mSbal)
     PlanField("BAL_AFTER", b2)
+    WmsPack.PlanQtyFields()
     If Abs(b2 - mSbal) > 0.0000001 Then PlanSetValue(SH_STOCK, mIei, SC_QTY, b2, False)
     If mRplace <> place0 Then PlanSetValue(SH_STOCK, mIei, SC_PLACE, mRplace, False)
     PlanSetValue(SH_RET, n, RT_QTY, mRqty, False)

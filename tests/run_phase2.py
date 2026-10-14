@@ -829,8 +829,9 @@ def v26_percent_column():
         s.type_iss("F", 1, "50")
         pv = s.iss(1)[17]
         res = s.post(1)
-        R.add(c, "«Количество в %» (F) не используется для проведения: заполненная F — понятный отказ, ничего не списано",
-              res.startswith("ERR") and "%" in pv and s.stock(1) == 100.0 and njournal(s) == 0, f"{pv}; {res}")
+        # D-099 (снимает D-043): F — процент от прихода ЕИ; заполнены и E, и F — непонятно, что считать
+        R.add(c, "«Количество» (E) и «Количество в %» (F) вместе — понятный отказ «что-то одно», ничего не списано",
+              res.startswith("ERR") and "%" in pv and "что-то одно" in res and s.stock(1) == 100.0 and njournal(s) == 0, f"{pv}; {res}")
     finally:
         s.close()
 
