@@ -410,11 +410,14 @@ Sub BtnRetFix(Optional oEvent As Variant)
     v(1) = Format(sh.getCellByPosition(RC_DATE, r).getValue(), "DD.MM.YYYY")
     v(2) = sh.getCellByPosition(RC_PLACE, r).getString()
     pick = -1
+    WmsUi.WhyBegin()
     If Not ReturnDialog("Исправить возврат № " & n & " (та же выдача, тот же ЕИ)", sInfo, "Исправить", empty0, pick, v) Then
+        WmsUi.WhyEnd()
         gUiLastMsg = "SKIP:окно закрыто без исправления"
         Exit Sub
     End If
     res = WmsReturn.ReturnFixRow(r, v(0), v(1), v(2))
+    WmsUi.WhyEnd()
     AfterOperation("«Исправить» (возврат)", res)
     If Left(res, 5) = "SKIP:" Then
         UiMessage(Payload(res))
@@ -450,15 +453,17 @@ Sub BtnRetDelete(Optional oEvent As Variant)
         Exit Sub
     End Select
     sh = WmsReturn.ReturnsSheet()
-    If Not UiConfirm("Удалить возврат № " & gRtN & "?" & Chr(10) & Chr(10) & sh.getCellByPosition(RC_EI, r).getString() & " — " _
+    gOpReason = ""
+    If Not WmsPrimeUi.ReasonAsk("Удалить возврат", "Удалить возврат № " & gRtN & "?" & Chr(10) & Chr(10) & sh.getCellByPosition(RC_EI, r).getString() & " — " _
         & sh.getCellByPosition(RC_NAME, r).getString() & ", " & sh.getCellByPosition(RC_QTY, r).getString() & " " & sh.getCellByPosition(RC_UNIT, r).getString() _
         & " (выдача № " & sh.getCellByPosition(RC_ISSUE, r).getString() & ", «" & sh.getCellByPosition(RC_WHO, r).getString() & "»)" & Chr(10) & Chr(10) _
         & "Остаток ЕИ уменьшится на это количество, по выдаче его снова можно будет вернуть. Строка останется в истории с отметкой «" _
-        & ST_DELETED & "», № не будет использован повторно.") Then
+        & ST_DELETED & "», № не будет использован повторно.", "Удалить", gOpReason) Then
         gUiLastMsg = "SKIP:удаление не подтверждено"
         Exit Sub
     End If
     res = WmsReturn.ReturnDeleteRow(r)
+    gOpReason = ""
     AfterOperation("«Удалить» (возврат)", res)
     If Left(res, 5) = "SKIP:" Then
         UiMessage(Payload(res))
@@ -558,6 +563,7 @@ Private Function ReturnDialog(sTitle As String, sInfo As String, sOk As String, 
         dm.insertByName("e" & i, m)
         y = y + 18
     Next i
+    y = WmsUi.WhyField(dm, y, 8, 120, 172)
     m = dm.createInstance("com.sun.star.awt.UnoControlButtonModel")
     m.PositionX = 160
     m.PositionY = y + 4
@@ -580,6 +586,7 @@ Private Function ReturnDialog(sTitle As String, sInfo As String, sOk As String, 
     dlg.setModel(dm)
     dlg.createPeer(CreateUnoService("com.sun.star.awt.Toolkit"), Null)
     If dlg.execute() = 1 Then
+        WmsUi.WhyRead(dlg)
         For i = 0 To 2
             v(i) = dlg.getControl("e" & i).getText()
         Next i

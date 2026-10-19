@@ -273,11 +273,14 @@ Sub BtnSpcFix(Optional oEvent As Variant)
     sInfo = "Строка № " & gXn & ", поступление " & sh.getCellByPosition(XC_EVENT, r).getString() & ", " & sh.getCellByPosition(XC_EI, r).getString() _
         & IIf(isAdd, ". Пополнение ЕИ детали: наименование, артикул, единица и категория — от карточки ЕИ, здесь не меняются.", _
         ". Строка создала ЕИ: наименование, артикул, категория и единица — это карточка ЕИ. Тип прихода, ЕИ и № поступления не меняются.")
+    WmsUi.WhyBegin()
     If Not SpcDialog("Исправить строку № " & gXn & " (тот же ЕИ)", sInfo, "Исправить", lbl, v, -1, empty0) Then
+        WmsUi.WhyEnd()
         gUiLastMsg = "SKIP:окно закрыто без исправления"
         Exit Sub
     End If
     res = WmsSpecial.SpecialFixRow(r, v(0), v(1), v(2), v(3), v(4), v(5), v(6), v(7), v(8), v(9))
+    WmsUi.WhyEnd()
     AfterOperation("«Исправить» (иной приход)", res)
     If Left(res, 5) = "SKIP:" Then
         UiMessage(Payload(res))
@@ -322,14 +325,16 @@ Sub BtnSpcDelete(Optional oEvent As Variant)
         Exit Sub
     End If
     sh = WmsSpecial.SpecialSheet()
-    If Not UiConfirm("Удалить строку прихода № " & gXn & "?" & Chr(10) & Chr(10) & sh.getCellByPosition(XC_EI, r).getString() & " — " _
+    gOpReason = ""
+    If Not WmsPrimeUi.ReasonAsk("Удалить приход", "Удалить строку прихода № " & gXn & "?" & Chr(10) & Chr(10) & sh.getCellByPosition(XC_EI, r).getString() & " — " _
         & sh.getCellByPosition(XC_NAME, r).getString() & ", " & sh.getCellByPosition(XC_QTY, r).getString() & " " & sh.getCellByPosition(XC_UNIT, r).getString() _
         & " (" & sh.getCellByPosition(XC_EVENT, r).getString() & ")" & Chr(10) & Chr(10) _
-        & "Остаток ЕИ уменьшится на это количество. Строка останется в истории с отметкой «" & ST_DELETED & "», № не будет использован повторно.") Then
+        & "Остаток ЕИ уменьшится на это количество. Строка останется в истории с отметкой «" & ST_DELETED & "», № не будет использован повторно.", "Удалить", gOpReason) Then
         gUiLastMsg = "SKIP:удаление не подтверждено"
         Exit Sub
     End If
     res = WmsSpecial.SpecialDeleteRow(r)
+    gOpReason = ""
     AfterOperation("«Удалить» (иной приход)", res)
     If Left(res, 5) = "SKIP:" Then
         UiMessage(Payload(res))
@@ -466,6 +471,7 @@ Private Function SpcDialog(sTitle As String, sInfo As String, sOk As String, lab
         dm.insertByName("e" & i, m)
         y = y + 18
     Next i
+    y = WmsUi.WhyField(dm, y, 8, 130, 182)
     m = dm.createInstance("com.sun.star.awt.UnoControlButtonModel")
     m.PositionX = 180
     m.PositionY = y + 4
@@ -488,6 +494,7 @@ Private Function SpcDialog(sTitle As String, sInfo As String, sOk As String, lab
     dlg.setModel(dm)
     dlg.createPeer(CreateUnoService("com.sun.star.awt.Toolkit"), Null)
     If dlg.execute() = 1 Then
+        WmsUi.WhyRead(dlg)
         For i = 0 To UBound(labels)
             If i = listField Then
                 v(i) = dlg.getControl("e" & i).getSelectedItem()

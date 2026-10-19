@@ -737,6 +737,36 @@ EH:
     gFdBusy = False
 End Function
 
+' 1.0: a ready table on the page under its own headers (up to 8 columns B..I; the hidden J..L — the sheet, the row and the EI
+' a double click leads to): the history of the changes, the reports
+Function ShowTable(sTitle As String, sInfo As String, sInfo2 As String, heads As Variant, rows As Variant, n As Long, bCard As Boolean) As String
+    Dim sh As Object, h() As Variant, i As Integer
+    gFdBusy = True
+    On Error GoTo EH
+    sh = ViewOpen(SH_FIND)
+    ClearPage(sh)
+    gFdMode = "LIST"
+    TableMode(sh, bCard)
+    sh.getCellByPosition(1, FD_HEAD).setString(sTitle)
+    sh.getCellByPosition(1, FD_INFO).setString(sInfo)
+    sh.getCellByPosition(1, FD_INFO + 1).setString(sInfo2)
+    ReDim h(7)
+    For i = 0 To 7
+        If i <= UBound(heads) Then h(i) = heads(i) Else h(i) = ""
+    Next i
+    sh.getCellRangeByPosition(1, FD_TABLE_HEAD, 8, FD_TABLE_HEAD).setDataArray(Array(h))
+    If n > 0 Then sh.getCellRangeByPosition(1, FD_TABLE, 12, FD_TABLE + n - 1).setDataArray(SubArr(rows, n))
+    ViewDone(sh)
+    gFdBusy = False
+    ShowTable = "OK:строк " & n
+    Exit Function
+EH:
+    ShowTable = "ERR:" & Error$
+    On Error Resume Next
+    ViewDone(sh)
+    gFdBusy = False
+End Function
+
 ' ================================================================ the card of an EI
 
 ' the card of EI n: who it came from, the movements with the running balance, the check against «Наличие». OK:… / ERR:…

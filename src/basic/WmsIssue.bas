@@ -937,6 +937,7 @@ Function IssueFixRow(r As Long, vEI As Variant, vQty As Variant, vWho As Variant
     qNew = Round3(pNew - mCqty)
     oldCtl = sh.getCellByPosition(IC_CTL, r).getString()
     PlanBegin("ISSUE_FIX", CStr(k))
+    PlanWhy(SH_ISSUES, r, IC_NOTE, "исправлено")
     PlanField("NO", k)
     PlanField("OLD_EI", canon1)
     PlanField("OLD_QTY", q1)
@@ -1047,6 +1048,7 @@ Function IssueDeleteRow(r As Long) As String
     End If
     q1 = sh.getCellByPosition(IC_QTY, r).getValue()
     PlanBegin("ISSUE_DEL", CStr(k))
+    PlanWhy(SH_ISSUES, r, IC_NOTE, "удалено")
     PlanField("NO", k)
     PlanField("EI", canon1)
     PlanField("QTY", q1)

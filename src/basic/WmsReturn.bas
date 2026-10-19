@@ -813,6 +813,7 @@ Function ReturnFixRow(r As Long, vQty As Variant, vDate As Variant, vPlace As Va
     before = WmsIssue.Round3(mSbal - q1)
     b2 = WmsIssue.Round3(before + mRqty)
     PlanBegin("RETURN_FIX", CStr(n))
+    PlanWhy(SH_RETURNS, r, RC_NOTE, "исправлено")
     PlanField("RET", n)
     PlanField("ISSUE", k)
     PlanField("EI", mIcanon)
@@ -930,6 +931,7 @@ Function ReturnDeleteRow(r As Long) As String
     End If
     b2 = WmsIssue.Round3(bal - q1)
     PlanBegin("RETURN_DEL", CStr(n))
+    PlanWhy(SH_RETURNS, r, RC_NOTE, "удалено")
     PlanField("RET", n)
     PlanField("ISSUE", k)
     PlanField("EI", canon)

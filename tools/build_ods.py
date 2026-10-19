@@ -147,7 +147,10 @@ GOODS_HEADERS = ["Код", "Наименование", "Артикул", "Ед."
                  "Обновлено"]
 GOODS_WMS_COLS = 4          # the last columns M..P: written by «Обновить» (WmsSupply), not by the storekeeper
 SUPPLY = "Снабжение"
-SHEETS_10 = [PLACES, SUPPLIERS, GOODS, SUPPLY]
+# 1.0 (З12, К3, К4, К11, К12, К14, А1): the page of the documents on paper — WmsPrint fills it, «Печать…» / «Сохранить PDF»
+PRINT = "Печать"
+PRINT_WIDTHS = [900, 2600, 6300, 2300, 1500, 2000, 2400]        # A..G = 18 cm: an A4 page with margins of 1,5 cm
+SHEETS_10 = [PLACES, SUPPLIERS, GOODS, SUPPLY, PRINT]
 LEGREP = "Сверка переноса"
 LEGREP_HEAD = 3                   # WmsConfig.LEGREP_HEAD
 LEGREP_HEADERS = ["ЕИ", "Наименование", "Ед.", "Откуда", "Приход при переносе", "Остаток при переносе", "Израсходовано до переноса",
@@ -1058,6 +1061,47 @@ def build_supply(doc, sh):
     # protected with the other pages at the end of the build (a protected sheet stops the cell styles created later)
 
 
+def build_print(doc, sh):
+    """«Печать» (WmsPrint): a page of the documents — A4 portrait, one page wide; the buttons right of the page are not printed"""
+    ps = doc.StyleFamilies.getByName("PageStyles")
+    if not ps.hasByName("WMS_Print"):
+        ps.insertByName("WMS_Print", doc.createInstance("com.sun.star.style.PageStyle"))
+    st = ps.getByName("WMS_Print")
+    st.IsLandscape = False
+    st.Width, st.Height = 21000, 29700
+    st.LeftMargin = st.RightMargin = 1500
+    st.TopMargin = st.BottomMargin = 1200
+    st.HeaderIsOn = False
+    st.FooterIsOn = False
+    st.ScaleToPagesX = 1
+    st.ScaleToPagesY = 0
+    st.PrintGrid = False
+    sh.PageStyle = "WMS_Print"
+    for c, w in enumerate(PRINT_WIDTHS):
+        sh.getColumns().getByIndex(c).Width = w
+    sh.getColumns().getByIndex(len(PRINT_WIDTHS)).Width = 600
+    body = sh.getCellRangeByPosition(0, 0, len(PRINT_WIDTHS) - 1, 2000)
+    body.CharHeight = 10
+    body.CharColor = TEXT
+    text_cell(sh, 0, 0, "Здесь появляется документ для печати: акт, накладная, опись, карточка ЕИ, отчёт.", size=13, bold=True, color=INK)
+    text_cell(sh, 0, 2, "Его делают кнопки на рабочих листах («Акт расхождения», «Акт списания», «Накладная», «Опись», «Печать карточки», "
+                        "«Отчёт»). «Печать…» — на принтер, «Сохранить PDF» — файл в папке «WMS_Документы» рядом с книгой.", size=10, color=MUTED)
+    x = sum(PRINT_WIDTHS) + 900
+    add_button(doc, sh, "btnPrint", "Печать…", "WmsPrint.BtnPrint", x, 200, 3200, 760, bold=True, back=0xC6E0B4)
+    add_button(doc, sh, "btnPdf", "Сохранить PDF", "WmsPrint.BtnPdf", x, 1060, 3200, 760, back=0xDDEBF7)
+    add_button(doc, sh, "btnPrintBack", "Назад", "WmsPrint.BtnBack", x, 1920, 3200, 760, back=0xDDEBF7)
+    sh.getCellRangeByPosition(0, 0, 12, 2000).CellProtection = protection(True)
+    # protected with the other pages at the end of the build
+
+
+def print_10(doc, sheets):
+    """1.0: the page «Печать» for a new book and an upgraded one"""
+    if not sheets.hasByName(PRINT):
+        names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+        sheets.insertNewByName(PRINT, names.index(SUPPLY) + 1 if SUPPLY in names else names.index(FIND) + 1)
+        build_print(doc, sheets.getByName(PRINT))
+
+
 def supply_10(doc, sheets):
     """1.0 (этап F): what a new book and an upgraded one both get — «Поставщики», «Номенклатура», «Снабжение»; the list of the
     suppliers on «Заказы» L and on the panel of «Приход авто»; the events of «Снабжение»"""
@@ -1136,7 +1180,7 @@ def layout_10(doc, sheets):
 FREEZE_COLS_10 = {ISSUES: 3, ORDERS: 2, RETURNS: 4, ADJUST: 4, SPECIAL: 4, STOCK: 2}
 # 1.0 (В9): the colour of the sheet tabs by group — pages, the sheets the storekeeper works in, the registers and directories,
 # the service sheets
-TAB_COLORS_10 = [((DASH, MAIN, FIND, MAP, SUPPLY), 0x5B9BD5), ((ORDERS, SPECIAL, CARS, ISSUES, RETURNS, ADJUST), 0x70AD47),
+TAB_COLORS_10 = [((DASH, MAIN, FIND, MAP, SUPPLY, PRINT), 0x5B9BD5), ((ORDERS, SPECIAL, CARS, ISSUES, RETURNS, ADJUST), 0x70AD47),
                  ((STOCK, RCPT, TOPO, PLACES, SUPPLIERS, GOODS), 0xED7D31), ((LEGREP, HELP), 0xA5A5A5)]
 # 1.0 (В1): what the storekeeper fills in is white, what WMS writes is grey (data rows), the headers likewise
 INPUT_HEAD_10 = 0xFFF2CC
@@ -1325,6 +1369,9 @@ BUTTONS_10 = [
     (GOODS, "btnGoodsRefresh", "Обновить", "WmsSupply.BtnGoodsRefresh", None, None, 2600, 650, 0xDDEBF7),
     (GOODS, "btnGoodsFill", "Пополнить из «Наличия»", "WmsSupply.BtnGoodsFill", None, None, 5000, 650, 0xDDEBF7),
     (CARS, "btnCarAccept", "Принять товар", "WmsSupply.BtnCarAccept", None, None, None, None, 0xC6E0B4),
+    (ORDERS, "btnDiscAct", "Акт расхождения", "WmsPrint.BtnDiscrepancyAct", 26800, 880, 3600, 650, 0xDDEBF7),
+    # 1.0 (этап G): control and documents
+    (FIND, "btnHistory", "История изменений", "WmsAudit.BtnHistory", None, None, 4000, 720, 0xDDEBF7),
 ]
 
 
@@ -1345,7 +1392,8 @@ def buttons_10(doc, sheets):
         elif x is None:
             # «Поиск»: the row of its buttons (build_find), after «Фасовка ЕИ»
             y = sh.getCellByPosition(0, 3).Position.Y + 90
-            x = sh.getCellByPosition(6, 3).Position.X + {"btnIssueFrom": 13100, "btnReturnHands": 15580, "btnShowOnMap": 19560}[name]
+            x = sh.getCellByPosition(6, 3).Position.X + {"btnIssueFrom": 13100, "btnReturnHands": 15580, "btnShowOnMap": 19560,
+                                                         "btnHistory": 23540}[name]
         if not has_button(sh, name):
             add_button(doc, sh, name, label, macro, x, y, w, h, back=back)
 
@@ -1785,6 +1833,7 @@ def build(office, out_path, test=False, instance_id=None):
     where_buttons(doc, sheets)
     layout_10(doc, sheets)
     supply_10(doc, sheets)
+    print_10(doc, sheets)
     buttons_10(doc, sheets)
     colors_10(doc, sheets)
     hints_10(doc, sheets)
@@ -1831,7 +1880,7 @@ def build(office, out_path, test=False, instance_id=None):
     for name in (ORD, RCV, SPR, ART, RET, ISS, ADJ, CAR, LEG, PACK, IDX, "_SYS"):
         sheets.getByName(name).IsVisible = False
     for name in (MAIN, ORDERS, SPECIAL, CARS, ISSUES, RETURNS, ADJUST, STOCK, LEGREP, HELP, ORD, RCV, SPR, ART, RET, ISS, ADJ, CAR, LEG, PACK, IDX,
-                 "_SYS", DASH, FIND, MAP, SUPPLY):
+                 "_SYS", DASH, FIND, MAP, SUPPLY, PRINT):
         sheets.getByName(name).protect(PWD)
     doc.protect(PWD)
     if os.path.exists(out_path):

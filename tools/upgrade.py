@@ -325,6 +325,9 @@ def step_08(doc, leg, from_text, done):
     B.status_colors(doc, sheets)
     B.where_buttons(doc, sheets)
     B.layout_10(doc, sheets)
+    # 1.0 (этапы F, G): «Поставщики», «Номенклатура», «Снабжение», «Печать» — before the buttons that live on them
+    B.supply_10(doc, sheets)
+    B.print_10(doc, sheets)
     B.buttons_10(doc, sheets)
     B.colors_10(doc, sheets)
     B.hints_10(doc, sheets)
@@ -332,7 +335,8 @@ def step_08(doc, leg, from_text, done):
     B.hotkeys_10(doc)
     B.rebuild_main(doc, sheets.getByName(B.MAIN))
     done.append(f"страницы «{B.DASH}», «{B.FIND}», «{B.MAP}» и лист «{B.TOPO}» (вставьте туда схему склада); «{B.MAIN}» этого выпуска (кнопки к страницам)")
-    return [B.LEGREP, B.LEG, B.PACK, B.DASH, B.FIND, B.MAP]
+    done.append(f"1.0: справочники «{B.SUPPLIERS}» и «{B.GOODS}» (пополняются кнопками из «{B.ORDERS}» и «{B.STOCK}»), страницы «{B.SUPPLY}» и «{B.PRINT}»")
+    return [B.LEGREP, B.LEG, B.PACK, B.DASH, B.FIND, B.MAP, B.SUPPLY, B.PRINT]
 
 
 def finish_doc(doc, was_protected, new_sheets, done):

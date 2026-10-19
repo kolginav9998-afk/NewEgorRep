@@ -681,6 +681,7 @@ Function CarFix(n As Long, ByVal sPlate As String, ByVal sSup As String, ByVal s
     r = CAR_FIRST + n - 1
     If VarType(d(CR_FIXES)) = 5 Then fx = CLng(d(CR_FIXES))
     PlanBegin("CAR_FIX", CStr(n))
+    PlanWhy(SH_CARS, r, CC_NOTE, "исправлено")
     PlanField("CAR", n)
     If sPlate <> oldPlate Then
         PlanField("PLATE_OLD", oldPlate)
@@ -745,6 +746,7 @@ Function CarCancel(n As Long) As String
     bOpen = (d(CR_STATE) = CR_OPEN)
     r = CAR_FIRST + n - 1
     PlanBegin("CAR_CANCEL", CStr(n))
+    PlanWhy(SH_CARS, r, CC_NOTE, "отменено")
     PlanField("CAR", n)
     PlanField("PLATE", CStr(v(CC_PLATE)))
     PlanField("KEY", CStr(d(CR_KEY)))

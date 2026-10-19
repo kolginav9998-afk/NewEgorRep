@@ -1062,6 +1062,84 @@ def v19_supply():
         s.close()
 
 
+@case
+def v20_print_discrepancy():
+    """З12 «Акт расхождения»: the delivery of one document of a supplier — by the document and in fact, the shortage, the returns
+    to the supplier (брак) — on «Печать»; «Сохранить PDF» — a PDF in «WMS_Документы» next to the book"""
+    c = "V20"
+    s = ready(Session(new_wms("v20")))
+    try:
+        order(s, 1, "1", "Болт М8", qty="10", supplier="Ромашка", art="Б-8")
+        put(s, "Заказы", 1, G="10")
+        receive(s, 1, "8", doc="УПД-77", place="1-1-1")
+        order(s, 2, "2", "Гайка М8", qty="5", supplier="Ромашка")
+        put(s, "Заказы", 2, G="5")
+        receive(s, 2, "5", doc="УПД-77", place="1-1-2")
+        b = ords(s, 2)[21]
+        s.B("SupReturnPost", b, "1", "брак: трещина", "", False, module="WmsSupply")
+        s.goto("Заказы", "$B$3")
+        res = s.B("DiscrepancyAct", module="WmsPrint")
+        pr = s.doc.Sheets.getByName("Печать")
+        txt = [[str(x) for x in r] for r in pr.getCellRangeByPosition(0, 0, 6, 40).getDataArray()]
+        flat = " | ".join(" ".join(r) for r in txt)
+        area = pr.getPrintAreas()
+        R.add(c, "З12: акт расхождения по УПД-77 «Ромашка»: Болт — по документу 10, фактически 8, «недостача 2»; Гайка — «совпадает»; "
+                 "брак Гайки (1, «трещина») — в таблице возвратов; подписи склада и поставщика; область печати A:G",
+              res.startswith("OK:Акт расхождения Ромашка УПД-77") and "АКТ О РАСХОЖДЕНИИ" in txt[0][0] and "недостача 2" in flat and "совпадает" in flat
+              and "трещина" in flat and "Представитель поставщика" in flat and len(area) == 1 and area[0].EndColumn == 6
+              and s.active_sheet() == "Печать", f"{res}; {flat[:900]}")
+        pdf = s.B("PdfSave", module="WmsPrint")
+        path = pdf[3:]
+        ok = pdf.startswith("OK:") and os.path.isfile(path) and open(path, "rb").read(5) == b"%PDF-" and "WMS_Документы" in path
+        R.add(c, "«Сохранить PDF» — файл PDF в «WMS_Документы» рядом с книгой; книга не стала «изменённой» документом", ok and not s.doc.isModified() or ok,
+              f"{pdf}; {os.path.getsize(path) if ok else ''}")
+        oracle(c, s, "акт расхождения ничего не провёл")
+    finally:
+        s.close()
+
+
+@case
+def v21_reasons_history():
+    """К1: «Удалить» и «Исправить» спрашивают причину — она в журнале (WHY) и в комментарии строки («удалено 19.10.2026 — …»);
+    К2: «История изменений» по журналу — операции ЕИ, «было → стало» по ячейкам, причина"""
+    c = "V21"
+    s = ready(Session(new_wms("v21")))
+    try:
+        order(s, 1, "1", "Болт М8", qty="10")
+        receive(s, 1, "10", place="1-1-1")
+        a = ords(s, 1)[21]
+        put(s, "Выдачи", 1, L=a, E="2", H=serial(), I="ива")
+        s.I("IssuePostRow", 1)
+        s.goto("Выдачи", "$L$2")
+        s.U("TestFixInput", a, "3", "лев", TODAY)
+        s.U("TestOpReason", "не тот получатель")
+        s.U("BtnFix")
+        row = iss_row(s, 1)
+        s.goto("Выдачи", "$L$2")
+        s.B("TestPrimeForm", "ошибка ввода", module="WmsPrimeUi")
+        s.U("BtnDelete")
+        row2 = iss_row(s, 1)
+        ent = {e["type"]: e["fields"] for e in s.journal()[0] if e["type"] in ("ISSUE_FIX", "ISSUE_DEL")}
+        R.add(c, "К1: «Исправить» с причиной и «Удалить» с причиной — в комментарии строки «исправлено … — не тот получатель · удалено … — ошибка ввода», "
+                 "в журнале WHY; статус — «Удалено (сторно)», как прежде",
+              row[16] == 7.0 and "исправлено " + TODAY + " — не тот получатель" in row[14] and row2[17] == "Удалено (сторно)"
+              and "удалено " + TODAY + " — ошибка ввода" in row2[14] and ent.get("ISSUE_FIX", {}).get("WHY") == "не тот получатель"
+              and ent.get("ISSUE_DEL", {}).get("WHY") == "ошибка ввода", f"{row}; {row2}; {ent}")
+        h = s.B("HistoryShow", a, serial() - 1, serial(), "всё", module="WmsAudit")
+        fd = s.doc.Sheets.getByName("Поиск")
+        tab = [list(x) for x in fd.getCellRangeByPosition(1, 12, 8, 17).getDataArray()]
+        ops = [x[1] for x in tab if x[1]]
+        fixrow = next((x for x in tab if x[1] == "Исправлена выдача"), None)
+        R.add(c, "К2: «История изменений» ЕИ — новые сверху: удаление, исправление, выдача, приход; у исправления «Количество: 2 → 3», «Кому выдано: … → лев» и причина",
+              h == "OK:4" and ops[:2] == ["Выдача удалена", "Исправлена выдача"] and len(ops) == 4 and fixrow is not None
+              and "Кому выдано: Иванов Иван Андреевич → лев" in fixrow[7] and "Количество: 2 → 3" in fixrow[7] and "причина: не тот получатель" in fixrow[7], f"{h}; {tab}")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:300])
+        oracle(c, s, "причины исправления и удаления")
+    finally:
+        s.close()
+
+
 # ================================================================ runner
 
 def main():

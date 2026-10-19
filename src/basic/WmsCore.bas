@@ -13,6 +13,11 @@ Global gBDir As String
 Global gSession As String
 ' 1.0: the startups finished in this session of the book (StateDump «STARTS»)
 Global gStarts As Long
+' 1.0 (К1): the reason the storekeeper gave for «Удалить» / «Исправить» (set by the window, cleared after the operation)
+Global gOpReason As String
+' the next window of «Исправить» shows the field «Причина исправления»; the reason a test gives instead of the window
+Global gFixWhyField As Boolean
+Global gFixWhyTest As String
 ' "" = startup not run yet, CLEAN = posting allowed, BLOCKED, RECOVERING (replay in progress)
 Global gState As String
 Global gBlock As String
@@ -741,6 +746,16 @@ End Sub
 ' quantity text replaced by its numeric value), so an empty cell is also an acceptable precondition on replay
 Sub PlanSetValue(sSheet As String, r As Long, c As Integer, vAfter As Variant, bRestorable As Boolean)
     PlanAdd("V", sSheet, r, CStr(c), EncCell(SheetByName(sSheet).getCellByPosition(c, r)), EncVar(vAfter), bRestorable)
+End Sub
+
+' 1.0 (К1): the reason of a storno or a correction — in the journal (WHY) and at the end of the comment of the row («удалено
+' 19.10.2026 — ошибка ввода»), a derived write (the comment stays the storekeeper's field). Nothing when no reason was given
+Sub PlanWhy(sSheet As String, r As Long, cNote As Integer, sVerb As String)
+    Dim s As String
+    If Trim(gOpReason) = "" Then Exit Sub
+    PlanField("WHY", Trim(gOpReason))
+    s = Trim(SheetByName(sSheet).getCellByPosition(cNote, r).getString())
+    PlanDerived(sSheet, r, cNote, s & IIf(s <> "", " · ", "") & sVerb & " " & Format(WmsOrders.Today(), "DD.MM.YYYY") & " — " & Trim(gOpReason))
 End Sub
 
 ' derived display value (a status, a balance mirror, a control text): written and rolled back like a value, but on replay

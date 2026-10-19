@@ -275,13 +275,15 @@ Sub BtnAdjDelete(Optional oEvent As Variant)
     Case Else
         what = "Разница " & IIf(rd(AJ_QTY) > 0, "+", "") & WmsIssue.QtyText(rd(AJ_QTY)) & " будет снята с остатка."
     End Select
-    If Not UiConfirm("Удалить корректировку № " & gAjN & " (" & WmsAdjust.KindName(code) & ")?" & Chr(10) & Chr(10) _
+    gOpReason = ""
+    If Not WmsPrimeUi.ReasonAsk("Удалить корректировку", "Удалить корректировку № " & gAjN & " (" & WmsAdjust.KindName(code) & ")?" & Chr(10) & Chr(10) _
         & sh.getCellByPosition(AC_EI, r).getString() & " — " & sh.getCellByPosition(AC_NAME, r).getString() & Chr(10) & Chr(10) & what _
-        & " Строка останется в истории с отметкой «" & ST_DELETED & "», № не будет использован повторно.") Then
+        & " Строка останется в истории с отметкой «" & ST_DELETED & "», № не будет использован повторно.", "Удалить", gOpReason) Then
         gUiLastMsg = "SKIP:удаление не подтверждено"
         Exit Sub
     End If
     res = WmsAdjust.AdjustDeleteRow(r)
+    gOpReason = ""
     AfterOperation("«Удалить» (корректировка)", res)
     If Left(res, 5) = "SKIP:" Then
         UiMessage(Payload(res))

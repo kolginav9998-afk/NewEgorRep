@@ -460,12 +460,17 @@ Sub BtnFix(Optional oEvent As Variant)
     sQty0 = sQty
     sWho = sh.getCellByPosition(IC_WHO, r).getString()
     sDate = Format(sh.getCellByPosition(IC_DATE, r).getValue(), "DD.MM.YYYY")
-    If Not FixDialog(k, sEI, sQty, sWho, sDate) Then Exit Sub
+    WhyBegin()
+    If Not FixDialog(k, sEI, sQty, sWho, sDate) Then
+        WhyEnd()
+        Exit Sub
+    End If
     If Trim(sQty) = sQty0 And Trim(sEI) = sCanon Then
         res = WmsIssue.IssueFixRow(r, sEI, q0, sWho, sDate)
     Else
         res = WmsIssue.IssueFixRow(r, sEI, sQty, sWho, sDate)
     End If
+    WhyEnd()
     gUiLastMsg = res
     If Left(res, 3) <> "OK:" Then UiMessage("Исправление не выполнено: " & Mid(res, InStr(res, ":") + 1))
     If Left(res, 8) = "BLOCKED:" Or Left(res, 13) = "ERR-CRITICAL:" Then UiRefresh("«Исправить»: " & res)
@@ -490,11 +495,13 @@ Sub BtnDelete(Optional oEvent As Variant)
         UiMessage("Строка — КОПИЯ, её можно только очистить кнопкой «Очистить».")
         Exit Sub
     End Select
-    If Not UiConfirm("Удалить выдачу № " & sh.getCellByPosition(IC_NO, r).getString() & "?" & Chr(10) & Chr(10) _
+    gOpReason = ""
+    If Not WmsPrimeUi.ReasonAsk("Удалить выдачу", "Удалить выдачу № " & sh.getCellByPosition(IC_NO, r).getString() & "?" & Chr(10) & Chr(10) _
         & sh.getCellByPosition(IC_EI, r).getString() & " — " & sh.getCellByPosition(IC_NAME, r).getString() & ", " _
         & sh.getCellByPosition(IC_QTY, r).getString() & " " & sh.getCellByPosition(IC_UNIT, r).getString() & Chr(10) & Chr(10) _
-        & "Остаток вернётся на склад. Строка останется в истории с отметкой «" & ST_DELETED & "», № не будет использован повторно.") Then Exit Sub
+        & "Остаток вернётся на склад. Строка останется в истории с отметкой «" & ST_DELETED & "», № не будет использован повторно.", "Удалить", gOpReason) Then Exit Sub
     res = WmsIssue.IssueDeleteRow(r)
+    gOpReason = ""
     gUiLastMsg = res
     If Left(res, 3) <> "OK:" Then UiMessage("Удаление не выполнено: " & Mid(res, InStr(res, ":") + 1))
     If Left(res, 8) = "BLOCKED:" Or Left(res, 13) = "ERR-CRITICAL:" Then UiRefresh("«Удалить»: " & res)
@@ -512,8 +519,53 @@ Sub BtnClear(Optional oEvent As Variant)
 End Sub
 
 ' the correction dialog: EI, quantity, recipient, date prefilled with the posted values
+' 1.0 (К1): the field «Причина исправления» of a window of «Исправить» (when gFixWhyField) at y, from xLabel to xEdit + wEdit;
+' the next free y
+Function WhyField(dm As Object, y As Long, xLabel As Long, xEdit As Long, wEdit As Long) As Long
+    Dim m As Object
+    WhyField = y
+    If Not gFixWhyField Then Exit Function
+    m = dm.createInstance("com.sun.star.awt.UnoControlFixedTextModel")
+    m.PositionX = xLabel
+    m.PositionY = y + 3
+    m.Width = xEdit - xLabel - 4
+    m.Height = 12
+    m.Label = "Причина исправления"
+    dm.insertByName("lWhy", m)
+    m = dm.createInstance("com.sun.star.awt.UnoControlEditModel")
+    m.PositionX = xEdit
+    m.PositionY = y
+    m.Width = wEdit
+    m.Height = 14
+    dm.insertByName("eWhy", m)
+    WhyField = y + 18
+End Function
+
+' the reason typed into a window of «Исправить» after «OK»
+Sub WhyRead(dlg As Object)
+    If gFixWhyField Then gOpReason = Trim(dlg.getControl("eWhy").getText())
+End Sub
+
+' before a window of «Исправить»: the field of the reason on, the reason of a test taken; after the operation: both off
+Sub WhyBegin()
+    gOpReason = gFixWhyTest
+    gFixWhyTest = ""
+    gFixWhyField = True
+End Sub
+
+Sub WhyEnd()
+    gOpReason = ""
+    gFixWhyField = False
+End Sub
+
+' the reason of the next «Исправить» / «Удалить» in the tests (the windows are not shown there)
+Function TestOpReason(s As String) As String
+    gFixWhyTest = s
+    TestOpReason = "OK"
+End Function
+
 Private Function FixDialog(k As Long, ByRef sEI As String, ByRef sQty As String, ByRef sWho As String, ByRef sDate As String) As Boolean
-    Dim dm As Object, dlg As Object, i As Integer, lbl As Variant, nm As Variant, vals As Variant, m As Object
+    Dim dm As Object, dlg As Object, i As Integer, lbl As Variant, nm As Variant, vals As Variant, m As Object, yb As Long
     If gUiAuto <> 0 Then
         If gUiFixSet Then
             sEI = gUiFixEI
@@ -548,9 +600,11 @@ Private Function FixDialog(k As Long, ByRef sEI As String, ByRef sQty As String,
         m.Text = vals(i)
         dm.insertByName(nm(i), m)
     Next i
+    yb = WhyField(dm, 80, 8, 104, 124) + 2
+    dm.Height = yb + 22
     m = dm.createInstance("com.sun.star.awt.UnoControlButtonModel")
     m.PositionX = 104
-    m.PositionY = 100
+    m.PositionY = yb
     m.Width = 60
     m.Height = 15
     m.Label = "Исправить"
@@ -559,7 +613,7 @@ Private Function FixDialog(k As Long, ByRef sEI As String, ByRef sQty As String,
     dm.insertByName("bOK", m)
     m = dm.createInstance("com.sun.star.awt.UnoControlButtonModel")
     m.PositionX = 168
-    m.PositionY = 100
+    m.PositionY = yb
     m.Width = 60
     m.Height = 15
     m.Label = "Отмена"
@@ -569,6 +623,7 @@ Private Function FixDialog(k As Long, ByRef sEI As String, ByRef sQty As String,
     dlg.setModel(dm)
     dlg.createPeer(CreateUnoService("com.sun.star.awt.Toolkit"), Null)
     If dlg.execute() = 1 Then
+        WhyRead(dlg)
         sEI = dlg.getControl("eEI").getText()
         sQty = dlg.getControl("eQty").getText()
         sWho = dlg.getControl("eWho").getText()

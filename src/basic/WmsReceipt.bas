@@ -899,6 +899,7 @@ Function ReceiptFixRow(r As Long, vFact As Variant, vDocQty As Variant, vDoc As 
     dup = WmsOrders.FindDuplicate(sKey, n)
     own = WmsOrders.ReceiptControl(mFact, mHasDocQty, mDocQty, mDoc <> "", mHasDdate, Trim(Txt(r, OC_UNIT)))
     PlanBegin("RECEIPT_FIX", canon)
+    PlanWhy(SH_ORDERS, r, OC_NOTE, "исправлено")
     PlanField("EI", canon)
     PlanField("OL", olid)
     PlanField("ROW", r + 1)
@@ -1108,6 +1109,7 @@ Private Function RcvDelete(r As Long, checkOnly As Boolean) As String
         Exit Function
     End If
     PlanBegin("RECEIPT_DEL", canon)
+    PlanWhy(SH_ORDERS, r, OC_NOTE, "удалено")
     PlanField("EI", canon)
     PlanField("OL", olid)
     PlanField("ROW", r + 1)

@@ -211,7 +211,9 @@ Sub BtnCarFix(Optional oEvent As Variant)
     Next r
     sInfo = "Визит № " & n & " от " & WmsCar.DayText(CDbl(d(CR_ARR))) & IIf(bOpen, " — машина на территории: выезд запишет УЕХАЛ.", ".") _
         & " Время — ЧЧ:ММ; выезд на другой день — ДД.ММ.ГГГГ ЧЧ:ММ."
+    WmsUi.WhyBegin()
     If Not CarFields("WMS — Исправить визит", sInfo, Array("Марка / госномер", "Поставщик", "Приезд, ЧЧ:ММ", "Выезд, ЧЧ:ММ"), g, IIf(bOpen, 3, 4)) Then
+        WmsUi.WhyEnd()
         gUiLastMsg = "CANCEL:визит не изменён"
         Exit Sub
     End If
@@ -219,6 +221,7 @@ Sub BtnCarFix(Optional oEvent As Variant)
     If Trim(g(2)) = f(2) Then g(2) = ""
     If Trim(g(3)) = f(3) Then g(3) = ""
     res = WmsCar.CarFix(n, g(0), g(1), g(2), g(3))
+    WmsUi.WhyEnd()
     AfterOperation("Исправить", res)
 End Sub
 
@@ -239,12 +242,14 @@ Sub BtnCarCancel(Optional oEvent As Variant)
         Refuse("Визит № " & n & " уже отменён.")
         Exit Sub
     End If
-    If Not UiConfirm("Отменить визит № " & n & " " & WmsCar.VisitText(n) & "? Используйте для ошибочной записи: визит останется в истории " _
-        & "со статусом «" & CS_CANCEL & "» и не попадёт в показатели.") Then
+    gOpReason = ""
+    If Not WmsPrimeUi.ReasonAsk("Отменить визит", "Отменить визит № " & n & " " & WmsCar.VisitText(n) & "? Используйте для ошибочной записи: визит останется в истории " _
+        & "со статусом «" & CS_CANCEL & "» и не попадёт в показатели.", "Отменить визит", gOpReason) Then
         gUiLastMsg = "CANCEL:визит не отменён"
         Exit Sub
     End If
     res = WmsCar.CarCancel(n)
+    gOpReason = ""
     AfterOperation("Отменить визит", res)
 End Sub
 
@@ -458,6 +463,7 @@ Private Function CarFields(sTitle As String, sInfo As String, lbl As Variant, v(
         dm.insertByName("e" & i, m)
         y = y + 18
     Next i
+    y = WmsUi.WhyField(dm, y, 8, 120, 172)
     m = dm.createInstance("com.sun.star.awt.UnoControlButtonModel")
     m.PositionX = 160
     m.PositionY = y + 4
@@ -480,6 +486,7 @@ Private Function CarFields(sTitle As String, sInfo As String, lbl As Variant, v(
     dlg.setModel(dm)
     dlg.createPeer(CreateUnoService("com.sun.star.awt.Toolkit"), Null)
     If dlg.execute() = 1 Then
+        WmsUi.WhyRead(dlg)
         For i = 0 To nF - 1
             v(i) = dlg.getControl("e" & i).getText()
         Next i

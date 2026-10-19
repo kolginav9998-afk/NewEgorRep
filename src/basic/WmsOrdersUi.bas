@@ -321,11 +321,14 @@ Sub BtnRcvFix(Optional oEvent As Variant)
     v(4) = Format(sh.getCellByPosition(OC_RDATE, r).getValue(), "DD.MM.YYYY")
     v(5) = sh.getCellByPosition(OC_PLACE, r).getString()
     If sh.getCellByPosition(OC_PRICE, r).getType() = com.sun.star.table.CellContentType.VALUE Then v(6) = WmsIssue.QtyText(sh.getCellByPosition(OC_PRICE, r).getValue())
+    WmsUi.WhyBegin()
     If Not ReceiptDialog("Исправить приход " & gKcanon & " (тот же ЕИ)", "Исправить", v) Then
+        WmsUi.WhyEnd()
         gUiLastMsg = "SKIP:окно закрыто без исправления"
         Exit Sub
     End If
     res = WmsReceipt.ReceiptFixRow(r, v(0), v(1), v(2), v(3), v(4), v(5), v(6))
+    WmsUi.WhyEnd()
     AfterOperation("«Исправить»", res)
     If Left(res, 5) = "SKIP:" Then
         UiMessage(Payload(res))
@@ -376,10 +379,12 @@ Sub BtnRcvDelete(Optional oEvent As Variant)
         Exit Sub
     End If
     sh = gDoc.Sheets.getByName(SH_ORDERS)
-    If Not UiConfirm("Удалить приход " & gKcanon & "?" & Chr(10) & Chr(10) & sh.getCellByPosition(OC_NAME, r).getString() & ", " _
+    gOpReason = ""
+    If Not WmsPrimeUi.ReasonAsk("Удалить приход", "Удалить приход " & gKcanon & "?" & Chr(10) & Chr(10) & sh.getCellByPosition(OC_NAME, r).getString() & ", " _
         & sh.getCellByPosition(OC_FACT, r).getString() & " " & sh.getCellByPosition(OC_UNIT, r).getString() & Chr(10) & Chr(10) _
-        & "Остаток этого ЕИ станет 0. Строка останется в истории с отметкой «Приход удалён (сторно)», ЕИ не будет использован повторно.") Then Exit Sub
+        & "Остаток этого ЕИ станет 0. Строка останется в истории с отметкой «Приход удалён (сторно)», ЕИ не будет использован повторно.", "Удалить", gOpReason) Then Exit Sub
     res = WmsReceipt.ReceiptDeleteRow(r)
+    gOpReason = ""
     AfterOperation("«Удалить»", res)
     If Left(res, 5) = "SKIP:" Then
         UiMessage(Payload(res))
@@ -481,7 +486,7 @@ End Sub
 ' ================================================================ the receipt dialog (F, G, C, O, N, U, J)
 
 Private Function ReceiptDialog(sTitle As String, sOk As String, v() As String, Optional sInfo As Variant) As Boolean
-    Dim dm As Object, dlg As Object, i As Integer, lbl As Variant, m As Object, top As Integer, info As String
+    Dim dm As Object, dlg As Object, i As Integer, lbl As Variant, m As Object, top As Integer, info As String, yb As Long
     If Not IsMissing(sInfo) Then info = CStr(sInfo)
     gRcvShown = Join(v, Chr(9))
     gRcvInfo = info
@@ -531,9 +536,13 @@ Private Function ReceiptDialog(sTitle As String, sOk As String, v() As String, O
         m.Text = v(i)
         dm.insertByName("e" & i, m)
     Next i
+    ' 1.0 (К1): «Исправить» — the field of the reason under the fields
+    yb = WmsUi.WhyField(dm, top + 134, 8, 118, 124)
+    If yb = top + 134 Then yb = top + 148 Else yb = yb + 2
+    dm.Height = yb + 22
     m = dm.createInstance("com.sun.star.awt.UnoControlButtonModel")
     m.PositionX = 118
-    m.PositionY = top + 148
+    m.PositionY = yb
     m.Width = 60
     m.Height = 15
     m.Label = sOk
@@ -542,7 +551,7 @@ Private Function ReceiptDialog(sTitle As String, sOk As String, v() As String, O
     dm.insertByName("bOK", m)
     m = dm.createInstance("com.sun.star.awt.UnoControlButtonModel")
     m.PositionX = 182
-    m.PositionY = top + 148
+    m.PositionY = yb
     m.Width = 60
     m.Height = 15
     m.Label = "Отмена"
@@ -552,6 +561,7 @@ Private Function ReceiptDialog(sTitle As String, sOk As String, v() As String, O
     dlg.setModel(dm)
     dlg.createPeer(CreateUnoService("com.sun.star.awt.Toolkit"), Null)
     If dlg.execute() = 1 Then
+        WmsUi.WhyRead(dlg)
         For i = 0 To 6
             v(i) = dlg.getControl("e" & i).getText()
         Next i

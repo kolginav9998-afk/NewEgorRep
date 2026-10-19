@@ -251,22 +251,80 @@ Function UiForm(sTitle As String, sInfo As String, labels As Variant, v() As Str
 End Function
 
 ' 1.0 (З5, К1): a question with the reason — «Отменить заказ?», «Удалить?»: sText and one field «Причина» (sReason — in: the
-' proposed one, out: as typed). True — «sOk» pressed. In the tests: a form set by TestPrimeForm answers it; without one the
-' answer is that of UiConfirm (TestUiAuto 1 — «Да» with the proposed reason, 2 — «Нет»)
+' proposed one, out: as typed; may stay empty). True — «sOk» pressed. The window is «WMS» like the confirmation it replaces
+' (the buttons «yes» / «close» as the tests of the windows know them). In the tests: a form set by TestPrimeForm answers it;
+' without one the answer is that of UiConfirm (TestUiAuto 1 — «Да» with the proposed reason, 2 — «Нет»)
 Function ReasonAsk(sTitle As String, sText As String, sOk As String, ByRef sReason As String) As Boolean
-    Dim v(0) As String
-    v(0) = sReason
-    If gUiAuto <> 0 And Not gPrFormSet Then
-        gUiLastMsg = sText
-        gUiConfirms = gUiConfirms + 1
-        gPrShown = sTitle & Chr(10) & sText & Chr(10) & sReason
-        ReasonAsk = (gUiAuto = 1)
+    Dim dm As Object, dlg As Object, m As Object, a As Variant, i As Integer, lines As Integer, h As Integer
+    gUiLastMsg = sText
+    gUiConfirms = gUiConfirms + 1
+    gPrShown = sTitle & Chr(10) & sText & Chr(10) & sReason
+    If gUiAuto <> 0 Then
+        If gPrFormSet Then
+            If gPrFormIn(0) <> FORM_KEEP Then sReason = Trim(gPrFormIn(0))
+            gPrFormSet = False
+            ReasonAsk = True
+        Else
+            ReasonAsk = (gUiAuto = 1)
+        End If
         Exit Function
     End If
-    If UiForm(sTitle, sText, Array("Причина"), v, Array(""), sOk) Then
-        sReason = Trim(v(0))
+    a = Split(sText, Chr(10))
+    For i = 0 To UBound(a)
+        lines = lines + 1 + Len(a(i)) \ 62
+    Next i
+    h = 10 * lines + 4
+    dm = CreateUnoService("com.sun.star.awt.UnoControlDialogModel")
+    dm.Title = "WMS"
+    dm.Width = 300
+    dm.Height = h + 64
+    m = dm.createInstance("com.sun.star.awt.UnoControlFixedTextModel")
+    m.PositionX = 10
+    m.PositionY = 8
+    m.Width = 280
+    m.Height = h
+    m.MultiLine = True
+    m.Label = sText
+    dm.insertByName("lText", m)
+    m = dm.createInstance("com.sun.star.awt.UnoControlFixedTextModel")
+    m.PositionX = 10
+    m.PositionY = h + 13
+    m.Width = 80
+    m.Height = 12
+    m.Label = "Причина:"
+    dm.insertByName("lWhy", m)
+    m = dm.createInstance("com.sun.star.awt.UnoControlEditModel")
+    m.PositionX = 90
+    m.PositionY = h + 10
+    m.Width = 200
+    m.Height = 14
+    m.Text = sReason
+    dm.insertByName("why", m)
+    m = dm.createInstance("com.sun.star.awt.UnoControlButtonModel")
+    m.PositionX = 130
+    m.PositionY = h + 34
+    m.Width = 78
+    m.Height = 16
+    m.Label = sOk
+    m.PushButtonType = 1
+    m.DefaultButton = True
+    dm.insertByName("yes", m)
+    m = dm.createInstance("com.sun.star.awt.UnoControlButtonModel")
+    m.PositionX = 212
+    m.PositionY = h + 34
+    m.Width = 78
+    m.Height = 16
+    m.Label = "Отмена"
+    m.PushButtonType = 2
+    dm.insertByName("close", m)
+    dlg = CreateUnoService("com.sun.star.awt.UnoControlDialog")
+    dlg.setModel(dm)
+    dlg.createPeer(CreateUnoService("com.sun.star.awt.Toolkit"), Null)
+    If dlg.execute() = 1 Then
+        sReason = Trim(dlg.getControl("why").getText())
         ReasonAsk = True
     End If
+    dlg.dispose()
 End Function
 
 ' 1.0: UiForm with two action buttons (sOk, sOk2 — «Выдать», «Выдать и следующую»): 1 — sOk, 2 — sOk2, 0 — «Отмена» or

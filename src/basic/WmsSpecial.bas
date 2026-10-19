@@ -1245,6 +1245,7 @@ Function SpecialFixRow(r As Long, vQty As Variant, vDate As Variant, vPlace As V
     If p2 <> p1 And p2 <> placeNow Then ctl = ctl & " · место ЕИ «" & placeNow & "» → «" & p2 & "»"
     If dup <> "" Then ctl = ctl & " · Возможный дубль: " & dup
     PlanBegin("SP_FIX", CStr(nL))
+    PlanWhy(SH_SPECIAL, r, XC_NOTE, "исправлено")
     PlanField("SPL", nL)
     PlanField("EVENT", sd(SR_EVENT))
     PlanField("SRC", mCode)
@@ -1413,6 +1414,7 @@ Private Function SpDelete(r As Long, checkOnly As Boolean) As String
     End If
     bal2 = WmsIssue.Round3(bal - q)
     PlanBegin("SP_DEL", CStr(nL))
+    PlanWhy(SH_SPECIAL, r, XC_NOTE, "удалено")
     PlanField("SPL", nL)
     PlanField("EVENT", sd(SR_EVENT))
     PlanField("SRC", sd(SR_TYPE))

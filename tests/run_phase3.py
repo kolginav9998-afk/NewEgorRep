@@ -73,6 +73,11 @@ def fact(s, r, f, n=D0, u="A-1", c="УПД-1", g=None, o="24.09.2026", j=None):
     s.order_input(r, F=f, G=g, C=c, O=o, N=n, U=u, J=j)
 
 
+def not_processed(y):
+    """«Контроль» of a row the block did not reach: empty, or only the hint of 1.0 (З7) that the same goods are expected already"""
+    return y == "" or (y.startswith("Внимание:") and "уже ожидается" in y)
+
+
 def post(s, r):
     return s.click_ord("BtnRcvPost", r)
 
@@ -1470,8 +1475,10 @@ def r44_receipt_date():
         shown1, back1 = dialog(s)
         r1 = add_row_of(m1) if m1.startswith("OK") else None
         n1 = s.ord(r1, "N") if r1 else None
-        R.add(c, "«Ещё поступление»: окно предлагает в N сегодняшнюю дату (количество и документ пустые); подтверждено как есть — поступление с этой датой",
-              first == "OK:1" and m1.startswith("OK:2") and shown1[4] == today and shown1[0] == "" and shown1[2] == "" and back1[4] == today
+        # 1.0 (З4): the window proposes what is still expected of the position as the quantity (the document stays empty)
+        R.add(c, "«Ещё поступление»: окно предлагает в N сегодняшнюю дату, в количестве — остаток позиции (документ пустой); подтверждено как есть — "
+                 "поступление с этой датой",
+              first == "OK:1" and m1.startswith("OK:2") and shown1[4] == today and shown1[0] not in ("", "0") and shown1[2] == "" and back1[4] == today
               and n1 == serial(today) and s.journal()[0][-1]["type"] == "RECEIPT_ADD", f"{first}; {m1}; предложено {shown1}; возвращено {back1}; N {n1!r}")
         s.OU("TestRcvInput", "2", "", "УПД-3", "", "01.11.2026", "A-2", "")
         m2 = s.click_ord("BtnRcvMore", 1)
@@ -1623,7 +1630,7 @@ def r46_block_posting():
         R.add(c, "системная ошибка WMS посреди блока (номер, который выдал бы счётчик ЕИ, уже записан на листе): строка 8 проведена, на строке 9 обработка "
                  "остановлена, строки 10–11 не обрабатывались; окно показывает итог и причину остановки",
               head2 == "OK=1;ERR=0;SKIP=0;STOP=9" and "ERR-SYS:" in sys2 and ei(205) in sys2 and s.ord(7, "V") == ei(204)
-              and [s.ord(r, "V") for r in (8, 9, 10)] == ["", "", ""] and s.ord(9, "Y") == "" and s.ord(10, "Y") == "" and njournal(s) == nj + 1
+              and [s.ord(r, "V") for r in (8, 9, 10)] == ["", "", ""] and not_processed(s.ord(9, "Y")) and not_processed(s.ord(10, "Y")) and njournal(s) == nj + 1
               and s.sysv("NEXT_EI") == 205 and "ОБРАБОТКА ОСТАНОВЛЕНА" in msg2 and "проведено 1" in msg2, f"{head2}; {sys2[:170]}; {msg2[-220:]}")
         cl = s.click_ord("BtnRcvClear", 12)
         head2b = s.click_ord("BtnRcvPost", 7, r1=10).split("\n")[0]

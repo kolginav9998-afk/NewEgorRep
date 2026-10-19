@@ -1169,6 +1169,7 @@ Function AdjustDeleteRow(r As Long) As String
     mBatch = sh.getCellByPosition(AC_BATCH, r).getString()
     b2 = WmsIssue.Round3(mSbal - delta1)
     PlanBegin(mKind & "_DEL", CStr(n))
+    PlanWhy(SH_ADJUST, r, AC_NOTE, "удалено")
     PlanCommonFields(n, r)
     Select Case mKind
     Case "MOVE"
