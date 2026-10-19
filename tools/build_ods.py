@@ -149,8 +149,37 @@ GOODS_WMS_COLS = 4          # the last columns M..P: written by «Обновит
 SUPPLY = "Снабжение"
 # 1.0 (З12, К3, К4, К11, К12, К14, А1): the page of the documents on paper — WmsPrint fills it, «Печать…» / «Сохранить PDF»
 PRINT = "Печать"
+# 1.0 (этап G): the closed months (WmsLedger SH_CLOSE, CL_*): a row per closing, written only by MONTH_CLOSE / MONTH_OPEN
+CLOSE = "_CLOSE"
+CLOSE_HEADERS = ["Месяц", "Закрыт по", "Когда закрыт", "Состояние", "Остаток на конец", "На сумму", "Файлы", "Причина открытия"]
+# 1.0 (этап G): «Отчёты» (WmsLedger) — the reports of the accounting and of the manager, made on «Печать» or into a file
+REPORTS = "Отчёты"
+REPORT_GROUPS = [
+    ("Учёт и бухгалтерия", [
+        ("btnStockOnDate", "Остаток на дату…", "WmsLedger.BtnStockOnDate",
+         "Остаток всех ЕИ на любую прошедшую дату, с ценой и суммой — на печать или в файл."),
+        ("btnTurnover", "Оборотная ведомость…", "WmsLedger.BtnTurnover",
+         "За период по товарам: начало, приход, выдано, возвращено, списано, конец — в единицах и рублях."),
+        ("btnExportAcc", "Выгрузка для бухгалтерии…", "WmsLedger.BtnExport",
+         "Файл CSV всех движений за период: документы, ЕИ, цены, суммы, получатели (открывается в Excel, загружается в 1С)."),
+        ("btnCompare1C", "Сверка с 1С…", "WmsLedger.BtnCompare1C",
+         "Выберите файл остатков из 1С (CSV, XLSX, ODS) — список расхождений с WMS. Ничего не проводится."),
+        ("btnCloseMonth", "Закрыть месяц…", "WmsLedger.BtnCloseMonth",
+         "Итоги месяца сохраняются в файлы и фиксируются в журнале; операция задним числом — только с предупреждением и причиной."),
+        ("btnOpenMonth", "Открыть месяц…", "WmsLedger.BtnOpenMonth",
+         "Снять закрытие последнего закрытого месяца — с причиной (она остаётся в журнале)."),
+    ]),
+    ("Руководителю", [
+        ("btnManagerReport", "Отчёт руководителю…", "WmsLedger.BtnManagerReport",
+         "Сегодня, неделя, месяц или период: операции и суммы, остаток на сумму, получатели, потери, поставщики, машины."),
+        ("btnConsumers", "Расход по получателям…", "WmsLedger.BtnConsumers",
+         "Сколько выдано, возвращено и на руках — у каждого получателя и подразделения (колонка C «Получателей»), на какую сумму."),
+        ("btnDeadStock", "Мёртвый груз…", "WmsLedger.BtnDeadStock",
+         "Все ЕИ без движения дольше 90, 180 или 365 дней — по дням или по сумме, итог «на сумму …»."),
+    ]),
+]
 PRINT_WIDTHS = [900, 2600, 6300, 2300, 1500, 2000, 2400]        # A..G = 18 cm: an A4 page with margins of 1,5 cm
-SHEETS_10 = [PLACES, SUPPLIERS, GOODS, SUPPLY, PRINT]
+SHEETS_10 = [PLACES, SUPPLIERS, GOODS, SUPPLY, PRINT, REPORTS, CLOSE]
 LEGREP = "Сверка переноса"
 LEGREP_HEAD = 3                   # WmsConfig.LEGREP_HEAD
 LEGREP_HEADERS = ["ЕИ", "Наименование", "Ед.", "Откуда", "Приход при переносе", "Остаток при переносе", "Израсходовано до переноса",
@@ -1094,6 +1123,85 @@ def build_print(doc, sh):
     # protected with the other pages at the end of the build
 
 
+def build_reports(doc, sh):
+    """«Отчёты» (WmsLedger): a menu — a button and what it makes; every report goes to «Печать» (print, PDF) or into a file"""
+    for c, w in enumerate([400, 6600, 17000, 400]):
+        sh.getColumns().getByIndex(c).Width = w
+    sh.getRows().getByIndex(0).Height = 1100
+    sh.getRows().getByIndex(1).Height = 900
+    merge(sh, 1, 0, 2, 0)
+    text_cell(sh, 1, 0, "Отчёты и учёт", size=20, bold=True, color=INK, valign=2)
+    merge(sh, 1, 1, 2, 1)
+    text_cell(sh, 1, 1, "Отчёт появляется на странице «Печать» — оттуда «Печать…» или «Сохранить PDF»; файлы CSV и PDF — в папке «WMS_Документы» "
+                        "рядом с книгой. Отчёты ничего не проводят; «Закрыть месяц» и «Открыть месяц» — операции журнала.", size=9, color=MUTED,
+              wrap=True, valign=1)
+    r = 3
+    for caption, items in REPORT_GROUPS:
+        sh.getRows().getByIndex(r).Height = 700
+        text_cell(sh, 1, r, caption, size=12, bold=True, color=INK, valign=3)
+        r += 1
+        for name, label, macro, desc in items:
+            sh.getRows().getByIndex(r).Height = 900
+            text_cell(sh, 2, r, desc, size=10, color=TEXT, wrap=True, valign=2)
+            y = sh.getCellByPosition(1, r).Position.Y
+            x = sh.getCellByPosition(1, r).Position.X
+            add_button(doc, sh, name, label, macro, x, y + 80, 6400, 740, bold=name in ("btnStockOnDate", "btnTurnover", "btnManagerReport"),
+                       back=0xF4CCCC if name == "btnOpenMonth" else (0xC6E0B4 if name == "btnCloseMonth" else 0xDDEBF7))
+            r += 1
+        r += 1
+    add_button(doc, sh, "btnRepMain", "Главная", "WmsUi.NavMain", sh.getCellByPosition(2, 0).Position.X + 13200, 160, 3700, 760, back=0xDDEBF7)
+    sh.getCellRangeByPosition(0, 0, 12, 200).CellProtection = protection(True)
+    # protected with the other pages at the end of the build
+
+
+def dash_10(doc, sheets):
+    """1.0 (А6): «Все…» over the four lists of «Дашборд» and the hidden column of the references of its right lists (a double
+    click on a row opens its order, its EI card or the goods on «Поиск»)"""
+    sh = sheets.getByName(DASH)
+    sh.getColumns().getByIndex(15).IsVisible = False
+    for name, macro, c_end, r in (("btnAllWait", "WmsDash.BtnAllWait", 7, 7), ("btnAllOps", "WmsDash.BtnAllOps", 13, 7),
+                                  ("btnAllIssued", "WmsDash.BtnAllIssued", 7, 22), ("btnAllStale", "WmsDash.BtnAllStale", 13, 22)):
+        if not has_button(sh, name):
+            x = sh.getCellByPosition(c_end, r).Position.X - 1900
+            y = sh.getCellByPosition(0, r).Position.Y + 60
+            add_button(doc, sh, name, "Все…", macro, x, y, 1800, 520, back=0xDDEBF7)
+
+
+def ledger_10(doc, sheets):
+    """1.0 (этап G): what a new book and an upgraded one both get — the hidden _CLOSE (the closed months) and the page «Отчёты»"""
+    if not sheets.hasByName(CLOSE):
+        names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+        sheets.insertNewByName(CLOSE, names.index("_SYS") if "_SYS" in names else sheets.getCount())
+        sh = sheets.getByName(CLOSE)
+        for c, h in enumerate(CLOSE_HEADERS):
+            sh.getCellByPosition(c, 0).setString(h)
+        text = number_format(doc, "@", ("ru", "RU"))
+        for c in (0, 2, 3, 6, 7):
+            sh.getCellRangeByPosition(c, 1, c, 1000).NumberFormat = text
+        sh.getCellRangeByPosition(1, 1, 1, 1000).NumberFormat = number_format(doc, "DD.MM.YYYY")
+        sh.IsVisible = False
+    if not sheets.hasByName(REPORTS):
+        names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+        sheets.insertNewByName(REPORTS, names.index(PRINT) if PRINT in names else names.index(FIND) + 1)
+        build_reports(doc, sheets.getByName(REPORTS))
+    # А3: the department of a recipient — the storekeeper's column C of «Получатели»
+    rc = sheets.getByName(RCPT)
+    cur = rc.createCursor()
+    cur.gotoEndOfUsedArea(False)
+    last = cur.getRangeAddress().EndRow
+    # only an empty column C gets the header (cells holding an empty text count as empty): a column the storekeeper already
+    # uses for something else stays as it is
+    if all(str(r[0]).strip() == "" for r in rc.getCellRangeByPosition(2, 0, 2, max(last, 0)).getDataArray()):
+        h = rc.getCellByPosition(2, 0)
+        h.setString("Подразделение")
+        h.CharWeight = 150
+        h.IsTextWrapped = True
+        h.VertJustify = 3
+        h.CellBackColor = rc.getCellByPosition(1, 0).CellBackColor
+        rc.getColumns().getByIndex(2).Width = 5000
+    dash_10(doc, sheets)
+
+
 def print_10(doc, sheets):
     """1.0: the page «Печать» for a new book and an upgraded one"""
     if not sheets.hasByName(PRINT):
@@ -1180,7 +1288,7 @@ def layout_10(doc, sheets):
 FREEZE_COLS_10 = {ISSUES: 3, ORDERS: 2, RETURNS: 4, ADJUST: 4, SPECIAL: 4, STOCK: 2}
 # 1.0 (В9): the colour of the sheet tabs by group — pages, the sheets the storekeeper works in, the registers and directories,
 # the service sheets
-TAB_COLORS_10 = [((DASH, MAIN, FIND, MAP, SUPPLY, PRINT), 0x5B9BD5), ((ORDERS, SPECIAL, CARS, ISSUES, RETURNS, ADJUST), 0x70AD47),
+TAB_COLORS_10 = [((DASH, MAIN, FIND, MAP, SUPPLY, REPORTS, PRINT), 0x5B9BD5), ((ORDERS, SPECIAL, CARS, ISSUES, RETURNS, ADJUST), 0x70AD47),
                  ((STOCK, RCPT, TOPO, PLACES, SUPPLIERS, GOODS), 0xED7D31), ((LEGREP, HELP), 0xA5A5A5)]
 # 1.0 (В1): what the storekeeper fills in is white, what WMS writes is grey (data rows), the headers likewise
 INPUT_HEAD_10 = 0xFFF2CC
@@ -1424,6 +1532,7 @@ def where_buttons(doc, sheets):
 def view_events(sheets):
     """the events of the view sheets (the same in a new book and in an upgraded one)"""
     bind_event(sheets.getByName(DASH).Events, "OnFocus", "WmsDash.OnDashFocus")
+    bind_event(sheets.getByName(DASH).Events, "OnDoubleClick", "WmsDash.OnDashDoubleClick")
     bind_event(sheets.getByName(FIND).Events, "OnChange", "WmsFind.OnFindChange")
     bind_event(sheets.getByName(FIND).Events, "OnDoubleClick", "WmsFind.OnFindDoubleClick")
     bind_event(sheets.getByName(MAP).Events, "OnSelect", "WmsMap.OnMapSelect")
@@ -1595,11 +1704,11 @@ def main_nav_views(doc, sh):
     """PRIME 0.8: «Главная» leads to the new pages too — the second strip, under the ways to the working sheets"""
     sh.getRows().getByIndex(2).Height = 1000
     y = sh.getCellByPosition(0, 2).Position.Y
-    # 1.0: «Снабжение» (этап F) among them
-    for i, (name, label, macro) in enumerate((("navDash", "Дашборд", "WmsUi.NavDash"), ("navFind", "Поиск и карточка ЕИ", "WmsUi.NavFind"),
+    # 1.0: «Снабжение» (этап F) and «Отчёты» (этап G) among them
+    for i, (name, label, macro) in enumerate((("navDash", "Дашборд", "WmsUi.NavDash"), ("navFind", "Поиск, карточка ЕИ", "WmsUi.NavFind"),
                                               ("navMap", "Карта склада", "WmsUi.NavMap"), ("navSupply", "Снабжение", "WmsSupply.NavSupply"),
-                                              ("navHelp", "Справка", "WmsDaily.NavHelp"))):
-        add_button(doc, sh, name, label, macro, MAIN_LEFT + 100 + i * 4560, y + 80, 4500, 840, bold=True, back=0xC6E0B4)
+                                              ("navReports", "Отчёты", "WmsLedger.NavReports"), ("navHelp", "Справка", "WmsDaily.NavHelp"))):
+        add_button(doc, sh, name, label, macro, MAIN_LEFT + 100 + i * 3800, y + 80, 3740, 840, bold=True, back=0xC6E0B4)
 
 
 def version_text():
@@ -1842,6 +1951,7 @@ def build(office, out_path, test=False, instance_id=None):
     layout_10(doc, sheets)
     supply_10(doc, sheets)
     print_10(doc, sheets)
+    ledger_10(doc, sheets)
     buttons_10(doc, sheets)
     colors_10(doc, sheets)
     hints_10(doc, sheets)
@@ -1888,7 +1998,7 @@ def build(office, out_path, test=False, instance_id=None):
     for name in (ORD, RCV, SPR, ART, RET, ISS, ADJ, CAR, LEG, PACK, IDX, "_SYS"):
         sheets.getByName(name).IsVisible = False
     for name in (MAIN, ORDERS, SPECIAL, CARS, ISSUES, RETURNS, ADJUST, STOCK, LEGREP, HELP, ORD, RCV, SPR, ART, RET, ISS, ADJ, CAR, LEG, PACK, IDX,
-                 "_SYS", DASH, FIND, MAP, SUPPLY, PRINT):
+                 "_SYS", DASH, FIND, MAP, SUPPLY, PRINT, CLOSE, REPORTS):
         sheets.getByName(name).protect(PWD)
     doc.protect(PWD)
     if os.path.exists(out_path):

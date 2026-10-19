@@ -131,8 +131,8 @@ def main():
         k0 = o.basic(doc, "WmsUi", "TestUiConfirmCount")
         goto(o, doc, "$B$3")
         kids, msg = run_msg(o, ut, doc, "BtnAdjDelete", "WmsAdjustUi")
-        step("«Удалить» списания: окно «Удалить корректировку № 2?» (Да / Нет); «Нет» — ничего не удалено",
-             msg.startswith("SKIP:удаление не подтверждено") and "close" in kids and sh.getCellByPosition(16, 2).getString() == "Проведено"
+        step("«Удалить» списания: окно «Удалить корректировку № 2?» с полем причины (1.0, К1); «Отмена» — ничего не удалено",
+             msg.startswith("SKIP:удаление не подтверждено") and "reason" in kids and sh.getCellByPosition(16, 2).getString() == "Проведено"
              and o.basic(doc, "WmsUi", "TestUiConfirmCount") == k0 + 1, f"кнопки {kids}; {msg}")
         o.basic(doc, "WmsUi", "TestUiAuto", 1)
         adj_row(sh, 3, "Перемещение", "ЕИ-00000001", place="Z-3")

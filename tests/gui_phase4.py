@@ -98,7 +98,9 @@ def run_dialog(o, ut, doc, macro, title_part, button, module="WmsReturnUi", exac
 def run_msg(o, ut, doc, macro, module):
     """runs the button macro in a thread and waits for the first window titled «WMS»; returns (the buttons of that window,
     the macro's recorded result). A message of Basic shows its button as «ok»; a confirmation («Да» / «Нет») shows only
-    «Нет», as «close» («Да» has no id). The window is closed with «OK» or, for a confirmation, with «Нет»."""
+    «Нет», as «close» («Да» has no id). The window is closed with «OK» or, for a confirmation, with «Нет».
+    1.0 (К1): «Удалить» asks in a window of its own with the field «Причина» — its buttons are «ok» (the action) and «cancel»;
+    it is answered with «cancel» (the «Нет» of the confirmation) and reported as «reason» before its buttons."""
     th = threading.Thread(target=lambda: o.basic(doc, module, macro), daemon=True)
     th.start()
     kids = None
@@ -108,6 +110,10 @@ def run_msg(o, ut, doc, macro, module):
             w = ut.getTopFocusWindow()
             if str(state(w).get("Text", "")) == "WMS":
                 kids = [k for k in w.getChildren() if k in ("ok", "yes", "no", "close", "cancel")]
+                if "ok" in kids and "cancel" in kids:
+                    w.getChild("cancel").executeAction("CLICK", ())
+                    kids = ["reason"] + kids
+                    break
                 w.getChild("ok" if "ok" in kids else "close").executeAction("CLICK", ())
                 break
         except Exception:
@@ -221,8 +227,8 @@ def main():
              title is not None and msg.startswith("SKIP:ничего не изменилось") and shown[:3] == ["1", "22.09.2026", "S-07"] and back == shown,
              f"{title}; {msg}; предложено {shown}")
         o.dispatch(doc, ".uno:GoToCell", ToPoint="$Возврат.$B$2")
-        title, msg = run_dialog(o, ut, doc, "BtnRetDelete", "WMS", "close", exact=True)
-        step("подтверждение «Удалить» — «Нет»: возврат не удалён", title is not None and msg.startswith("SKIP:удаление не подтверждено")
+        title, msg = run_dialog(o, ut, doc, "BtnRetDelete", "WMS", "cancel", exact=True)
+        step("подтверждение «Удалить» с полем причины (1.0, К1) — «Отмена»: возврат не удалён", title is not None and msg.startswith("SKIP:удаление не подтверждено")
              and sh.getCellByPosition(13, 1).getString() == "Проведено", f"{title}; {msg}")
         # «Удалить» of a receipt (D-069): the refusal first, the confirmation only for a storno that is allowed
         o.basic(doc, "WmsUi", "TestUiAuto", 1)
@@ -249,8 +255,8 @@ def main():
         o.dispatch(doc, ".uno:GoToCell", ToPoint="$Заказы.$B$2")
         kids2, msg2 = run_msg(o, ut, doc, "BtnRcvDelete", "WmsOrdersUi")
         k2 = o.basic(doc, "WmsUi", "TestUiConfirmCount")
-        step("после сторно возврата и выдачи сторно допустимо: окно подтверждения «Удалить приход …?» («Да» / «Нет»); «Нет» — приход не удалён",
-             all(x.startswith("OK") for x in rd) and "close" in kids2 and "ok" not in kids2 and msg2.startswith("Удалить приход ЕИ-00000201?")
+        step("после сторно возврата и выдачи сторно допустимо: окно подтверждения «Удалить приход …?» с полем причины (1.0, К1); «Отмена» — приход не удалён",
+             all(x.startswith("OK") for x in rd) and "reason" in kids2 and msg2.startswith("Удалить приход ЕИ-00000201?")
              and k2 == k1 + 1 and rcv.getCellByPosition(4, 201).getString() == "LIVE", f"{rd}; кнопки окна {kids2}; {msg2[:40]}; подтверждений {k2 - k1}")
         o.basic(doc, "WmsUi", "TestUiAuto", 1)
         doc.setModified(False)

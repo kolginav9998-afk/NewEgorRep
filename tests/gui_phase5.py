@@ -240,8 +240,8 @@ def main():
         goto(o, doc, "$B$2")
         kids, msg = run_msg(o, ut, doc, "BtnSpcDelete", "WmsSpecialUi")
         k3 = o.basic(doc, "WmsUi", "TestUiConfirmCount")
-        step("«Удалить» строки без выдач: окно подтверждения «Удалить строку прихода № 1?» (Да / Нет); «Нет» — строка не удалена",
-             "close" in kids and "ok" not in kids and msg.startswith("SKIP:удаление не подтверждено") and k3 == k2 + 1
+        step("«Удалить» строки без выдач: окно подтверждения «Удалить строку прихода № 1?» с полем причины (1.0, К1); «Отмена» — строка не удалена",
+             "reason" in kids and msg.startswith("SKIP:удаление не подтверждено") and k3 == k2 + 1
              and sh.getCellByPosition(16, 1).getString() == "Проведено: новый ЕИ", f"кнопки {kids}; {msg[:40]}")
         # «Исправить»: the window with the posted values
         goto(o, doc, "$B$3")

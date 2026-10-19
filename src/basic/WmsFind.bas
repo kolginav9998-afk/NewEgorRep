@@ -836,7 +836,7 @@ Function CardShow(n As Long) As String
         IIf(CStr(st(SC_ART)) <> "", "артикул " & st(SC_ART), ""), st(SC_CAT)), "   ·   "))
     sh.getCellByPosition(1, FD_INFO + 1).setString(JoinParts(Array("Откуда: " & IIf(CStr(st(SC_SRC)) <> "", st(SC_SRC), "—") _
         & IIf(CStr(st(SC_STYPE)) <> "", " (" & st(SC_STYPE) & ")", ""), "пришло " & WmsIssue.QtyText(sumIn), "ушло " & WmsIssue.QtyText(sumOut), _
-        "движений " & nM), "   ·   "))
+        "движений " & nM, PriceText(n, IIf(VarType(q) = 5, q, 0))), "   ·   "))
     If Not hasSrc Then
         sh.getCellByPosition(1, FD_INFO + 2).setString("•  Первичного прихода в книге нет (ЕИ начальных данных) — сверка остатка с движениями не выполняется")
     ElseIf ok Then
@@ -864,6 +864,17 @@ EH:
     On Error Resume Next
     ViewDone(sh)
     gFdBusy = False
+End Function
+
+' 1.0 (А2): the price of the EI (from its order; a split EI — that of its source) and the money of its balance
+Private Function PriceText(n As Long, q As Double) As String
+    Dim p As Double
+    p = WmsPrint.EiPrice(n)
+    If p < 0 Then
+        PriceText = "цены нет (не по заказу)"
+    Else
+        PriceText = "цена " & WmsPrint.Money(p) & ", на сумму " & WmsPrint.Money(q * p)
+    End If
 End Function
 
 ' a movement: key (date + order within the day), date text, operation, document, who, in, out, sheet, row, note; bGray — no effect

@@ -34,6 +34,15 @@ Private Sub MemoPut(sKey As String, sAnswer As String)
     If gAskMemoOn Then gAskMemo = gAskMemo & sKey & "=" & Replace(sAnswer, "|", "/") & "|"
 End Sub
 
+' 1.0 (К13): the answer of a block for another module (the reason of a posting in a closed month); "" — none or no block
+Function MemoValue(sKey As String) As String
+    MemoValue = MemoGet(sKey)
+End Function
+
+Sub MemoSet(sKey As String, sAnswer As String)
+    MemoPut(sKey, sAnswer)
+End Sub
+
 ' the line under a question of a block: the answer counts for the other rows of the block
 Private Function MemoNote() As String
     If gAskMemoOn Then MemoNote = Chr(10) & Chr(10) & "Ответ будет применён и к остальным строкам этой пачки."

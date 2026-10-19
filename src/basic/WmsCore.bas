@@ -1010,6 +1010,12 @@ Function ApplyOperation(mode As Integer, replaySeq As Long) As String
             ApplyOperation = why
             Exit Function
         End If
+        ' 1.0 (К13): a date in a closed month — posted only after the warning and with a reason (BACKDATED, BACKWHY)
+        why = WmsLedger.ClosedAsk()
+        If why <> "" Then
+            ApplyOperation = why
+            Exit Function
+        End If
         seq = CLng(SysNum(SK_LAST_SEQ)) + 1
     Else
         If gState <> "RECOVERING" Then

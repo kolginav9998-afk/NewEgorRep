@@ -31,6 +31,8 @@ Public Const DB_SVC_COL = 14
 Public Const DB_STALE_DAYS = 90
 ' a page counted longer than this is not counted again by itself when it is shown (a big book): «Обновить» counts it
 Public Const DB_AUTO_MAX_MS = 5000
+' 1.0 (А7): the rows of the list «Внимание» (as many as «Поиск» shows)
+Public Const DB_AT_MAX = 500
 
 Global gDbBusy As Boolean
 ' 1.0: the state line of the page while a save writes the file (DashSavedState)
@@ -102,7 +104,7 @@ Function DashRefresh() As String
     Dim unposted As Long, attention As Long, recent() As Boolean, nSt As Long, stN(DB_STALE_CAND - 1) As Long, nStShown As Long, stDay As Variant
     Dim osh As Object, rows(), mx As Double, ord As Variant, tIdx() As Long, d As Variant, cond As String, dq As String, rg As String, rd As String
     Dim row As Variant, cD As Integer, cW As Integer, cN As Integer, cU As Integer, cQ As Integer, nList As Long, stKey() As Double, stOrd() As Long
-    Dim tails As Variant, nTails As Long, tRows()
+    Dim tails As Variant, nTails As Long, tRows(), money As Variant
     If gDbBusy Then Exit Function
     gDbBusy = True
     On Error GoTo EH
@@ -286,7 +288,10 @@ Function DashRefresh() As String
     sh.getCellByPosition(8, DB_TITLE_ROW).setString(s)
     sh.getCellByPosition(DB_SVC_COL, 0).setString(gState & "|" & gBlock)
     ' the tiles: value, line under it
-    PutTile(sh, 0, nPos, "всего ЕИ " & NumText(nEI) & " · требует разбора " & NumText(nReview))
+    ' 1.0 (А2): the money of the stock by the price of the order (cached until the next operation)
+    money = WmsLedger.StockMoney()
+    PutTile(sh, 0, nPos, "на сумму " & WmsPrint.Money(money(0)) & IIf(nPos > money(1), " (без цены " & NumText(nPos - money(1)) & ")", "") _
+        & " · всего ЕИ " & NumText(nEI) & " · требует разбора " & NumText(nReview))
     ' 1.0 (З10): the goods of «Номенклатура» below their minimum
     nNeed = 0
     If gDoc.Sheets.hasByName(WmsSupply.SH_GOODS) Then
@@ -297,7 +302,8 @@ Function DashRefresh() As String
     PutTile(sh, 2, rcvToday + splToday, "по заказам " & NumText(rcvToday) & " · иной приход " & NumText(splToday))
     PutTile(sh, 3, issToday, "получателей " & NumText(nWho) & " · возвратов " & NumText(retToday) & " · корректировок " & NumText(adjToday))
     PutTile(sh, 4, carsIn, "приехало сегодня " & NumText(carsArr) & " · уехало " & NumText(carsDep))
-    PutTile(sh, 5, attention, IIf(attention = 0, "всё в порядке", "непроведённых " & NumText(unposted) & " · требует разбора " & NumText(nReview)))
+    PutTile(sh, 5, attention, IIf(attention = 0, "всё в порядке", "непроведённых " & NumText(unposted) & " · требует разбора " & NumText(nReview) _
+        & " · двойной щелчок — список"))
     ' list 1: the positions by the expected date (the earliest first); 1.0 (З3): what is still expected of each, «и ещё N», the
     ' row of «Заказы» (the hidden column) for a double click
     sh.getCellRangeByPosition(1, DB_LIST1, 6, DB_LIST1 + DB_LIST1_N - 1).clearContents(1 + 2 + 4)
@@ -322,8 +328,10 @@ Function DashRefresh() As String
     sh.getCellByPosition(1, DB_LIST1_HEAD).setString("Ожидается: срок прошёл и ближайшие поставки" & IIf(nWait > nW, " · и ещё " & NumText(nWait - nW) _
         & " — все на «" & WmsSupply.SH_SUPPLY & "»", ""))
     If nW = 0 Then sh.getCellByPosition(2, DB_LIST1).setString(IIf(nWait = 0, "ничего не ожидается", "ожидаемая дата (Q) не указана ни у одной позиции"))
-    ' list 2: the last operations of the journal
+    ' list 2: the last operations of the journal (1.0, А6: the EI of each for a double click — the hidden column right of DB_SVC_COL)
     sh.getCellRangeByPosition(7, DB_LIST1, 12, DB_LIST1 + DB_LIST1_N - 1).clearContents(1 + 2 + 4)
+    sh.getCellRangeByPosition(DB_SVC_COL + 1, DB_LIST1, DB_SVC_COL + 1, DB_LIST2 + DB_LIST2_N - 1).clearContents(1 + 2 + 4)
+    sh.getCellRangeByPosition(DB_SVC_COL, DB_LIST2, DB_SVC_COL, DB_LIST2 + DB_LIST2_N - 1).clearContents(1 + 2 + 4)
     LastOps(sh)
     ' list 3: the most issued in 30 days (by the number of issues)
     sh.getCellRangeByPosition(1, DB_LIST2, 12, DB_LIST2 + DB_LIST2_N - 1).clearContents(1 + 2 + 4)
@@ -337,6 +345,7 @@ Function DashRefresh() As String
             If i >= nTop Then Exit For
             j = tIdx(i)
             PutRow(sh, DB_LIST2 + i, 1, Array(tName(j), "", "", tCnt(j), tQty(j), tUnit(j)))
+            sh.getCellByPosition(DB_SVC_COL, DB_LIST2 + i).setString("GOODS|" & tName(j))
         Next i
     Else
         sh.getCellByPosition(1, DB_LIST2).setString("за 30 дней выдач нет")
@@ -358,6 +367,7 @@ Function DashRefresh() As String
         n = stN(j)
         d = WmsIssue.StockSheet().getCellRangeByPosition(0, n, SC_QTY, n).getDataArray()(0)
         PutRow(sh, DB_LIST2 + i, 7, Array(CStr(d(SC_EI)), CStr(d(SC_NAME)), "", "", d(SC_QTY), IIf(stDay(j) > 0, CLng(today - stDay(j)), "нет движений")))
+        sh.getCellByPosition(DB_SVC_COL + 1, DB_LIST2 + i).setString("EI|" & d(SC_EI))
     Next i
     If nSt = 0 Then sh.getCellByPosition(8, DB_LIST2).setString("ЕИ без движения " & DB_STALE_DAYS & "+ дней нет")
     sh.getCellByPosition(7, DB_LIST2_HEAD).setString("Лежит без движения " & DB_STALE_DAYS & "+ дней" & IIf(nSt > 0, " — ЕИ: " & NumText(nSt) _
@@ -566,6 +576,7 @@ Private Sub LastOps(sh As Object)
                     End If
                     sh.getCellRangeByPosition(7, DB_LIST1 + k, 12, DB_LIST1 + k).setDataArray(Array(Array( _
                         Mid(ts, 9, 2) & "." & Mid(ts, 6, 2) & " " & Mid(ts, 12, 5), OpName(sType), "", what, "", q)))
+                    If JField(fields, "EI") <> "" Then sh.getCellByPosition(DB_SVC_COL + 1, DB_LIST1 + k).setString("EI|" & JField(fields, "EI"))
                     k = k + 1
                 End If
             End If
@@ -577,6 +588,188 @@ Private Sub LastOps(sh As Object)
 EH:
     sh.getCellByPosition(8, DB_LIST1).setString("журнал не прочитан: " & Error$)
 End Sub
+
+' ================================================================ 1.0 (А6, А7): the transitions of the page
+
+' a double click on the page: the tile «Внимание» — the list of what needs action (А7); a row of a list — its order, its EI
+' card or the goods on «Поиск» (А6). True: the cell is not edited
+Function OnDashDoubleClick(Optional oTarget As Variant) As Boolean
+    Dim r As Long, c As Long, sh As Object, s As String
+    On Error GoTo EH
+    WmsInit()
+    r = oTarget.getCellAddress().Row
+    c = oTarget.getCellAddress().Column
+    sh = gDoc.Sheets.getByName(SH_DASH)
+    If r >= DB_TILE_CAP And r <= DB_TILE_SUB Then
+        OnDashDoubleClick = True
+        If c >= 11 And c <= 12 Then
+            AttentionShow()
+            WmsView.GoCell(SH_FIND, FD_TABLE, 1)
+        ElseIf c >= 3 And c <= 4 Then
+            WmsSupply.NavSupply()
+        End If
+        Exit Function
+    End If
+    If (r >= DB_LIST1 And r < DB_LIST1 + DB_LIST1_N) Or (r >= DB_LIST2 And r < DB_LIST2 + DB_LIST2_N) Then
+        s = sh.getCellByPosition(IIf(c <= 6, DB_SVC_COL, DB_SVC_COL + 1), r).getString()
+    End If
+    If s = "" Then Exit Function
+    OnDashDoubleClick = True
+    DashGo(s)
+    Exit Function
+EH:
+End Function
+
+' «Заказы|r» — the row; «EI|ЕИ-…» — the card on «Поиск»; «GOODS|name» — the search of the name
+Sub DashGo(s As String)
+    Dim a As Variant, n As Long
+    a = Split(s, "|")
+    If UBound(a) < 1 Then Exit Sub
+    Select Case a(0)
+    Case "EI"
+        n = EiNo(CStr(a(1)), CLng(SysNum(SK_NEXT_EI)))
+        If n > 0 Then
+            WmsFind.CardShow(n)
+            WmsView.GoCell(SH_FIND, FD_TABLE, 1)
+        End If
+    Case "GOODS"
+        WmsFind.FindRun(CStr(a(1)) & "*")
+        WmsView.GoCell(SH_FIND, FD_TABLE, 1)
+    Case Else
+        If gDoc.Sheets.hasByName(a(0)) And IsNumeric(a(1)) Then WmsView.GoCell(CStr(a(0)), CLng(a(1)), 1)
+    End Select
+    gUiLastMsg = "OK:" & s
+End Sub
+
+' «Все…» under the lists of the page
+Sub BtnAllWait(Optional oEvent As Variant)
+    WmsInit()
+    WmsSupply.NavSupply()
+End Sub
+
+Sub BtnAllOps(Optional oEvent As Variant)
+    WmsInit()
+    WmsAudit.HistoryShow("", Today0() - 6, Today0(), "всё")
+    WmsView.GoCell(SH_FIND, FD_TABLE, 1)
+End Sub
+
+Sub BtnAllIssued(Optional oEvent As Variant)
+    WmsInit()
+    WmsLedger.Consumers(Today0() - 29, Today0())
+End Sub
+
+Sub BtnAllStale(Optional oEvent As Variant)
+    WmsInit()
+    WmsLedger.DeadStock(DB_STALE_DAYS, False)
+End Sub
+
+' 1.0 (А7): what needs the storekeeper, as a list on «Поиск» with the transitions (a double click — the row; an EI — its card): the
+' vehicles on the territory since an earlier day, the rows typed and not posted on every sheet, the EIs «Требует разбора», the
+' possible duplicates of the receipts. OK:<rows>
+Function AttentionShow() As String
+    Dim rows() As Variant, n As Long, today As Double, sh As Object, last As Long, d As Variant, i As Long, items As Variant, nItems As Long, r As Long
+    Dim nCar As Long, nOpen As Long, nRev As Long, nDup As Long, k As Long
+    WmsInit()
+    On Error GoTo EH
+    today = Today0()
+    ReDim rows(DB_AT_MAX)
+    If gDoc.Sheets.hasByName(SH_CARS) Then
+        sh = gDoc.Sheets.getByName(SH_CARS)
+        last = WmsOrders.LastRow(sh)
+        If last >= CAR_FIRST Then
+            d = sh.getCellRangeByPosition(0, CAR_FIRST, CC_STATUS, last).getDataArray()
+            For i = 0 To UBound(d)
+                If CStr(d(i)(CC_STATUS)) = CS_OPEN And DateOf(d(i)(CC_DATE)) > 0 And DateOf(d(i)(CC_DATE)) < today Then
+                    AtAdd(rows, n, Array("Машина с прошлого дня", SH_CARS & ", строка " & (CAR_FIRST + i + 1), ViewDay(DateOf(d(i)(CC_DATE))), CStr(d(i)(CC_PLATE)), _
+                        CStr(d(i)(CC_SUP)), "всё ещё «" & CS_OPEN & "» — отметьте «Уехал» или «Отменить визит»", "", "", "", SH_CARS, CAR_FIRST + i, ""))
+                    nCar = nCar + 1
+                End If
+            Next i
+        End If
+    End If
+    nOpen = AtUnposted(rows, n, SH_ISSUES, IC_NO, IC_EI, IC_NAME, IC_DATE, "Выдача не проведена")
+    nOpen = nOpen + AtUnposted(rows, n, SH_RETURNS, RC_NO, RC_EI, RC_NAME, RC_DATE, "Возврат не проведён")
+    nOpen = nOpen + AtUnposted(rows, n, SH_ADJUST, AC_NO, AC_EI, AC_NAME, AC_DATE, "Корректировка не проведена")
+    nOpen = nOpen + AtUnposted(rows, n, SH_SPECIAL, XC_NO, XC_QTY, XC_NAME, XC_DATE, "Иной приход не проведён")
+    nOpen = nOpen + AtUnposted(rows, n, SH_ORDERS, OC_EI, OC_FACT, OC_NAME, OC_RDATE, "Приход не проведён")
+    ' the EIs «Требует разбора»
+    last = CLng(SysNum(SK_NEXT_EI)) - 1
+    If last >= 1 Then
+        items = EngList("TEXTJOIN("";"";1;IF(" & ColRng(SH_STOCK, SC_STATE, 1, last) & "=""" & EI_ST_REVIEW & """;ROW(" & ColRng(SH_STOCK, SC_STATE, 1, last) _
+            & ")-1;""""))", nItems)
+        For i = 0 To nItems - 1
+            r = CLng(items(i))
+            d = WmsIssue.StockSheet().getCellRangeByPosition(0, r, SC_LAST, r).getDataArray()(0)
+            AtAdd(rows, n, Array("ЕИ требует разбора", SH_STOCK & ", строка " & (r + 1), "", CStr(d(SC_EI)), CStr(d(SC_NAME)), "откуда: " & d(SC_SRC) _
+                & " — разберите на «" & SH_SPECIAL & "» («Разобрать»)", "", "", "", SH_STOCK, r, CStr(d(SC_EI))))
+            nRev = nRev + 1
+        Next i
+    End If
+    ' the possible duplicates of the receipts
+    sh = WmsOrders.OrdersSheet()
+    last = WmsOrders.LastRow(sh)
+    If last >= 1 Then
+        items = EngList("TEXTJOIN("";"";1;IF(LEFT(" & ColRng(SH_ORDERS, OC_DUP, 1, last) & ";15)=""Возможный дубль"";ROW(" & ColRng(SH_ORDERS, OC_DUP, 1, last) _
+            & ")-1;""""))", nItems)
+        For i = 0 To nItems - 1
+            r = CLng(items(i))
+            d = sh.getCellRangeByPosition(0, r, OC_DUP, r).getDataArray()(0)
+            AtAdd(rows, n, Array("Возможный дубль прихода", SH_ORDERS & ", строка " & (r + 1), ViewDay(DateOf(d(OC_RDATE))), CStr(d(OC_EI)), CStr(d(OC_NAME)), _
+                CStr(d(OC_DUP)), "", "", "", SH_ORDERS, r, ""))
+            nDup = nDup + 1
+        Next i
+    End If
+    AttentionShow = WmsFind.ShowTable("Внимание: что требует действия", IIf(n = 0, "Всё в порядке: ничего не ждёт.", "Двойной щелчок по строке — перейти к ней " _
+        & "(у ЕИ — карточка)."), "машины с прошлых дней " & nCar & " · не проведено строк " & nOpen & " · требует разбора " & nRev & " · возможных дублей " & nDup _
+        & IIf(n > DB_AT_MAX, " · показаны первые " & DB_AT_MAX, ""), Array("Что", "Где", "Дата", "ЕИ / машина", "Наименование / поставщик", "Подробно", "", ""), rows, _
+        IIf(n > DB_AT_MAX, DB_AT_MAX, n), False)
+    If Left(AttentionShow, 3) = "OK:" Then AttentionShow = "OK:" & n
+    gUiLastMsg = AttentionShow
+    Exit Function
+EH:
+    AttentionShow = "ERR:список не построен: " & Error$ & " (код " & Err & ", строка " & Erl & ")"
+    gUiLastMsg = AttentionShow
+End Function
+
+Private Sub AtAdd(rows() As Variant, n As Long, row As Variant)
+    If n < DB_AT_MAX Then rows(n) = row
+    n = n + 1
+End Sub
+
+' the rows of a sheet with an input (cTest) and no number (cKey — the number, or the EI on «Заказы»): fast through the empty
+' cells of the key column. The count
+Private Function AtUnposted(rows() As Variant, n As Long, sName As String, cKey As Integer, cTest As Integer, cName As Integer, cDate As Integer, _
+    sWhat As String) As Long
+    Dim sh As Object, last As Long, blocks As Variant, got As Variant, i As Long, j As Long, r As Long, flags As Long, d As Variant, k As Long, ctl As String
+    On Error GoTo EH
+    If Not gDoc.Sheets.hasByName(sName) Then Exit Function
+    sh = gDoc.Sheets.getByName(sName)
+    last = WmsOrders.LastRow(sh)
+    If last < 1 Then Exit Function
+    flags = com.sun.star.sheet.CellFlags.VALUE + com.sun.star.sheet.CellFlags.DATETIME + com.sun.star.sheet.CellFlags.STRING + com.sun.star.sheet.CellFlags.FORMULA
+    blocks = sh.getCellRangeByPosition(cKey, 1, cKey, last).queryEmptyCells().getRangeAddresses()
+    For i = 0 To UBound(blocks)
+        If i >= 200 Then Exit For
+        got = sh.getCellRangeByPosition(cTest, blocks(i).StartRow, cTest, blocks(i).EndRow).queryContentCells(flags).getRangeAddresses()
+        For j = 0 To UBound(got)
+            For r = got(j).StartRow To got(j).EndRow
+                d = sh.getCellRangeByPosition(0, r, cName, r).getDataArray()(0)
+                ctl = ""
+                If sName = SH_ORDERS Then ctl = sh.getCellByPosition(OC_STATUS, r).getString()
+                If ctl <> OS_CANCELLED Then
+                    AtAdd(rows, n, Array(sWhat, sName & ", строка " & (r + 1), ViewDay(DateOf(sh.getCellByPosition(cDate, r).getValue())), _
+                        sh.getCellByPosition(cTest, r).getString(), CStr(d(cName)), "строка заполнена, но не проведена — «Почему?» на ней", "", "", "", sName, r, ""))
+                    k = k + 1
+                End If
+                If k > DB_AT_MAX Then Exit For
+            Next r
+        Next j
+    Next i
+    AtUnposted = k
+    Exit Function
+EH:
+    AtUnposted = k
+End Function
 
 ' 1.0: the state line of the page in the saved file — «WMS не запущена» for someone who opens it with the macros off;
 ' after the save the line of this session again (WmsUi.UiSavedState)

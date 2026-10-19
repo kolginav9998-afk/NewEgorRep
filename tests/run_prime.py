@@ -664,7 +664,7 @@ def pr11_upgrade_072():
         main_btn = s.doc.Sheets.getByName("Главная").getDrawPage().getCount()
         R.add(c, "обновлённая книга — с новыми страницами: «Дашборд» первым, «Поиск», «Карта склада», «Топология»; «Главная» 1.0 (21 кнопка над строками состояния, с «Справкой»); "
                  "дашборд считается; карточка ЕИ-00000427 — остаток сходится с движениями переноса и 0.7.2",
-              names[:2] == ["Дашборд", "Главная"] and "Поиск" in names and "Карта склада" in names and "Топология" in names and main_btn == 22
+              names[:2] == ["Дашборд", "Главная"] and "Поиск" in names and "Карта склада" in names and "Топология" in names and main_btn == 23
               and db.startswith("OK") and fd.startswith("OK:ЕИ-00000427") and card.startswith("✓"), f"{names}; {main_btn}; {db}; {fd}; {card}")
         btns = {}
         for n in ("Заказы", "Иной приход", "Выдачи", "Корректировки", "Наличие"):

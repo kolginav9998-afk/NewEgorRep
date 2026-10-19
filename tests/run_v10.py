@@ -1246,6 +1246,238 @@ def v22_control_documents():
         s.close()
 
 
+def print_rows(s, n=400):
+    """the rows of the page «Печать» (A:G) as lists of texts"""
+    pr = s.doc.Sheets.getByName("Печать")
+    return [[str(int(x)) if isinstance(x, float) and x.is_integer() else str(x) for x in r] for r in pr.getCellRangeByPosition(0, 0, 6, n).getDataArray()]
+
+
+@case
+def v23_accounting():
+    """К7 остаток на прошедшую дату; К8 оборотная ведомость за период (начало, приход, выдано, возвращено, списано, конец — в единицах
+    и рублях), на странице и в файле; К9 выгрузка движений в CSV с ценами и суммами; К10 сверка с файлом 1С (CSV в Windows-1251);
+    К13 закрытие месяца: файлы, _CLOSE, MONTH_CLOSE; операция задним числом — только с причиной (BACKDATED, BACKWHY); открыть месяц"""
+    import csv
+    import datetime as dt_
+    import uno
+    from run_prime import T
+    c = "V23"
+    s = ready(Session(new_wms("v23")))
+    try:
+        first = T.replace(day=1)
+        p_end = first - dt_.timedelta(days=1)
+        p0 = p_end.replace(day=1)
+        off = lambda d: (d - T).days                                       # noqa: E731
+        ser = lambda d: serial(off(d))                                     # noqa: E731
+        order(s, 1, "1", "Болт М8", qty="10", art="Б-8", J=12.5)
+        r = receive(s, 1, "10", place="5-1-1", k=off(p0 + dt_.timedelta(days=2)))
+        b = ords(s, 1)[21]
+        put(s, "Выдачи", 1, L=b, E="3", H=ser(p0 + dt_.timedelta(days=5)), I="ива")
+        i1 = s.I("IssuePostRow", 1)
+        put(s, "Корректировки", 1, B="Списание", C=b, G="1", K=ser(p0 + dt_.timedelta(days=10)), L="брак")
+        w1 = s.A("AdjustPostRow", 1)
+        put(s, "Выдачи", 2, L=b, E="2", H=serial(), I="ива")
+        i2 = s.I("IssuePostRow", 2)
+        # К7
+        res = s.B("StockOnDate", ser(p0 + dt_.timedelta(days=6)), False, module="WmsLedger")
+        rows = print_rows(s)
+        brow = next((x for x in rows if x[1] == b), None)
+        R.add(c, "К7: остаток на дату после первой выдачи — болт 7 шт по 12,50 на 87,50 (сейчас 4); заголовок «ОСТАТОК НА …»",
+              all(x.startswith("OK") for x in (r, i1, w1, i2)) and res.startswith("OK:Остаток на") and rows[0][0].startswith("ОСТАТОК НА ")
+              and brow is not None and brow[3] == "7 шт" and brow[5] == "12,50" and brow[6] == "87,50" and s.stock(int(b[3:])) == 4.0,
+              f"{(r, i1, w1, i2)}; {res}; {brow}")
+        res0 = s.B("StockOnDate", ser(p0), False, module="WmsLedger")
+        rows0 = print_rows(s)
+        R.add(c, "К7: на дату до прихода болта нет", res0.startswith("OK") and not any(x[1] == b for x in rows0), res0)
+        # К8 on the page and in the file
+        res = s.B("Turnover", ser(p0), ser(p_end), False, module="WmsLedger")
+        rows = print_rows(s, 600)
+        tr = next((x for x in rows if x[0] == "Болт М8 (Б-8), шт"), None)
+        money = next((x for x in rows if x[0] == "Итого, руб."), None)
+        R.add(c, "К8: оборотная ведомость прошлого месяца — болт: начало 0, приход 10, выдано 3, списано 1, конец 6; в рублях приход 125,00, "
+                 "выдано 37,50, списано 12,50, конец 75,00 (синтетические ЕИ без цены не в рублях)",
+              res.startswith("OK:Оборотная ведомость") and tr == ["Болт М8 (Б-8), шт", "", "10", "3", "", "1", "6"] and money is not None
+              and money[2] == "125,00" and money[3] == "37,50" and money[5] == "12,50" and money[6].endswith("75,00"), f"{res}; {tr}; {money}")
+        res = s.B("Turnover", ser(p0), ser(p_end), True, module="WmsLedger")
+        path = res[5:]
+        lines = list(csv.reader(open(path, encoding="utf-8-sig"), delimiter=";")) if res.startswith("FILE:") and os.path.isfile(path) else []
+        bl = next((x for x in lines if x[:1] == ["Болт М8"]), [])
+        R.add(c, "К8 в файл: CSV в «WMS_Документы» (UTF-8 с меткой, «;»), строка болта с единицами и рублями",
+              "WMS_Документы" in path and lines[1][:4] == ["Товар", "Артикул", "Ед.", "ЕИ"] and bl[3:10] == ["1", "0", "10", "3", "0", "1", "6"]
+              and bl[11] == "125,00" and bl[15] == "75,00", f"{res}; {bl}")
+        # К9
+        res = s.B("ExportMoves", ser(p0), serial(), module="WmsLedger")
+        path = res[5:].split("\n")[0]
+        lines = list(csv.reader(open(path, encoding="utf-8-sig"), delimiter=";")) if res.startswith("FILE:") and os.path.isfile(path) else []
+        mv = [x for x in lines[2:] if len(x) > 3 and x[3] == b]
+        R.add(c, "К9: выгрузка движений — 4 движения болта по датам: приход 10 (УПД-1), выдача 3, списание 1, выдача 2; цена 12,50, суммы 125,00 / 37,50 / 12,50 / 25,00",
+              res.startswith("FILE:") and [x[1].split(" № ")[0] for x in mv] == ["Приход по заказу", "Выдача", "Списание", "Выдача"]
+              and [x[7] or x[8] for x in mv] == ["10", "3", "1", "2"] and [x[10] for x in mv] == ["125,00", "37,50", "12,50", "25,00"]
+              and mv[0][2] == "УПД-1" and mv[1][11] == "Иванов Иван Андреевич", f"{res[:200]}; {mv}")
+        # К10
+        f1c = os.path.join(s.dir, "остатки_1с.csv")
+        with open(f1c, "w", encoding="cp1251", newline="") as f:
+            f.write("Ведомость по товарам на складах\r\nСклад: Основной\r\n\r\n")
+            f.write("Номенклатура;Артикул;Ед. изм.;Конечный остаток\r\n")
+            f.write("Болт М8;Б-8;шт;5\r\nШайба М8;Ш-8;шт;100\r\nТовар 7;ART-00007;кг;50\r\nИтого;;;155\r\n")
+        res = s.B("Compare1C", uno.systemPathToFileUrl(f1c), False, module="WmsLedger")
+        rows = print_rows(s, 600)
+        flat = " | ".join(" ".join(x) for x in rows)
+        bolt = next((x for x in rows if x[1].startswith("Болт М8")), None)
+        washer = next((x for x in rows if x[1].startswith("Шайба М8")), None)
+        R.add(c, "К10: сверка с 1С (CSV Windows-1251, шапка 1С выше таблицы) по наименованию — болт: 1С 5, WMS 4, разница −1; шайба — «нет в WMS»; "
+                 "Товар 7 совпал; итоговая строка 1С пропущена; ничего не проведено",
+              res.startswith("OK:Сверка с 1С") and bolt is not None and bolt[3:6] == ["5", "4", "-1"] and washer is not None and washer[6] == "нет в WMS"
+              and "Совпало: 1" in flat and "Строк в файле: 3" in flat and not any(x[1].startswith("Товар 7 ") for x in rows), f"{res}; {bolt}; {washer}; {flat[:500]}")
+        # К13
+        nseq = int(s.sysv("LAST_SEQ"))
+        res = s.B("CloseMonth", p0.year, p0.month, module="WmsLedger")
+        cl = list(s.doc.Sheets.getByName("_CLOSE").getCellRangeByPosition(0, 1, 7, 1).getDataArray()[0])
+        ent = [e for e in s.journal()[0] if e["type"] == "MONTH_CLOSE"]
+        docs = os.path.join(os.path.dirname(s.path), "WMS_Документы")
+        files = sorted(os.listdir(docs)) if os.path.isdir(docs) else []
+        R.add(c, "К13: «Закрыть месяц» прошлого месяца — строка _CLOSE (по последнему дню, CLOSED, файлы), MONTH_CLOSE в журнале, файлы "
+                 "«Закрытие … оборотная ведомость» и «Остаток на …», ClosedTo — последний день",
+              res.startswith("OK:") and cl[0] == f"{p0.year:04d}-{p0.month:02d}" and cl[1] == ser(p_end) and cl[3] == "CLOSED" and len(ent) == 1
+              and ent[0]["fields"].get("TO") == p_end.isoformat() and any(x.startswith(f"Закрытие {p0.year:04d}-{p0.month:02d}") for x in files)
+              and s.B("ClosedTo", module="WmsLedger") == ser(p_end) and int(s.sysv("LAST_SEQ")) == nseq + 1, f"{res}; {cl}; {ent}; {files}")
+        again = s.B("CloseMonth", p0.year, p0.month, module="WmsLedger")
+        cur = s.B("CloseMonth", T.year, T.month, module="WmsLedger")
+        R.add(c, "К13: повторное закрытие — «уже закрыт»; текущий месяц — «ещё не закончился»",
+              again.startswith("ERR:") and "уже закрыт" in again and cur.startswith("ERR:") and "не закончился" in cur, f"{again}; {cur}")
+        put(s, "Выдачи", 3, L=b, E="1", H=ser(p0 + dt_.timedelta(days=20)), I="ива")
+        x1 = s.I("IssuePostRow", 3)
+        st1 = s.stock(int(b[3:]))
+        s.B("TestPrimeForm", "забыли провести вовремя", module="WmsPrimeUi")
+        x2 = s.I("IssuePostRow", 3)
+        e2 = [e for e in s.journal()[0] if e["type"] == "ISSUE"][-1]["fields"]
+        R.add(c, "К13: выдача с датой в закрытом месяце — без причины не проведена (остаток 4); с причиной проведена, в журнале BACKDATED и BACKWHY",
+              x1.startswith("SKIP:") and "причина" in x1 and st1 == 4.0 and x2.startswith("OK") and s.stock(int(b[3:])) == 3.0
+              and e2.get("BACKDATED") == p_end.isoformat() and e2.get("BACKWHY") == "забыли провести вовремя", f"{x1}; {x2}; {e2}")
+        put(s, "Выдачи", 4, L=b, E="1", H=serial(), I="ива")
+        x3 = s.I("IssuePostRow", 4)
+        e3 = [e for e in s.journal()[0] if e["type"] == "ISSUE"][-1]["fields"]
+        R.add(c, "К13: выдача сегодняшним днём — без вопроса и без BACKDATED", x3.startswith("OK") and "BACKDATED" not in e3, f"{x3}; {e3}")
+        op = s.B("OpenMonth", "", module="WmsLedger")
+        op2 = s.B("OpenMonth", "нашли ошибку в приходе", module="WmsLedger")
+        cl = list(s.doc.Sheets.getByName("_CLOSE").getCellRangeByPosition(0, 1, 7, 1).getDataArray()[0])
+        put(s, "Выдачи", 5, L=b, E="1", H=ser(p0 + dt_.timedelta(days=21)), I="ива")
+        x4 = s.I("IssuePostRow", 5)
+        R.add(c, "К13: «Открыть месяц» без причины — отказ; с причиной — OPENED и причина в _CLOSE, MONTH_OPEN в журнале; потом прошлый месяц проводится без вопроса",
+              op.startswith("ERR:") and op2.startswith("OK:") and cl[3] == "OPENED" and cl[7] == "нашли ошибку в приходе"
+              and any(e["type"] == "MONTH_OPEN" for e in s.journal()[0]) and x4.startswith("OK") and s.B("ClosedTo", module="WmsLedger") == 0,
+              f"{op}; {op2}; {cl}; {x4}")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:300])
+        oracle(c, s, "отчёты учёта ничего не провели; закрытие и открытие месяца — операции журнала")
+    finally:
+        s.close()
+
+
+@case
+def v24_reports():
+    """А1 отчёт руководителю за день; А2 «на сумму» на плитке «Дашборда» и цена со стоимостью в карточке ЕИ; А3 расход по получателям и
+    подразделениям; А4 полный список мёртвого груза (порог, сортировка, итог); А6 переходы двойным щелчком и «Все…»; А7 «Внимание»
+    списком с переходами"""
+    c = "V24"
+    s = ready(Session(new_wms("v24")))
+    try:
+        order(s, 1, "1", "Болт М8", qty="10", art="Б-8", J=12.5)
+        receive(s, 1, "10", place="5-1-1")
+        order(s, 2, "2", "Гайка М8", qty="10", supplier="Лютик", J=2.0)
+        receive(s, 2, "10", place="5-1-2")
+        order(s, 3, "3", "Шайба М8", qty="5", J=1.0)
+        receive(s, 3, "5", place="6-1-1", k=-200)
+        b, g, w = ords(s, 1)[21], ords(s, 2)[21], ords(s, 3)[21]
+        rc = s.doc.Sheets.getByName("Получатели")
+        rr = [rc.getCellByPosition(1, r).getString() for r in range(1, 10)].index("Иванов Иван Андреевич") + 1
+        rc.getCellByPosition(2, rr).setString("Цех 1")
+        put(s, "Выдачи", 1, L=b, E="3", H=serial(), I="ива")
+        i1 = s.I("IssuePostRow", 1)
+        put(s, "Возврат", 1, B="1", F="1", H=serial(), I="ива")
+        r1 = s.B("ReturnPostRow", 1, module="WmsReturn")
+        put(s, "Корректировки", 1, B="Списание", C=b, G="1", K=serial(), L="брак")
+        w1 = s.A("AdjustPostRow", 1)
+        # А2
+        db = s.B("DashRefresh", module="WmsDash")
+        dsh = s.doc.Sheets.getByName("Дашборд")
+        sub0 = dsh.getCellByPosition(1, 5).getString()
+        s.B("CardShow", int(b[3:]), module="WmsFind")
+        info = s.doc.Sheets.getByName("Поиск").getCellByPosition(1, 8).getString()
+        R.add(c, "А2: плитка «На складе» — «на сумму 112,50» (болт 7 × 12,50 + гайка 10 × 2 + шайба 5 × 1; ЕИ без цены — отдельно); "
+                 "в карточке болта «цена 12,50, на сумму 87,50»",
+              all(x.startswith("OK") for x in (i1, r1, w1, db)) and sub0.startswith("на сумму 112,50 (без цены ") and "цена 12,50, на сумму 87,50" in info,
+              f"{(i1, r1, w1, db)}; {sub0}; {info}")
+        # А1
+        res = s.B("ManagerReport", serial(), serial(), module="WmsLedger")
+        rows = print_rows(s, 300)
+        op = {x[0]: x for x in rows if x[0] in ("Приход по заказам", "Выдачи", "Возвраты на склад", "Списания")}
+        who = next((x for x in rows if x[1] == "Иванов Иван Андреевич"), None)
+        loss = next((x for x in rows if x[1] == "брак"), None)
+        sups = [x[1] for x in rows if x[1] in ("Ромашка", "Лютик")]
+        flat = " | ".join(" ".join(x) for x in rows)
+        R.add(c, "А1: отчёт руководителю за сегодня — приходы 2 на 145,00 (шайба — 200 дней назад, не в периоде), выдача 37,50, возврат 12,50, "
+                 "списание 12,50; остаток на сумму 112,50; получатель — выдано 37,50, возвращено 12,50, на руках 25,00; потери «брак» 12,50; "
+                 "поставщики по сумме: Ромашка, Лютик",
+              res.startswith("OK:Отчёт руководителю") and op.get("Приход по заказам", [""] * 3)[1:3] == ["2", "145,00"]
+              and op.get("Выдачи", [""] * 3)[1:3] == ["1", "37,50"] and op.get("Возвраты на склад", [""] * 3)[1:3] == ["1", "12,50"]
+              and op.get("Списания", [""] * 3)[1:3] == ["1", "12,50"] and "на сумму 112,50" in flat and who is not None
+              and who[2:6] == ["1", "37,50", "12,50", "25,00"] and loss is not None and loss[3] == "12,50" and sups == ["Ромашка", "Лютик"], f"{res}; {op}; {who}; {loss}; {sups}")
+        # А3
+        res = s.B("Consumers", serial(), serial(), module="WmsLedger")
+        rows = print_rows(s, 300)
+        who = next((x for x in rows if x[1].startswith("Иванов Иван Андреевич")), None)
+        dep = next((x for x in rows if x[1] == "Цех 1"), None)
+        R.add(c, "А3: расход по получателям — «Иванов Иван Андреевич (Цех 1)»: выдач 1, 37,50 / 12,50 / на руках 25,00; таблица подразделений с «Цех 1»",
+              res.startswith("OK:Расход по получателям") and who is not None and who[1] == "Иванов Иван Андреевич (Цех 1)" and who[2:6] == ["1", "37,50", "12,50", "25,00"]
+              and dep is not None and dep[2:6] == ["1", "37,50", "12,50", "25,00"], f"{res}; {who}; {dep}")
+        # А4
+        res = s.B("DeadStock", 180, True, module="WmsLedger")
+        rows = print_rows(s, 400)
+        tab = [x for x in rows if x[1].startswith("ЕИ-")]
+        res2 = s.B("DeadStock", 365, False, module="WmsLedger")
+        rows2 = print_rows(s, 400)
+        tab2 = [x for x in rows2 if x[1].startswith("ЕИ-")]
+        R.add(c, "А4: мёртвый груз 180 дней по сумме — первой шайба (200 дней, 5,00), затем ЕИ без движений; итог «на сумму 5,00»; при пороге 365 "
+                 "шайбы нет, болт и гайка (двигались сегодня) — нигде",
+              res.startswith("OK:Мёртвый груз 180") and tab[0][1] == w and tab[0][5] == "200" and tab[0][6] == "5,00"
+              and any(x[0] == "Итого на сумму: 5,00" for x in rows) and not any(x[1] in (b, g) for x in tab) and not any(x[1] == w for x in tab2)
+              and all(x[5] == "нет движений" for x in tab2) and res2.startswith("OK"), f"{res}; {tab[:2]}; {res2}; {tab2[:2]}")
+        # А7 and А6
+        put(s, "Выдачи", 2, L=g, E="1", H=serial(), I="ива")
+        at = s.B("AttentionShow", module="WmsDash")
+        fd = s.doc.Sheets.getByName("Поиск")
+        lst = [list(x) for x in fd.getCellRangeByPosition(1, 12, 12, 20).getDataArray()]
+        row = next((x for x in lst if x[0] == "Выдача не проведена"), None)
+        R.add(c, "А7: «Внимание» списком — «Выдача не проведена», «Выдачи, строка 3», ЕИ гайки; переход — лист «Выдачи», строка 3",
+              at.startswith("OK:") and row is not None and row[1] == "Выдачи, строка 3" and row[3] == g and row[9] == "Выдачи" and row[10] == 2, f"{at}; {lst[:3]}")
+        r_at = lst.index(row)
+        s.B("OnFindDoubleClick", fd.getCellByPosition(1, 12 + r_at), module="WmsFind")
+        R.add(c, "А7: двойной щелчок по строке списка — переход на «Выдачи»", s.active_sheet() == "Выдачи", s.active_sheet())
+        s.B("DashRefresh", module="WmsDash")
+        refs = [dsh.getCellByPosition(15, r).getString() for r in range(9, 21)]
+        stale = [dsh.getCellByPosition(15, r).getString() for r in range(24, 34)]
+        rop = next((9 + i for i, x in enumerate(refs) if x == "EI|" + b), None)
+        ok1 = s.B("OnDashDoubleClick", dsh.getCellByPosition(8, rop), module="WmsDash") if rop else False
+        head = fd.getCellByPosition(1, 6).getString()
+        ok2 = s.B("OnDashDoubleClick", dsh.getCellByPosition(11, 4), module="WmsDash")
+        head2 = fd.getCellByPosition(1, 6).getString()
+        mb = form_buttons(dsh)
+        R.add(c, "А6: у последних операций и «без движения» — ссылки на ЕИ; двойной щелчок по операции болта — его карточка на «Поиске»; по "
+                 "плитке «Внимание» — список; над списками кнопки «Все…»",
+              rop is not None and ok1 and head.startswith(b) and ok2 and head2.startswith("Внимание") and all(x.startswith("EI|ЕИ-") for x in stale if x)
+              and all(k in mb for k in ("btnAllWait", "btnAllOps", "btnAllIssued", "btnAllStale")), f"{refs}; {stale[:3]}; {head}; {head2}; {sorted(mb)[:8]}")
+        s.B("BtnAllStale", module="WmsDash")
+        t = print_text(s, 5)
+        R.add(c, "«Все…» у «Лежит без движения» — полный список мёртвого груза на «Печати»", "МЁРТВЫЙ ГРУЗ" in t, t[:200])
+        rp = form_buttons(s.doc.Sheets.getByName("Отчёты"))
+        R.add(c, "страница «Отчёты»: кнопки учёта и руководителя, «Главная»", all(k in rp for k in ("btnStockOnDate", "btnTurnover", "btnExportAcc", "btnCompare1C",
+              "btnCloseMonth", "btnOpenMonth", "btnManagerReport", "btnConsumers", "btnDeadStock", "btnRepMain")), str(sorted(rp)))
+        oracle(c, s, "отчёты и переходы ничего не провели")
+    finally:
+        s.close()
+
+
 # ================================================================ runner
 
 def main():

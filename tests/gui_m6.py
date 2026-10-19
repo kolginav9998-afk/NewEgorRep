@@ -74,9 +74,10 @@ def main():
              all(b.get(k, ("", "", 99))[:2] == v and b[k][2] <= 2 for k, v in want.items()), str(b))
         c2, d2 = sh.getCellByPosition(2, 1), sh.getCellByPosition(3, 1)
         vl = [c.Validation for c in (c2, d2)]
-        step("ячейки «Марка / госномер» и «Поставщик» открыты и предлагают списки известных машин и поставщиков (сортированные)",
+        step("ячейки «Марка / госномер» и «Поставщик» открыты и предлагают списки известных машин (сортированные) и поставщиков "
+             "(1.0, З8: справочник «Поставщики»)",
              not c2.CellProtection.IsLocked and not d2.CellProtection.IsLocked and [v.Type.value for v in vl] == ["LIST", "LIST"]
-             and vl[0].getFormula1().endswith("$N$2:$N$1048576") and vl[1].getFormula1().endswith("$P$2:$P$1048576") and vl[0].ShowList == 2,
+             and vl[0].getFormula1().endswith("$N$2:$N$1048576") and vl[1].getFormula1().endswith("$Поставщики.$A$2:$A$1048576") and vl[0].ShowList == 2,
              f"{[v.getFormula1() for v in vl]}")
         locks = [sh.getCellByPosition(c, 10).CellProtection.IsLocked for c in range(14)]
         step("строки таблицы защищены, открыт только «Комментарий» (M); порог L5 открыт", locks == [True] * 12 + [False, True]
