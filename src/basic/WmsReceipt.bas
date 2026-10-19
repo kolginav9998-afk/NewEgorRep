@@ -8,6 +8,8 @@ Option Explicit
 
 ' 1.0: what a receipt posted but could not finish (its packing) — the window after the posting says it
 Global gRcvNote As String
+' 1.0 (З5): the reason of «Отменить заказ» / «Отменить остаток» / «Отменить весь заказ» (set by the window, cleared after)
+Global gCancelReason As String
 ' 1.0: OrderCancelCheck — the checks of a cancellation run without the operation (the question comes after them)
 Private mCheckOnly As Boolean
 
@@ -1206,12 +1208,13 @@ Function OrderCancelRow(r As Long) As String
         PlanField("ORDER", Trim(Txt(r, OC_ORDER)))
         PlanField("NAME", Trim(Txt(r, OC_NAME)))
         PlanField("ORD_QTY", mOrdQty)
+        If gCancelReason <> "" Then PlanField("REASON", gCancelReason)
         PlanSetValue(SH_ORD, 0, OD_NEXT_COL, olid + 1, False)
         PlanOrdRow(olid, r, "", fp, mOrdQty, 0, 0, 0, OD_CANCEL_ORDER)
         PlanOrderInputs(r)
         PlanOrderValues(r)
         PlanDerived(SH_ORDERS, r, OC_STATUS, OS_CANCELLED)
-        PlanDerived(SH_ORDERS, r, OC_CTL, "Заказ отменён; ЕИ не создавался")
+        PlanDerived(SH_ORDERS, r, OC_CTL, "Заказ отменён" & IIf(gCancelReason <> "", " " & Format(WmsOrders.Today(), "DD.MM.YYYY") & " — " & gCancelReason, "") & "; ЕИ не создавался")
         PlanDerived(SH_ORDERS, r, OC_STOCK, "")
         PlanDerived(SH_ORDERS, r, OC_DUP, "")
         PlanLockBits(SH_ORDERS, r, 0, OC_LAST, ORDER_LOCKS_POSTED)
@@ -1226,6 +1229,7 @@ Function OrderCancelRow(r As Long) As String
         PlanField("OL", olid)
         PlanField("ROW", src + 1)
         PlanField("ORD_QTY", od(OD_ORD))
+        If gCancelReason <> "" Then PlanField("REASON", gCancelReason)
         PlanSetValue(SH_ORD, olid, OD_CANCEL, OD_CANCEL_ORDER, False)
         If gSmoved Then PlanSetValue(SH_ORD, olid, OD_ROW, src, False)
         PlanSourceStatus(src, od, 0, 0, OD_CANCEL_ORDER)
@@ -1314,6 +1318,7 @@ Function OrderCancelRestRow(r As Long) As String
     PlanField("ORD_QTY", od(OD_ORD))
     PlanField("RCV_QTY", od(OD_RCV))
     PlanField("REST", WmsIssue.Round3(od(OD_ORD) - od(OD_RCV)))
+    If gCancelReason <> "" Then PlanField("REASON", gCancelReason)
     PlanSetValue(SH_ORD, olid, OD_CANCEL, OD_CANCEL_REST, False)
     If gSmoved Then PlanSetValue(SH_ORD, olid, OD_ROW, src, False)
     PlanSourceStatus(src, od, od(OD_RCV), od(OD_NODOC), OD_CANCEL_REST)

@@ -11,6 +11,8 @@ Global gBaseDir As String
 Global gJDir As String
 Global gBDir As String
 Global gSession As String
+' 1.0: the startups finished in this session of the book (StateDump «STARTS»)
+Global gStarts As Long
 ' "" = startup not run yet, CLEAN = posting allowed, BLOCKED, RECOVERING (replay in progress)
 Global gState As String
 Global gBlock As String
@@ -355,6 +357,8 @@ Function StateDump() As String
     End If
     um = gDoc.getUndoManager()
     s = s & ";UNDO_LOCKED=" & um.isLocked() & ";UNDO_CAN=" & um.isUndoPossible() & ";SESSION=" & gSession
+    ' 1.0: how many startups have finished (0 — the startup of the opening is still running: the tools wait for it)
+    s = s & ";STARTS=" & gStarts
     StateDump = s
 End Function
 
@@ -409,6 +413,7 @@ Function WmsStartup() As String
     WmsUi.UiAfterStartup()
     UndoEnd()
     AddNote("запуск WMS " & (GetSystemTicks() - t0) & " мс")
+    gStarts = gStarts + 1
     WmsStartup = StateLine() & " | " & gReport
     Exit Function
 EH:
@@ -421,6 +426,7 @@ EH:
     AddNote("ЗАБЛОКИРОВАНО: ошибка запуска WMS — " & Error$ & " (код STARTUP_ERROR)")
     WmsUi.UiAfterStartup()
     UndoEnd()
+    gStarts = gStarts + 1
     WmsStartup = StateLine() & " | " & gReport
 End Function
 

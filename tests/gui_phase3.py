@@ -166,9 +166,10 @@ def main():
         title, msg = run_dialog(o, ut, doc, "BtnRcvMore", "Ещё поступление", "ok")
         shown, _, back = o.basic(doc, "WmsOrdersUi", "TestRcvDialog").partition("\n")
         today = datetime.date.today().strftime("%d.%m.%Y")
-        step("«OK» без ввода: окно предложило в N сегодняшнюю дату и вернуло все поля как предложены (F пусто) — отказ «не указано количество», "
-             "новой строки и ЕИ нет",
-             "не указано количество" in msg and sysh.getCellByPosition(1, 5).getValue() == nx and sh.getCellByPosition(21, 6).getString() == ""
+        # 1.0 (З4): the window proposes what is still expected of the position as F — «OK» without typing receives that rest
+        step("«OK» без ввода: окно предложило в F остаток позиции, в N — сегодняшнюю дату и вернуло все поля как предложены — проведено "
+             "«Ещё поступление» остатка: новая строка, новый ЕИ",
+             msg.startswith("OK:") and shown.split("\t")[0] not in ("", "0") and sysh.getCellByPosition(1, 5).getValue() == nx + 1
              and shown.split("\t")[4] == today and back == shown, f"{title}; {msg[:120]}; предложено {shown.split(chr(9))}")
         o.dispatch(doc, ".uno:GoToCell", ToPoint="$Заказы.$B$2")
         title, msg = run_dialog(o, ut, doc, "BtnRcvFix", "Исправить приход", "ok")

@@ -33,6 +33,8 @@ Global gRmoved As Boolean
 Global gRcvUnpostedMore As Boolean
 
 Private mInHandler As Boolean
+' 1.0 (З7): the goods or the supplier of one row were typed — «this position is already expected» is looked up
+Private mWaitHint As Boolean
 
 ' ================================================================ sheets
 
@@ -1116,17 +1118,20 @@ Private Sub HandleRange(ra As Variant)
     um = gDoc.getUndoManager()
     um.enterUndoContext("WMS: проверка строки заказа")
     inCtx = True
+    mWaitHint = (ra.StartRow = ra.EndRow And ra.StartColumn <= OC_SUPPLIER And ra.EndColumn >= OC_NAME)
     For r = IIf(ra.StartRow < 1, 1, ra.StartRow) To r1
         n = n + 1
         ' more rows at once (paste, fill): the rest keeps its status until «Обновить статусы» (spec §13)
         If n > PREVIEW_MAX_ROWS Then Exit For
         PreviewOrderRow(r, (ra.StartColumn <= OC_EI And ra.EndColumn >= OC_EI))
     Next r
+    mWaitHint = False
     um.leaveUndoContext()
     mInHandler = False
     Exit Sub
 EH:
     On Error Resume Next
+    mWaitHint = False
     If inCtx Then um.leaveUndoContext()
     mInHandler = False
 End Sub
@@ -1146,7 +1151,14 @@ Sub PreviewOrderRow(r As Long, bKeyTouched As Boolean)
     Case "OPEN"
         SetIfDiff(sh.getCellByPosition(OC_STATUS, r), OpenRowStatus(r))
         p = OpenRowProblem(r)
-        If p <> "" Then p = "Ошибка: " & p
+        If p <> "" Then
+            p = "Ошибка: " & p
+        ElseIf mWaitHint Then
+            ' 1.0 (З7): the same goods of the same supplier are expected already — a hint, never a refusal
+            p = WmsSupply.WaitingHint(r)
+        ElseIf Left(sh.getCellByPosition(OC_CTL, r).getString(), 9) = "Внимание:" Then
+            p = sh.getCellByPosition(OC_CTL, r).getString()
+        End If
         SetIfDiff(sh.getCellByPosition(OC_CTL, r), p)
         SetIfDiff(sh.getCellByPosition(OC_STOCK, r), "")
         SetIfDiff(sh.getCellByPosition(OC_DUP, r), "")

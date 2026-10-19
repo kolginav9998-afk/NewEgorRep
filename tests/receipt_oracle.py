@@ -51,7 +51,8 @@ ISSUE_TYPES = ("ISSUE", "ISSUE_FIX", "ISSUE_DEL")
 RETURN_TYPES = ("RETURN", "RETURN_FIX", "RETURN_DEL")
 SPECIAL_TYPES = ("SP_RECEIPT", "SP_REFILL", "SP_FIX", "SP_DEL", "SP_IDENTIFY")
 ADJUST_TYPES = ("MOVE", "MOVE_FIX", "MOVE_DEL", "WRITE_OFF", "WRITE_OFF_FIX", "WRITE_OFF_DEL", "INV_ADJ", "INV_ADJ_FIX", "INV_ADJ_DEL",
-                "SPLIT", "SPLIT_DEL")       # 1.0 (М1): the split of an EI and its storno (a split is never corrected)
+                "SPLIT", "SPLIT_DEL",       # 1.0 (М1): the split of an EI and its storno (a split is never corrected)
+                "SUP_RET", "SUP_RET_FIX", "SUP_RET_DEL")    # 1.0 (З1): the return to the supplier — as a write-off, never below 0
 MIGRATE_TYPES = ("MIGRATE", "MIGRATE_FIX")
 MIGRATE_STYPES = ("Поставщик", "Офис", "Производство", "Детали", "Старый склад", "Иной приход")
 SP_CODES = ("OFF", "PROD", "DET", "OLD", "OTH")
@@ -1239,17 +1240,20 @@ def replay_adjust(t, f, sq, bal, adjs, place, touched_place, bad, created=None):
             touched_place.add(new)
             if created is not None:
                 created.append(new)
-        elif kind == "WRITE_OFF":
+        elif kind in ("WRITE_OFF", "SUP_RET"):
             q = fnum("QTY")
             if q is None or q <= 0:
-                bad(f"seq {sq} WRITE_OFF № {n}: количество {f.get('QTY')!r}", "A")
+                bad(f"seq {sq} {kind} № {n}: количество {f.get('QTY')!r}", "A")
                 return
             if abs(fnum("BAL_BEFORE") - bal[ei]) > EPS:
-                bad(f"seq {sq} WRITE_OFF № {n}: BAL_BEFORE {f.get('BAL_BEFORE')} ≠ {bal[ei]}", 3)
+                bad(f"seq {sq} {kind} № {n}: BAL_BEFORE {f.get('BAL_BEFORE')} ≠ {bal[ei]}", 3)
             if q > bal[ei] + EPS:
-                bad(f"seq {sq} WRITE_OFF № {n}: списано {q} больше остатка {bal[ei]}", 6)
+                bad(f"seq {sq} {kind} № {n}: списано {q} больше остатка {bal[ei]}", 6)
             bal[ei] -= q
             a["delta"] = -q
+            # 1.0 (З1): the supplier and the document of a return are written by the operation
+            if kind == "SUP_RET":
+                a.update(doc=f.get("DOC", ""), supplier=f.get("SUPPLIER", ""))
         else:
             book, fact, diff = fnum("BOOK"), fnum("FACT"), fnum("DIFF")
             if book is None or abs(book - bal[ei]) > EPS:
@@ -1300,10 +1304,10 @@ def replay_adjust(t, f, sq, bal, adjs, place, touched_place, bad, created=None):
                 bal[ei] -= a["delta"]
                 a["state"] = "STORNO"
             else:
-                if kind == "WRITE_OFF":
+                if kind in ("WRITE_OFF", "SUP_RET"):
                     q = fnum("QTY")
                     if q is None or q <= 0 or abs(fnum("OLD_QTY") + a["delta"]) > EPS:
-                        bad(f"seq {sq} WRITE_OFF_FIX № {n}: количество {f.get('QTY')} / OLD_QTY {f.get('OLD_QTY')} ≠ {-a['delta']}", "A")
+                        bad(f"seq {sq} {kind}_FIX № {n}: количество {f.get('QTY')} / OLD_QTY {f.get('OLD_QTY')} ≠ {-a['delta']}", "A")
                         return
                     nd = -q
                 else:

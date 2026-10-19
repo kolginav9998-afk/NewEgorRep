@@ -114,7 +114,7 @@ ADJUST_HEADERS = ["№", "Вид", "Внутренний код", "Наимен�
                   "Остаток после", "Разница", "Контроль", "Пакет", "Комментарий"]
 ADJUST_WIDTHS = [1500, 3000, 3300, 6000, 3000, 2300, 2300, 2500, 2500, 2800, 2600, 5000, 2800, 2300, 2300, 2300, 7000, 3500, 4500]
 ADJUST_LOCKS_OPEN = "1001110000001111100"      # WmsConfig.ADJUST_LOCKS_OPEN: unposted rows, inputs B C G H I J K L R S open
-ADJUST_KINDS = ["Перемещение", "Списание", "Инвентаризация", "Разделение"]      # WmsConfig.ADJ_KIND_NAMES
+ADJUST_KINDS = ["Перемещение", "Списание", "Инвентаризация", "Разделение", "Возврат поставщику"]      # WmsConfig.ADJ_KIND_NAMES
 ADJ = "_ADJ"
 ADJ_HEADERS = ["№", "Вид", "ЕИ", "Изменение остатка", "Состояние", "Строка (индекс)", "Место до", "Место после", "Учётный остаток",
                "Фактический остаток", "Дата", "Новый ЕИ"]                                                   # WmsConfig AJ_*
@@ -137,7 +137,17 @@ VIEW_SHEETS = [DASH, FIND, MAP, TOPO]
 PLACES = "Места"
 PLACES_HEADERS = ["Место", "Тип", "Зона", "Вместимость, ячеек", "Закрыто", "Примечание"]
 PLACE_KINDS = ["Стеллаж", "Пол", "Улица", "Офис", "Другое"]
-SHEETS_10 = [PLACES]
+# 1.0 (З8, З10, Ф3): the directories of the suppliers and of the goods — the storekeeper's own sheets, not protected; «Снабжение»
+# (WmsSupply) — the page «Ожидаем» / «Нужно заказать»
+SUPPLIERS = "Поставщики"
+SUPPLIER_HEADERS = ["Поставщик", "Телефон", "Контакт", "Обычный срок поставки, дней", "Примечание"]
+GOODS = "Номенклатура"
+GOODS_HEADERS = ["Код", "Наименование", "Артикул", "Ед.", "Категория", "Фасовка: частей в 1 ед.", "Часть (как называть)", "Минимум",
+                 "Заказывать по", "Поставщик", "Фото (файл в папке «Фото»)", "Примечание", "Остаток (все ЕИ)", "ЕИ с остатком", "В пути",
+                 "Обновлено"]
+GOODS_WMS_COLS = 4          # the last columns M..P: written by «Обновить» (WmsSupply), not by the storekeeper
+SUPPLY = "Снабжение"
+SHEETS_10 = [PLACES, SUPPLIERS, GOODS, SUPPLY]
 LEGREP = "Сверка переноса"
 LEGREP_HEAD = 3                   # WmsConfig.LEGREP_HEAD
 LEGREP_HEADERS = ["ЕИ", "Наименование", "Ед.", "Откуда", "Приход при переносе", "Остаток при переносе", "Израсходовано до переноса",
@@ -955,6 +965,121 @@ def build_places(doc, sh):
     sh.getColumns().getByIndex(7).Width = 11000
 
 
+def build_suppliers(doc, sh):
+    """«Поставщики» (1.0, З8): one spelling of every supplier — the list of «Заказы» L and «Приход авто»; the usual delivery
+    time gives the expected date of a new order made by WMS (a replacement, a repeat). The storekeeper's own sheet"""
+    header(sh, SUPPLIER_HEADERS, [7000, 3600, 4200, 3400, 9000], height=900)
+    text = number_format(doc, "@", ("ru", "RU"))
+    sh.getCellRangeByPosition(0, 1, 2, LAST_ROW).NumberFormat = text
+    sh.getCellRangeByPosition(3, 1, 3, LAST_ROW).NumberFormat = number_format(doc, "0")
+    hint = sh.getCellByPosition(6, 0)
+    hint.setString("Одна строка — один поставщик, одним написанием: тогда «Заказы», «Приход авто» и «Ожидаем» его не путают. "
+                   "«Пополнить из заказов» добавит поставщиков, которых здесь ещё нет.")
+    hint.CharColor = MUTED
+    hint.IsTextWrapped = True
+    sh.getColumns().getByIndex(6).Width = 11000
+
+
+def build_goods(doc, sh):
+    """«Номенклатура» (1.0, З10 / Ф3): the goods (an article, or the name when there is none, joins the EIs of one goods):
+    the minimum and the batch of «Нужно заказать», the usual supplier, the default packing, the photo; M..P — written by WMS"""
+    header(sh, GOODS_HEADERS, [2200, 7000, 3000, 1600, 3000, 2600, 2600, 2200, 2400, 4800, 4200, 5000, 2600, 2400, 2400, 2800], height=1300)
+    text = number_format(doc, "@", ("ru", "RU"))
+    for c in (0, 1, 2, 3, 4, 6, 9, 10, 11):
+        sh.getCellRangeByPosition(c, 1, c, LAST_ROW).NumberFormat = text
+    n = len(GOODS_HEADERS)
+    wms = sh.getCellRangeByPosition(n - GOODS_WMS_COLS, 0, n - 1, 0)
+    wms.CellBackColor = WMS_HEAD_10
+    sh.getCellRangeByPosition(0, 0, n - GOODS_WMS_COLS - 1, 0).CellBackColor = INPUT_HEAD_10
+    sh.getCellRangeByPosition(n - GOODS_WMS_COLS, 1, n - 1, 5000).CharColor = MUTED
+    sh.getCellRangeByPosition(n - 1, 1, n - 1, LAST_ROW).NumberFormat = number_format(doc, "DD.MM.YYYY")
+    hint = sh.getCellByPosition(n + 1, 0)
+    hint.setString("Товар — строка: артикул (или наименование, если артикула нет) объединяет все его ЕИ. «Минимум» и «Заказывать по» — для "
+                   "«Нужно заказать» на странице «Снабжение». Серые колонки WMS заполняет кнопкой «Обновить».")
+    hint.CharColor = MUTED
+    hint.IsTextWrapped = True
+    sh.getColumns().getByIndex(n + 1).Width = 11000
+
+
+def build_supply(doc, sh):
+    """«Снабжение» (WmsSupply): the filter by supplier, «Ожидаем» (the open positions by supplier) and «Нужно заказать» (the goods
+    below their minimum); a double click — the row of «Заказы»"""
+    view_styles(doc)
+    widths = [400, 5600, 7400, 2800, 2000, 2000, 2200, 1500, 2700, 2600, 2700, 400]
+    for c, w in enumerate(widths):
+        sh.getColumns().getByIndex(c).Width = w
+    for c in (12, 13, 14):                         # WmsSupply.SP_SRC_SHEET, SP_SRC_ROW, SP_MARK
+        sh.getColumns().getByIndex(c).IsVisible = False
+    for r, h in {0: 1100, 1: 950, 2: 250, 3: 900, 4: 600, 5: 250, 6: 800, 7: 520, 8: 520, 9: 560}.items():
+        sh.getRows().getByIndex(r).Height = h
+    merge(sh, 1, 0, 10, 0)
+    text_cell(sh, 1, 0, "Снабжение: ожидаем и нужно заказать", size=20, bold=True, color=INK, valign=2)
+    text_cell(sh, 1, 3, "Поставщик", size=12, bold=True, color=INK, valign=2, halign=3)
+    inp = merge(sh, 2, 3, 3, 3)
+    cell = sh.getCellByPosition(2, 3)
+    cell.CharHeight = 13
+    cell.VertJustify = 2
+    cell.NumberFormat = number_format(doc, "@", ("ru", "RU"))
+    inp.CellBackColor = 0xFFF8E1
+    box(inp, 0xE0B84C, 26)
+    list_validation(sh.getCellByPosition(2, 3), f"$'{SUPPLIERS}'.$A$2:$A$1048576")
+    merge(sh, 1, 4, 10, 4)
+    text_cell(sh, 1, 4, "Пусто — все поставщики. «Ожидаем» — что заказано и ещё не пришло; «Нужно заказать» — товары «Номенклатуры» ниже "
+                        "минимума. Двойной щелчок по строке — строка «Заказов».", size=9, color=MUTED, wrap=True, valign=1)
+    merge(sh, 1, 6, 10, 6)
+    text_cell(sh, 1, 6, "Нажмите «Ожидаем» или «Нужно заказать»", size=15, bold=True, color=INK, valign=2)
+    for r in (7, 8):
+        merge(sh, 1, r, 10, r)
+        text_cell(sh, 1, r, "", size=10, color=TEXT, valign=2)
+    hdr = sh.getCellRangeByPosition(1, 9, 10, 9)
+    hdr.CharWeight = 150
+    hdr.CharHeight = 9
+    hdr.CharColor = MUTED
+    hdr.CellBackColor = 0xE7ECF2
+    hdr.VertJustify = 2
+    hdr.IsTextWrapped = True
+    body = sh.getCellRangeByPosition(1, 10, 10, 3100)
+    body.CharHeight = 9
+    body.CharColor = TEXT
+    cell_style(doc, "SP_Group", CharWeight=150, CellBackColor=0xEEF3F8, CharColor=INK)
+    cell_style(doc, "SP_Late", CharColor=0x9C0006)
+    add_cond(sh, sh.getCellRangeByPosition(1, 10, 10, 3100), '$O11="G"', "SP_Group", 1, 10)
+    add_cond(sh, sh.getCellRangeByPosition(1, 10, 10, 3100), '$O11="L"', "SP_Late", 1, 10)
+    view_nav(doc, sh, 1, "spNav", "", total=30500)
+    y = sh.getCellByPosition(0, 3).Position.Y
+    x = sh.getCellByPosition(4, 3).Position.X
+    add_button(doc, sh, "btnWait", "Ожидаем", "WmsSupply.BtnWait", x + 80, y + 90, 2500, 720, bold=True, back=0xC6E0B4)
+    add_button(doc, sh, "btnNeed", "Нужно заказать", "WmsSupply.BtnNeed", x + 2660, y + 90, 3400, 720, bold=True, back=0xC6E0B4)
+    add_button(doc, sh, "btnSupGo", "Перейти к строке", "WmsSupply.BtnSupplyGo", x + 6140, y + 90, 3600, 720, back=0xDDEBF7)
+    add_button(doc, sh, "btnSupDir", "Поставщики", "WmsSupply.NavSuppliers", x + 9820, y + 90, 2900, 720, back=0xDDEBF7)
+    add_button(doc, sh, "btnGoodsDir", "Номенклатура", "WmsSupply.NavGoods", x + 12800, y + 90, 3000, 720, back=0xDDEBF7)
+    sh.getCellRangeByPosition(0, 0, 15, 3100).CellProtection = protection(True)
+    sh.getCellByPosition(2, 3).CellProtection = protection(False)
+    # protected with the other pages at the end of the build (a protected sheet stops the cell styles created later)
+
+
+def supply_10(doc, sheets):
+    """1.0 (этап F): what a new book and an upgraded one both get — «Поставщики», «Номенклатура», «Снабжение»; the list of the
+    suppliers on «Заказы» L and on the panel of «Приход авто»; the events of «Снабжение»"""
+    names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+    if not sheets.hasByName(SUPPLIERS):
+        sheets.insertNewByName(SUPPLIERS, names.index(RCPT) + 1)
+        build_suppliers(doc, sheets.getByName(SUPPLIERS))
+    names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+    if not sheets.hasByName(GOODS):
+        sheets.insertNewByName(GOODS, names.index(SUPPLIERS) + 1)
+        build_goods(doc, sheets.getByName(GOODS))
+    names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+    if not sheets.hasByName(SUPPLY):
+        sheets.insertNewByName(SUPPLY, names.index(FIND) + 1)
+        build_supply(doc, sheets.getByName(SUPPLY))
+    src = f"$'{SUPPLIERS}'.$A$2:$A$1048576"
+    list_validation(sheets.getByName(ORDERS).getCellRangeByPosition(11, 1, 11, LAST_ROW), src)
+    list_validation(sheets.getByName(CARS).getCellByPosition(3, 1), src)          # the panel: «Поставщик» D2 (WmsConfig CP_SUP_COL, CP_IN_ROW)
+    bind_event(sheets.getByName(SUPPLY).Events, "OnDoubleClick", "WmsSupply.OnSupplyDoubleClick")
+    bind_event(sheets.getByName(SUPPLY).Events, "OnChange", "WmsSupply.OnSupplyChange")
+
+
 def layout_10(doc, sheets):
     """1.0: what a new book and an upgraded one both get (the data are not touched, only formats): the place columns are text —
     «5.12.3» typed there stays a place, Calc does not take it for a date (Заказы U, Возврат J, Иной приход I, Корректировки J);
@@ -1011,8 +1136,8 @@ def layout_10(doc, sheets):
 FREEZE_COLS_10 = {ISSUES: 3, ORDERS: 2, RETURNS: 4, ADJUST: 4, SPECIAL: 4, STOCK: 2}
 # 1.0 (В9): the colour of the sheet tabs by group — pages, the sheets the storekeeper works in, the registers and directories,
 # the service sheets
-TAB_COLORS_10 = [((DASH, MAIN, FIND, MAP), 0x5B9BD5), ((ORDERS, SPECIAL, CARS, ISSUES, RETURNS, ADJUST), 0x70AD47),
-                 ((STOCK, RCPT, TOPO, PLACES), 0xED7D31), ((LEGREP, HELP), 0xA5A5A5)]
+TAB_COLORS_10 = [((DASH, MAIN, FIND, MAP, SUPPLY), 0x5B9BD5), ((ORDERS, SPECIAL, CARS, ISSUES, RETURNS, ADJUST), 0x70AD47),
+                 ((STOCK, RCPT, TOPO, PLACES, SUPPLIERS, GOODS), 0xED7D31), ((LEGREP, HELP), 0xA5A5A5)]
 # 1.0 (В1): what the storekeeper fills in is white, what WMS writes is grey (data rows), the headers likewise
 INPUT_HEAD_10 = 0xFFF2CC
 WMS_HEAD_10 = 0xE7E6E6
@@ -1107,10 +1232,11 @@ HINTS_10 = {
               9: ("Место", "Куда положили: 1-2-3. У ЕИ на нескольких местах WMS спросит — добавить место или заменить.")},
     SPECIAL: {1: ("Тип прихода", "Офис, Производство, Детали, Старый склад или Иной — из списка."), 5: _QTY_IN,
               7: ("Дата поступления", _DATE[1]), 8: _PLACE},
-    ADJUST: {1: ("Вид", "Перемещение, Списание, Инвентаризация или Разделение (часть ЕИ — в новый ЕИ со своей этикеткой) — из списка."), 2: _EI,
-             6: ("Списать / отделить", "Списание: 2 · 0,25 · 1 кан · 1,5 м · всё (весь остаток). Разделение: сколько отделить в новый ЕИ — 2 кан, 4,5 м."),
+    ADJUST: {1: ("Вид", "Перемещение, Списание, Инвентаризация, Разделение (часть ЕИ — в новый ЕИ) или Возврат поставщику (брак, пересорт) — из списка."), 2: _EI,
+             6: ("Списать / отделить / вернуть", "Списание и возврат поставщику: 2 · 0,25 · 1 кан · 1,5 м · всё. Разделение: сколько отделить в новый ЕИ — 2 кан, 4,5 м."),
              7: ("Фактический остаток", "Инвентаризация: сколько насчитали — 3 · 3 кан · 4,5 м; 0 — на месте пусто. Совпало с учётом — так и запишется."),
-             9: ("Новое место", "Перемещение: куда переложили — 1-2-3 или несколько мест через запятую. Разделение: место нового ЕИ (пусто — то же место)."),
+             9: ("Новое место", "Перемещение: куда переложили — 1-2-3, несколько мест через запятую, «1-2-3…5»; «+1-2-5» — добавить место, «−1-2-3» — убрать. "
+                 "Разделение: место нового ЕИ. Возврат поставщику: номер документа возврата."),
              10: _DATE},
 }
 
@@ -1189,6 +1315,16 @@ BUTTONS_10 = [
     (ORDERS, "btnReceiveAll", "Принять всё по заказу", "WmsDaily.BtnReceiveAll", 150 + 5 * 3050, 120 + 760, 3900, 650, 0xC6E0B4),
     (FIND, "btnIssueFrom", "Выдать", "WmsDaily.BtnIssueFrom", None, None, 2400, 720, 0xC6E0B4),
     (FIND, "btnReturnHands", "Вернуть выделенное", "WmsDaily.BtnReturnHands", None, None, 3900, 720, 0xC6E0B4),
+    # 1.0 (этап F): orders and suppliers
+    (ORDERS, "btnRepeatOrder", "Повторить заказ", "WmsSupply.BtnRepeatOrder", 19400, 880, 3300, 650, 0xDDEBF7),
+    (ORDERS, "btnCancelOrderAll", "Отменить весь заказ", "WmsSupply.BtnCancelOrderAll", 22800, 880, 3900, 650, 0xF4CCCC),
+    (ORDERS, "btnSupply", "Снабжение", "WmsSupply.NavSupply", 150 + 7 * 3050, 120, 2900, 650, 0xDDEBF7),
+    (STOCK, "btnSupReturn", "Вернуть поставщику…", "WmsSupply.BtnSupReturn", 21600, 120, 4300, 650, 0xDDEBF7),
+    (ADJUST, "btnSupReturn", "Вернуть поставщику…", "WmsSupply.BtnSupReturn", 150 + 9 * 2900, 120, 4200, 650, 0xDDEBF7),
+    (SUPPLIERS, "btnSuppliersFill", "Пополнить из заказов", "WmsSupply.BtnSuppliersFill", 18200, 120, 4600, 650, 0xDDEBF7),
+    (GOODS, "btnGoodsRefresh", "Обновить", "WmsSupply.BtnGoodsRefresh", None, None, 2600, 650, 0xDDEBF7),
+    (GOODS, "btnGoodsFill", "Пополнить из «Наличия»", "WmsSupply.BtnGoodsFill", None, None, 5000, 650, 0xDDEBF7),
+    (CARS, "btnCarAccept", "Принять товар", "WmsSupply.BtnCarAccept", None, None, None, None, 0xC6E0B4),
 ]
 
 
@@ -1196,7 +1332,17 @@ def buttons_10(doc, sheets):
     fit_headers(sheets.getByName(ISSUES), ISSUE_HEADERS, 3100)
     for sheet, name, label, macro, x, y, w, h, back in BUTTONS_10:
         sh = sheets.getByName(sheet)
-        if x is None:
+        if x is None and sheet == CARS:
+            # 1.0 (З9): over L1:L2 of the panel, after «Исправить» / «Отменить визит»
+            x = sh.getCellByPosition(11, 0).Position.X + 40
+            y = sh.getCellByPosition(0, 0).Position.Y + 40
+            w = sh.getCellByPosition(12, 0).Position.X - x - 40
+            h = sh.getCellByPosition(0, 2).Position.Y - y - 40
+        elif x is None and sheet == GOODS:
+            # over the hint right of the table
+            x = sh.getCellByPosition(len(GOODS_HEADERS) + 1, 0).Position.X + {"btnGoodsRefresh": 0, "btnGoodsFill": 2700}[name]
+            y = 120
+        elif x is None:
             # «Поиск»: the row of its buttons (build_find), after «Фасовка ЕИ»
             y = sh.getCellByPosition(0, 3).Position.Y + 90
             x = sh.getCellByPosition(6, 3).Position.X + {"btnIssueFrom": 13100, "btnReturnHands": 15580, "btnShowOnMap": 19560}[name]
@@ -1393,9 +1539,11 @@ def main_nav_views(doc, sh):
     """PRIME 0.8: «Главная» leads to the new pages too — the second strip, under the ways to the working sheets"""
     sh.getRows().getByIndex(2).Height = 1000
     y = sh.getCellByPosition(0, 2).Position.Y
+    # 1.0: «Снабжение» (этап F) among them
     for i, (name, label, macro) in enumerate((("navDash", "Дашборд", "WmsUi.NavDash"), ("navFind", "Поиск и карточка ЕИ", "WmsUi.NavFind"),
-                                              ("navMap", "Карта склада", "WmsUi.NavMap"), ("navHelp", "Справка", "WmsDaily.NavHelp"))):
-        add_button(doc, sh, name, label, macro, MAIN_LEFT + 100 + i * 5700, y + 80, 5640, 840, bold=True, back=0xC6E0B4)
+                                              ("navMap", "Карта склада", "WmsUi.NavMap"), ("navSupply", "Снабжение", "WmsSupply.NavSupply"),
+                                              ("navHelp", "Справка", "WmsDaily.NavHelp"))):
+        add_button(doc, sh, name, label, macro, MAIN_LEFT + 100 + i * 4560, y + 80, 4500, 840, bold=True, back=0xC6E0B4)
 
 
 def version_text():
@@ -1636,6 +1784,7 @@ def build(office, out_path, test=False, instance_id=None):
     status_colors(doc, sheets)
     where_buttons(doc, sheets)
     layout_10(doc, sheets)
+    supply_10(doc, sheets)
     buttons_10(doc, sheets)
     colors_10(doc, sheets)
     hints_10(doc, sheets)
@@ -1682,7 +1831,7 @@ def build(office, out_path, test=False, instance_id=None):
     for name in (ORD, RCV, SPR, ART, RET, ISS, ADJ, CAR, LEG, PACK, IDX, "_SYS"):
         sheets.getByName(name).IsVisible = False
     for name in (MAIN, ORDERS, SPECIAL, CARS, ISSUES, RETURNS, ADJUST, STOCK, LEGREP, HELP, ORD, RCV, SPR, ART, RET, ISS, ADJ, CAR, LEG, PACK, IDX,
-                 "_SYS", DASH, FIND, MAP):
+                 "_SYS", DASH, FIND, MAP, SUPPLY):
         sheets.getByName(name).protect(PWD)
     doc.protect(PWD)
     if os.path.exists(out_path):

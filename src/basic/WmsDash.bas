@@ -71,11 +71,31 @@ Sub OnDashFocus(Optional oEvent As Variant)
 EH:
 End Sub
 
+' 1.0 (З3): what is still expected of the position of row r of «Заказы» (ordered − received; the whole order before a receipt)
+Private Function DashRest(r As Long) As Double
+    Dim osh As Object, canon As String, n As Long, rv As Variant, od As Variant, q As Double, msg As String
+    On Error GoTo EH
+    osh = WmsOrders.OrdersSheet()
+    canon = osh.getCellByPosition(OC_EI, r).getString()
+    If canon = "" Then
+        If WmsOrders.ParseQtyAs(osh.getCellByPosition(OC_ORDQTY, r), "заказано", q, msg) Then DashRest = q
+    ElseIf WmsOrders.StrictEI(canon, n) Then
+        If WmsOrders.RcvRegistered(n, rv) Then
+            If WmsOrders.OlValid(CLng(rv(RV_OL)), od) Then
+                If CStr(od(OD_CANCEL)) = "" Then DashRest = WmsIssue.Round3(od(OD_ORD) - od(OD_RCV))
+            End If
+        End If
+    End If
+    If DashRest < 0 Then DashRest = 0
+EH:
+End Function
+
 ' Counts and writes the page. OK:<what was counted, ms> or ERR:<why>. The sheets are counted by formulas of the Calc
 ' engine (WmsView.Eng): only the rows they find — the positions we wait for, the issues of 30 days — are read by Basic.
 Function DashRefresh() As String
     Dim sh As Object, today As Double, nextEI As Long, last As Long, i As Long, k As Long, n As Long, s As String, a As Variant, nItems As Long
     Dim nEI As Long, nPos As Long, nReview As Long, nWait As Long, nLate As Long, nToday As Long, nNoDate As Long, wKey(DB_LIST1_N - 1) As Double, nW As Long
+    Dim nNeed As Long, rest As Double
     Dim rcvToday As Long, splToday As Long, issToday As Long, retToday As Long, adjToday As Long, carsIn As Long, carsArr As Long, carsDep As Long
     Dim who As Object, nWho As Long, dayIss(13) As Long, dayRcv(13) As Long, dt As Double, key As Double, r As Long
     Dim top As Object, tName() As String, tCnt() As Double, tQty() As Double, tUnit() As String, nTop As Long, j As Long, nm As String
@@ -267,13 +287,21 @@ Function DashRefresh() As String
     sh.getCellByPosition(DB_SVC_COL, 0).setString(gState & "|" & gBlock)
     ' the tiles: value, line under it
     PutTile(sh, 0, nPos, "всего ЕИ " & NumText(nEI) & " · требует разбора " & NumText(nReview))
-    PutTile(sh, 1, nWait, "просрочено " & NumText(nLate) & " · сегодня " & NumText(nToday) & " · без даты " & NumText(nNoDate))
+    ' 1.0 (З10): the goods of «Номенклатура» below their minimum
+    nNeed = 0
+    If gDoc.Sheets.hasByName(WmsSupply.SH_GOODS) Then
+        If Left(WmsSupply.NeedCompute(""), 3) = "OK:" Then nNeed = gNdN
+    End If
+    PutTile(sh, 1, nWait, "просрочено " & NumText(nLate) & " · сегодня " & NumText(nToday) & " · без даты " & NumText(nNoDate) _
+        & IIf(nNeed > 0, " · заказать " & NumText(nNeed), ""))
     PutTile(sh, 2, rcvToday + splToday, "по заказам " & NumText(rcvToday) & " · иной приход " & NumText(splToday))
     PutTile(sh, 3, issToday, "получателей " & NumText(nWho) & " · возвратов " & NumText(retToday) & " · корректировок " & NumText(adjToday))
     PutTile(sh, 4, carsIn, "приехало сегодня " & NumText(carsArr) & " · уехало " & NumText(carsDep))
     PutTile(sh, 5, attention, IIf(attention = 0, "всё в порядке", "непроведённых " & NumText(unposted) & " · требует разбора " & NumText(nReview)))
-    ' list 1: the positions by the expected date (the earliest first)
+    ' list 1: the positions by the expected date (the earliest first); 1.0 (З3): what is still expected of each, «и ещё N», the
+    ' row of «Заказы» (the hidden column) for a double click
     sh.getCellRangeByPosition(1, DB_LIST1, 6, DB_LIST1 + DB_LIST1_N - 1).clearContents(1 + 2 + 4)
+    sh.getCellRangeByPosition(DB_SVC_COL, DB_LIST1, DB_SVC_COL, DB_LIST1 + DB_LIST1_N - 1).clearContents(1 + 2 + 4)
     For i = 0 To nW - 1
         dt = Int(wKey(i) / 1048576)
         r = CLng(wKey(i) - dt * 1048576)
@@ -286,8 +314,13 @@ Function DashRefresh() As String
         Else
             s = "через " & (-k) & " дн."
         End If
-        PutRow(sh, DB_LIST1 + i, 1, Array(CStr(ord(OC_ORDER)), CStr(ord(OC_NAME)), "", CStr(ord(OC_SUPPLIER)), ViewDay(dt), s))
+        rest = DashRest(r)
+        PutRow(sh, DB_LIST1 + i, 1, Array(CStr(ord(OC_ORDER)), CStr(ord(OC_NAME)) & IIf(rest > 0, " · осталось " & WmsIssue.QtyText(rest) _
+            & IIf(CStr(ord(OC_UNIT)) <> "", " " & ord(OC_UNIT), ""), ""), "", CStr(ord(OC_SUPPLIER)), ViewDay(dt), s))
+        sh.getCellByPosition(DB_SVC_COL, DB_LIST1 + i).setString(SH_ORDERS & "|" & r)
     Next i
+    sh.getCellByPosition(1, DB_LIST1_HEAD).setString("Ожидается: срок прошёл и ближайшие поставки" & IIf(nWait > nW, " · и ещё " & NumText(nWait - nW) _
+        & " — все на «" & WmsSupply.SH_SUPPLY & "»", ""))
     If nW = 0 Then sh.getCellByPosition(2, DB_LIST1).setString(IIf(nWait = 0, "ничего не ожидается", "ожидаемая дата (Q) не указана ни у одной позиции"))
     ' list 2: the last operations of the journal
     sh.getCellRangeByPosition(7, DB_LIST1, 12, DB_LIST1 + DB_LIST1_N - 1).clearContents(1 + 2 + 4)

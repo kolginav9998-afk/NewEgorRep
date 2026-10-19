@@ -1537,7 +1537,10 @@ Function WhereSuggest(nm As String, art As String) As String
             For j = 0 To gMpN - 1
                 If gMpOcc(j) + plan(j) < cap(j) And Not used(j) And gMpFirst(j) = j And Not PlaceClosed(gMpKey(j)) Then
                     If anchorIdx >= 0 Then
-                        d = Abs(gMpRow(j) - gMpRow(anchorIdx)) * 3 + Abs(gMpCol(j) - gMpCol(anchorIdx))
+                        ' the same row of racks: the address (another tier of the same section first, then the next sections);
+                        ' another row: as far as it is on the map (rows numbered apart may stand side by side)
+                        d = SameRowDistance(anchorKey, gMpKey(j))
+                        If d < 0 Then d = 100 + Abs(gMpRow(j) - gMpRow(anchorIdx)) * 3 + Abs(gMpCol(j) - gMpCol(anchorIdx))
                     Else
                         d = PlaceDistance(anchorKey, gMpKey(j), j)
                     End If
@@ -1550,7 +1553,7 @@ Function WhereSuggest(nm As String, art As String) As String
             If best < 0 Then Exit For
             used(best) = True
             out = out & IIf(out <> "", Chr(10), "") & gMpKey(best) & "|" & gMpKey(best) & IIf(gMpOcc(best) + plan(best) = 0, " — свободно", " — есть место (занято " _
-                & (gMpOcc(best) + plan(best)) & " из " & cap(best) & ")") & IIf(anchorKey <> "", IIf(bestD < IIf(anchorIdx >= 0, 12, 1000), ", рядом", ""), "")
+                & (gMpOcc(best) + plan(best)) & " из " & cap(best) & ")") & IIf(anchorKey <> "", IIf(bestD < IIf(anchorIdx >= 0, 21, 1000), ", рядом", ""), "")
             nOut = nOut + 1
         Next k
     End If
@@ -1559,6 +1562,17 @@ Function WhereSuggest(nm As String, art As String) As String
     Else
         WhereSuggest = out
     End If
+End Function
+
+' 1.0 (М9): two places of one row of racks — 10 per section apart and 1 per tier; −1 for places of two rows (or not numbered)
+Private Function SameRowDistance(sFrom As String, sTo As String) As Double
+    Dim a As Variant, b As Variant
+    SameRowDistance = -1
+    a = Split(sFrom, "-")
+    b = Split(sTo, "-")
+    If UBound(a) < 2 Or UBound(b) < 2 Then Exit Function
+    If a(0) <> b(0) Or Not IsNumeric(a(1)) Or Not IsNumeric(b(1)) Or Not IsNumeric(a(2)) Or Not IsNumeric(b(2)) Then Exit Function
+    SameRowDistance = Abs(CDbl(a(1)) - CDbl(b(1))) * 10 + Abs(CDbl(a(2)) - CDbl(b(2)))
 End Function
 
 ' the distance between two places «ряд-секция-ярус» (numbers): rows far apart count most; with no anchor — the order of the map

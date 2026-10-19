@@ -11,6 +11,8 @@ Global gRcvIn(6) As String
 ' what the last receipt dialog proposed and what it returned (the test seam reads them; the GUI test checks the real window)
 Global gRcvShown As String
 Global gRcvBack As String
+' 1.0 (З4): the line over the fields of the last receipt dialog
+Global gRcvInfo As String
 ' the text of the window that ended the last block of «Провести приход» (the test seam reads it)
 Global gRcvBlockMsg As String
 Private Const RCV_KEEP = "<как предложено>"
@@ -196,6 +198,7 @@ End Function
 ' «Ещё поступление»: the next receipt of the position of the row under the cursor, in a new row
 Sub BtnRcvMore(Optional oEvent As Variant)
     Dim r As Long, why As String, res As String, kind As String, v(6) As String, sh As Object, a As Variant, nr As Long
+    Dim od As Variant, rest As Double, info As String, u As String, q As Double, msg As String
     If Not ActiveOrderRow(r, why) Then
         Refuse(why)
         Exit Sub
@@ -223,10 +226,37 @@ Sub BtnRcvMore(Optional oEvent As Variant)
     v(4) = Format(WmsOrders.Today(), "DD.MM.YYYY")
     v(5) = sh.getCellByPosition(OC_PLACE, r).getString()
     If sh.getCellByPosition(OC_PRICE, r).getType() = com.sun.star.table.CellContentType.VALUE Then v(6) = WmsIssue.QtyText(sh.getCellByPosition(OC_PRICE, r).getValue())
+    ' 1.0 (З4): what is still expected of the position, the rest proposed as the quantity
+    rest = -1
+    info = ""
+    If WmsOrders.OlValid(gKol, od) Then
+        u = Trim(sh.getCellByPosition(OC_UNIT, r).getString())
+        If CStr(od(OD_CANCEL)) = OD_CANCEL_REST Then
+            info = "Заказано " & WmsIssue.QtyText(od(OD_ORD)) & " · получено " & WmsIssue.QtyText(od(OD_RCV)) & " · остаток отменён"
+        Else
+            rest = WmsIssue.Round3(od(OD_ORD) - od(OD_RCV))
+            If rest < 0 Then rest = 0
+            info = "Заказано " & WmsIssue.QtyText(od(OD_ORD)) & " · получено " & WmsIssue.QtyText(od(OD_RCV)) & " · осталось " & WmsIssue.QtyText(rest) _
+                & IIf(u <> "", " " & u, "")
+            If rest > 0 Then v(0) = WmsIssue.QtyText(rest)
+        End If
+    End If
     If Not ReceiptDialog("Ещё поступление: " & sh.getCellByPosition(OC_NAME, r).getString() & " (заказ " & sh.getCellByPosition(OC_ORDER, r).getString() & ")", _
-        "Провести", v) Then
+        "Провести", v, info) Then
         gUiLastMsg = "SKIP:окно закрыто без проведения"
         Exit Sub
+    End If
+    ' more than still expected — asked (a delivery above the order is possible, but usually a typing slip)
+    If rest >= 0 Then
+        If WmsOrders.ParseQtyValueAs(v(0), "принято", q, msg) Then
+            If q > rest + 0.0000001 Then
+                If Not UiConfirm("Принято " & WmsIssue.QtyText(q) & ", а осталось получить " & WmsIssue.QtyText(rest) & " (" & LCase(Left(info, 1)) & Mid(info, 2) _
+                    & ") — больше заказанного." & Chr(10) & Chr(10) & "Провести поступление " & WmsIssue.QtyText(q) & "?") Then
+                    gUiLastMsg = "SKIP:поступление не проведено — больше заказанного"
+                    Exit Sub
+                End If
+            End If
+        End If
     End If
     res = WmsReceipt.ReceiptAddRow(r, v(0), v(1), v(2), v(3), v(4), v(5), v(6))
     AfterOperation("«Ещё поступление»", res)
@@ -360,7 +390,7 @@ Sub BtnRcvDelete(Optional oEvent As Variant)
 End Sub
 
 Sub BtnOrdCancel(Optional oEvent As Variant)
-    Dim r As Long, why As String, res As String, sh As Object
+    Dim r As Long, why As String, res As String, sh As Object, reason As String
     If Not ActiveOrderRow(r, why) Then
         UiMessage(why)
         Exit Sub
@@ -373,10 +403,14 @@ Sub BtnOrdCancel(Optional oEvent As Variant)
         gUiLastMsg = res
         Exit Sub
     End If
-    If Not UiConfirm("Отменить заказ?" & Chr(10) & Chr(10) & "Заказ " & sh.getCellByPosition(OC_ORDER, r).getString() & ": " _
+    ' 1.0 (З5): the reason of the cancellation — in the journal and in «Контроль»
+    reason = ""
+    If Not WmsPrimeUi.ReasonAsk("Отменить заказ", "Отменить заказ?" & Chr(10) & Chr(10) & "Заказ " & sh.getCellByPosition(OC_ORDER, r).getString() & ": " _
         & sh.getCellByPosition(OC_NAME, r).getString() & Chr(10) & Chr(10) & "Позиция получит статус «Отменено», строка останется в истории. " _
-        & "ЕИ не создаётся.") Then Exit Sub
+        & "ЕИ не создаётся.", "Отменить заказ", reason) Then Exit Sub
+    gCancelReason = reason
     res = WmsReceipt.OrderCancelRow(r)
+    gCancelReason = ""
     AfterOperation("«Отменить заказ»", res)
     If Left(res, 5) = "SKIP:" Then
         UiMessage(Payload(res))
@@ -387,7 +421,7 @@ Sub BtnOrdCancel(Optional oEvent As Variant)
 End Sub
 
 Sub BtnOrdCancelRest(Optional oEvent As Variant)
-    Dim r As Long, why As String, res As String, sh As Object
+    Dim r As Long, why As String, res As String, sh As Object, reason As String
     If Not ActiveOrderRow(r, why) Then
         UiMessage(why)
         Exit Sub
@@ -399,10 +433,13 @@ Sub BtnOrdCancelRest(Optional oEvent As Variant)
         gUiLastMsg = res
         Exit Sub
     End If
-    If Not UiConfirm("Отменить остаток позиции?" & Chr(10) & Chr(10) & "Заказ " & sh.getCellByPosition(OC_ORDER, r).getString() & ": " _
+    reason = ""
+    If Not WmsPrimeUi.ReasonAsk("Отменить остаток", "Отменить остаток позиции?" & Chr(10) & Chr(10) & "Заказ " & sh.getCellByPosition(OC_ORDER, r).getString() & ": " _
         & sh.getCellByPosition(OC_NAME, r).getString() & Chr(10) & Chr(10) & "Полученное количество и заказанное (H) не меняются, " _
-        & "неполученный остаток больше не ожидается.") Then Exit Sub
+        & "неполученный остаток больше не ожидается.", "Отменить остаток", reason) Then Exit Sub
+    gCancelReason = reason
     res = WmsReceipt.OrderCancelRestRow(r)
+    gCancelReason = ""
     AfterOperation("«Отменить остаток»", res)
     If Left(res, 5) = "SKIP:" Then
         UiMessage(Payload(res))
@@ -443,9 +480,11 @@ End Sub
 
 ' ================================================================ the receipt dialog (F, G, C, O, N, U, J)
 
-Private Function ReceiptDialog(sTitle As String, sOk As String, v() As String) As Boolean
-    Dim dm As Object, dlg As Object, i As Integer, lbl As Variant, m As Object
+Private Function ReceiptDialog(sTitle As String, sOk As String, v() As String, Optional sInfo As Variant) As Boolean
+    Dim dm As Object, dlg As Object, i As Integer, lbl As Variant, m As Object, top As Integer, info As String
+    If Not IsMissing(sInfo) Then info = CStr(sInfo)
     gRcvShown = Join(v, Chr(9))
+    gRcvInfo = info
     gRcvBack = ""
     If gUiAuto <> 0 Then
         If gRcvInSet Then
@@ -461,20 +500,32 @@ Private Function ReceiptDialog(sTitle As String, sOk As String, v() As String) A
     dm = CreateUnoService("com.sun.star.awt.UnoControlDialogModel")
     dm.Title = sTitle
     dm.Width = 250
-    dm.Height = 170
+    ' 1.0 (З4): a line over the fields — «заказано 10 · получено 2 · осталось 8»
+    If info <> "" Then top = 16
+    dm.Height = 170 + top
+    If info <> "" Then
+        m = dm.createInstance("com.sun.star.awt.UnoControlFixedTextModel")
+        m.PositionX = 8
+        m.PositionY = 5
+        m.Width = 234
+        m.Height = 12
+        m.Label = info
+        m.FontWeight = 150
+        dm.insertByName("lInfo", m)
+    End If
     lbl = Array("Фактически принято (F)", "Количество по документу (G)", "Номер документа (C)", "Дата документа (O), дд.мм.гггг", _
         "Дата поступления (N), дд.мм.гггг", "Место хранения (U)", "Цена (J)")
     For i = 0 To 6
         m = dm.createInstance("com.sun.star.awt.UnoControlFixedTextModel")
         m.PositionX = 8
-        m.PositionY = 11 + i * 18
+        m.PositionY = top + 11 + i * 18
         m.Width = 108
         m.Height = 12
         m.Label = lbl(i)
         dm.insertByName("l" & i, m)
         m = dm.createInstance("com.sun.star.awt.UnoControlEditModel")
         m.PositionX = 118
-        m.PositionY = 8 + i * 18
+        m.PositionY = top + 8 + i * 18
         m.Width = 124
         m.Height = 14
         m.Text = v(i)
@@ -482,7 +533,7 @@ Private Function ReceiptDialog(sTitle As String, sOk As String, v() As String) A
     Next i
     m = dm.createInstance("com.sun.star.awt.UnoControlButtonModel")
     m.PositionX = 118
-    m.PositionY = 148
+    m.PositionY = top + 148
     m.Width = 60
     m.Height = 15
     m.Label = sOk
@@ -491,7 +542,7 @@ Private Function ReceiptDialog(sTitle As String, sOk As String, v() As String) A
     dm.insertByName("bOK", m)
     m = dm.createInstance("com.sun.star.awt.UnoControlButtonModel")
     m.PositionX = 182
-    m.PositionY = 148
+    m.PositionY = top + 148
     m.Width = 60
     m.Height = 15
     m.Label = "Отмена"
@@ -538,6 +589,11 @@ Function TestRcvBlockMessage() As String
         Exit Function
     End If
     TestRcvBlockMessage = gRcvBlockMsg
+End Function
+
+' 1.0 (З4): the line over the fields of the last receipt dialog («Заказано 10 · получено 2 · осталось 8»)
+Function TestRcvInfo() As String
+    TestRcvInfo = gRcvInfo
 End Function
 
 Function TestRcvDialog() As String

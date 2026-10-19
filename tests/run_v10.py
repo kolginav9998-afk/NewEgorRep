@@ -934,6 +934,134 @@ def v18_rename_route():
         s.close()
 
 
+KEEP = "<как предложено>"          # WmsOrdersUi / WmsPrimeUi test seams: the field keeps what the window proposed
+
+
+@case
+def v19_supply():
+    """этап F: З8 «Поставщики» (пополнить из заказов, срок поставки), З1 возврат поставщику (остаток, поставщик, документ, «ждём
+    замену» — новая строка заказа), его «Исправить» и «Удалить», З4 «Ещё поступление» с остатком позиции, З6 повтор позиции,
+    З5 отмена всего заказа с причиной, З7 «уже ожидается», З2 «Ожидаем», З10 «Нужно заказать», З3 дашборд, З9 «Принять товар»"""
+    c = "V19"
+    s = ready(Session(new_wms("v19")))
+    try:
+        order(s, 1, "1", "Болт М8", qty="10", supplier="Ромашка", art="Б-8")
+        receive(s, 1, "10", place="1-1-1")
+        order(s, 2, "2", "Гайка М8", qty="10", supplier="ромашка ")
+        receive(s, 2, "4", place="1-1-2")
+        order(s, 3, "1", "Шайба М8", qty="6", supplier="Лютик")
+        order(s, 4, "2", "Винт М8", qty="3", supplier="Лютик")
+        fill = s.B("SuppliersFill", module="WmsSupply")
+        sup = s.doc.Sheets.getByName("Поставщики")
+        names = [sup.getCellByPosition(0, r).getString() for r in range(1, 4)]
+        sup.getCellByPosition(3, 1).setValue(5)
+        lead = s.B("SupplierLead", "РОМАШКА", module="WmsSupply")
+        val = s.doc.Sheets.getByName("Заказы").getCellByPosition(11, 5).Validation.getFormula1()
+        R.add(c, "З8: «Пополнить из заказов» — Ромашка и Лютик по одному разу («ромашка » — то же); срок 5 дн. находится без учёта регистра; "
+                 "на «Заказах» L — список «Поставщиков»", fill.startswith("OK:") and names == ["Ромашка", "Лютик", ""] and lead == 5
+              and "Поставщики" in val, f"{fill}; {names}; {lead}; {val}")
+        a = ords(s, 1)[21]
+        na = int(a[3:])
+        r = s.B("SupReturnPost", a, "2", "брак", "ВП-1", True, module="WmsSupply")
+        adj = s.doc.Sheets.getByName("Корректировки")
+        row = list(adj.getCellRangeByPosition(0, 1, 18, 1).getDataArray()[0])
+        osh = s.doc.Sheets.getByName("Заказы")
+        nr = int(s.B("TestSupNewRow", module="WmsSupply"))
+        rep = list(osh.getCellRangeByPosition(0, nr, 27, nr).getDataArray()[0]) if nr > 0 else []
+        ent = [e for e in s.journal()[0] if e["type"] == "SUP_RET"]
+        R.add(c, "З1: возврат поставщику 2 из 10 — остаток 8; строка «Возврат поставщику», J — документ, «Проведено · поставщику Ромашка»; в журнале "
+                 "SUP_RET с поставщиком и документом; «ждём замену» — новая строка «Заказов»: Болт, Б-8, заказано 2, Ромашка, ожидаем через 5 дн., «Ожидается»",
+              r.startswith("OK:") and s.stock(na) == 8.0 and row[1] == "Возврат поставщику" and row[9] == "ВП-1" and row[16] == "Проведено · поставщику Ромашка"
+              and "ждём замену" in row[11] and len(ent) == 1 and ent[0]["fields"].get("SUPPLIER") == "Ромашка" and ent[0]["fields"].get("DOC") == "ВП-1"
+              and rep[:2] == ["1", "Болт М8"] and rep[4] == "Б-8" and rep[7] == "2" and rep[11] == "Ромашка" and rep[22] == "Ожидается"
+              and rep[16] == rep[15] + 5 and "возврату поставщику № 1" in rep[25], f"{r}; {s.stock(na)}; {row}; {rep}")
+        fx = s.B("AdjustFixRow", 1, "3", serial(), "брак; ждём замену", module="WmsAdjust")
+        b1 = s.stock(na)
+        dl = s.B("AdjustDeleteRow", 1, module="WmsAdjust")
+        R.add(c, "З1: «Исправить» возврат — 3 (остаток 7), «Удалить» — сторно (остаток 10)", fx.startswith("OK") and b1 == 7.0 and dl.startswith("OK")
+              and s.stock(na) == 10.0, f"{fx}; {b1}; {dl}; {s.stock(na)}")
+        # З4: «Ещё поступление» of the partly received position
+        s.goto("Заказы", "$B$3")
+        s.B("TestRcvInput", KEEP, "", "УПД-2", KEEP, KEEP, "1-1-2", "", module="WmsOrdersUi")
+        s.B("BtnRcvMore", module="WmsOrdersUi")
+        info = s.B("TestRcvInfo", module="WmsOrdersUi")
+        shown = s.B("TestRcvDialog", module="WmsOrdersUi").split("\n")[0].split("\t")
+        st2 = osh.getCellByPosition(22, 2).getString()
+        R.add(c, "З4: «Ещё поступление» — над полями «Заказано 10 · получено 4 · осталось 6», количество 6 предложено; принято 6 — «Получено»",
+              info.startswith("Заказано 10 · получено 4 · осталось 6") and shown[0] == "6" and st2.startswith("Получено"), f"{info}; {shown}; {st2}")
+        # З6: the repeat of a position (5 pieces)
+        s.goto("Заказы", "$B$2")
+        choose(s, 0)
+        s.B("TestPrimeForm", "5", module="WmsPrimeUi")
+        rp = s.B("RepeatOrder", module="WmsSupply")
+        last = int(rp.split("|")[1].split("-")[1]) - 1 if rp.startswith("OK:") else 0
+        rr = list(osh.getCellRangeByPosition(0, last, 27, last).getDataArray()[0])
+        R.add(c, "З6: «Повторить заказ» → «Эту позицию» 5 — новая строка: Болт, Б-8, Ромашка, 5, дата заказа сегодня, «Ожидается»",
+              rp.startswith("OK:1|") and rr[1] == "Болт М8" and rr[4] == "Б-8" and rr[7] == "5" and rr[11] == "Ромашка" and rr[15] == serial() and rr[22] == "Ожидается",
+              f"{rp}; {rr}")
+        # З7: a new row of the same goods and supplier — the hint
+        put(s, "Заказы", last + 1, A="1", B="Шайба М8", H="2", I="шт", L="Лютик")
+        # as the storekeeper types it: the change handler of «Заказы» for the cell L (an API write does not fire it)
+        s.B("OnOrdersChange", osh.getCellByPosition(11, last + 1), module="WmsOrders")
+        hint = osh.getCellByPosition(24, last + 1).getString()
+        # «Ещё поступление» of «Гайка» put its row under it: the rows below moved down by one
+        bcol = [x[0] for x in osh.getCellRangeByPosition(1, 0, 1, last).getDataArray()]
+        r_sh = bcol.index("Шайба М8")
+        R.add(c, f"З7: новая строка «Шайба М8» у «Лютик» — в «Контроль»: «Внимание: … уже ожидается — строка {r_sh + 1}»",
+              hint.startswith("Внимание:") and f"уже ожидается — строка {r_sh + 1} " in hint, hint)
+        s.B("ClearOrderRow", last + 1, module="WmsOrders")
+        # З2 «Ожидаем», З10 «Нужно заказать», З3 the dashboard
+        w = s.B("WaitShow", "", module="WmsSupply")
+        fd = s.doc.Sheets.getByName("Снабжение")
+        tab = [list(x) for x in fd.getCellRangeByPosition(1, 10, 14, 17).getDataArray()]
+        groups = [x[0] for x in tab if x[13] == "G"]
+        R.add(c, "З2: «Ожидаем» — позиции по поставщикам (Лютик: Шайба 6, Винт 3; Ромашка: замена Болт 2, повтор Болт 5); строка ведёт на «Заказы»",
+              w == "OK:4" and groups == ["Лютик", "Ромашка"] and any(x[1] == "Шайба М8" and x[5] == 6 for x in tab)
+              and any(x[1] == "Болт М8" and x[5] == 5 for x in tab) and all(x[11] == "Заказы" for x in tab if x[13] != "G" and x[1]),
+              f"{w}; {tab}")
+        gd = s.doc.Sheets.getByName("Номенклатура")
+        fl = s.B("GoodsFill", module="WmsSupply")
+        names_g = [x[0] for x in gd.getCellRangeByPosition(1, 0, 1, 400).getDataArray()]
+        rows = {nm: r for r, nm in enumerate(names_g) if nm}
+        gd.getCellByPosition(7, rows["Болт М8"]).setValue(20)
+        gd.getCellByPosition(8, rows["Болт М8"]).setValue(10)
+        gd.getCellByPosition(7, rows["Гайка М8"]).setValue(5)
+        nd = s.B("NeedShow", "", module="WmsSupply")
+        tab2 = [list(x) for x in fd.getCellRangeByPosition(1, 10, 14, 12).getDataArray()]
+        R.add(c, "З10: «Номенклатура» пополнена из «Наличия»; «Нужно заказать»: Болт — остаток 10 + в пути 7 < минимума 20 → заказать 10 (кратно 10); "
+                 "Гайка (10 ≥ 5) — нет", fl.startswith("OK:") and nd == "OK:1" and tab2[0][0] == "Болт М8" and tab2[0][2] == 10 and tab2[0][3] == 7
+              and tab2[0][6] == 10, f"{fl}; {nd}; {tab2}")
+        db = s.B("DashRefresh", module="WmsDash")
+        dsh = s.doc.Sheets.getByName("Дашборд")
+        tile = dsh.getCellByPosition(3, 5).getString() + " | " + dsh.getCellByPosition(1, 5).getString()
+        refs = [dsh.getCellByPosition(14, r).getString() for r in range(9, 13)]
+        R.add(c, "З3/З10: дашборд — у ожидаемых «осталось …», ссылка на строку «Заказов» (для перехода), в плитке «заказать 1»",
+              db.startswith("OK") and "заказать 1" in tile and all(x.startswith("Заказы|") for x in refs if x), f"{db}; {tile}; {refs}")
+        # З9: the vehicle of «Лютик» — «Принять товар»
+        cars = s.doc.Sheets.getByName("Приход авто")
+        cars.getCellByPosition(2, 1).setString("А123ВС")
+        cars.getCellByPosition(3, 1).setString("Лютик")
+        s.B("BtnCarArrive", module="WmsCarUi")
+        s.goto("Приход авто", "$D$7")
+        ca = s.B("CarAccept", module="WmsSupply")
+        R.add(c, "З9: «Принять товар» на визите «Лютик» — «Снабжение» с позициями Лютика (ждём 2), принято сегодня 0",
+              ca == "OK:Лютик|принято 0|ждём 2" and s.active_sheet() == "Снабжение", ca)
+        # З5: the whole order of «Лютик» (rows 4–5) cancelled with the reason
+        s.goto("Заказы", f"$B${r_sh + 1}")
+        s.B("TestPrimeForm", "поставщик не привезёт", module="WmsPrimeUi")
+        co = s.B("CancelOrderAll", module="WmsSupply")
+        ctl = osh.getCellByPosition(24, r_sh).getString()
+        ent2 = [e for e in s.journal()[0] if e["type"] == "ORDER_CANCEL"]
+        R.add(c, "З5: «Отменить весь заказ» — обе позиции «Отменено», в «Контроль» и в журнале — причина",
+              co == "OK:2|0|0|0" and osh.getCellByPosition(22, r_sh).getString() == "Отменено" and osh.getCellByPosition(22, r_sh + 1).getString() == "Отменено"
+              and "поставщик не привезёт" in ctl and len(ent2) == 2 and all(e["fields"].get("REASON") == "поставщик не привезёт" for e in ent2), f"{co}; {ctl}")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:300])
+        oracle(c, s, "возврат поставщику, замена, повтор, отмена заказа")
+    finally:
+        s.close()
+
+
 # ================================================================ runner
 
 def main():

@@ -43,6 +43,9 @@ Private mAltQty As String
 ' 1.0 (М1): the new EI of a split being posted
 Private mNewEi As Long
 Private mNewCanon As String
+' 1.0 (З1): a return to the supplier — the supplier of the EI and the document of the return (J)
+Private mSupplier As String
+Private mDoc As String
 
 ' ================================================================ sheets and kinds
 
@@ -315,7 +318,7 @@ End Function
 ' Validates the inputs of row r: "" or the reason; fills m*. bNeedAll: posting needs every field of the kind (the
 ' preview checks only what is filled).
 Private Function CheckRowInputs(r As Long, bNeedAll As Boolean) As String
-    Dim sh As Object, why As String, c As Object, msg As String, x As Double, info As String, sTo As String
+    Dim sh As Object, why As String, c As Object, msg As String, x As Double, info As String, sTo As String, sWhat As String, sVerb As String
     sh = AdjustSheet()
     mShort = False
     mKind = KindCode(sh.getCellByPosition(AC_KIND, r).getString())
@@ -362,25 +365,39 @@ Private Function CheckRowInputs(r As Long, bNeedAll As Boolean) As String
             CheckRowInputs = "новое место «" & mPlace & "» совпадает с текущим местом " & mCanon & " — перемещать некуда"
             Exit Function
         End If
-    Case "WRITE_OFF"
-        If Not IsBlank(sh.getCellByPosition(AC_FACT, r)) Or Not IsBlank(sh.getCellByPosition(AC_PLACE, r)) Or Not IsBlank(sh.getCellByPosition(AC_BOOK, r)) Then
+    Case "WRITE_OFF", "SUP_RET"
+        If mKind = "SUP_RET" Then
+            ' 1.0 (З1): G — how much goes back to the supplier (in parts too), J — the document of the return (when there is one)
+            If Not IsBlank(sh.getCellByPosition(AC_FACT, r)) Or Not IsBlank(sh.getCellByPosition(AC_BOOK, r)) Then
+                CheckRowInputs = "для возврата поставщику заполняются G «сколько вернуть» и, если есть, J — номер документа возврата; очистите H «Фактический остаток» " _
+                    & "и I «Учётный остаток»"
+                Exit Function
+            End If
+            mDoc = Trim(sh.getCellByPosition(AC_PLACE, r).getString())
+            mSupplier = WmsSupply.EiSupplier(mEi)
+            sWhat = "сколько вернуть (G)"
+            sVerb = "вернуть "
+        ElseIf Not IsBlank(sh.getCellByPosition(AC_FACT, r)) Or Not IsBlank(sh.getCellByPosition(AC_PLACE, r)) Or Not IsBlank(sh.getCellByPosition(AC_BOOK, r)) Then
             CheckRowInputs = "для списания заполняется только G «Списать» — очистите H «Фактический остаток», I «Учётный остаток» и J «Новое место»"
             Exit Function
+        Else
+            sWhat = "количество списания (G)"
+            sVerb = "списать "
         End If
         c = sh.getCellByPosition(AC_QTY, r)
         If mAltQty <> "" Then
-            If Not WmsPack.QtyAsEI(Nothing, mAltQty, "количество списания (G)", mEi, mSbal, CStr(mSdata(SC_UNIT)), "OUT", 0, mQty, info, msg) Then
+            If Not WmsPack.QtyAsEI(Nothing, mAltQty, sWhat, mEi, mSbal, CStr(mSdata(SC_UNIT)), "OUT", 0, mQty, info, msg) Then
                 CheckRowInputs = msg
                 Exit Function
             End If
         ElseIf Not IsBlank(c) Or bNeedAll Then
-            If Not WmsPack.QtyAsEI(c, Empty, "количество списания (G)", mEi, mSbal, CStr(mSdata(SC_UNIT)), "OUT", 0, mQty, info, msg) Then
+            If Not WmsPack.QtyAsEI(c, Empty, sWhat, mEi, mSbal, CStr(mSdata(SC_UNIT)), "OUT", 0, mQty, info, msg) Then
                 CheckRowInputs = msg
                 Exit Function
             End If
             If mQty > mSbal + 0.0000001 Then
                 mShort = True
-                CheckRowInputs = "списать " & WmsIssue.QtyText(mQty) & " нельзя: остаток " & mCanon & " — " & WmsPack.QtyWithParts(mEi, mSbal, CStr(mSdata(SC_UNIT)))
+                CheckRowInputs = sVerb & WmsIssue.QtyText(mQty) & " нельзя: остаток " & mCanon & " — " & WmsPack.QtyWithParts(mEi, mSbal, CStr(mSdata(SC_UNIT)))
                 Exit Function
             End If
         End If
@@ -480,6 +497,10 @@ Private Function Describe() As String
         ' 1.0: an EI with a packing — the quantities in its parts too («списать 0,25 шт (1 кан), остаток 1 шт (4 кан) → …»)
         Describe = mCanon & ": списать " & WmsPack.QtyWithParts(mEi, mQty, CStr(mSdata(SC_UNIT))) & ", остаток " _
             & WmsPack.QtyWithParts(mEi, mSbal, CStr(mSdata(SC_UNIT))) & " → " & WmsPack.QtyWithParts(mEi, WmsIssue.Round3(mSbal - mQty), CStr(mSdata(SC_UNIT)))
+    Case "SUP_RET"
+        Describe = mCanon & ": вернуть поставщику" & IIf(mSupplier <> "", " «" & mSupplier & "»", "") & " " & WmsPack.QtyWithParts(mEi, mQty, CStr(mSdata(SC_UNIT))) _
+            & ", остаток " & WmsPack.QtyWithParts(mEi, mSbal, CStr(mSdata(SC_UNIT))) & " → " & WmsPack.QtyWithParts(mEi, WmsIssue.Round3(mSbal - mQty), CStr(mSdata(SC_UNIT))) _
+            & IIf(mDoc <> "", ", документ «" & mDoc & "»", "")
     Case "SPLIT"
         Describe = mCanon & ": отделить " & WmsPack.QtyWithParts(mEi, mQty, CStr(mSdata(SC_UNIT))) & " в новый ЕИ (место «" & mPlace & "»), у " & mCanon _
             & " останется " & WmsPack.QtyWithParts(mEi, WmsIssue.Round3(mSbal - mQty), CStr(mSdata(SC_UNIT)))
@@ -570,10 +591,10 @@ Private Function AskAdjust(why As String, r As Long) As String
             AskAdjust = msg
             Exit Function
         End If
-    Case "WRITE_OFF"
+    Case "WRITE_OFF", "SUP_RET"
         If why <> "" Then
             msg = why
-            st = WmsPack.QtyAsk(mEi, nm, u, "Списать", "OUT", mSbal, 0, False, mQty, info, msg)
+            st = WmsPack.QtyAsk(mEi, nm, u, IIf(mKind = "SUP_RET", "Вернуть", "Списать"), "OUT", mSbal, 0, False, mQty, info, msg)
             If st = 0 Then
                 ' the parts chosen: the row is checked again with them (the date and the reason were not read yet)
                 mAltQty = WmsPack.PartsText(gPkParts, gPkUnit)
@@ -582,7 +603,7 @@ Private Function AskAdjust(why As String, r As Long) As String
                 If msg <> "" Then st = 2
             End If
         Else
-            st = WmsPack.QtyAsk(mEi, nm, u, "Списать", "OUT", mSbal, 0, True, mQty, info, msg)
+            st = WmsPack.QtyAsk(mEi, nm, u, IIf(mKind = "SUP_RET", "Вернуть", "Списать"), "OUT", mSbal, 0, True, mQty, info, msg)
         End If
     Case "SPLIT"
         If why <> "" Then
@@ -699,7 +720,7 @@ Function AdjustPostRow(r As Long) As String
     End If
     b2 = mSbal
     delta = 0
-    If mKind = "WRITE_OFF" Or mKind = "SPLIT" Then delta = -mQty
+    If mKind = "WRITE_OFF" Or mKind = "SPLIT" Or mKind = "SUP_RET" Then delta = -mQty
     If mKind = "INV_ADJ" Then delta = mDiff
     b2 = WmsIssue.Round3(mSbal + delta)
     PlanBegin(mKind, CStr(n))
@@ -717,11 +738,15 @@ Function AdjustPostRow(r As Long) As String
         PlanField("FROM", mSplace)
         PlanField("TO", mPlace)
         PlanField("BAL", mSbal)
-    Case "WRITE_OFF"
+    Case "WRITE_OFF", "SUP_RET"
         PlanField("QTY", mQty)
         PlanField("BAL_BEFORE", mSbal)
         PlanField("BAL_AFTER", b2)
         WmsPack.PlanQtyFields()
+        If mKind = "SUP_RET" Then
+            PlanField("SUPPLIER", mSupplier)
+            If mDoc <> "" Then PlanField("DOC", mDoc)
+        End If
     Case "INV_ADJ"
         PlanField("BOOK", mBook)
         PlanField("FACT", mFact)
@@ -753,9 +778,10 @@ Function AdjustPostRow(r As Long) As String
     Select Case mKind
     Case "MOVE"
         PlanSetValue(SH_ADJUST, r, AC_PLACE, mPlace, True)
-    Case "WRITE_OFF"
+    Case "WRITE_OFF", "SUP_RET"
         PlanSetValue(SH_ADJUST, r, AC_QTY, mQty, True)
         PlanSetValue(SH_ADJUST, r, AC_DIFF, delta, True)
+        If mKind = "SUP_RET" And mDoc <> "" Then PlanSetValue(SH_ADJUST, r, AC_PLACE, mDoc, True)
     Case "SPLIT"
         PlanSetValue(SH_ADJUST, r, AC_QTY, mQty, True)
         PlanSetValue(SH_ADJUST, r, AC_PLACE, mPlace, True)
@@ -771,7 +797,12 @@ Function AdjustPostRow(r As Long) As String
     PlanSetValue(SH_ADJUST, r, AC_BEFORE, mSbal, True)
     PlanSetValue(SH_ADJUST, r, AC_AFTER, b2, True)
     ' 1.0 (М1): the row of a split names the new EI (the start «Проведено» is what every check reads)
-    PlanSetValue(SH_ADJUST, r, AC_CTL, ST_POSTED & IIf(mKind = "SPLIT", " · новый " & mNewCanon, ""), True)
+    ' 1.0 (З1): a return names its supplier
+    If mKind = "SUP_RET" Then
+        PlanSetValue(SH_ADJUST, r, AC_CTL, ST_POSTED & IIf(mSupplier <> "", " · поставщику " & mSupplier, ""), True)
+    Else
+        PlanSetValue(SH_ADJUST, r, AC_CTL, ST_POSTED & IIf(mKind = "SPLIT", " · новый " & mNewCanon, ""), True)
+    End If
     ' the batch the row came from (a tool's file) is restored with the row after a crash, like the other inputs
     If mBatch <> "" Then PlanSetValue(SH_ADJUST, r, AC_BATCH, mBatch, True)
     PlanLockBits(SH_ADJUST, r, 0, AC_LAST, ADJUST_LOCKS_POSTED)
@@ -851,7 +882,7 @@ Private Function LoadPosted(r As Long, rd As Variant) As String
         Exit Function
     End If
     mKind = CStr(rd(AJ_KIND))
-    If mKind <> "MOVE" And mKind <> "WRITE_OFF" And mKind <> "INV_ADJ" And mKind <> "SPLIT" Then
+    If mKind <> "MOVE" And mKind <> "WRITE_OFF" And mKind <> "INV_ADJ" And mKind <> "SPLIT" And mKind <> "SUP_RET" Then
         LoadPosted = "ERR-SYS:в " & SH_ADJ & " у корректировки № " & gAjN & " неизвестный вид «" & mKind & "»"
         Exit Function
     End If
@@ -884,7 +915,7 @@ End Function
 Function AdjustFixRow(r As Long, vMain As Variant, vDate As Variant, vReason As Variant) As String
     Dim why As String, kind As String, n As Long, rd As Variant, msg As String, sh As Object, res As String
     Dim q1 As Double, d1 As Double, reason1 As String, to1 As String, from1 As String, delta1 As Double, delta2 As Double
-    Dim before As Double, b2 As Double, info As String, st As Integer, to2 As String
+    Dim before As Double, b2 As Double, info As String, st As Integer, to2 As String, sVerb As String, sWhat As String
     WmsInit()
     If r < 1 Or r > MAX_SHEET_ROW Then
         AdjustFixRow = "ERR:выберите строку корректировки (не заголовок)"
@@ -973,20 +1004,27 @@ Function AdjustFixRow(r As Long, vMain As Variant, vDate As Variant, vReason As 
         If mPlace <> mSplace Then PlanSetValue(SH_STOCK, mEi, SC_PLACE, mPlace, False)
         PlanSetValue(SH_ADJ, n, AJ_TO, mPlace, False)
         PlanSetValue(SH_ADJUST, r, AC_PLACE, mPlace, False)
-    Case "WRITE_OFF"
+    Case "WRITE_OFF", "SUP_RET"
         q1 = -delta1
-        If Not WmsPack.QtyAsEI(Nothing, vMain, "количество списания", mEi, WmsIssue.Round3(mSbal + q1), CStr(mSdata(SC_UNIT)), "OUT", 0, mQty, info, msg) Then
+        If mKind = "SUP_RET" Then
+            sVerb = "вернуть "
+            sWhat = "сколько вернуть"
+        Else
+            sVerb = "списать "
+            sWhat = "количество списания"
+        End If
+        If Not WmsPack.QtyAsEI(Nothing, vMain, sWhat, mEi, WmsIssue.Round3(mSbal + q1), CStr(mSdata(SC_UNIT)), "OUT", 0, mQty, info, msg) Then
             AdjustFixRow = "ERR:" & msg
             Exit Function
         End If
         ' 1.0: a new quantity «1» of an EI with a packing or a percent below 1 — asked as at the posting
         If Abs(mQty - q1) > 0.0000001 Then
-            msg = "списать " & WmsIssue.QtyText(mQty) & " нельзя: остаток " & mCanon & " без этого списания — " _
+            msg = sVerb & WmsIssue.QtyText(mQty) & " нельзя: остаток " & mCanon & " без этой корректировки — " _
                 & WmsPack.QtyWithParts(mEi, WmsIssue.Round3(mSbal + q1), CStr(mSdata(SC_UNIT)))
-            st = WmsPack.QtyAsk(mEi, CStr(mSdata(SC_NAME)), CStr(mSdata(SC_UNIT)), "Списать", "OUT", WmsIssue.Round3(mSbal + q1), 0, _
+            st = WmsPack.QtyAsk(mEi, CStr(mSdata(SC_NAME)), CStr(mSdata(SC_UNIT)), IIf(mKind = "SUP_RET", "Вернуть", "Списать"), "OUT", WmsIssue.Round3(mSbal + q1), 0, _
                 mQty <= WmsIssue.Round3(mSbal + q1) + 0.0000001, mQty, info, msg)
             If st = 1 Then
-                AdjustFixRow = "SKIP:списание не исправлено — " & msg
+                AdjustFixRow = "SKIP:" & IIf(mKind = "SUP_RET", "возврат поставщику", "списание") & " не исправлено — " & msg
                 Exit Function
             ElseIf st = 2 Then
                 AdjustFixRow = "ERR:" & msg
@@ -994,7 +1032,7 @@ Function AdjustFixRow(r As Long, vMain As Variant, vDate As Variant, vReason As 
             End If
         End If
         If mQty > WmsIssue.Round3(mSbal + q1) + 0.0000001 Then
-            AdjustFixRow = "ERR:списать " & WmsIssue.QtyText(mQty) & " нельзя: остаток " & mCanon & " без этого списания — " _
+            AdjustFixRow = "ERR:" & sVerb & WmsIssue.QtyText(mQty) & " нельзя: остаток " & mCanon & " без этой корректировки — " _
                 & WmsIssue.QtyText(WmsIssue.Round3(mSbal + q1))
             Exit Function
         End If
@@ -1005,7 +1043,7 @@ Function AdjustFixRow(r As Long, vMain As Variant, vDate As Variant, vReason As 
         delta2 = -mQty
         before = WmsIssue.Round3(mSbal - delta1)
         b2 = WmsIssue.Round3(before + delta2)
-        PlanBegin("WRITE_OFF_FIX", CStr(n))
+        PlanBegin(mKind & "_FIX", CStr(n))
         PlanCommonFields(n, r)
         PlanField("OLD_QTY", q1)
         PlanField("QTY", mQty)
@@ -1137,7 +1175,7 @@ Function AdjustDeleteRow(r As Long) As String
         PlanField("FROM", from1)
         PlanField("TO", to1)
         PlanSetValue(SH_STOCK, mEi, SC_PLACE, from1, False)
-    Case "WRITE_OFF"
+    Case "WRITE_OFF", "SUP_RET"
         PlanField("QTY", -delta1)
         PlanField("BAL_BEFORE", mSbal)
         PlanField("BAL_AFTER", b2)
@@ -1416,9 +1454,10 @@ Sub PreviewAdjustRow(r As Long)
         Exit Sub
     End If
     Select Case mKind
-    Case "WRITE_OFF"
+    Case "WRITE_OFF", "SUP_RET"
         If IsBlank(sh.getCellByPosition(AC_QTY, r)) Then
-            SetCtl(r, "Укажите количество списания (G); остаток " & WmsIssue.QtyText(mSbal))
+            SetCtl(r, IIf(mKind = "SUP_RET", "Укажите, сколько вернуть поставщику (G)", "Укажите количество списания (G)") & "; остаток " _
+                & WmsPack.QtyWithParts(mEi, mSbal, CStr(mSdata(SC_UNIT))))
             Exit Sub
         End If
         WmsOrders.SetIfDiff(sh.getCellByPosition(AC_DIFF, r), -mQty)
@@ -1580,7 +1619,7 @@ End Function
 Function AdjustCheck() As String
     Dim ad As Object, sh As Object, last As Long, r0 As Long, r1 As Long, i As Long, d As Variant, t0 As Long, nextAdj As Long
     Dim n As Long, nBad As Long, first As String, nStale As Long, nLive As Long, nStorno As Long, maxN As Long, x As Double, lastR As Long
-    Dim colA As Variant, colA0 As Long, k As String, st As String, ei As Long, nKind(3) As Long
+    Dim colA As Variant, colA0 As Long, k As String, st As String, ei As Long, nKind(4) As Long
     On Error GoTo EH
     t0 = GetSystemTicks()
     ad = AdjSheet()
@@ -1610,6 +1649,8 @@ Function AdjustCheck() As String
                         nKind(1) = nKind(1) + 1
                     ElseIf k = "INV_ADJ" Then
                         nKind(2) = nKind(2) + 1
+                    ElseIf k = "SUP_RET" Then
+                        nKind(4) = nKind(4) + 1
                     ElseIf k = "SPLIT" Then
                         nKind(3) = nKind(3) + 1
                         If Not WmsOrders.StrictEI(CStr(d(i)(AJ_NEW)), ei) Then
@@ -1629,7 +1670,7 @@ Function AdjustCheck() As String
                         Bad(nBad, first, "корректировка № " & (r0 + i) & ": изменение остатка не число")
                     ElseIf k = "MOVE" And d(i)(AJ_QTY) <> 0 Then
                         Bad(nBad, first, "перемещение № " & (r0 + i) & ": изменение остатка " & d(i)(AJ_QTY) & " (должно быть 0)")
-                    ElseIf (k = "WRITE_OFF" Or k = "SPLIT") And d(i)(AJ_QTY) >= 0 Then
+                    ElseIf (k = "WRITE_OFF" Or k = "SPLIT" Or k = "SUP_RET") And d(i)(AJ_QTY) >= 0 Then
                         Bad(nBad, first, KindName(k) & " № " & (r0 + i) & ": изменение остатка " & d(i)(AJ_QTY) & " (должно быть меньше 0)")
                     End If
                     If st = RV_LIVE Then
@@ -1662,7 +1703,7 @@ Function AdjustCheck() As String
     If nBad > 0 Then
         AdjustCheck = "ОШИБКА: расхождений " & nBad & " (" & first & ")"
     Else
-        AdjustCheck = "корректировок " & n & " (перемещений " & nKind(0) & ", списаний " & nKind(1) & ", инвентаризаций " & nKind(2) & IIf(nKind(3) > 0, ", разделений " & nKind(3), "") & "; из них сторно " _
+        AdjustCheck = "корректировок " & n & " (перемещений " & nKind(0) & ", списаний " & nKind(1) & ", инвентаризаций " & nKind(2) & IIf(nKind(3) > 0, ", разделений " & nKind(3), "") & IIf(nKind(4) > 0, ", возвратов поставщику " & nKind(4), "") & "; из них сторно " _
             & nStorno & "), расхождений нет, NEXT_ADJ " & nextAdj & " выше всех №" _
             & IIf(nStale > 0, ", устаревших подсказок строк " & nStale & " (исправятся при следующей операции)", "") & ", " & (GetSystemTicks() - t0) & " мс"
     End If

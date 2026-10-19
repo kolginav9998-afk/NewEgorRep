@@ -958,6 +958,10 @@ Private Sub AdjMove(d As Variant, live As Boolean, dt As Double, sName As String
         note = "учётный " & d(AC_BOOK) & ", фактический " & d(AC_FACT)
     ElseIf kind = "Разделение" Then
         note = Mid(CStr(d(AC_CTL)), InStr(CStr(d(AC_CTL)), "·") + 2) & " · место «" & d(AC_PLACE) & "»"
+    ElseIf kind = "Возврат поставщику" Then
+        ' 1.0 (З1): to whom, by which document
+        If InStr(CStr(d(AC_CTL)), "·") > 0 Then note = Mid(CStr(d(AC_CTL)), InStr(CStr(d(AC_CTL)), "·") + 2)
+        If CStr(d(AC_PLACE)) <> "" Then note = note & IIf(note <> "", " · ", "") & "документ «" & d(AC_PLACE) & "»"
     End If
     If Not live Then
         ch = 0

@@ -17,7 +17,7 @@ import special_oracle
 
 EPS = 1e-6
 ST_POSTED, ST_FIXED, ST_DELETED = "Проведено", "Проведено (исправлено)", "Удалено (сторно)"
-KIND_NAME = {"MOVE": "Перемещение", "WRITE_OFF": "Списание", "INV_ADJ": "Инвентаризация", "SPLIT": "Разделение"}
+KIND_NAME = {"MOVE": "Перемещение", "WRITE_OFF": "Списание", "INV_ADJ": "Инвентаризация", "SPLIT": "Разделение", "SUP_RET": "Возврат поставщику"}
 
 
 def check(doc, jdir, initial, expect_tail=0, today=None, base=None, legacy_mn_empty=True):
@@ -92,6 +92,8 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, legacy_mn_em
         want_st = ST_DELETED if a["state"] == "STORNO" else (ST_FIXED if a["fixes"] else ST_POSTED)
         if a["kind"] == "SPLIT" and a["state"] != "STORNO":
             want_st = f"{ST_POSTED} · новый {a['new']}"
+        if a["kind"] == "SUP_RET" and a["state"] != "STORNO" and not a["fixes"] and a.get("supplier"):
+            want_st = f"{ST_POSTED} · поставщику {a['supplier']}"
         if ctl != want_st:
             bad(f"корректировка № {n}: статус «{ctl}», ожидался «{want_st}»")
         if (row[1], row[2]) != (KIND_NAME[a["kind"]], a["ei"]):
@@ -103,11 +105,13 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, legacy_mn_em
         if a["kind"] == "MOVE":
             if (row[9], row[12]) != (a["to"], a["frm"] or ""):
                 bad(f"перемещение № {n}: J/M {(row[9], row[12])} ≠ {(a['to'], a['frm'])}")
-        elif a["kind"] in ("WRITE_OFF", "SPLIT"):
+        elif a["kind"] in ("WRITE_OFF", "SPLIT", "SUP_RET"):
             if not isinstance(row[6], float) or abs(row[6] + a["delta"]) > EPS or not isinstance(row[15], float) or abs(row[15] - a["delta"]) > EPS:
                 bad(f"{KIND_NAME[a['kind']]} № {n}: G/P {(row[6], row[15])} ≠ {(-a['delta'], a['delta'])}")
             if a["kind"] == "SPLIT" and row[9] != (a["to"] or ""):
                 bad(f"разделение № {n}: J «{row[9]}» ≠ месту нового ЕИ «{a['to']}»")
+            if a["kind"] == "SUP_RET" and row[9] != (a.get("doc") or ""):
+                bad(f"возврат поставщику № {n}: J «{row[9]}» ≠ документу «{a.get('doc')}»")
         else:
             if (not isinstance(row[7], float) or abs(row[7] - a["fact"]) > EPS or not isinstance(row[8], float) or abs(row[8] - a["book"]) > EPS
                     or not isinstance(row[15], float) or abs(row[15] - a["delta"]) > EPS):

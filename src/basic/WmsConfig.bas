@@ -444,8 +444,8 @@ Public Const ADJUST_LOCKS_OPEN = "1001110000001111100"
 Public Const ADJUST_LOCKS_POSTED = "1111111111111111110"
 
 ' the kinds: name in column B, code in _ADJ and the journal
-Public Const ADJ_KIND_NAMES = "Перемещение|Списание|Инвентаризация|Разделение"
-Public Const ADJ_KIND_CODES = "MOVE|WRITE_OFF|INV_ADJ|SPLIT"
+Public Const ADJ_KIND_NAMES = "Перемещение|Списание|Инвентаризация|Разделение|Возврат поставщику"
+Public Const ADJ_KIND_CODES = "MOVE|WRITE_OFF|INV_ADJ|SPLIT|SUP_RET"
 
 ' _ADJ — the corrections, one row per № (row index = №, dense like «Наличие»): kind, EI, change of the balance
 ' (WRITE_OFF < 0, INV_ADJ the difference, MOVE 0), state LIVE / STORNO, row hint, places before and after the move,

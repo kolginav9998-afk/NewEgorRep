@@ -250,6 +250,25 @@ Function UiForm(sTitle As String, sInfo As String, labels As Variant, v() As Str
     dlg.dispose()
 End Function
 
+' 1.0 (З5, К1): a question with the reason — «Отменить заказ?», «Удалить?»: sText and one field «Причина» (sReason — in: the
+' proposed one, out: as typed). True — «sOk» pressed. In the tests: a form set by TestPrimeForm answers it; without one the
+' answer is that of UiConfirm (TestUiAuto 1 — «Да» with the proposed reason, 2 — «Нет»)
+Function ReasonAsk(sTitle As String, sText As String, sOk As String, ByRef sReason As String) As Boolean
+    Dim v(0) As String
+    v(0) = sReason
+    If gUiAuto <> 0 And Not gPrFormSet Then
+        gUiLastMsg = sText
+        gUiConfirms = gUiConfirms + 1
+        gPrShown = sTitle & Chr(10) & sText & Chr(10) & sReason
+        ReasonAsk = (gUiAuto = 1)
+        Exit Function
+    End If
+    If UiForm(sTitle, sText, Array("Причина"), v, Array(""), sOk) Then
+        sReason = Trim(v(0))
+        ReasonAsk = True
+    End If
+End Function
+
 ' 1.0: UiForm with two action buttons (sOk, sOk2 — «Выдать», «Выдать и следующую»): 1 — sOk, 2 — sOk2, 0 — «Отмена» or
 ' the window closed. The values as for UiForm
 Function UiForm2(sTitle As String, sInfo As String, labels As Variant, v() As String, lists As Variant, sOk As String, sOk2 As String) As Integer

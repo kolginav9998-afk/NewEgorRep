@@ -493,7 +493,7 @@ Private Function OrderedQty(r As Long) As Double
 End Function
 
 ' the rows of the order of row r: up to the first position (A = 1) above, down to the row before the next first position
-Private Sub OrderBlockOf(r As Long, ByRef r0 As Long, ByRef r1 As Long)
+Sub OrderBlockOf(r As Long, ByRef r0 As Long, ByRef r1 As Long)
     Dim sh As Object, last As Long, a As String
     sh = WmsOrders.OrdersSheet()
     last = WmsOrders.LastRow(sh)

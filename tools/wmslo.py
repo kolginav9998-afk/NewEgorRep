@@ -87,24 +87,37 @@ class Office:
     def new_calc(self):
         return self.desktop.loadComponentFromURL("private:factory/scalc", "_blank", 0, props(Hidden=True))
 
-    def load(self, path, macros=4, hidden=False, **extra):
-        """macros: css.document.MacroExecMode (0 never, 4 always without warning)."""
+    def load(self, path, macros=4, hidden=False, wait_wms=True, **extra):
+        """macros: css.document.MacroExecMode (0 never, 4 always without warning). 1.0: with the macros on, a WMS book is
+        returned once its startup has finished (wait_wms)"""
         kw = dict(MacroExecutionMode=macros, Hidden=hidden)
         kw.update(extra)
         doc = self.desktop.loadComponentFromURL(uno.systemPathToFileUrl(os.path.abspath(path)), "_blank", 0, props(**kw))
         self.idle()
+        if doc is not None and macros and wait_wms and doc.supportsService("com.sun.star.sheet.SpreadsheetDocument"):
+            self.wms_ready(doc)
         return doc
 
-    def wms_state(self, doc, wait=30.0):
+    def wms_state(self, doc, wait=60.0):
         """WMS's state line (WmsCore.StateDump) once its startup has run: on a loaded machine the OnLoad macro Calc
-        posts after loading can still be queued (or running) when the load returns, and the line then reads «STATE=»"""
+        posts after loading can still be queued — or running, its state half-made («STATE=BLOCKED;BLOCK=;») — when the
+        load returns. 1.0 counts the finished startups («STARTS»); a book of an earlier core: while «STATE=» is empty"""
         end = time.time() + wait
         while True:
             st = str(self.basic(doc, "WmsCore", "StateDump") or "")
-            if not st.startswith("STATE=;") or time.time() > end:
+            busy = ";STARTS=0" in st if ";STARTS=" in st else st.startswith("STATE=;")
+            if not busy or time.time() > end:
                 return st
             self.idle()
             time.sleep(0.25)
+
+    def wms_ready(self, doc, wait=60.0):
+        """after the load of a book with the macros on: waits for the startup of WMS (nothing to wait for in a book without
+        WMS — the call of WmsCore fails at once)"""
+        try:
+            return self.wms_state(doc, wait)
+        except Exception:
+            return ""
 
     def idle(self):
         """Let LibreOffice run what it has queued, in particular the document's OnLoad macro, which Calc posts
@@ -167,7 +180,7 @@ class Office:
 # «WmsPlus»: their names do not slow the core down. A library sees the other one's procedures, constants and globals once
 # both are loaded (WmsCore.WmsInit loads WmsPlus).
 PLUS_LIB = "WmsPlus"
-PLUS_MODULES = ["WmsLegacy", "WmsPrimeUi", "WmsView", "WmsPack", "WmsDash", "WmsFind", "WmsMap", "WmsAsk", "WmsDaily"]
+PLUS_MODULES = ["WmsLegacy", "WmsPrimeUi", "WmsView", "WmsPack", "WmsDash", "WmsFind", "WmsMap", "WmsAsk", "WmsDaily", "WmsSupply"]
 
 
 def lib_of(module):
