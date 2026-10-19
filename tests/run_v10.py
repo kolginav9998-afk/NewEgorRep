@@ -1140,6 +1140,112 @@ def v21_reasons_history():
         s.close()
 
 
+def print_text(s, n=120):
+    """the text of the page «Печать» (A:G of its first n rows) in one line"""
+    pr = s.doc.Sheets.getByName("Печать")
+    return " | ".join(" ".join(str(x) for x in r) for r in pr.getCellRangeByPosition(0, 0, 6, n).getDataArray())
+
+
+@case
+def v22_control_documents():
+    """К3 «Акт списания» по выделенным проведённым списаниям — номер, причины, позиции частями, цена и сумма, подписи;
+    К11/К12 «Накладная» — выделенные выдачи или «всё, что выдано <кому> сегодня», количество частями, номер накладной ставится в
+    выдачи (операция ISSUE_DOC в журнале); К14 «Печать карточки» — движения и исправления «было → стало» с причиной; К4 опись с
+    пустым «Факт» по порядку мест и сличительная ведомость (излишки, недостачи, суммы); К5 «Пересчитать место» — строки «Инвентаризация»"""
+    c = "V22"
+    s = ready(Session(new_wms("v22")))
+    try:
+        order(s, 1, "1", "Антифриз 20 л", qty="2", J=100.0)
+        receive(s, 1, "2", place="5-1-1")
+        order(s, 2, "2", "Болт М8", qty="10", art="Б-8", J=12.5)
+        receive(s, 2, "10", place="5-1-2")
+        order(s, 3, "3", "Гайка М8", qty="10", J=2.0)
+        receive(s, 3, "10", place="6-1-1")
+        a, b, g = ords(s, 1)[21], ords(s, 2)[21], ords(s, 3)[21]
+        s.B("PackSet", a, "4", "кан", "", module="WmsPack")
+        # К3
+        put(s, "Корректировки", 1, B="Списание", C=a, G="1 кан", K=serial(), L="протечка")
+        put(s, "Корректировки", 2, B="Списание", C=b, G="2", K=serial(), L="ржавчина")
+        w = [s.A("AdjustPostRow", 1), s.A("AdjustPostRow", 2)]
+        s.goto("Корректировки", "$A$2:$A$3")
+        res = s.B("WriteOffAct", module="WmsPrint")
+        t = print_text(s)
+        R.add(c, "К3: акт списания по двум выделенным строкам — «АКТ СПИСАНИЯ № 1–2», причины «протечка; ржавчина», антифриз «1 кан (0,25 шт)» "
+                 "по 100,00 на 25,00, болт 2 × 12,50 = 25,00, итого 50,00; подписи «Списал», «Проверил», «Утвердил»",
+              all(x.startswith("OK") for x in w) and res == "OK:Акт списания 1" and "АКТ СПИСАНИЯ № 1–2" in t and "протечка; ржавчина" in t
+              and "1 кан (0,25 шт)" in t and "100,00" in t and "12,50" in t and "Итого на сумму: 50,00" in t and "Проверил" in t and "Утвердил" in t,
+              f"{w}; {res}; {t[:700]}")
+        s.goto("Корректировки", "$A$5")
+        e3 = s.B("WriteOffAct", module="WmsPrint")
+        R.add(c, "К3: без проведённых списаний в выделении — понятный отказ", e3.startswith("ERR:") and "Списание" in e3, e3)
+        # К11/К12
+        put(s, "Выдачи", 1, L=a, E="1 кан", H=serial(), I="ива")
+        put(s, "Выдачи", 2, L=b, E="3", H=serial(), I="ива")
+        put(s, "Выдачи", 3, L=g, E="1", H=serial(), I="лев")
+        p = [s.I("IssuePostRow", r) for r in (1, 2, 3)]
+        s.goto("Выдачи", "$C$2")
+        choose(s, 1)
+        res = s.B("IssueNote", module="WmsPrint")
+        t = print_text(s)
+        docs = [s.doc.Sheets.getByName("Выдачи").getCellByPosition(1, r).getString() for r in (1, 2, 3)]
+        nos = [s.doc.Sheets.getByName("Выдачи").getCellByPosition(0, r).getValue() for r in (1, 2)]
+        ent = [e for e in s.journal()[0] if e["type"] == "ISSUE_DOC"]
+        R.add(c, "К11/К12: «Всё, что выдано «Иванов…» сегодня» — накладная на 2 выдачи (антифриз «1 кан (0,25 шт)», болт «3 шт»), выдача "
+                 "«лев» не попала; номер «Н-<№ первой>» записан в B обеих выдач одной операцией ISSUE_DOC; подписи «Выдал», «Получил»",
+              all(x.startswith("OK") for x in p) and res.startswith("OK:Накладная Н-") and "НАКЛАДНАЯ НА ВЫДАЧУ № Н-" in t and "1 кан (0,25 шт)" in t
+              and "3 шт" in t and "Гайка" not in t and "Получил" in t and docs[0] == docs[1] == f"Н-{int(nos[0])}" and docs[2] == ""
+              and len(ent) == 1 and ent[0]["fields"].get("NOS") == f"{int(nos[0])},{int(nos[1])}", f"{p}; {res}; {docs}; {ent}; {t[:600]}")
+        s.goto("Выдачи", "$C$2:$C$4")
+        res2 = s.B("IssueNote", module="WmsPrint")
+        t2 = print_text(s)
+        docs2 = [s.doc.Sheets.getByName("Выдачи").getCellByPosition(1, r).getString() for r in (1, 2, 3)]
+        R.add(c, "К11: три выделенные выдачи — накладная с уже стоящим номером документа; пустой B третьей выдачи получил тот же номер",
+              res2 == res and "Гайка" in t2 and docs2 == [docs[0]] * 3, f"{res2}; {docs2}")
+        # К14
+        s.goto("Выдачи", "$L$3")
+        s.U("TestFixInput", b, "4", "ива", TODAY)
+        s.U("TestOpReason", "пересчитали")
+        s.U("BtnFix")
+        s.B("CardShow", int(b[3:]), module="WmsFind")
+        res = s.B("CardPrint", b, module="WmsPrint")
+        t = print_text(s)
+        R.add(c, "К14: «Печать карточки» — шапка ЕИ, движения с остатком (приход 10, списание 2, выдача 4), исправление «Количество: 3 → 4 · причина: пересчитали»",
+              res == f"OK:Карточка {b}" and f"КАРТОЧКА {b}" in t and "Болт М8" in t and "Количество: 3 → 4" in t and "причина: пересчитали" in t
+              and "Исправления и сторно (из журнала WMS): 1" in t, f"{res}; {t[:900]}")
+        # К4 the inventory list
+        res = s.B("InventoryList", "5", module="WmsPrint")
+        t = print_text(s)
+        ia, ib = t.find(a), t.find(b)
+        R.add(c, "К4: опись ряда «5» — антифриз (5-1-1) раньше болта (5-1-2), гайки (6-1-1) нет; учёт частями, колонка «Факт» пустая",
+              res == "OK:Опись 5" and "ИНВЕНТАРИЗАЦИОННАЯ ОПИСЬ" in t and 0 < ia < ib and g not in t and "Факт" in t and "Пересчитал" in t, f"{res}; {t[:700]}")
+        bad = s.B("InventoryList", "что-то", module="WmsPrint")
+        R.add(c, "К4: опись неизвестной зоны — отказ с примером", bad.startswith("ERR:") and "5-12-3" in bad, bad)
+        # К5 recount the zone, then the comparison sheet
+        res = s.B("RecountZone", "5", module="WmsPrint")
+        adj = s.doc.Sheets.getByName("Корректировки")
+        rows = [list(adj.getCellRangeByPosition(0, r, 17, r).getDataArray()[0]) for r in (3, 4)]
+        again = s.B("RecountZone", "5", module="WmsPrint")
+        R.add(c, "К5: «Пересчитать место» ряда «5» — две строки «Инвентаризация» (по порядку мест) с учётным остатком, датой и основанием, пакет "
+                 "«Пересчёт 5 …»; повторно — не добавляет (уже ждут пересчёта)",
+              res.startswith("OK:добавлено строк пересчёта: 2") and [r[1] for r in rows] == ["Инвентаризация"] * 2 and [r[2] for r in rows] == [a, b]
+              and rows[0][8] == 1.5 and rows[1][8] == 4.0 and rows[0][10] == serial() and rows[0][11] == "пересчёт места 5"
+              and rows[0][17].startswith("Пересчёт 5 ") and "Укажите фактический остаток" in rows[0][16] and again.startswith("ERR:") and "ждущих" in again,
+              f"{res}; {rows}; {again}")
+        put(s, "Корректировки", 3, H="6 кан")
+        put(s, "Корректировки", 4, H="3")
+        q = [s.A("AdjustPostRow", 3), s.A("AdjustPostRow", 4)]
+        res = s.B("InventoryCompare", serial(), module="WmsPrint")
+        t = print_text(s)
+        R.add(c, "К4: сличительная ведомость за сегодня — антифриз «совпало», болт «недостача 1 шт» на 12,50; итог «недостачи на сумму 12,50»; подписи комиссии",
+              all(x.startswith("OK") for x in q) and res.startswith("OK:Сличительная ведомость") and "совпало" in t and "недостача 1 шт" in t
+              and "недостачи на сумму 12,50" in t and "Председатель комиссии" in t, f"{q}; {res}; {t[:700]}")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:300])
+        oracle(c, s, "документы контроля ничего не провели, кроме номера накладной (ISSUE_DOC)")
+    finally:
+        s.close()
+
+
 # ================================================================ runner
 
 def main():

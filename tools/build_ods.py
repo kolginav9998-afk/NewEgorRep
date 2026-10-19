@@ -1372,11 +1372,19 @@ BUTTONS_10 = [
     (ORDERS, "btnDiscAct", "Акт расхождения", "WmsPrint.BtnDiscrepancyAct", 26800, 880, 3600, 650, 0xDDEBF7),
     # 1.0 (этап G): control and documents
     (FIND, "btnHistory", "История изменений", "WmsAudit.BtnHistory", None, None, 4000, 720, 0xDDEBF7),
+    (FIND, "btnCardPrint", "Печать карточки", "WmsPrint.BtnCardPrint", None, None, 3900, 720, 0xDDEBF7),
+    (ISSUES, "btnIssueNote", "Накладная", "WmsPrint.BtnIssueNote", 150 + 5 * 2900, 880, 2750, 650, 0xDDEBF7),
+    # «Корректировки»: the second row of buttons (its header made as high as that of «Выдачи»)
+    (ADJUST, "btnRecount", "Пересчитать место…", "WmsPrint.BtnRecountZone", 150, 880, 3900, 650, 0xC6E0B4),
+    (ADJUST, "btnInvList", "Опись…", "WmsPrint.BtnInventoryList", 150 + 4050, 880, 2750, 650, 0xDDEBF7),
+    (ADJUST, "btnInvCompare", "Сличительная ведомость…", "WmsPrint.BtnInventoryCompare", 150 + 4050 + 2900, 880, 4900, 650, 0xDDEBF7),
+    (ADJUST, "btnWriteOffAct", "Акт списания", "WmsPrint.BtnWriteOffAct", 150 + 4050 + 2900 + 5050, 880, 3000, 650, 0xDDEBF7),
 ]
 
 
 def buttons_10(doc, sheets):
     fit_headers(sheets.getByName(ISSUES), ISSUE_HEADERS, 3100)
+    fit_headers(sheets.getByName(ADJUST), ADJUST_HEADERS, 2700)
     for sheet, name, label, macro, x, y, w, h, back in BUTTONS_10:
         sh = sheets.getByName(sheet)
         if x is None and sheet == CARS:
@@ -1393,7 +1401,7 @@ def buttons_10(doc, sheets):
             # «Поиск»: the row of its buttons (build_find), after «Фасовка ЕИ»
             y = sh.getCellByPosition(0, 3).Position.Y + 90
             x = sh.getCellByPosition(6, 3).Position.X + {"btnIssueFrom": 13100, "btnReturnHands": 15580, "btnShowOnMap": 19560,
-                                                         "btnHistory": 23540}[name]
+                                                         "btnHistory": 23540, "btnCardPrint": 27640}[name]
         if not has_button(sh, name):
             add_button(doc, sh, name, label, macro, x, y, w, h, back=back)
 

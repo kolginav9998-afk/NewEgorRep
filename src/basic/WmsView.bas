@@ -487,6 +487,7 @@ Function OpName(sType As String) As String
     Case "SP_IDENTIFY": OpName = "Разобран иной приход"
     Case "SP_REFILL": OpName = "Пополнение ЕИ (иной приход)"
     Case "EI_PACK": OpName = "Фасовка ЕИ"
+    Case "ISSUE_DOC": OpName = "Номер накладной в выдачах"
     Case "ABANDON": OpName = "Хвост журнала отложен"
     Case "START": OpName = "Начало журнала"
     Case Else
