@@ -10,7 +10,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from harness import OUT, Results, Session, new_wms  # noqa: E402
-from run_prime import TODAY, order, put, receive, serial, topology  # noqa: E402
+from run_prime import TODAY, issue, order, put, receive, serial, topology  # noqa: E402
 
 R = Results()
 CASES = []
@@ -794,6 +794,142 @@ def v16_places():
         head2 = s.doc.Sheets.getByName("Поиск").getCellByPosition(1, 6).getString()
         R.add(c, "М6: двойной щелчок по месту карты — «Поиск» с этим местом", dc is True and s.active_sheet() == "Поиск" and "Место 1-2-1: сейчас — 1 ЕИ" in head2,
               f"{dc}; {s.active_sheet()}; {head2}")
+    finally:
+        s.close()
+
+
+@case
+def v17_place_lists():
+    """М10: a range «1-2-3…5» is three places (the map, the checks); the new place of a move as a change of the list — «+1-3-1»
+    one more, «−1-1-1» one less (the refusals: already there, not there, nothing left); «Исправить» the same from the places the
+    move wrote. М11: after an issue from an EI on several places — «место опустело?» frees the chosen one by a move"""
+    c = "V17"
+    s = ready(Session(new_wms("v17")))
+    try:
+        topology(s, {1: (3, 2)})
+        pl = [list(s.B("PlaceList", x, module="WmsView")) for x in ("1-2-3…5", "1-2-3..5, 2-1-1", "1-2-5…3", "1-2-3…1-2-5", "1-2-3…1-3-5", "1-2…4")]
+        it = list(s.B("PlaceItems", "1-1-1…2; у стены", module="WmsView"))
+        R.add(c, "М10: «1-2-3…5» = 1-2-3, 1-2-4, 1-2-5 (и «..», обратный порядок, полный конец «…1-2-5»); «1-2-3…1-3-5» — не диапазон; "
+                 "в списке примечание остаётся частью",
+              pl[0] == ["1-2-3", "1-2-4", "1-2-5"] and pl[1] == ["1-2-3", "1-2-4", "1-2-5", "2-1-1"] and pl[2] == pl[0] and pl[3] == pl[0]
+              and pl[4] == [] and pl[5] == ["1-2", "1-3", "1-4"] and it == ["1-1-1", "1-1-2", "у стены"], f"{pl}; {it}")
+        ed = []
+        for base, typed in (("1-1-1, 1-2-1", "+1-3-1"), ("1-1-1, 1-2-1", "−1-1-1"), ("1-1-1, 1-2-1", "-1-1-1"), ("1-1-1", "+1-2-1…2"),
+                            ("1-1-1, 1-2-1", "+1-1-1"), ("1-1-1, 1-2-1", "−9-9-9"), ("1-1-1, 1-2-1", "−1-1-1, 1-2-1"), ("", "+1-1-1"), ("1-1-1", "+")):
+            ed.append(s.B("TestPlaceEdit", base, typed, module="WmsDaily"))
+        R.add(c, "М10: «+» и «−» к списку мест: добавить, убрать (минус любой чертой), диапазоном; отказы — «уже есть», «нет в списке», "
+                 "«не останется ни одного места», пустой «+»",
+              ed[0] == "OK:1-1-1, 1-2-1, 1-3-1" and ed[1] == "OK:1-2-1" and ed[2] == "OK:1-2-1" and ed[3] == "OK:1-1-1, 1-2-1, 1-2-2"
+              and "уже есть" in ed[4] and "нет в списке" in ed[5] and "не останется" in ed[6] and ed[7] == "OK:1-1-1" and ed[8].startswith("ERR:"), str(ed))
+        order(s, 1, "1", "Болт М8", qty="10")
+        receive(s, 1, "10", place="1-1-1…2")
+        a = ords(s, 1)[21]
+        na = int(a[3:])
+        s.B("MapBuild", "OCC", True, module="WmsMap")
+        m1 = [s.B("TestMapEIs", k, module="WmsMap").split("|")[-1] for k in ("1-1-1", "1-1-2", "1-2-1")]
+        R.add(c, "М10: приход на «1-1-1…2» — без вопроса о месте; на карте ЕИ лежит на 1-1-1 и 1-1-2", m1[0] != "" and m1[0] == m1[1] and m1[2] == "",
+              f"{m1}; {s.stock_place(na) if hasattr(s, 'stock_place') else ''}")
+        stk = s.doc.Sheets.getByName("Наличие")
+        put(s, "Корректировки", 1, B="Перемещение", C=a, J="+1-3-1", K=serial(), L="не влезло")
+        p1 = s.B("AdjustPostRow", 1, module="WmsAdjust")
+        adj = s.doc.Sheets.getByName("Корректировки")
+        put(s, "Корректировки", 2, B="Перемещение", C=a, J="−1-1-1…2", K=serial(), L="освободили")
+        p2 = s.B("AdjustPostRow", 2, module="WmsAdjust")
+        put(s, "Корректировки", 3, B="Перемещение", C=a, J="−1-3-1", K=serial(), L="x")
+        p3 = s.B("AdjustPostRow", 3, module="WmsAdjust")
+        ent = [e for e in s.journal()[0] if e["type"] == "MOVE"]
+        R.add(c, "М10: перемещение «+1-3-1» — место «1-1-1…2, 1-3-1», в J и в журнале — весь список; «−1-1-1…2» — «1-3-1»; убрать последнее — отказ",
+              p1.startswith("OK") and adj.getCellByPosition(9, 1).getString() == "1-1-1…2, 1-3-1" and p2.startswith("OK")
+              and stk.getCellByPosition(5, na).getString() == "1-3-1" and adj.getCellByPosition(9, 2).getString() == "1-3-1"
+              and p3.startswith("ERR:") and "не останется" in p3 and len(ent) == 2 and ent[0]["fields"].get("TO") == "1-1-1…2, 1-3-1",
+              f"{p1}; {p2}; {p3}; {adj.getCellByPosition(9, 1).getString()}; {stk.getCellByPosition(5, na).getString()}")
+        s.B("AdjustClearRow", 3, module="WmsAdjust")
+        fx = s.B("AdjustFixRow", 2, "+1-2-2", serial(), "освободили", module="WmsAdjust")
+        R.add(c, "М10: «Исправить» перемещение «+1-2-2» — к местам, что оно записало (1-3-1): «1-3-1, 1-2-2»",
+              fx.startswith("OK") and stk.getCellByPosition(5, na).getString() == "1-3-1, 1-2-2", f"{fx}; {stk.getCellByPosition(5, na).getString()}")
+        # М11: the issue from an EI on two places
+        put(s, "Выдачи", 1, L=a, E="2", H=serial(), I="ива")
+        s.goto("Выдачи", "$L$2")
+        s.U("BtnPost")
+        same = stk.getCellByPosition(5, na).getString()
+        put(s, "Выдачи", 2, L=a, E="3", H=serial(), I="ива")
+        s.goto("Выдачи", "$L$3")
+        choose(s, 2)                                     # «Место 1-2-2 опустело»
+        s.U("BtnPost")
+        after = stk.getCellByPosition(5, na).getString()
+        last = adj.getCellRangeByPosition(0, 3, 16, 3).getDataArray()[0]
+        R.add(c, "М11: выдача с ЕИ на двух местах — «место опустело?»: Enter — места те же; «1-2-2 опустело» — проведено перемещение «−1-2-2», место «1-3-1»",
+              same == "1-3-1, 1-2-2" and after == "1-3-1" and last[1] == "Перемещение" and str(last[16]).startswith("Проведено")
+              and "опустело после выдачи № 2" in last[11] and s.stock(na) == 5.0, f"{same}; {after}; {last}")
+        put(s, "Выдачи", 3, L=a, E="1", H=serial(), I="ива")
+        s.goto("Выдачи", "$L$4")
+        shown0 = s.B("TestPrimeShown", module="WmsPrimeUi")
+        s.U("BtnPost")
+        R.add(c, "М11: ЕИ на одном месте — вопроса нет", s.B("TestPrimeShown", module="WmsPrimeUi") == shown0 and s.stock(na) == 4.0, str(s.stock(na)))
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:300])
+        oracle(c, s, "списки мест: диапазон, «+», «−», исправление, «место опустело»")
+    finally:
+        s.close()
+
+
+@case
+def v18_rename_route():
+    """М7 «Переименовать ряд…»: rows «Перемещение» prepared (not posted) for every EI with a balance there, the map and «Места»
+    renamed when asked, the block posted by «Провести»; М8 «Маршрут сбора»: the rows of «Выдачи» not posted, in the order of
+    the places, on «Поиск»"""
+    c = "V18"
+    s = ready(Session(new_wms("v18")))
+    try:
+        topology(s, {1: (3, 2)})
+        pl = s.doc.Sheets.getByName("Места")
+        pl.getCellByPosition(0, 1).setString("1-2-1")
+        pl.getCellByPosition(3, 1).setValue(2)
+        for k, (nm, place) in enumerate((("Болт М8", "1-2-1"), ("Гайка М8", "1-1-1, 1-2-2"), ("Шайба М8", "1-3-1"), ("Винт М8", "1-2-2"))):
+            order(s, 1 + k, str(1 + k), nm, qty="5")
+            receive(s, 1 + k, "5", place=place)
+        eis = [ords(s, 1 + k)[21] for k in range(4)]
+        issue(s, 1, eis[3], "5")                        # Винт: nothing left — not moved
+        stk = s.doc.Sheets.getByName("Наличие")
+        adj = s.doc.Sheets.getByName("Корректировки")
+        s.B("TestPrimeForm", "1-2\t1-4\tперевесили таблички", module="WmsPrimeUi")
+        choose(s, 0)                                     # «Подготовить строки и переименовать на карте»
+        rn = s.B("RenamePlaces", module="WmsDaily")
+        rows = adj.getCellRangeByPosition(0, 1, 16, 3).getDataArray()
+        topo = s.doc.Sheets.getByName("Топология")
+        tt = {topo.getCellByPosition(cc, r).getString() for r in range(0, 8) for cc in range(0, 5)}
+        R.add(c, "М7: «1-2» → «1-4»: подготовлены 2 строки «Перемещение» (Болт → 1-4-1, Гайка → 1-1-1, 1-4-2), не проведены; Винт (остаток 0) — нет; "
+                 "на карте 1-2-1/1-2-2 стали 1-4-1/1-4-2, в «Места» — 1-4-1; остатки и места ЕИ пока прежние",
+              rn == "OK:2|2-3" and rows[0][1] == "Перемещение" and rows[0][2] == eis[0] and rows[0][9] == "1-4-1" and rows[1][2] == eis[1]
+              and rows[1][9] == "1-1-1, 1-4-2" and rows[0][0] == "" and rows[2][1] == "" and "перевесили таблички" in rows[0][11]
+              and "1-4-1" in tt and "1-4-2" in tt and "1-2-1" not in tt and pl.getCellByPosition(0, 1).getString() == "1-4-1"
+              and stk.getCellByPosition(5, int(eis[0][3:])).getString() == "1-2-1", f"{rn}; {rows}; {sorted(tt)}")
+        s.goto("Корректировки", "$A$2:$S$3")
+        s.B("BtnAdjPost", module="WmsAdjustUi")
+        R.add(c, "М7: строки проведены блоком «Провести», без вопросов о местах; места ЕИ — новые",
+              stk.getCellByPosition(5, int(eis[0][3:])).getString() == "1-4-1" and stk.getCellByPosition(5, int(eis[1][3:])).getString() == "1-1-1, 1-4-2"
+              and str(adj.getCellByPosition(16, 1).getString()).startswith("Проведено") and str(adj.getCellByPosition(16, 2).getString()).startswith("Проведено"),
+              f"{s.U('TestUiLastMessage')}; {adj.getCellByPosition(16, 1).getString()}; {adj.getCellByPosition(16, 2).getString()}")
+        s.B("TestPrimeForm", "7\t8\tx", module="WmsPrimeUi")
+        r7 = s.B("RenamePlaces", module="WmsDaily")
+        s.B("TestPrimeForm", "1-4\t2\tx", module="WmsPrimeUi")
+        r8 = s.B("RenamePlaces", module="WmsDaily")
+        R.add(c, "М7: мест «7…» нет нигде — отказ; «1-4» → «2» (секция на ряд) — отказ", r7.startswith("ERR:") and "нет ни у одного" in r7
+              and r8.startswith("ERR:") and "так же" in r8, f"{r7}; {r8}")
+        # М8: the route
+        put(s, "Выдачи", 2, L=eis[2], E="1", H=serial(), I="ива")       # 1-3-1
+        put(s, "Выдачи", 3, L=eis[0], E="2", H=serial(), I="ива")       # 1-4-1
+        put(s, "Выдачи", 4, L=eis[1], E="1", H=serial(), I="лев")       # 1-1-1, 1-4-2
+        put(s, "Выдачи", 5, L="ЕИ-999", E="1", H=serial(), I="лев")     # unknown EI — last
+        rt = s.B("PickRoute", module="WmsFind")
+        fd = s.doc.Sheets.getByName("Поиск")
+        tab = [list(r) for r in fd.getCellRangeByPosition(1, 12, 8, 15).getDataArray()]
+        R.add(c, "М8: «Маршрут сбора» — 4 непроведённые строки по порядку мест: 1-1-1 (Гайка), 1-3-1 (Шайба), 1-4-1 (Болт), без места — в конце; номер, место, ЕИ, "
+                 "количество, кому, строка «Выдачи»",
+              rt == "OK:строк 4" and [r[2] for r in tab] == [eis[1], eis[2], eis[0], "ЕИ-00000999"] and tab[0][0] == 1 and tab[0][1] == "1-1-1, 1-4-2"
+              and tab[3][1] == "место не указано" and str(tab[2][4]) in ("2", "2.0") and tab[0][6] == "лев" and tab[1][7] == "строка 3"
+              and "Маршрут сбора: 4 строки" in fd.getCellByPosition(1, 6).getString(), f"{rt}; {tab}; {fd.getCellByPosition(1, 6).getString()}")
+        oracle(c, s, "переименование ряда блоком перемещений")
     finally:
         s.close()
 

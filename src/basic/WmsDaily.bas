@@ -305,6 +305,8 @@ Function IssueWindow() As String
             sh.getCellByPosition(IC_DATE, r).setValue(d)
             res = WmsIssue.IssuePostRow(r)
             If Left(res, 3) = "OK:" Then
+                ' 1.0 (М11): an EI on several places — did a place become empty?
+                PlaceAfterIssue(r)
                 nDone = nDone + 1
                 sLast = "№ " & CLng(sh.getCellByPosition(IC_NO, r).getValue()) & " — " & sEI & ", " _
                     & WmsPack.QtyWithParts(CLng(Val(Mid(sEI, Len(EI_PREFIX) + 1))), sh.getCellByPosition(IC_QTY, r).getValue(), sh.getCellByPosition(IC_UNIT, r).getString()) _
@@ -963,6 +965,243 @@ Function PickOffcut() As String
     WmsIssue.PreviewRow(r, True, False)
     PickOffcut = "OK:" & WmsIssue.EiCanon(m)
     gUiLastMsg = PickOffcut
+End Function
+
+' ================================================================ М11 the issue «с места»
+
+' after an issue posted by «Провести»: the rest of a bar (Ч7), then the places of an EI on several places (М11)
+Sub AfterIssue(r As Long)
+    OffcutAfterIssue(r)
+    PlaceAfterIssue(r)
+End Sub
+
+' 1.0 (М11): an EI on several places and something left after the issue — did one of the places become empty? The chosen
+' place leaves the list of the EI by a row «Перемещение» («−1-2-4»), posted at once. Enter — «Места не менялись»
+Sub PlaceAfterIssue(r As Long)
+    Dim sEI As String, n As Long, canon As String, msg As String, b As Double, d As Variant, pls As Variant, labels() As String, codes() As Integer
+    Dim i As Integer, m As Integer, k As Integer, sNo As String
+    On Error GoTo EH
+    sEI = WmsIssue.IssuesSheet().getCellByPosition(IC_EI, r).getString()
+    If Not WmsIssue.NormalizeEI(sEI, n, canon, msg) Then Exit Sub
+    If Not WmsIssue.StockQty(n, b) Then Exit Sub
+    If b <= 0.0000005 Then Exit Sub
+    d = WmsIssue.StockData(n)
+    pls = WmsView.PlaceList(CStr(d(SC_PLACE)))
+    If UBound(pls) < 1 Then Exit Sub
+    m = UBound(pls) + 1
+    If m > 6 Then m = 6
+    ReDim labels(m)
+    ReDim codes(m)
+    labels(0) = "Места не менялись"
+    codes(0) = 0
+    For i = 0 To m - 1
+        labels(i + 1) = "Место " & pls(i) & " опустело — убрать его из списка"
+        codes(i + 1) = 10 + i
+    Next i
+    sNo = WmsIssue.IssuesSheet().getCellByPosition(IC_NO, r).getString()
+    k = WmsPrimeUi.UiButtons("WMS — место", canon & " · «" & d(SC_NAME) & "» лежит на " & (UBound(pls) + 1) & " местах: " & Join(pls, ", ") _
+        & ". После выдачи № " & sNo & " осталось " & WmsPack.QtyWithParts(n, b, CStr(d(SC_UNIT))) & "." & Chr(10) & Chr(10) _
+        & "Одно из мест опустело? WMS уберёт его из списка мест ЕИ (строка «Перемещение» на листе «" & SH_ADJUST & "»).", labels, codes)
+    If k < 10 Then Exit Sub
+    MovePost(canon, "−" & pls(k - 10), "место " & pls(k - 10) & " опустело после выдачи № " & sNo)
+    Exit Sub
+EH:
+End Sub
+
+' a row «Перемещение» of «Корректировки» filled and posted (the new place may be a change of the list: «−1-2-4», «+1-2-5»):
+' OK:<the new place>|строка N, or the refusal (said in a window)
+Function MovePost(sEI As String, sPlace As String, sReason As String) As String
+    Dim ash As Object, r As Long, res As String
+    ash = gDoc.Sheets.getByName(SH_ADJUST)
+    r = WmsOrders.LastRow(ash) + 1
+    If r < 1 Then r = 1
+    ash.getCellByPosition(AC_KIND, r).setString("Перемещение")
+    ash.getCellByPosition(AC_EI, r).setString(sEI)
+    ash.getCellByPosition(AC_PLACE, r).setString(sPlace)
+    ash.getCellByPosition(AC_DATE, r).setValue(CDbl(Date()))
+    ash.getCellByPosition(AC_REASON, r).setString(sReason)
+    res = WmsAdjust.AdjustPostRow(r)
+    If Left(res, 3) = "OK:" Then
+        MovePost = "OK:" & ash.getCellByPosition(AC_PLACE, r).getString() & "|строка " & (r + 1)
+    Else
+        MovePost = res
+        If Left(res, 5) <> "SKIP:" Then WmsUi.UiMessage("Перемещение не проведено: " & Mid(res, InStr(res, ":") + 1) & " (строка " & (r + 1) & " «" & SH_ADJUST & "»)")
+    End If
+    gUiLastMsg = MovePost
+End Function
+
+' the test seam of WmsView.PlaceEdit: OK:<the new list> / ERR:<the refusal>
+Function TestPlaceEdit(sBase As String, sTyped As String) As String
+    Dim why As String, sOut As String
+    why = WmsView.PlaceEdit(sBase, sTyped, sOut)
+    TestPlaceEdit = IIf(why = "", "OK:" & sOut, "ERR:" & why)
+End Function
+
+' ================================================================ М7 a row, a section or a place renamed
+
+Sub BtnRenamePlaces(Optional oEvent As Variant)
+    Dim s As String
+    WmsInit()
+    s = RenamePlaces()
+    If Left(s, 4) = "ERR:" Then WmsUi.UiMessage(Mid(s, 5))
+End Sub
+
+' the parts of «5», «5-12», «5-12-3» (a row, a section, a place) as the keys of the places have them; Array() when it is none
+Private Function RenameParts(ByVal s As String) As Variant
+    Dim k As String, a As Variant
+    RenameParts = Array()
+    s = Trim(s)
+    If s = "" Then Exit Function
+    k = WmsView.PlaceKey(s)
+    If k = "" Then
+        ' one part — a row alone («5», «Р5», «А»): read as the first part of a key
+        k = WmsView.PlaceKey(s & "-0")
+        If k = "" Then Exit Function
+        a = Split(k, "-")
+        RenameParts = Array(a(0))
+        Exit Function
+    End If
+    RenameParts = Split(k, "-")
+End Function
+
+' «Переименовать ряд…»: the row 5 became 6 (or a section, a place): rows «Перемещение» are prepared on «Корректировки» for every
+' EI with a balance on those places — not posted: the storekeeper checks them and posts the selected block by «Провести».
+' The map («Топология») and «Места» are renamed too when asked (the previous map kept in «_TOPO_PREV»). OK:<rows>|<first>-<last> /
+' SKIP:… / ERR:…
+Function RenamePlaces() As String
+    Dim v(2) As String, oldP As Variant, newP As Variant, st As Object, last As Long, r0 As Long, r1 As Long, d As Variant, i As Long
+    Dim items As Variant, j As Integer, nk As String, t As String, seen As String, changed As Boolean, eis() As String, pls() As String, n As Long
+    Dim nTopo As Long, nDir As Long, nBusy As Long, k As Integer, ash As Object, r As Long, a() As Variant, b() As Variant, sOld As String, sNew As String
+    Dim labels As Variant, codes As Variant, sText As String, bMap As Boolean, ky As String
+    On Error GoTo EH
+    If WmsMap.MapEditing() Then
+        RenamePlaces = "ERR:карта в режиме правки — сначала «Сохранить карту» или «Отменить правку»"
+        gUiLastMsg = RenamePlaces
+        Exit Function
+    End If
+    v(2) = "переименование мест"
+    If Not WmsPrimeUi.UiForm("Переименовать ряд или место", "Ряд, секция или место получили другой номер (перевесили таблички, перенумеровали ряды). " _
+        & "WMS подготовит строки «Перемещение» на листе «" & SH_ADJUST & "» для всех ЕИ с остатком, что там лежат, — вы проверите их и проведёте сами. " _
+        & "Ряд — «5», секция — «5-12», место — «5-12-3».", Array("Было", "Стало", "Причина"), v, Array("", "", ""), "Подготовить") Then
+        RenamePlaces = "SKIP:окно закрыто"
+        gUiLastMsg = RenamePlaces
+        Exit Function
+    End If
+    oldP = RenameParts(v(0))
+    newP = RenameParts(v(1))
+    If UBound(oldP) < 0 Then
+        RenamePlaces = "ERR:«Было»: напишите ряд («5»), секцию («5-12») или место («5-12-3»)"
+    ElseIf UBound(newP) <> UBound(oldP) Then
+        RenamePlaces = "ERR:«Стало» пишется так же, как «Было»: ряд на ряд («5» → «6»), секция на секцию («5-12» → «5-14»), место на место"
+    ElseIf Join(oldP, "-") = Join(newP, "-") Then
+        RenamePlaces = "ERR:«Было» и «Стало» совпадают — переименовывать нечего"
+    End If
+    If RenamePlaces <> "" Then
+        gUiLastMsg = RenamePlaces
+        Exit Function
+    End If
+    sOld = Join(oldP, "-")
+    sNew = Join(newP, "-")
+    ' the EIs with a balance on those places: their new lists (the other places of a list stay as written)
+    st = WmsIssue.StockSheet()
+    last = WmsOrders.LastRow(st)
+    ReDim eis(100)
+    ReDim pls(100)
+    For r0 = 1 To last Step CHECK_CHUNK_ROWS
+        r1 = r0 + CHECK_CHUNK_ROWS - 1
+        If r1 > last Then r1 = last
+        d = st.getCellRangeByPosition(0, r0, SC_PLACE, r1).getDataArray()
+        For i = 0 To r1 - r0
+            If VarType(d(i)(SC_QTY)) = 5 And Trim(CStr(d(i)(SC_PLACE))) <> "" Then
+                If d(i)(SC_QTY) > 0.0000005 Then
+                    items = WmsView.PlaceItems(CStr(d(i)(SC_PLACE)))
+                    t = ""
+                    seen = "|"
+                    changed = False
+                    For j = 0 To UBound(items)
+                        ky = WmsView.PlaceKey(CStr(items(j)))
+                        nk = WmsMap.KeyRenamed(ky, oldP, newP)
+                        If nk <> "" Then
+                            changed = True
+                        Else
+                            nk = Trim(CStr(items(j)))
+                            If WmsMap.KeyRenamed(ky, newP, newP) <> "" Then nBusy = nBusy + 1
+                        End If
+                        If InStr(seen, "|" & UCase(nk) & "|") = 0 Then
+                            t = t & IIf(t <> "", ", ", "") & nk
+                            seen = seen & UCase(nk) & "|"
+                        End If
+                    Next j
+                    If changed Then
+                        If n > UBound(eis) Then
+                            ReDim Preserve eis(2 * n)
+                            ReDim Preserve pls(2 * n)
+                        End If
+                        eis(n) = CStr(d(i)(SC_EI))
+                        pls(n) = t
+                        n = n + 1
+                    End If
+                End If
+            End If
+        Next i
+    Next r0
+    nTopo = WmsMap.TopoRename(oldP, newP, False, nDir)
+    If n = 0 And nTopo = 0 And nDir = 0 Then
+        RenamePlaces = "ERR:мест «" & sOld & "…» нет ни у одного ЕИ с остатком, ни на карте склада, ни в справочнике «" & SH_PLACES & "»"
+        gUiLastMsg = RenamePlaces
+        Exit Function
+    End If
+    sText = "«" & sOld & "» → «" & sNew & "»." & Chr(10) & Chr(10) & "ЕИ с остатком на этих местах: " & n _
+        & IIf(n > 0, " — для них будут подготовлены строки «Перемещение» на листе «" & SH_ADJUST & "» (ещё не проведены).", ".")
+    If nBusy > 0 Then sText = sText & Chr(10) & "Внимание: на местах «" & sNew & "…» уже лежат ЕИ (" & nBusy & ") — после переименования места совпадут."
+    If nTopo + nDir > 0 Then sText = sText & Chr(10) & "На карте склада таких мест: " & nTopo & ", в справочнике «" & SH_PLACES & "»: " & nDir & "."
+    If n > 0 And nTopo + nDir > 0 Then
+        labels = Array("Подготовить строки и переименовать на карте", "Только подготовить строки", "Отмена")
+        codes = Array(3, 1, 0)
+    ElseIf n > 0 Then
+        labels = Array("Подготовить строки", "Отмена")
+        codes = Array(1, 0)
+    Else
+        labels = Array("Переименовать на карте", "Отмена")
+        codes = Array(2, 0)
+    End If
+    k = WmsPrimeUi.UiButtons("Переименовать места", sText, labels, codes)
+    If k = 0 Or k = -1 Then
+        RenamePlaces = "SKIP:ничего не изменено"
+        gUiLastMsg = RenamePlaces
+        Exit Function
+    End If
+    bMap = (k = 2 Or k = 3)
+    If bMap Then WmsMap.TopoRename(oldP, newP, True, nDir)
+    If n = 0 Then
+        RenamePlaces = "OK:0|карта"
+        WmsUi.UiMessage("Готово: на карте склада и в «" & SH_PLACES & "» места «" & sOld & "…» стали «" & sNew & "…» (прежняя карта — в скрытом листе «" & SH_TOPO_PREV & "»).")
+        gUiLastMsg = RenamePlaces
+        Exit Function
+    End If
+    ' the rows: B «Перемещение», C the EI; J the new places, K today, L the reason (only the input columns)
+    ash = gDoc.Sheets.getByName(SH_ADJUST)
+    r = WmsOrders.LastRow(ash) + 1
+    If r < 1 Then r = 1
+    ReDim a(n - 1)
+    ReDim b(n - 1)
+    For i = 0 To n - 1
+        a(i) = Array("Перемещение", eis(i))
+        b(i) = Array(pls(i), CDbl(Date()), IIf(Trim(v(2)) <> "", Trim(v(2)), "переименование мест") & ": «" & sOld & "» → «" & sNew & "»")
+    Next i
+    ash.getCellRangeByPosition(AC_KIND, r, AC_EI, r + n - 1).setDataArray(a)
+    ash.getCellRangeByPosition(AC_PLACE, r, AC_REASON, r + n - 1).setDataArray(b)
+    gDoc.getCurrentController().setActiveSheet(ash)
+    gDoc.getCurrentController().select(ash.getCellRangeByPosition(0, r, AC_LAST, r + n - 1))
+    RenamePlaces = "OK:" & n & "|" & (r + 1) & "-" & (r + n)
+    WmsUi.UiMessage("Подготовлено строк «Перемещение»: " & n & " (строки " & (r + 1) & "–" & (r + n) & " листа «" & SH_ADJUST & "»), «" & sOld & "» → «" _
+        & sNew & "». Ничего ещё не проведено." & Chr(10) & Chr(10) & "Строки выделены: проверьте новые места (J) и нажмите «Провести» — WMS проведёт их блоком." _
+        & IIf(bMap, Chr(10) & "Карта склада и «" & SH_PLACES & "» уже переименованы (прежняя карта — в скрытом листе «" & SH_TOPO_PREV & "»).", ""))
+    gUiLastMsg = RenamePlaces
+    Exit Function
+EH:
+    RenamePlaces = "ERR:строки не подготовлены: " & Error$ & " (строка " & Erl & ")"
+    gUiLastMsg = RenamePlaces
 End Function
 
 ' 1.0 (В4): «Справка» from «Главная»

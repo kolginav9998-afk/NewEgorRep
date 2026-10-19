@@ -627,6 +627,116 @@ EH:
     gFdBusy = False
 End Function
 
+' ================================================================ 1.0 (М8) the route of picking
+
+Sub BtnPickRoute(Optional oEvent As Variant)
+    Dim s As String
+    WmsInit()
+    s = PickRoute()
+    If Left(s, 4) = "ERR:" Then WmsUi.UiMessage(Mid(s, 5))
+End Sub
+
+' the order of a place in a walk through the store: ряд, секция, ярус of its first place (a letter part by its letter); the rows
+' without a known place go last
+Private Function RouteKey(pls As Variant) As Double
+    Dim a As Variant, i As Integer, x As Double, w As Variant, v As Double
+    RouteKey = 99999999
+    If UBound(pls) < 0 Then Exit Function
+    a = Split(pls(0), "-")
+    w = Array(100000, 100, 1)
+    For i = 0 To UBound(a)
+        If i > 2 Then Exit For
+        If IsNumeric(a(i)) Then v = Val(a(i)) Else v = 900 + (AscW(Left(a(i), 1)) Mod 99)
+        If v > IIf(i = 2, 99, 999) Then v = IIf(i = 2, 99, 999)
+        x = x + v * w(i)
+    Next i
+    RouteKey = x
+End Function
+
+' the rows of «Выдачи» not posted yet (an EI written, no №) in the order of a walk through the store — by the place of the EI
+' (ряд, секция, ярус; the rows without a place at the end): a picking list on «Поиск», ready to print (Ctrl+P). OK:строк N / ERR:…
+Function PickRoute() As String
+    Dim ish As Object, last As Long, r0 As Long, r1 As Long, d As Variant, i As Long, n As Long, rows() As Variant, key() As Double, ord() As Long
+    Dim sEI As String, num As Long, canon As String, msg As String, st As Variant, pls As Variant, pl As String, tmp() As Variant, sh As Object
+    Dim nm As String, u As String, q As Variant, nNo As Long, more As Boolean, rw As Variant
+    gFdBusy = True
+    On Error GoTo EH
+    ish = WmsIssue.IssuesSheet()
+    last = WmsOrders.LastRow(ish)
+    ReDim rows(FD_CARD_MAX)
+    ReDim key(FD_CARD_MAX)
+    For r0 = 1 To last Step CHECK_CHUNK_ROWS
+        r1 = r0 + CHECK_CHUNK_ROWS - 1
+        If r1 > last Then r1 = last
+        d = ish.getCellRangeByPosition(0, r0, IC_LAST, r1).getDataArray()
+        For i = 0 To r1 - r0
+            If Trim(CStr(d(i)(IC_EI))) <> "" And VarType(d(i)(IC_NO)) <> 5 Then
+                If n > FD_CARD_MAX Then
+                    more = True
+                    Exit For
+                End If
+                sEI = Trim(CStr(d(i)(IC_EI)))
+                canon = sEI
+                nm = CStr(d(i)(IC_NAME))
+                u = CStr(d(i)(IC_UNIT))
+                pl = ""
+                If WmsIssue.NormalizeEI(sEI, num, canon, msg) Then
+                    st = WmsIssue.StockData(num)
+                    pl = Trim(CStr(st(SC_PLACE)))
+                    nm = CStr(st(SC_NAME))
+                    u = CStr(st(SC_UNIT))
+                End If
+                pls = PlaceList(pl)
+                If UBound(pls) < 0 Then nNo = nNo + 1
+                q = d(i)(IC_QTY)
+                If VarType(q) <> 5 Then q = Trim(CStr(q))
+                If Trim(CStr(d(i)(IC_PCT))) <> "" Then q = Trim(CStr(q) & " " & CStr(d(i)(IC_PCT)))
+                rows(n) = Array(0, IIf(pl <> "", pl, "место не указано"), canon, nm, q, u, CStr(d(i)(IC_WHO)), "строка " & (r0 + i + 1), "", SH_ISSUES, r0 + i, canon)
+                key(n) = RouteKey(pls) * 1000000 + r0 + i
+                n = n + 1
+            End If
+        Next i
+        If more Then Exit For
+    Next r0
+    sh = ViewOpen(SH_FIND)
+    ClearPage(sh)
+    gFdMode = "LIST"
+    TableMode(sh, False)
+    sh.getCellByPosition(1, FD_HEAD).setString("Маршрут сбора: " & NumText(n) & " " & Plural(n, "строка", "строки", "строк") & " «" & SH_ISSUES & "» ещё не проведены")
+    sh.getCellByPosition(1, FD_INFO).setString("По порядку обхода склада: ряд, секция, ярус места ЕИ" & IIf(nNo > 0, "; без места на карте — в конце (" & nNo & ")", "") _
+        & IIf(more, "; в списке первые " & NumText(FD_CARD_MAX + 1), "") & ". Собрали — проведите строки на листе «" & SH_ISSUES & "».")
+    sh.getCellByPosition(1, FD_INFO + 1).setString("Напечатать: Ctrl+P (печатается этот лист). Двойной щелчок по строке — карточка ЕИ; «Перейти к строке» — строка выдачи.")
+    sh.getCellRangeByPosition(1, FD_TABLE_HEAD, 8, FD_TABLE_HEAD).setDataArray(Array(Array("№", "Место", "ЕИ", "Наименование", "Количество", _
+        "Ед.", "Кому", "Выдачи")))
+    If n > 0 Then
+        ReDim ord(n - 1)
+        For i = 0 To n - 1
+            ord(i) = i
+        Next i
+        SortIdx(key, ord, n, False)
+        ReDim tmp(n - 1)
+        For i = 0 To n - 1
+            rw = rows(ord(i))
+            rw(0) = i + 1
+            tmp(i) = rw
+        Next i
+        sh.getCellRangeByPosition(1, FD_TABLE, 12, FD_TABLE + n - 1).setDataArray(tmp)
+    Else
+        sh.getCellByPosition(2, FD_TABLE).setString("непроведённых выдач нет — собирать нечего")
+    End If
+    ViewDone(sh)
+    gFdBusy = False
+    PickRoute = "OK:строк " & n
+    gUiLastMsg = PickRoute
+    Exit Function
+EH:
+    PickRoute = "ERR:маршрут не построен: " & Error$ & " (строка " & Erl & ")"
+    gUiLastMsg = PickRoute
+    On Error Resume Next
+    ViewDone(sh)
+    gFdBusy = False
+End Function
+
 ' ================================================================ the card of an EI
 
 ' the card of EI n: who it came from, the movements with the running balance, the check against «Наличие». OK:… / ERR:…

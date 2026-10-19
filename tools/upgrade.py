@@ -408,10 +408,10 @@ def open_wms(o, path):
     doc = o.load(path, macros=4)
     if doc is None:
         return None, "книга не открылась"
-    st = o.basic(doc, "WmsCore", "StateDump") or ""
+    st = o.wms_state(doc)
     if "STATE=CLEAN" not in st and "REG=other" in st:
         o.basic(doc, "WmsCore", "ActionRegisterHere", False)
-        st = o.basic(doc, "WmsCore", "StateDump") or ""
+        st = o.wms_state(doc)
     return doc, st
 
 
@@ -1126,7 +1126,7 @@ def verify(o, book):
     if doc is None:
         return False, "книга не открылась", ""
     try:
-        st = o.basic(doc, "WmsCore", "StateDump") or ""
+        st = o.wms_state(doc)
         rep = o.basic(doc, "WmsCore", "StartupReport") or ""
         sc = o.basic(doc, "WmsCore", "ActionSelfCheck") or ""
         ok = "STATE=CLEAN" in st and sc.startswith(SELF_CHECK_OK)

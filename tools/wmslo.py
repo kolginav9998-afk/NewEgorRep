@@ -95,6 +95,17 @@ class Office:
         self.idle()
         return doc
 
+    def wms_state(self, doc, wait=30.0):
+        """WMS's state line (WmsCore.StateDump) once its startup has run: on a loaded machine the OnLoad macro Calc
+        posts after loading can still be queued (or running) when the load returns, and the line then reads «STATE=»"""
+        end = time.time() + wait
+        while True:
+            st = str(self.basic(doc, "WmsCore", "StateDump") or "")
+            if not st.startswith("STATE=;") or time.time() > end:
+                return st
+            self.idle()
+            time.sleep(0.25)
+
     def idle(self):
         """Let LibreOffice run what it has queued, in particular the document's OnLoad macro, which Calc posts
         asynchronously after loading. Calling a Basic macro through the script provider while that event is being

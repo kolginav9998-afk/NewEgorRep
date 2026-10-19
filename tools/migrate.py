@@ -231,10 +231,10 @@ def open_wms(o, path):
     doc = o.load(path, macros=4)
     if doc is None:
         return None, "книга не открылась"
-    st = o.basic(doc, "WmsCore", "StateDump") or ""
+    st = o.wms_state(doc)
     if "STATE=CLEAN" not in st and "REG=other" in st:
         o.basic(doc, "WmsCore", "ActionRegisterHere", False)
-        st = o.basic(doc, "WmsCore", "StateDump") or ""
+        st = o.wms_state(doc)
     return doc, st
 
 

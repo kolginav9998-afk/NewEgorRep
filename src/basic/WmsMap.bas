@@ -1211,6 +1211,98 @@ EH:
     gUiLastMsg = MapEditSave
 End Function
 
+' ================================================================ 1.0 (М7) a row, a section or a place renamed
+
+' key k («5-12-3») renamed when it begins with the parts oldP («5», «5-12» or «5-12-3» split by «-»): those parts become newP;
+' "" when k does not begin with them
+Function KeyRenamed(k As String, oldP As Variant, newP As Variant) As String
+    Dim a As Variant, i As Integer
+    If k = "" Then Exit Function
+    a = Split(k, "-")
+    If UBound(a) < UBound(oldP) Then Exit Function
+    For i = 0 To UBound(oldP)
+        If a(i) <> oldP(i) Then Exit Function
+    Next i
+    For i = 0 To UBound(newP)
+        a(i) = newP(i)
+    Next i
+    KeyRenamed = Join(a, "-")
+End Function
+
+' the places oldP… of the map («Топология») and of the directory «Места»: counted (bDo False) or renamed to newP… (bDo True;
+' «Топология» is first copied to the hidden «_TOPO_PREV», as at «Сохранить карту»). The cells of the map, nDir — the rows of «Места»
+Function TopoRename(oldP As Variant, newP As Variant, bDo As Boolean, ByRef nDir As Long) As Long
+    Dim topo As Object, cur As Object, d As Variant, r As Long, c As Long, k As String, nk As String, n As Long, wasProt As Boolean, wasDoc As Boolean
+    Dim vals As Object, addrs As Variant, i As Long, rr As Long, cc As Long, sh As Object, last As Long, cell As Object, prev As Object
+    nDir = 0
+    If gDoc.Sheets.hasByName(SH_TOPO) Then
+        topo = TopoSheet()
+        cur = topo.createCursor()
+        cur.gotoEndOfUsedArea(False)
+        If cur.getRangeAddress().EndRow <= 2000 And cur.getRangeAddress().EndColumn <= 400 Then
+            d = topo.getCellRangeByPosition(0, 0, cur.getRangeAddress().EndColumn, cur.getRangeAddress().EndRow).getDataArray()
+            vals = topo.getCellRangeByPosition(0, 0, cur.getRangeAddress().EndColumn, cur.getRangeAddress().EndRow).queryContentCells(com.sun.star.sheet.CellFlags.DATETIME)
+            addrs = vals.getRangeAddresses()
+            If bDo Then
+                wasDoc = gDoc.isProtected()
+                If wasDoc Then gDoc.unprotect(PROTECT_PWD)
+                If gDoc.Sheets.hasByName(SH_TOPO_PREV) Then gDoc.Sheets.removeByName(SH_TOPO_PREV)
+                gDoc.Sheets.copyByName(SH_TOPO, SH_TOPO_PREV, gDoc.Sheets.getCount())
+                prev = gDoc.Sheets.getByName(SH_TOPO_PREV)
+                prev.IsVisible = False
+                If wasDoc Then gDoc.protect(PROTECT_PWD)
+                wasProt = topo.isProtected()
+                If wasProt Then topo.unprotect(PROTECT_PWD)
+            End If
+            For r = 0 To UBound(d)
+                For c = 0 To UBound(d(r))
+                    If VarType(d(r)(c)) = 8 Then
+                        nk = KeyRenamed(PlaceTextKey(CStr(d(r)(c))), oldP, newP)
+                        If nk <> "" Then
+                            n = n + 1
+                            If bDo Then topo.getCellByPosition(c, r).setString(nk)
+                        End If
+                    End If
+                Next c
+            Next r
+            For i = 0 To UBound(addrs)
+                For rr = addrs(i).StartRow To addrs(i).EndRow
+                    For cc = addrs(i).StartColumn To addrs(i).EndColumn
+                        cell = topo.getCellByPosition(cc, rr)
+                        nk = KeyRenamed(DateCellPlace(cell), oldP, newP)
+                        If nk <> "" Then
+                            n = n + 1
+                            If bDo Then cell.setString(nk)
+                        End If
+                    Next cc
+                Next rr
+            Next i
+            If bDo And wasProt Then topo.protect(PROTECT_PWD)
+        End If
+    End If
+    If gDoc.Sheets.hasByName(SH_PLACES) Then
+        sh = gDoc.Sheets.getByName(SH_PLACES)
+        last = WmsOrders.LastRow(sh)
+        If last > 20000 Then last = 20000
+        If last >= 1 Then
+            d = sh.getCellRangeByPosition(PD_PLACE, 1, PD_PLACE, last).getDataArray()
+            For i = 0 To UBound(d)
+                nk = KeyRenamed(PlaceKey(Trim(CStr(d(i)(0)))), oldP, newP)
+                If nk <> "" Then
+                    nDir = nDir + 1
+                    If bDo Then sh.getCellByPosition(PD_PLACE, i + 1).setString(nk)
+                End If
+            Next i
+        End If
+    End If
+    If bDo Then
+        gTkValid = False
+        gPdValid = False
+        gMpSig = ""
+    End If
+    TopoRename = n
+End Function
+
 ' ================================================================ a click on the map
 
 ' the selection changed: a place → what lies there (in the line over the map and in the panel)
@@ -1727,28 +1819,10 @@ EH:
     ' the check never stops a posting by itself
 End Function
 
-' the parts of a place text as people write a list («1-2-3, 1-2-4; Улица»); one part when it is one place («5,12,3»)
+' the parts of a place text as people write a list («1-2-3, 1-2-4; Улица»); one part when it is one place («5,12,3»); 1.0 (М10):
+' a range «1-2-3…5» — its places
 Function PlaceParts(ByVal s As String) As Variant
-    Dim a As Variant, i As Integer, out() As String, n As Integer
-    s = Trim(s)
-    If PlaceKey(s) <> "" Or (InStr(s, ",") = 0 And InStr(s, ";") = 0 And InStr(s, "+") = 0) Then
-        PlaceParts = Array(s)
-        Exit Function
-    End If
-    a = Split(Replace(Replace(s, ";", ","), "+", ","), ",")
-    ReDim out(UBound(a))
-    For i = 0 To UBound(a)
-        If Trim(a(i)) <> "" Then
-            out(n) = Trim(a(i))
-            n = n + 1
-        End If
-    Next i
-    If n = 0 Then
-        PlaceParts = Array(s)
-        Exit Function
-    End If
-    ReDim Preserve out(n - 1)
-    PlaceParts = out
+    PlaceParts = PlaceItems(s)
 End Function
 
 ' two keys one typing slip apart: one character more, less or other, or a lost / doubled separator («1-24» ~ «1-2-4»)

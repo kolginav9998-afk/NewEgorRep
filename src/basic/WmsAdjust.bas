@@ -315,7 +315,7 @@ End Function
 ' Validates the inputs of row r: "" or the reason; fills m*. bNeedAll: posting needs every field of the kind (the
 ' preview checks only what is filled).
 Private Function CheckRowInputs(r As Long, bNeedAll As Boolean) As String
-    Dim sh As Object, why As String, c As Object, msg As String, x As Double, info As String
+    Dim sh As Object, why As String, c As Object, msg As String, x As Double, info As String, sTo As String
     sh = AdjustSheet()
     mShort = False
     mKind = KindCode(sh.getCellByPosition(AC_KIND, r).getString())
@@ -344,6 +344,15 @@ Private Function CheckRowInputs(r As Long, bNeedAll As Boolean) As String
             Exit Function
         End If
         mPlace = Trim(sh.getCellByPosition(AC_PLACE, r).getString())
+        ' 1.0 (М10): «+1-2-5» / «−1-2-3» — one place more or less in the list of places of the EI
+        If PlaceChange(mPlace) Then
+            why = WmsView.PlaceEdit(mSplace, mPlace, sTo)
+            If why <> "" Then
+                CheckRowInputs = "новое место (J): " & why
+                Exit Function
+            End If
+            mPlace = sTo
+        End If
         If mPlace = "" Then
             If bNeedAll Then
                 CheckRowInputs = "не указано новое место (J)"
@@ -451,6 +460,13 @@ Private Function CheckRowInputs(r As Long, bNeedAll As Boolean) As String
     End If
     mBatch = Trim(sh.getCellByPosition(AC_BATCH, r).getString())
     CheckRowInputs = ""
+End Function
+
+' 1.0 (М10): the new place is a change of the list of places («+1-2-5», «−1-2-3», «-1-2-3»): no place begins with a sign
+Private Function PlaceChange(s As String) As Boolean
+    Dim c As String
+    c = Left(s, 1)
+    PlaceChange = (c = "+" Or c = "-" Or c = "−" Or c = "–" Or c = "—")
 End Function
 
 ' what the row will do (after CheckRowInputs): for «Контроль»
@@ -868,7 +884,7 @@ End Function
 Function AdjustFixRow(r As Long, vMain As Variant, vDate As Variant, vReason As Variant) As String
     Dim why As String, kind As String, n As Long, rd As Variant, msg As String, sh As Object, res As String
     Dim q1 As Double, d1 As Double, reason1 As String, to1 As String, from1 As String, delta1 As Double, delta2 As Double
-    Dim before As Double, b2 As Double, info As String, st As Integer
+    Dim before As Double, b2 As Double, info As String, st As Integer, to2 As String
     WmsInit()
     If r < 1 Or r > MAX_SHEET_ROW Then
         AdjustFixRow = "ERR:выберите строку корректировки (не заголовок)"
@@ -921,6 +937,15 @@ Function AdjustFixRow(r As Long, vMain As Variant, vDate As Variant, vReason As 
     Select Case mKind
     Case "MOVE"
         mPlace = Trim(CStr(vMain))
+        ' 1.0 (М10): «+1-2-5» / «−1-2-3» — the places the move wrote (the window shows them) with one place more or less
+        If PlaceChange(mPlace) Then
+            msg = WmsView.PlaceEdit(to1, mPlace, to2)
+            If msg <> "" Then
+                AdjustFixRow = "ERR:новое место: " & msg
+                Exit Function
+            End If
+            mPlace = to2
+        End If
         If mPlace = "" Then
             AdjustFixRow = "ERR:не указано новое место"
             Exit Function

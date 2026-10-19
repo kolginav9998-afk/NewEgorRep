@@ -425,8 +425,8 @@ Sub BtnPost(Optional oEvent As Variant)
     End If
     res = WmsIssue.IssuePostRow(r)
     WmsAsk.ShowRowResult("Выдача не проведена", res)
-    ' 1.0 (Ч7): metres cut from a bar — the rest of the bar may become an offcut of its own
-    If Left(res, 3) = "OK:" Then WmsDaily.OffcutAfterIssue(r)
+    ' 1.0: metres cut from a bar — the rest may become an offcut of its own (Ч7); an EI on several places — did one become empty (М11)
+    If Left(res, 3) = "OK:" Then WmsDaily.AfterIssue(r)
     gUiLastMsg = res
     If Left(res, 8) = "BLOCKED:" Or Left(res, 13) = "ERR-CRITICAL:" Then UiRefresh("«Провести»: " & res)
     If Left(res, 13) = "ERR-CRITICAL:" Or Left(res, 5) = "BUSY:" Then UiMessage(Mid(res, InStr(res, ":") + 1))

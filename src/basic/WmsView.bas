@@ -6,6 +6,9 @@ Option Explicit
 Global gVwWasMod As Boolean
 Global gVwT0 As Long
 
+' 1.0 (М10): the longest range of places «1-2-1…50»
+Const PL_RANGE_MAX = 50
+
 ' the view sheet sName open for writing (unprotected); ViewDone protects it again
 Function ViewOpen(sName As String) As Object
     Dim sh As Object
@@ -82,40 +85,219 @@ Function EiNo(ByVal s As String, nextEI As Long) As Long
 End Function
 
 ' PRIME 0.8 (D-100): the places of an EI as the storekeeper wrote them — one («5-12-3») or several when the goods take more
-' than one cell («1-2-3, 1-2-4», «1-2-3; 1-2-4», «1-2-3 + 1-2-4»); each as PlaceKey reads it. Array() when none can be read
+' than one cell («1-2-3, 1-2-4», «1-2-3; 1-2-4», «1-2-3 + 1-2-4»); each as PlaceKey reads it. 1.0 (М10): a range «1-2-3…5»
+' («1-2-3..5») is the places 1-2-3, 1-2-4, 1-2-5. Array() when none can be read
 Function PlaceList(ByVal s As String) As Variant
-    Dim k As String, parts As Variant, out() As String, n As Integer, i As Integer, sep As Variant
+    Dim k As String, parts As Variant, out() As String, n As Integer, i As Integer, rg As Variant, j As Integer
     s = Trim(s)
-    k = PlaceKey(s)
-    If k <> "" Then
-        PlaceList = Array(k)
-        Exit Function
+    If InStr(s, "…") = 0 And InStr(s, "..") = 0 Then
+        k = PlaceKey(s)
+        If k <> "" Then
+            PlaceList = Array(k)
+            Exit Function
+        End If
+        If InStr(s, ",") = 0 And InStr(s, ";") = 0 And InStr(s, "+") = 0 Then
+            PlaceList = Array()
+            Exit Function
+        End If
     End If
     ' a list: the parts that are places (a note in the list — «1-2-3, у стены» — is left out). 1.0: the separators may be
     ' mixed («1-2-3, 1-2-4; 1-2-5» — three places, it was one)
-    s = Replace(Replace(s, ";", ","), "+", ",")
-    For Each sep In Array(",")
-        If InStr(s, sep) > 0 Then
-            parts = Split(s, sep)
-            ReDim out(UBound(parts))
-            n = 0
-            For i = 0 To UBound(parts)
-                If Trim(parts(i)) <> "" Then
-                    k = PlaceKey(Trim(parts(i)))
-                    If k <> "" And PlHasDigit(k) Then
-                        out(n) = k
-                        n = n + 1
-                    End If
+    parts = Split(Replace(Replace(s, ";", ","), "+", ","), ",")
+    ReDim out(UBound(parts) + 8)
+    For i = 0 To UBound(parts)
+        If Trim(parts(i)) <> "" Then
+            rg = PlaceRange(Trim(parts(i)))
+            If UBound(rg) >= 0 Then
+                If n + UBound(rg) + 1 > UBound(out) Then
+                    ReDim Preserve out(n + UBound(rg) + 8)
                 End If
-            Next i
-            If n > 0 Then
-                ReDim Preserve out(n - 1)
-                PlaceList = out
-                Exit Function
+                For j = 0 To UBound(rg)
+                    out(n) = rg(j)
+                    n = n + 1
+                Next j
+            Else
+                k = PlaceKey(Trim(parts(i)))
+                If k <> "" And PlHasDigit(k) Then
+                    If n > UBound(out) Then
+                        ReDim Preserve out(n + 8)
+                    End If
+                    out(n) = k
+                    n = n + 1
+                End If
             End If
         End If
-    Next sep
-    PlaceList = Array()
+    Next i
+    If n = 0 Then
+        PlaceList = Array()
+        Exit Function
+    End If
+    ReDim Preserve out(n - 1)
+    PlaceList = out
+End Function
+
+' 1.0 (М10): the parts of a place text as written — one part when it is one place («5,12,3»), else the parts of the list
+' («1-2-3, 1-2-4; Улица» — three); a range «1-2-3…5» becomes its places (1-2-3, 1-2-4, 1-2-5)
+Function PlaceItems(ByVal s As String) As Variant
+    Dim a As Variant, i As Integer, out() As String, n As Integer, rg As Variant, j As Integer, hasRange As Boolean
+    s = Trim(s)
+    hasRange = (InStr(s, "…") > 0 Or InStr(s, "..") > 0)
+    If Not hasRange And (PlaceKey(s) <> "" Or (InStr(s, ",") = 0 And InStr(s, ";") = 0 And InStr(s, "+") = 0)) Then
+        PlaceItems = Array(s)
+        Exit Function
+    End If
+    a = Split(Replace(Replace(s, ";", ","), "+", ","), ",")
+    ReDim out(UBound(a) + 8)
+    For i = 0 To UBound(a)
+        If Trim(a(i)) <> "" Then
+            rg = Array()
+            If hasRange Then rg = PlaceRange(Trim(a(i)))
+            If UBound(rg) >= 0 Then
+                If n + UBound(rg) + 1 > UBound(out) Then
+                    ReDim Preserve out(n + UBound(rg) + 8)
+                End If
+                For j = 0 To UBound(rg)
+                    out(n) = rg(j)
+                    n = n + 1
+                Next j
+            Else
+                If n > UBound(out) Then
+                    ReDim Preserve out(n + 8)
+                End If
+                out(n) = Trim(a(i))
+                n = n + 1
+            End If
+        End If
+    Next i
+    If n = 0 Then
+        PlaceItems = Array(s)
+        Exit Function
+    End If
+    ReDim Preserve out(n - 1)
+    PlaceItems = out
+End Function
+
+' 1.0 (М10): a range of places — «1-2-3…5», «1-2-3..5» or «1-2-3…1-2-5»: the last number runs from one end to the other, the
+' rest of the address stays → the keys 1-2-3, 1-2-4, 1-2-5. Array() when s is not a range (or longer than PL_RANGE_MAX places)
+Function PlaceRange(ByVal s As String) As Variant
+    Dim p As Integer, nl As Integer, a As String, b As String, ka As String, kb As String, pa As Variant, head As String, tail As String
+    Dim x0 As Long, x1 As Long, x As Long, i As Long, out() As String
+    PlaceRange = Array()
+    s = Trim(s)
+    p = InStr(s, "…")
+    nl = 1
+    If p = 0 Then
+        p = InStr(s, "..")
+        nl = 2
+    End If
+    If p < 2 Then Exit Function
+    Do While Mid(s, p + nl, 1) = "." Or Mid(s, p + nl, 1) = "…"
+        nl = nl + 1
+    Loop
+    a = Trim(Left(s, p - 1))
+    b = Trim(Mid(s, p + nl))
+    ka = PlaceKey(a)
+    If ka = "" Or b = "" Then Exit Function
+    pa = Split(ka, "-")
+    tail = CStr(pa(UBound(pa)))
+    If Not IsAllDigits(tail) Then Exit Function
+    head = Left(ka, Len(ka) - Len(tail))
+    If IsAllDigits(b) Then
+        kb = head & CStr(CLng(Right(b, 9)))
+    Else
+        kb = PlaceKey(b)
+    End If
+    If Len(kb) <= Len(head) Or Left(kb, Len(head)) <> head Then Exit Function
+    If Not IsAllDigits(Mid(kb, Len(head) + 1)) Then Exit Function
+    x0 = CLng(tail)
+    x1 = CLng(Mid(kb, Len(head) + 1))
+    If x1 < x0 Then
+        x = x0
+        x0 = x1
+        x1 = x
+    End If
+    If x1 = x0 Or x1 - x0 >= PL_RANGE_MAX Then Exit Function
+    ReDim out(x1 - x0)
+    For i = x0 To x1
+        out(i - x0) = head & i
+    Next i
+    PlaceRange = out
+End Function
+
+' 1.0 (М10): the new place of a move written as a change of the list of places: «+1-2-5» — one more place («+1-2-5, 1-2-6»,
+' «+1-2-5…7» — several), «−1-2-3» or «-1-2-3» — one place less; the other places stay as written. sOut — the whole new list
+' (sTyped itself when it is not a change). "" when done, the refusal otherwise
+Function PlaceEdit(ByVal sBase As String, ByVal sTyped As String, ByRef sOut As String) As String
+    Dim sign As String, rest As String, bi As Variant, ai As Variant, bk() As String, i As Integer, j As Integer, k As String
+    Dim r As String, sep As String, hit As Boolean
+    sTyped = Trim(sTyped)
+    sBase = Trim(sBase)
+    sOut = sTyped
+    sign = Left(sTyped, 1)
+    If sign = "−" Or sign = "–" Or sign = "—" Then sign = "-"
+    If sign <> "+" And sign <> "-" Then Exit Function
+    rest = Trim(Mid(sTyped, 2))
+    If rest = "" Then
+        PlaceEdit = "после «" & Left(sTyped, 1) & "» укажите место: «+1-2-5» — добавить место к списку, «−1-2-3» — убрать"
+        Exit Function
+    End If
+    ai = PlaceItems(rest)
+    If sBase <> "" Then bi = PlaceItems(sBase) Else bi = Array()
+    If UBound(bi) >= 0 Then
+        ReDim bk(UBound(bi))
+    Else
+        ReDim bk(0)
+    End If
+    For i = 0 To UBound(bi)
+        bk(i) = WmsMap.PlaceKeyAny(CStr(bi(i)))
+    Next i
+    If sign = "+" Then
+        r = sBase
+        For j = 0 To UBound(ai)
+            k = WmsMap.PlaceKeyAny(CStr(ai(j)))
+            For i = 0 To UBound(bi)
+                If bk(i) = k Then
+                    PlaceEdit = "место «" & ai(j) & "» уже есть в списке «" & sBase & "»"
+                    Exit Function
+                End If
+            Next i
+            If InStr(sep, "|" & k & "|") = 0 Then
+                r = r & IIf(r <> "", ", ", "") & ai(j)
+                sep = sep & "|" & k & "|"
+            End If
+        Next j
+        sOut = r
+        Exit Function
+    End If
+    If UBound(bi) < 0 Then
+        PlaceEdit = "у ЕИ нет места — убирать нечего; напишите новое место без «" & Left(sTyped, 1) & "»"
+        Exit Function
+    End If
+    For j = 0 To UBound(ai)
+        k = WmsMap.PlaceKeyAny(CStr(ai(j)))
+        hit = False
+        For i = 0 To UBound(bi)
+            If bk(i) = k Then
+                hit = True
+                bk(i) = Chr(1)
+            End If
+        Next i
+        If Not hit Then
+            PlaceEdit = "места «" & ai(j) & "» нет в списке «" & sBase & "»"
+            Exit Function
+        End If
+    Next j
+    For i = 0 To UBound(bi)
+        If bk(i) <> Chr(1) Then
+            r = r & sep & bi(i)
+            sep = ", "
+        End If
+    Next i
+    If r = "" Then
+        PlaceEdit = "в списке «" & sBase & "» не останется ни одного места — напишите новое место без «" & Left(sTyped, 1) & "»"
+        Exit Function
+    End If
+    sOut = r
 End Function
 
 Private Function PlHasDigit(s As String) As Boolean
