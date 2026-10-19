@@ -192,6 +192,25 @@ Function QtyEIText(ByVal s As String, n As Long, b As Double, sUnit As String, s
     info = ""
     gPkKind = ""
     gPkPlain = False
+    ' 1.0 (Р12): «всё» — the whole balance in one record (no tail of 0,001 left by typing the number)
+    If sMode = "OUT" And IsAllWord(s) Then
+        If b <= 0.0000005 Then
+            msg = "«" & Trim(s) & "»: остаток " & WmsIssue.EiCanon(n) & " — 0, выдавать нечего"
+            QtyEIText = 2
+            Exit Function
+        End If
+        q = b
+        gPkKind = "ALL"
+        info = "всё: " & QtyWithParts(n, b, sUnit)
+        QtyEIText = 0
+        Exit Function
+    End If
+    ' 1.0 (Ч9): the words of a storekeeper — «пол кан», «1/4 кан», «2 + 1 кан» (a count by places)
+    If InStr(s, "+") > 0 Then
+        QtyEIText = QtySum(s, n, b, sUnit, sMode, capQty, q, info, msg)
+        Exit Function
+    End If
+    s = PkWords(s)
     PkSplit(s, sNum, sWord)
     ' a number and a word after it («1 кан», «25%»); anything else — the strict parser of a quantity with its own messages
     ' («-1»: отрицательное, «1/2»: дробь, «abc»: недопустимый символ)
@@ -245,6 +264,136 @@ Function QtyEIText(ByVal s As String, n As Long, b As Double, sUnit As String, s
             & "частями (канистрами, метрами), задайте фасовку: кнопка «Фасовка ЕИ»"
     End If
     QtyEIText = 2
+End Function
+
+' 1.0 (Ч9): «половина», «четверть», «пол кан», «полметра» → 0,5 / 0,25 of the part; a fraction before a word («1/4 кан»,
+' «1 1/2 м») → its decimal; a bare «1/2» stays as typed (the strict parser refuses it with its own message)
+Function PkWords(ByVal s As String) As String
+    Dim t As String, lt As String, p As Long, a As Long, e As Long, sA As String, sB As String, rest As String, head As String, x As Double
+    t = Trim(Replace(s, Chr(160), " "))
+    lt = LCase(t)
+    If Left(lt, 9) = "половина " Then
+        t = "0,5 " & Trim(Mid(t, 10))
+    ElseIf Left(lt, 9) = "четверть " Then
+        t = "0,25 " & Trim(Mid(t, 10))
+    ElseIf Left(lt, 4) = "пол " Or Left(lt, 4) = "пол-" Then
+        t = "0,5 " & Trim(Mid(t, 5))
+    ElseIf Left(lt, 3) = "пол" And Len(lt) > 3 And Not PkHasDigit(lt) Then
+        t = "0,5 " & Mid(t, 4)
+    End If
+    p = InStr(t, "/")
+    If p > 1 Then
+        a = p - 1
+        Do While a >= 1
+            If Not PkDigits(Mid(t, a, 1)) Then Exit Do
+            a = a - 1
+        Loop
+        e = p + 1
+        Do While e <= Len(t)
+            If Not PkDigits(Mid(t, e, 1)) Then Exit Do
+            e = e + 1
+        Loop
+        sA = Mid(t, a + 1, p - a - 1)
+        sB = Mid(t, p + 1, e - p - 1)
+        rest = Trim(Mid(t, e))
+        head = Trim(Left(t, a))
+        If sA <> "" And sB <> "" And rest <> "" And (head = "" Or PkDigits(head)) Then
+            If PkIsWord(rest) And CDbl(sB) > 0 Then
+                x = CDbl(sA) / CDbl(sB)
+                If head <> "" Then x = x + CDbl(head)
+                t = WmsIssue.QtyText(x) & " " & rest
+            End If
+        End If
+    End If
+    PkWords = t
+End Function
+
+Private Function PkDigits(s As String) As Boolean
+    Dim i As Long
+    If s = "" Then Exit Function
+    For i = 1 To Len(s)
+        If Mid(s, i, 1) < "0" Or Mid(s, i, 1) > "9" Then Exit Function
+    Next i
+    PkDigits = True
+End Function
+
+Private Function PkHasDigit(s As String) As Boolean
+    Dim i As Long
+    For i = 1 To Len(s)
+        If Mid(s, i, 1) >= "0" And Mid(s, i, 1) <= "9" Then
+            PkHasDigit = True
+            Exit Function
+        End If
+    Next i
+End Function
+
+' «2 + 1 кан»: a sum (the count of one EI on two places). The word of the last term is that of a term without one; the same
+' word everywhere — one quantity of that word (exact in parts); different words — only in a count (FACT), in the unit of the
+' document
+Private Function QtySum(ByVal s As String, n As Long, b As Double, sUnit As String, sMode As String, capQty As Double, ByRef q As Double, _
+    ByRef info As String, ByRef msg As String) As Integer
+    Dim parts As Variant, i As Long, sN As String, sW As String, wLast As String, w0 As String, same As Boolean, tot As Double, x As Double
+    Dim st As Integer, qi As Double, inf As String
+    parts = Split(s, "+")
+    For i = 0 To UBound(parts)
+        parts(i) = PkWords(Trim(CStr(parts(i))))
+        If parts(i) = "" Then
+            msg = "«" & Trim(s) & "»: между «+» нет количества"
+            QtySum = 2
+            Exit Function
+        End If
+    Next i
+    PkSplit(CStr(parts(UBound(parts))), sN, wLast)
+    same = True
+    For i = 0 To UBound(parts)
+        PkSplit(CStr(parts(i)), sN, sW)
+        If sN = "" Then
+            msg = "«" & Trim(s) & "»: в слагаемом «" & parts(i) & "» нет числа"
+            QtySum = 2
+            Exit Function
+        End If
+        If sW = "" Then sW = wLast
+        If i = 0 Then w0 = sW
+        If LCase(sW) <> LCase(w0) Then same = False
+        parts(i) = sN & IIf(sW = "", "", " " & sW)
+    Next i
+    If same Then
+        For i = 0 To UBound(parts)
+            PkSplit(CStr(parts(i)), sN, sW)
+            If Replace(Replace(Replace(sN, "0", ""), ",", ""), ".", "") = "" Then
+                x = 0
+            Else
+                st = ParseQtyText(sN, x, msg)
+                If st <> 0 Then
+                    QtySum = st
+                    Exit Function
+                End If
+            End If
+            tot = tot + x
+        Next i
+        st = QtyEIText(WmsIssue.QtyText(tot) & IIf(w0 = "", "", " " & w0), n, b, sUnit, sMode, capQty, q, info, msg)
+        If st = 0 Then info = Trim(s) & ": " & info
+        QtySum = st
+        Exit Function
+    End If
+    If sMode <> "FACT" Then
+        msg = "«" & Trim(s) & "»: разные единицы складываются только при пересчёте (инвентаризация) — напишите одно количество"
+        QtySum = 2
+        Exit Function
+    End If
+    For i = 0 To UBound(parts)
+        st = QtyEIText(CStr(parts(i)), n, b, sUnit, "FACT", 0, qi, inf, msg)
+        If st <> 0 Then
+            QtySum = st
+            Exit Function
+        End If
+        tot = tot + qi
+    Next i
+    q = WmsIssue.Round3(tot)
+    info = Trim(s) & " = " & WmsIssue.QtyText(q) & " " & sUnit
+    gPkKind = ""
+    gPkPlain = False
+    QtySum = 0
 End Function
 
 ' the same for a cell: a number in a plain format — the unit of the document; a number Calc formatted as a percent
@@ -389,8 +538,16 @@ Private Function QtyPercent(pct As Double, n As Long, sUnit As String, sMode As 
 End Function
 
 ' the fields of the journal line of the operation being planned: how its quantity was given
+' «всё», «весь остаток» (Р12)
+Function IsAllWord(ByVal s As String) As Boolean
+    s = Replace(LCase(Trim(s)), "ё", "е")
+    IsAllWord = (s = "все" Or s = "весь" Or s = "весь остаток" Or s = "все целиком" Or s = "остаток")
+End Function
+
 Sub PlanQtyFields()
-    If gPkKind = "PARTS" Then
+    If gPkKind = "ALL" Then
+        PlanField("HOW", "ALL")
+    ElseIf gPkKind = "PARTS" Then
         PlanField("PARTS", gPkParts)
         PlanField("PART_UNIT", gPkUnit)
         PlanField("PART_N", gPkN)
@@ -399,6 +556,32 @@ Sub PlanQtyFields()
         PlanField("PCT_BASE", gPkBase)
     End If
 End Sub
+
+' 1.0 (Ч1): the column «Остаток частями» of «Наличие» (K, after the ten columns of the registry): «3 кан» — the balance E
+' times the parts of the packing of the same row of _PACK (A the EI, B the part, C parts in 1 unit), "" without a packing
+Private Const SC_PARTS = 10
+
+Function PartsFormula(n As Long) As String
+    Dim r As String, v As String, pk As String
+    r = CStr(n + 1)
+    pk = "$'" & SH_PACK & "'."
+    v = "ROUND($E" & r & "*" & pk & "$C" & r & ";2)"
+    PartsFormula = "=IF(AND($A" & r & "<>"""";" & pk & "$A" & r & "=$A" & r & ";N(" & pk & "$C" & r & ")>0);IF(" & v & "=INT(" & v & ");FIXED(" _
+        & v & ";0;1);IF(" & v & "*10=INT(" & v & "*10);FIXED(" & v & ";1;1);FIXED(" & v & ";2;1)))&"" ""&" & pk & "$B" & r & ";"""")"
+End Function
+
+' 1.0 (Ч4): how the quantity was given, for the status of a posted row of «Выдачи» («Проведено · 1 кан») — written by the
+' operation itself, so the replay of the journal writes the same text
+Function PostedSuffix() As String
+    Select Case gPkKind
+    Case "PARTS"
+        PostedSuffix = " · " & PartsText(gPkParts, gPkUnit)
+    Case "PCT"
+        PostedSuffix = " · " & WmsIssue.QtyText(gPkPct) & " %"
+    Case "ALL"
+        PostedSuffix = " · весь остаток"
+    End Select
+End Function
 
 ' ================================================================ 1.0: the two readings WMS never guesses
 
@@ -587,6 +770,11 @@ Function PackSet(sEI As String, sN As String, sPart As String, sNote As String) 
         pu = ""
     Else
         st = ParseQtyText(Trim(sN), pn, msg)
+        If st = 4 And PkDecimal(Trim(sN)) Then
+            ' 1.0 (Ч8): parts computed from a weight («1 м = 7,85 кг» → 0,127389 м in 1 кг) keep six decimals
+            pn = Val(Replace(Trim(sN), ",", "."))
+            st = 0
+        End If
         If st <> 0 Then
             PackSet = "ERR:сколько частей в 1 " & d(SC_UNIT) & ": " & msg
             Exit Function
@@ -637,6 +825,10 @@ Function PackSet(sEI As String, sN As String, sPart As String, sNote As String) 
         PlanSetValue(SH_PACK, n, PK_UNIT, pu, False)
         PlanSetValue(SH_PACK, n, PK_N, pn, False)
         PlanSetValue(SH_PACK, n, PK_NOTE, Trim(sNote), False)
+        ' 1.0 (Ч1): «Остаток частями» of «Наличие» — a formula of the row (it follows the balance by itself)
+        If gDoc.Sheets.getByName(SH_STOCK).getCellByPosition(SC_PARTS, n).getType() <> com.sun.star.table.CellContentType.FORMULA Then
+            PlanFormula(SH_STOCK, n, SC_PARTS, PartsFormula(n))
+        End If
     Else
         PlanSetValue(SH_PACK, n, PK_EI, "", False)
         PlanSetValue(SH_PACK, n, PK_UNIT, "", False)
@@ -719,6 +911,250 @@ Sub BtnPackEI(Optional oEvent As Variant)
     End If
 End Sub
 
+' 1.0 (Ч6): «Фасовка пачкой…» — the EIs with a balance and without a packing whose name tells one («4 канистры», «L=6000»),
+' each shown with its guess and written only when the storekeeper presses «Записать»
+Sub BtnPackBatch(Optional oEvent As Variant)
+    Dim s As String
+    WmsInit()
+    s = PackBatch()
+    If Left(s, 4) = "ERR:" Then
+        WmsUi.UiMessage(Mid(s, 5))
+    ElseIf Left(s, 3) = "OK=" Then
+        WmsUi.UiMessage(gUiLastMsg)
+    End If
+End Sub
+
+Function PackBatch() As String
+    Dim st As Object, pk As Object, last As Long, d As Variant, p As Variant, i As Long, n As Long, gn As Double, gu As String, nC As Long
+    Dim cand() As Long, cn() As Double, cu() As String, k As Integer, res As String, nOk As Long, nSkip As Long, nErr As Long, sErr As String, x As String
+    st = WmsIssue.StockSheet()
+    pk = PackSheet()
+    If IsNull(pk) Then
+        PackBatch = "ERR:в книге нет листа фасовки " & SH_PACK & " — книга не обновлена"
+        Exit Function
+    End If
+    last = CLng(SysNum(SK_NEXT_EI)) - 1
+    If last < 1 Then
+        PackBatch = "ERR:в «" & SH_STOCK & "» нет ЕИ"
+        Exit Function
+    End If
+    d = st.getCellRangeByPosition(0, 1, SC_STATE, last).getDataArray()
+    p = pk.getCellRangeByPosition(0, 1, PK_N, last).getDataArray()
+    ReDim cand(last)
+    ReDim cn(last)
+    ReDim cu(last)
+    For i = 0 To last - 1
+        If VarType(d(i)(SC_QTY)) = 5 And CStr(d(i)(SC_STATE)) <> EI_ST_STORNO And CStr(d(i)(SC_EI)) <> "" Then
+            If d(i)(SC_QTY) > 0.0000005 And Not (CStr(p(i)(PK_EI)) = CStr(d(i)(SC_EI)) And VarType(p(i)(PK_N)) = 5) Then
+                PackGuess(CStr(d(i)(SC_NAME)), gn, gu)
+                If gn > 1 And Not UnitMatch(gu, CStr(d(i)(SC_UNIT))) Then
+                    cand(nC) = i + 1
+                    cn(nC) = gn
+                    cu(nC) = gu
+                    nC = nC + 1
+                End If
+            End If
+        End If
+    Next i
+    If nC = 0 Then
+        PackBatch = "ERR:ЕИ с остатком, у которых наименование подсказывает фасовку и она ещё не задана, нет"
+        Exit Function
+    End If
+    For i = 0 To nC - 1
+        n = cand(i)
+        x = "в 1 " & d(n - 1)(SC_UNIT) & " — " & PartsText(cn(i), cu(i))
+        k = WmsPrimeUi.UiButtons("Фасовка пачкой — " & (i + 1) & " из " & nC, WmsIssue.EiCanon(n) & " · «" & d(n - 1)(SC_NAME) & "» · остаток " _
+            & WmsIssue.QtyText(CDbl(d(n - 1)(SC_QTY))) & " " & d(n - 1)(SC_UNIT) & Chr(10) & Chr(10) & "По наименованию: «" & x & "» (остаток — " _
+            & PartsText(WmsIssue.Round3(CDbl(d(n - 1)(SC_QTY)) * cn(i)), cu(i)) & ")." & Chr(10) & "Записать эту фасовку?", _
+            Array("Записать «" & x & "»", "Пропустить", "Остановить"), Array(1, 0, 2))
+        If k = 2 Or k < 0 Then Exit For
+        If k = 1 Then
+            res = PackSet(WmsIssue.EiCanon(n), PkNumText6(cn(i)), cu(i), "по наименованию (фасовка пачкой)")
+            If Left(res, 3) = "OK:" Then
+                nOk = nOk + 1
+            Else
+                nErr = nErr + 1
+                sErr = sErr & Chr(10) & WmsIssue.EiCanon(n) & ": " & Mid(res, InStr(res, ":") + 1)
+                If Left(res, 4) <> "ERR:" And Left(res, 5) <> "SKIP:" Then Exit For
+            End If
+        Else
+            nSkip = nSkip + 1
+        End If
+    Next i
+    PackBatch = "OK=" & nOk & ";SKIP=" & nSkip & ";ERR=" & nErr
+    gUiLastMsg = "Фасовка пачкой: записано " & nOk & ", пропущено " & nSkip & IIf(nErr > 0, ", не записано " & nErr & ":" & sErr, "") _
+        & IIf(nOk + nSkip + nErr < nC, " (остановлено: просмотрено " & (nOk + nSkip + nErr) & " из " & nC & ")", "")
+End Function
+
+' 1.0 (Ч2): the packing of the last EI of the same product (the same article — or the same name when there is no article —
+' and the same unit of the document) is offered to a new EI of a first receipt. "" to post (pn > 0 — with that packing),
+' SKIP:… when the receipt is not posted
+Function ProductPackAsk(sName As String, sArt As String, sUnit As String, ByRef pn As Double, ByRef pu As String, ByRef sFrom As String) As String
+    Dim sh As Object, cur As Object, last As Long, f As String, s As String, a As Variant, n As Long, k As Integer, x As String
+    sFrom = ""
+    sh = PackSheet()
+    If IsNull(sh) Or (Trim(sArt) = "" And Trim(sName) = "") Then Exit Function
+    cur = sh.createCursor()
+    cur.gotoEndOfUsedArea(False)
+    last = cur.getRangeAddress().EndRow
+    If last < 1 Then Exit Function
+    If Trim(sArt) <> "" Then
+        f = "(" & WmsView.ColRng(SH_STOCK, SC_ART, 1, last) & "=""" & Replace(Trim(sArt), """", """""") & """)"
+    Else
+        f = "(" & WmsView.ColRng(SH_STOCK, SC_NAME, 1, last) & "=""" & Replace(Trim(sName), """", """""") & """)"
+    End If
+    s = WmsView.Eng("TEXTJOIN("";"";1;IF(ISNUMBER(" & WmsView.ColRng(SH_PACK, PK_N, 1, last) & ")*(" & WmsView.ColRng(SH_PACK, PK_N, 1, last) & ">0)*" & f _
+        & "*(" & WmsView.ColRng(SH_STOCK, SC_UNIT, 1, last) & "=""" & Replace(Trim(sUnit), """", """""") & """);ROW(" & WmsView.ColRng(SH_PACK, PK_N, 1, last) & ")-1;""""))")
+    If s = "" Then Exit Function
+    a = Split(s, ";")
+    n = CLng(Val(a(UBound(a))))
+    If Not PackOf(n, pu, pn) Then
+        pn = 0
+        pu = ""
+        Exit Function
+    End If
+    x = "в 1 " & IIf(Trim(sUnit) <> "", Trim(sUnit), "шт") & " — " & PartsText(pn, pu)
+    k = WmsPrimeUi.UiButtons("WMS — фасовка нового ЕИ", "«" & sName & "»: у прошлой поставки этого товара (" & WmsIssue.EiCanon(n) & ") фасовка «" & x _
+        & "»." & Chr(10) & "Задать такую же новому ЕИ — чтобы выдавать по 1 " & pu & " сразу?", Array("Да, фасовка «" & x & "»", "Без фасовки"), Array(1, 0))
+    If k <> 1 Then
+        pn = 0
+        pu = ""
+        Exit Function
+    End If
+    sFrom = WmsIssue.EiCanon(n)
+End Function
+
+' 1.0 (Ч8): a unit of weight in kilograms (1 for кг, 1000 for т, 0,001 for г); 0 — not a weight
+Function PkWeightUnit(sUnit As String) As Double
+    If UnitMatch(sUnit, "кг") Then
+        PkWeightUnit = 1
+    ElseIf UnitMatch(sUnit, "т") Then
+        PkWeightUnit = 1000
+    ElseIf UnitMatch(sUnit, "г") Then
+        PkWeightUnit = 0.001
+    End If
+End Function
+
+' «1 м = 2,5 кг» (or «2,5 кг = 1 м») for a document in sDocUnit (a weight): pn — parts (metres) in 1 unit of the document, pu — the part
+Function PkWeight(ByVal s As String, sDocUnit As String, ByRef pn As Double, ByRef pu As String, ByRef msg As String) As Boolean
+    Dim a As Variant, nL As String, wL As String, nR As String, wR As String, xL As Double, xR As Double, t As String, kd As Double, kw As Double
+    a = Split(PkDecimalCommas(Trim(s)), "=")
+    If UBound(a) <> 1 Then
+        msg = "«" & Trim(s) & "»: напишите вес одного метра так: «1 м = 2,5 кг»"
+        Exit Function
+    End If
+    PkSplit(Replace(Trim(CStr(a(0))), ".", ","), nL, wL)
+    PkSplit(Replace(Trim(CStr(a(1))), ".", ","), nR, wR)
+    If PkWeightUnit(wL) > 0 And PkWeightUnit(wR) = 0 Then
+        t = nL: nL = nR: nR = t
+        t = wL: wL = wR: wR = t
+    End If
+    kd = PkWeightUnit(sDocUnit)
+    kw = PkWeightUnit(wR)
+    If kd = 0 Then
+        msg = "вес метра нужен, когда документ в кг или т, а у этого ЕИ — «" & sDocUnit & "»: впишите просто, сколько частей в 1 " & sDocUnit
+        Exit Function
+    End If
+    If kw = 0 Or wL = "" Or PkWeightUnit(wL) > 0 Then
+        msg = "«" & Trim(s) & "»: напишите вес одного метра так: «1 м = 2,5 кг» (слева длина, справа вес в кг, т или г)"
+        Exit Function
+    End If
+    If nL = "" Then nL = "1"
+    If ParseQtyText(nL, xL, msg) <> 0 Or ParseQtyText(nR, xR, msg) <> 0 Then
+        msg = "«" & Trim(s) & "»: " & msg
+        Exit Function
+    End If
+    pn = xL / (xR * kw / kd)
+    pu = wL
+    PkWeight = True
+End Function
+
+' a number with up to six decimals and a decimal comma (the parts of a packing computed from a weight)
+Function PkNumText6(x As Double) As String
+    Dim ip As Double, fr As Long, s As String
+    ip = Int(x)
+    fr = Int((x - ip) * 1000000 + 0.5)
+    If fr >= 1000000 Then
+        ip = ip + 1
+        fr = 0
+    End If
+    s = Format(ip, "0")
+    If fr > 0 Then
+        s = s & "," & Right("000000" & fr, 6)
+        Do While Right(s, 1) = "0"
+            s = Left(s, Len(s) - 1)
+        Loop
+    End If
+    PkNumText6 = s
+End Function
+
+Private Function PkDecimal(s As String) As Boolean
+    Dim i As Long, ch As String, nSep As Integer
+    If s = "" Then Exit Function
+    For i = 1 To Len(s)
+        ch = Mid(s, i, 1)
+        If ch = "," Or ch = "." Then
+            nSep = nSep + 1
+        ElseIf ch < "0" Or ch > "9" Then
+            Exit Function
+        End If
+    Next i
+    PkDecimal = (nSep <= 1 And Len(s) <= 12)
+End Function
+
+' 1.0 (Ч3): what to check before a packing is changed — the balance in the new parts is not whole (for canisters, bottles,
+' pieces), and how many issues of this EI were given in the parts of the old packing. "" — nothing to ask
+Function PackChangeQuestion(n As Long, canon As String, d As Variant, sN As String, sPart As String) As String
+    Dim pn As Double, msg As String, b As Double, x As Double, pu As String, oldN As Double, oldU As String, s As String, cnt As String, sh As Object
+    Dim cur As Object, last As Long, st As Integer
+    If Trim(sN) = "" Or Trim(sN) = "0" Or Trim(sPart) = "" Then Exit Function
+    st = ParseQtyText(Trim(sN), pn, msg)
+    If st = 4 And PkDecimal(Trim(sN)) Then
+        pn = Val(Replace(Trim(sN), ",", "."))
+        st = 0
+    End If
+    If st <> 0 Or pn <= 0 Then Exit Function
+    If VarType(d(SC_QTY)) = 5 Then b = d(SC_QTY)
+    pu = Trim(sPart)
+    If b > 0 And PkCountable(pu) Then
+        x = b * pn
+        If Abs(x - Int(x + 0.5)) > 0.005 Then
+            s = "Остаток " & WmsIssue.QtyText(b) & " " & d(SC_UNIT) & " = " & WmsIssue.QtyText(x) & " " & pu & " при новой фасовке — не целое число " & pu _
+                & ". Проверьте: столько ли " & pu & " лежит на самом деле?"
+        End If
+    End If
+    If PackOf(n, oldU, oldN) Then
+        If oldU <> pu Or Abs(oldN - pn) > 0.0000001 Then
+            sh = WmsIssue.IssuesSheet()
+            cur = sh.createCursor()
+            cur.gotoEndOfUsedArea(False)
+            last = cur.getRangeAddress().EndRow
+            If last >= 1 Then
+                cnt = WmsView.Eng("SUMPRODUCT((" & WmsView.ColRng(SH_ISSUES, IC_EI, 1, last) & "=""" & canon & """)*" _
+                    & WmsView.PostedExpr(WmsView.ColRng(SH_ISSUES, IC_CTL, 1, last)) & "*ISNUMBER(SEARCH(""·"";" _
+                    & WmsView.ColRng(SH_ISSUES, IC_CTL, 1, last) & "))*(RIGHT(" & WmsView.ColRng(SH_ISSUES, IC_CTL, 1, last) & ";" & (Len(oldU) + 1) _
+                    & ")="" " & Replace(oldU, """", """""") & """))")
+            End If
+            If Val(cnt) > 0 Then
+                s = s & IIf(s <> "", Chr(10) & Chr(10), "") & "По старой фасовке (в 1 " & d(SC_UNIT) & " — " & PartsText(oldN, oldU) & ") этот ЕИ уже выдавали частями: " _
+                    & cnt & " раз. Проведённые выдачи не меняются — новая фасовка действует для следующих."
+            ElseIf s <> "" Then
+                s = s & Chr(10) & Chr(10) & "Сейчас: в 1 " & d(SC_UNIT) & " — " & PartsText(oldN, oldU) & "."
+            End If
+        End If
+    End If
+    PackChangeQuestion = s
+End Function
+
+' a part counted in whole pieces (a canister, a bottle, a box) — not a length, a weight or a volume
+Private Function PkCountable(pu As String) As Boolean
+    Dim w As Variant
+    For Each w In Array("м", "мм", "см", "кг", "г", "т", "л", "мл", "м2", "м3", "м²", "м³")
+        If LCase(pu) = w Or UnitMatch(pu, CStr(w)) Then Exit Function
+    Next w
+    PkCountable = True
+End Function
+
 Function PackEI() As String
     Dim sName As String, r As Long, sEI As String, n As Long, canon As String, msg As String, d As Variant, v(2) As String, pu As String, pn As Double
     Dim gu As String, gn As Double, info As String, res As String, bal As String
@@ -776,6 +1212,11 @@ Function PackEI() As String
             info = "Например: в 1 шт — 4 кан (незамерзайка: по документу 1 шт, по факту 4 канистры); в 1 шт — 6 м (профиль 6 м)."
         End If
     End If
+    ' 1.0 (Ч8): a document in kg or t, issued in metres — the weight of one metre is enough («1 м = 2,5 кг»)
+    If PkWeightUnit(CStr(d(SC_UNIT))) > 0 And Not PackOf(n, pu, pn) Then
+        info = info & " Документ в «" & d(SC_UNIT) & "», а выдаёте метрами? Впишите вес погонного метра: «1 м = 2,5 кг» — WMS посчитает сам."
+        If PkWeightUnit(CStr(d(SC_UNIT))) >= 1000 Then info = info & " (В тоннах WMS считает до 0,001 т = 1 кг: выдача метрами округляется до килограмма.)"
+    End If
     v(2) = PackSheet().getCellByPosition(PK_NOTE, n).getString()
     If VarType(d(SC_QTY)) = 5 Then bal = " · остаток " & WmsIssue.QtyText(CDbl(d(SC_QTY))) & " " & d(SC_UNIT)
     If Not WmsPrimeUi.UiForm("Фасовка ЕИ — " & canon, d(SC_NAME) & bal & " (учёт — по документу, в «" & d(SC_UNIT) & "»). " & info _
@@ -784,6 +1225,22 @@ Function PackEI() As String
         gUiLastMsg = "SKIP:окно закрыто"
         PackEI = gUiLastMsg
         Exit Function
+    End If
+    If InStr(v(0), "=") > 0 Then
+        If Not PkWeight(v(0), CStr(d(SC_UNIT)), gn, gu, msg) Then
+            PackEI = "ERR:" & msg
+            Exit Function
+        End If
+        v(0) = PkNumText6(gn)
+        If Trim(v(1)) = "" Then v(1) = gu
+    End If
+    msg = PackChangeQuestion(n, canon, d, v(0), v(1))
+    If msg <> "" Then
+        If WmsPrimeUi.UiButtons("Фасовка ЕИ — проверьте", msg, Array("Записать фасовку", "Не записывать"), Array(1, 0)) <> 1 Then
+            gUiLastMsg = "SKIP:фасовка не записана"
+            PackEI = gUiLastMsg
+            Exit Function
+        End If
     End If
     res = PackSet(canon, v(0), v(1), v(2))
     If Left(res, 3) = "OK:" Then
@@ -829,6 +1286,16 @@ Function TestQtyEI(sText As String, n As Long, sMode As String, capQty As Double
     If VarType(d(SC_QTY)) = 5 Then b = d(SC_QTY)
     st = QtyEIText(sText, n, b, CStr(d(SC_UNIT)), sMode, capQty, q, info, msg)
     If st = 0 Then TestQtyEI = "OK:" & WmsIssue.QtyText(q) & "|" & info Else TestQtyEI = "ERR:" & msg
+End Function
+
+Function TestPackChange(sEI As String, sN As String, sPart As String) As String
+    Dim n As Long, canon As String, msg As String
+    WmsInit()
+    If Not WmsIssue.NormalizeEI(sEI, n, canon, msg) Then
+        TestPackChange = "ERR:" & msg
+        Exit Function
+    End If
+    TestPackChange = PackChangeQuestion(n, canon, WmsIssue.StockData(n), sN, sPart)
 End Function
 
 Function TestPackGuess(sName As String) As String

@@ -39,10 +39,17 @@ Sub TbUnitAdd(units() As String, sums() As Double, ByRef n As Integer, ByVal u A
     n = n + 1
 End Sub
 
+' x rounded to dec decimals, half away from zero (Round of Basic exists only in the VBA mode)
+Function TbRound(x As Double, dec As Integer) As Double
+    Dim f As Double
+    f = 10 ^ dec
+    If x >= 0 Then TbRound = Int(x * f + 0.5) / f Else TbRound = -Int(-x * f + 0.5) / f
+End Function
+
 ' a number as the storekeeper writes it: «10,5», «1 250», at most 3 decimals
 Function TbNumText(x As Double) As String
     Dim s As String
-    s = Format(Round(x, 3), "#,##0.###")
+    s = Format(TbRound(x, 3), "#,##0.###")
     If Right(s, 1) = "." Or Right(s, 1) = "," Then s = Left(s, Len(s) - 1)
     TbNumText = s
 End Function

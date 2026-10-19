@@ -20,7 +20,12 @@ Public Const DB_STALE_CAND = 100
 Public Const DB_DAYS_HEAD = 35
 Public Const DB_DAYS = 37
 Public Const DB_DAYS_N = 14
-Public Const DB_FOOT = 52
+' 1.0 (Ч5): the tails — an EI with a balance below one part of its packing (0,01 бут, an offcut of 0,3 м) or, without a
+' packing, below 0,01 of the unit of its document
+Public Const DB_TAILS_HEAD = 54
+Public Const DB_TAILS = 56
+Public Const DB_TAILS_N = 10
+Public Const DB_FOOT = 67
 ' hidden service cells of column O: the state code, the LAST_SEQ, the day and the time (ms) of the last refresh
 Public Const DB_SVC_COL = 14
 Public Const DB_STALE_DAYS = 90
@@ -77,6 +82,7 @@ Function DashRefresh() As String
     Dim unposted As Long, attention As Long, recent() As Boolean, nSt As Long, stN(DB_STALE_CAND - 1) As Long, nStShown As Long, stDay As Variant
     Dim osh As Object, rows(), mx As Double, ord As Variant, tIdx() As Long, d As Variant, cond As String, dq As String, rg As String, rd As String
     Dim row As Variant, cD As Integer, cW As Integer, cN As Integer, cU As Integer, cQ As Integer, nList As Long, stKey() As Double, stOrd() As Long
+    Dim tails As Variant, nTails As Long, tRows()
     If gDbBusy Then Exit Function
     gDbBusy = True
     On Error GoTo EH
@@ -236,6 +242,8 @@ Function DashRefresh() As String
             End If
         Next i
     End If
+    ' ---------------------------------------------------------------- 1.0 (Ч5): the tails
+    tails = TailEIs(nTails)
     ' ---------------------------------------------------------------- attention: unposted rows, «Требует разбора»
     unposted = WmsIssue.UnpostedCount()
     attention = unposted + nReview
@@ -321,6 +329,17 @@ Function DashRefresh() As String
     If nSt = 0 Then sh.getCellByPosition(8, DB_LIST2).setString("ЕИ без движения " & DB_STALE_DAYS & "+ дней нет")
     sh.getCellByPosition(7, DB_LIST2_HEAD).setString("Лежит без движения " & DB_STALE_DAYS & "+ дней" & IIf(nSt > 0, " — ЕИ: " & NumText(nSt) _
         & ", дольше всех лежащие первыми" & IIf(nSt > DB_STALE_CAND, " (из первых " & DB_STALE_CAND & ")", ""), ""))
+    ' 1.0 (Ч5): the tails, the smallest first
+    sh.getCellRangeByPosition(1, DB_TAILS, 12, DB_TAILS + DB_TAILS_N - 1).clearContents(1 + 2 + 4)
+    For i = 0 To nTails - 1
+        If i >= DB_TAILS_N Then Exit For
+        n = tails(i)
+        d = WmsIssue.StockSheet().getCellRangeByPosition(0, n, SC_PLACE, n).getDataArray()(0)
+        PutRow(sh, DB_TAILS + i, 1, Array(CStr(d(SC_EI)), CStr(d(SC_NAME)), "", "", "", WmsPack.QtyWithParts(n, CDbl(d(SC_QTY)), CStr(d(SC_UNIT))), "", "", CStr(d(SC_PLACE))))
+    Next i
+    If nTails = 0 Then sh.getCellByPosition(2, DB_TAILS).setString("хвостов нет")
+    sh.getCellByPosition(1, DB_TAILS_HEAD).setString("Хвосты — остаток меньше одной части" & IIf(nTails > 0, ": ЕИ " & NumText(nTails) _
+        & IIf(nTails > DB_TAILS_N, " (показаны первые " & DB_TAILS_N & ")", "") & " — списать: кнопка «Списать хвосты…»", ""))
     ' the last 14 days: today first
     mx = 1
     For k = 0 To 13
@@ -337,7 +356,7 @@ Function DashRefresh() As String
     sh.getCellByPosition(DB_SVC_COL, 1).setValue(SysNum(SK_LAST_SEQ))
     sh.getCellByPosition(DB_SVC_COL, 2).setValue(today)
     sh.getCellByPosition(DB_SVC_COL, 3).setValue(ViewMs())
-    sh.getCellByPosition(1, DB_FOOT).setString("Обновлено " & Format(Now(), "DD.MM.YYYY HH:MM") & " за " & ViewMs() & " мс · считается по листам книги при " _
+    sh.getCellByPosition(1, DB_FOOT).setString("Обновлено " & Format(Now(), "DD.MM.YYYY HH:MM") & " · считается по листам книги при " _
         & "открытии страницы и после каждой операции; страница ничего не изменяет")
     ViewDone(sh)
     gDbBusy = False
@@ -348,6 +367,102 @@ EH:
     On Error Resume Next
     ViewDone(sh)
     gDbBusy = False
+End Function
+
+' 1.0 (Ч5): the EIs of a tail, the smallest balance first: with a packing — more than 0 and less than one part; without —
+' more than 0 and less than 0,01 of the unit of the document (what rounding leaves: 0,001 шт). A cancelled EI is not one
+Function TailEIs(ByRef nItems As Long) As Variant
+    Dim last As Long, rg As String, rp As String, a As Variant, i As Long, keys() As Double, idx() As Long, out() As Long, d As Variant, n As Long
+    nItems = 0
+    TailEIs = Array()
+    last = CLng(SysNum(SK_NEXT_EI)) - 1
+    If last < 1 Then Exit Function
+    rg = ColRng(SH_STOCK, SC_QTY, 1, last)
+    If gDoc.Sheets.hasByName(SH_PACK) Then
+        rp = ColRng(SH_PACK, PK_N, 1, last)
+        rp = "IF((" & ColRng(SH_PACK, PK_EI, 1, last) & "=" & ColRng(SH_STOCK, SC_EI, 1, last) & ")*(" & rp & ">0);" & rg & "*" & rp & "<0.9999999;" _
+            & rg & "<0.0099999)"
+    Else
+        rp = rg & "<0.0099999"
+    End If
+    a = EngList("TEXTJOIN("";"";1;IF(ISNUMBER(" & rg & ")*(" & rg & ">0.0000005)*(" & ColRng(SH_STOCK, SC_STATE, 1, last) & "<>""" & EI_ST_STORNO _
+        & """)*(" & rp & ");ROW(" & rg & ")-1;""""))", nItems)
+    If nItems = 0 Then Exit Function
+    ReDim keys(nItems - 1)
+    ReDim idx(nItems - 1)
+    ReDim out(nItems - 1)
+    For i = 0 To nItems - 1
+        n = CLng(a(i))
+        d = WmsIssue.StockSheet().getCellByPosition(SC_QTY, n).getValue()
+        keys(i) = d + n * 0.0000000001
+        idx(i) = i
+    Next i
+    SortIdx(keys, idx, nItems, False)
+    For i = 0 To nItems - 1
+        out(i) = CLng(a(idx(i)))
+    Next i
+    TailEIs = out
+End Function
+
+' «Списать хвосты…»: every tail is written off as a whole («всё») with one reason — rows of «Корректировки», posted one by one
+Sub BtnTails(Optional oEvent As Variant)
+    Dim s As String
+    WmsInit()
+    s = WriteOffTails()
+    If Left(s, 4) = "ERR:" Then WmsUi.UiMessage(Mid(s, 5))
+End Sub
+
+Function WriteOffTails() As String
+    Dim tails As Variant, nT As Long, i As Long, n As Long, d As Variant, sList As String, v(0) As String, ash As Object, r As Long, res As String
+    Dim nOk As Long, nErr As Long, sErr As String
+    tails = TailEIs(nT)
+    If nT = 0 Then
+        WriteOffTails = "ERR:хвостов нет — у всех ЕИ остаток не меньше одной части"
+        Exit Function
+    End If
+    For i = 0 To nT - 1
+        If i >= 8 Then
+            sList = sList & Chr(10) & "… и ещё " & (nT - 8)
+            Exit For
+        End If
+        n = tails(i)
+        d = WmsIssue.StockData(n)
+        sList = sList & Chr(10) & WmsIssue.EiCanon(n) & " · " & d(SC_NAME) & " · " & WmsPack.QtyWithParts(n, CDbl(d(SC_QTY)), CStr(d(SC_UNIT)))
+    Next i
+    v(0) = "хвост: остаток меньше одной части"
+    If Not WmsPrimeUi.UiForm("Списать хвосты", "Списать весь остаток у " & nT & " ЕИ (на листе «" & SH_ADJUST & "» появятся строки «Списание … всё»):" _
+        & sList, Array("Причина"), v, Array(""), "Списать") Then
+        WriteOffTails = "SKIP:окно закрыто"
+        gUiLastMsg = WriteOffTails
+        Exit Function
+    End If
+    If Trim(v(0)) = "" Then
+        WriteOffTails = "ERR:укажите причину списания"
+        Exit Function
+    End If
+    ash = gDoc.Sheets.getByName(SH_ADJUST)
+    For i = 0 To nT - 1
+        n = tails(i)
+        r = WmsOrders.LastRow(ash) + 1
+        If r < 1 Then r = 1
+        ash.getCellByPosition(AC_KIND, r).setString("Списание")
+        ash.getCellByPosition(AC_EI, r).setString(WmsIssue.EiCanon(n))
+        ash.getCellByPosition(AC_QTY, r).setString("всё")
+        ash.getCellByPosition(AC_DATE, r).setValue(CDbl(Date()))
+        ash.getCellByPosition(AC_REASON, r).setString(Trim(v(0)))
+        res = WmsAdjust.AdjustPostRow(r)
+        If Left(res, 3) = "OK:" Then
+            nOk = nOk + 1
+        Else
+            nErr = nErr + 1
+            sErr = sErr & Chr(10) & WmsIssue.EiCanon(n) & ": " & Mid(res, InStr(res, ":") + 1)
+            If Left(res, 4) <> "ERR:" And Left(res, 5) <> "SKIP:" Then Exit For
+        End If
+    Next i
+    WriteOffTails = "OK=" & nOk & ";ERR=" & nErr
+    If nErr > 0 Then WmsUi.UiMessage("Списано хвостов: " & nOk & " из " & nT & "; не списаны:" & sErr)
+    gUiLastMsg = WriteOffTails & sErr
+    DashRefresh()
 End Function
 
 Private Sub PutTile(sh As Object, t As Integer, v As Double, sSub As String)
@@ -438,10 +553,14 @@ Sub DashSavedState(bSaving As Boolean)
     If Not gDoc.Sheets.hasByName(SH_DASH) Then Exit Sub
     sh = gDoc.Sheets.getByName(SH_DASH)
     c = sh.getCellByPosition(8, DB_TITLE_ROW)
+    If Not bSaving And gDbStateLine = "" Then Exit Sub
+    ' the cell is unlocked (tools/build_ods.py layout_10): no change of the protection while the book is being saved — it
+    ' would put the writes into the Undo stack
+    If c.CellProtection.IsLocked And sh.isProtected() Then Exit Sub
     If bSaving Then
         gDbStateLine = c.getString()
         c.setString("●  WMS не запущена — откройте книгу с включёнными макросами (см. «" & SH_MAIN & "»)")
-    ElseIf gDbStateLine <> "" Then
+    Else
         c.setString(gDbStateLine)
         gDbStateLine = ""
     End If

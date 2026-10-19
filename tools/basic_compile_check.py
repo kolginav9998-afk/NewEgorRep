@@ -24,6 +24,10 @@ RESERVED = {"like", "base", "name", "any", "type", "mod", "is", "step", "output"
             "return", "on", "while", "until", "for", "each", "in", "do", "if", "with", "end", "true", "false", "nothing", "null", "empty"}
 
 
+# 1.0: VBA functions LibreOffice Basic knows only with «Option VBASupport 1» (the books of WMS never set it)
+VBA_ONLY = ("Round", "InStrRev", "FormatNumber", "FormatCurrency", "FormatPercent", "MonthName", "WeekdayName", "StrReverse")
+
+
 def reserved_names(src_dir):
     """the variables and parameters of the Basic sources named by a reserved word: ["Module.bas:line: name", ...]"""
     import re
@@ -49,11 +53,17 @@ def reserved_names(src_dir):
             # after a one-line «If … Then ReDim …» LibreOffice Basic takes the next line into the If as well
             if re.search(r"\bThen\s+ReDim\b", code, re.I):
                 bad.append(f"{fn}:{i}: однострочный If … Then ReDim (следующая строка попадёт в If)")
+            # functions of the VBA mode only: compiled fine, «Sub-procedure or function procedure not defined» when run
+            for f in re.findall(r"(?<![\w.])(" + "|".join(VBA_ONLY) + r")\s*\(", re.sub(r'"[^"]*"', '""', code), re.I):
+                bad.append(f"{fn}:{i}: {f}() есть только в режиме VBA (Option VBASupport) — при выполнении «процедура не определена»")
     return bad
 
 
 def main():
-    bad = reserved_names(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src", "basic"))
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # the WMS book and (1.0) the books of the tools, of the transfer and of the upgrade wizard
+    bad = [x for d in ("basic", "toolbox", "transfer", "upgrade") if os.path.isdir(os.path.join(root, "src", d))
+           for x in reserved_names(os.path.join(root, "src", d))]
     if bad:
         print("COMPILE FAILED: ловушки LibreOffice Basic (зарезервированное слово в имени, однострочный If … ReDim): " + "; ".join(bad))
         sys.exit(1)

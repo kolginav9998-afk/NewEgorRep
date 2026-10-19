@@ -27,8 +27,11 @@ Private Function FieldOf(sLock As String, sName As String) As String
 End Function
 
 Function DescribeLock(sLock As String) As String
-    Dim s As String
-    s = "открыта " & Replace(FieldOf(sLock, "opened"), "T", " ")
+    Dim s As String, t As String
+    t = FieldOf(sLock, "opened")
+    ' 1.0: «14.10.2026 04:55», as the other dates of WMS
+    If Len(t) >= 16 And Mid(t, 5, 1) = "-" And Mid(t, 11, 1) = "T" Then t = Mid(t, 9, 2) & "." & Mid(t, 6, 2) & "." & Left(t, 4) & " " & Mid(t, 12, 5)
+    s = "открыта " & t
     If FieldOf(sLock, "user") <> "" Then s = s & ", пользователь " & FieldOf(sLock, "user")
     If FieldOf(sLock, "host") <> "" Then s = s & ", компьютер " & FieldOf(sLock, "host")
     DescribeLock = s

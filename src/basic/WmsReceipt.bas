@@ -413,7 +413,7 @@ End Sub
 Function ReceiptPostRow(r As Long) As String
     Dim why As String, kind As String, n As Long, canon As String, olid As Long, res As String, sKey As String, dup As String
     Dim packN As Double, packU As String, sPlace0 As String
-    Dim fp As String, st As String, ctl As String, nodoc As Integer, own As String, sOrder As String, sArt As String, sSupplier As String
+    Dim fp As String, st As String, ctl As String, nodoc As Integer, own As String, sOrder As String, sArt As String, sSupplier As String, sPkFrom As String
     WmsInit()
     If r < 1 Or r > MAX_SHEET_ROW Then
         ReceiptPostRow = "ERR:выберите строку заказа (не заголовок)"
@@ -485,6 +485,10 @@ Function ReceiptPostRow(r As Long) As String
         why = WmsMap.PlaceAsk(mPlace, "приход не проведён")
         If why <> "" Then SetCtl(r, "Не проведено: проверьте место хранения (U) «" & sPlace0 & "»")
     End If
+    ' 1.0 (Ч2): a new delivery of a product that already has a packing (the same article or name, the same unit) — asked last,
+    ' after the questions that may stop the receipt
+    sPkFrom = ""
+    If why = "" And packN = 0 Then why = WmsPack.ProductPackAsk(mName, sArt, mUnit, packN, packU, sPkFrom)
     If why <> "" Then
         ReceiptPostRow = why
         Exit Function
@@ -523,7 +527,8 @@ Function ReceiptPostRow(r As Long) As String
     If Left(res, 6) = "ERR-RB" Then SetCtl(r, "Не проведено: " & Mid(res, 8))
     ' the packing of the new EI (its own operation EI_PACK): if it fails, the receipt stands and «Фасовка ЕИ» sets it later
     If Left(res, 3) = "OK:" And packN > 0 Then
-        why = WmsPack.PackSet(canon, WmsIssue.QtyText(packN), packU, "по документу " & WmsIssue.QtyText(mDocQty) & " " & mUnit & ", факт частями")
+        why = WmsPack.PackSet(canon, WmsPack.PkNumText6(packN), packU, IIf(sPkFrom <> "", "как у " & sPkFrom & " (тот же товар)", "по документу " _
+            & WmsIssue.QtyText(mDocQty) & " " & mUnit & ", факт частями"))
         If Left(why, 3) <> "OK:" Then gRcvNote = "Приход проведён (" & canon & "), но фасовка не записана: " & Mid(why, InStr(why, ":") + 1) _
             & Chr(10) & "Задайте её кнопкой «Фасовка ЕИ» на листе «" & SH_STOCK & "»."
     End If

@@ -416,7 +416,7 @@ Private Sub Turnover(oCell As Object, un() As String, sm() As Double, nu As Inte
         If sm2(j) > 0 Then
             s = s & IIf(n > 0, " · ", "") & IIf(un2(j) <> "", un2(j), "(без ед.)") & " " & TbNumText(x / sm2(j))
             n = n + 1
-            If n = 1 Then oCell.setValue(Round(x / sm2(j), 4))
+            If n = 1 Then oCell.setValue(TbRound(x / sm2(j), 4))
         End If
     Next j
     If n = 0 Then

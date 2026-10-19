@@ -105,6 +105,11 @@ def ei_history(st):
     for n, a in (st.get("adjs") or {}).items():
         if a["state"] == "LIVE" and a["ei"] in h:
             h[a["ei"]]["adjusted"] = h[a["ei"]].get("adjusted", 0.0) + a["delta"]
+        # 1.0 (М1): the new EI of a split came with the quantity taken from its source
+        if a["kind"] == "SPLIT" and a.get("new") in h:
+            e = h[a["new"]]
+            e["origin"] = f"Разделение {a['ei']}"
+            e["received"] = (e.get("received") or 0.0) + (-a["delta"] if a["state"] == "LIVE" else 0.0)
     return h
 
 

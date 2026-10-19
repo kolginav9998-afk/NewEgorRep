@@ -5,13 +5,46 @@ Option Explicit
 
 ' RetColumnsHint was shown in this session (Global: a sheet event is a macro call of its own)
 Global gAskRetHint As Boolean
+' 1.0: a block of rows posted at once (WmsDaily): the answers given to a question once, «|key=answer|…», reused for the rest
+Global gAskMemoOn As Boolean
+Global gAskMemo As String
+
+Sub AskMemoBegin()
+    gAskMemoOn = True
+    gAskMemo = "|"
+End Sub
+
+Sub AskMemoEnd()
+    gAskMemoOn = False
+    gAskMemo = ""
+End Sub
+
+' the answer remembered for key in the block ("" — none)
+Private Function MemoGet(sKey As String) As String
+    Dim p As Long, q As Long
+    If Not gAskMemoOn Then Exit Function
+    p = InStr(gAskMemo, "|" & sKey & "=")
+    If p = 0 Then Exit Function
+    p = p + Len(sKey) + 2
+    q = InStr(p, gAskMemo, "|")
+    MemoGet = Mid(gAskMemo, p, q - p)
+End Function
+
+Private Sub MemoPut(sKey As String, sAnswer As String)
+    If gAskMemoOn Then gAskMemo = gAskMemo & sKey & "=" & Replace(sAnswer, "|", "/") & "|"
+End Sub
+
+' the line under a question of a block: the answer counts for the other rows of the block
+Private Function MemoNote() As String
+    If gAskMemoOn Then MemoNote = Chr(10) & Chr(10) & "Ответ будет применён и к остальным строкам этой пачки."
+End Function
 
 ' ================================================================ the date of a movement
 
 ' d — the date of the movement (a Calc date), sWhat — what it is («выдачи», «возврата»), sVerb — the action on the button
 ' («Провести»). 0 — post with d, 1 — not posted (msg)
 Function DateAsk(d As Double, sWhat As String, sVerb As String, ByRef msg As String) As Integer
-    Dim today As Double, sText As String, k As Integer
+    Dim today As Double, sText As String, k As Integer, sMemo As String
     today = CDbl(Date())
     If d > today Then
         sText = "Дата " & sWhat & " " & Format(d, "DD.MM.YYYY") & " — в будущем (сегодня " & Format(today, "DD.MM.YYYY") & ")." & Chr(10) _
@@ -22,7 +55,14 @@ Function DateAsk(d As Double, sWhat As String, sVerb As String, ByRef msg As Str
     Else
         Exit Function
     End If
-    k = WmsPrimeUi.UiButtons("WMS — проверьте дату", sText, Array(sVerb & " с датой " & Format(d, "DD.MM.YYYY"), "Не проводить — исправлю дату"), Array(0, 1))
+    sMemo = MemoGet("D" & CLng(d))
+    If sMemo <> "" Then
+        k = CInt(sMemo)
+    Else
+        k = WmsPrimeUi.UiButtons("WMS — проверьте дату", sText & MemoNote(), Array(sVerb & " с датой " & Format(d, "DD.MM.YYYY"), "Не проводить — исправлю дату"), _
+            Array(0, 1))
+        MemoPut("D" & CLng(d), CStr(IIf(k = 0, 0, 1)))
+    End If
     If k <> 0 Then
         msg = "проверьте дату " & Format(d, "DD.MM.YYYY")
         DateAsk = 1
@@ -116,7 +156,19 @@ End Function
 ' a recipient not in the directory (ResolveRecipient 2): «Записать как есть», one of the names that look alike, «Не проводить».
 ' sWho — in: as typed, res: the name to post. 0 — post sWho, 1 — not posted (msg)
 Function WhoAsk(ByRef sWho As String, ByRef msg As String) As Integer
-    Dim aLike As Variant, labels() As String, codes() As Integer, i As Integer, n As Integer, k As Integer, sText As String
+    Dim aLike As Variant, labels() As String, codes() As Integer, i As Integer, n As Integer, k As Integer, sText As String, sMemo As String
+    ' a block: the same name answered once
+    sMemo = MemoGet("W" & WhoKey(sWho))
+    If sMemo = "0" Then
+        Exit Function
+    ElseIf sMemo = "1" Then
+        msg = "проверьте получателя «" & Trim(sWho) & "»"
+        WhoAsk = 1
+        Exit Function
+    ElseIf Left(sMemo, 1) = "=" Then
+        sWho = Mid(sMemo, 2)
+        Exit Function
+    End If
     aLike = WhoLike(sWho)
     n = UBound(aLike) + 1
     ReDim labels(n + 1)
@@ -140,12 +192,17 @@ Function WhoAsk(ByRef sWho As String, ByRef msg As String) As Integer
         WhoAsk = 0
         Exit Function
     End If
-    k = WmsPrimeUi.UiButtons("WMS — получатель", sText, labels, codes)
+    k = WmsPrimeUi.UiButtons("WMS — получатель", sText & MemoNote(), labels, codes)
+    sMemo = "W" & WhoKey(sWho)
     If k >= 10 Then
         sWho = aLike(k - 10)
+        MemoPut(sMemo, "=" & sWho)
     ElseIf k <> 0 Then
         msg = "проверьте получателя «" & Trim(sWho) & "»"
         WhoAsk = 1
+        MemoPut(sMemo, "1")
+    Else
+        MemoPut(sMemo, "0")
     End If
 End Function
 

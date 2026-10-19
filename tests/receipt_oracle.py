@@ -50,7 +50,8 @@ LEGACY_RECEIPTS = ("LEGACY_RECEIPT", "LEGACY_RECEIPT_ADD")
 ISSUE_TYPES = ("ISSUE", "ISSUE_FIX", "ISSUE_DEL")
 RETURN_TYPES = ("RETURN", "RETURN_FIX", "RETURN_DEL")
 SPECIAL_TYPES = ("SP_RECEIPT", "SP_REFILL", "SP_FIX", "SP_DEL", "SP_IDENTIFY")
-ADJUST_TYPES = ("MOVE", "MOVE_FIX", "MOVE_DEL", "WRITE_OFF", "WRITE_OFF_FIX", "WRITE_OFF_DEL", "INV_ADJ", "INV_ADJ_FIX", "INV_ADJ_DEL")
+ADJUST_TYPES = ("MOVE", "MOVE_FIX", "MOVE_DEL", "WRITE_OFF", "WRITE_OFF_FIX", "WRITE_OFF_DEL", "INV_ADJ", "INV_ADJ_FIX", "INV_ADJ_DEL",
+                "SPLIT", "SPLIT_DEL")       # 1.0 (М1): the split of an EI and its storno (a split is never corrected)
 MIGRATE_TYPES = ("MIGRATE", "MIGRATE_FIX")
 MIGRATE_STYPES = ("Поставщик", "Офис", "Производство", "Детали", "Старый склад", "Иной приход")
 SP_CODES = ("OFF", "PROD", "DET", "OLD", "OTH")
@@ -471,7 +472,7 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
         elif t in SPECIAL_TYPES:
             replay_special(t, f, sq, bal, sp, place, issues, returns, created, receipts, bad, adjs)
         elif t in ADJUST_TYPES:
-            replay_adjust(t, f, sq, bal, adjs, place, touched_place, bad)
+            replay_adjust(t, f, sq, bal, adjs, place, touched_place, bad, created)
         elif t == "MIGRATE_FIX":
             replay_migrate_fix(f, sq, bal, sp, bad)
         elif t in MIGRATE_TYPES:
@@ -738,7 +739,15 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
     # ------------------------------------------------------------ 8. PRIME 0.8: the packing of the EIs (_PACK) — the last EI_PACK of each EI
     packs = {}
     for e in applied:
-        if e["seq"] in abandoned or e["type"] != "EI_PACK":
+        if e["seq"] in abandoned:
+            continue
+        if e["type"] == "SPLIT":
+            # 1.0 (М1): the new EI of a split takes the packing of its source
+            src_pack = packs.get(e["fields"].get("EI"))
+            if src_pack and src_pack[1] > 0:
+                packs[e["fields"].get("NEW_EI")] = src_pack
+            continue
+        if e["type"] != "EI_PACK":
             continue
         f = e["fields"]
         try:
@@ -1173,7 +1182,7 @@ def replay_special(t, f, sq, bal, sp, place, issues, returns, created, receipts,
         L.update(name=f.get("NAME", ""), art=f.get("ART", ""), cat=f.get("CAT", ""), ident=typ)
 
 
-def replay_adjust(t, f, sq, bal, adjs, place, touched_place, bad):
+def replay_adjust(t, f, sq, bal, adjs, place, touched_place, bad, created=None):
     """one correction of the journal (Final Core), checked against the rules of the task written independently of the
     Basic code; the invariants of the corrections are reported as "A"."""
     def fnum(k):
@@ -1210,6 +1219,26 @@ def replay_adjust(t, f, sq, bal, adjs, place, touched_place, bad):
             a.update(frm=f.get("FROM", ""), to=f.get("TO", ""))
             place[ei] = f.get("TO", "")
             touched_place.add(ei)
+        elif kind == "SPLIT":
+            # 1.0 (М1): part of the EI becomes a new EI (the next number) with that quantity; the source keeps the rest
+            q, new = fnum("QTY"), f.get("NEW_EI", "")
+            if q is None or q <= 0:
+                bad(f"seq {sq} SPLIT № {n}: количество {f.get('QTY')!r}", "A")
+                return
+            if fnum("BAL_BEFORE") is None or abs(fnum("BAL_BEFORE") - bal[ei]) > EPS:
+                bad(f"seq {sq} SPLIT № {n}: BAL_BEFORE {f.get('BAL_BEFORE')} ≠ {bal[ei]}", 3)
+            if q >= bal[ei] - EPS:
+                bad(f"seq {sq} SPLIT № {n}: отделено {q} — не меньше всего остатка {bal[ei]} (это перемещение)", "A")
+            if not new or new in bal or (created is not None and new in created):
+                bad(f"seq {sq} SPLIT № {n}: новый ЕИ «{new}» уже существует", "A")
+                return
+            bal[ei] -= q
+            bal[new] = q
+            a.update(delta=-q, new=new, frm=f.get("FROM", ""), to=f.get("TO", ""))
+            place[new] = f.get("TO", "")
+            touched_place.add(new)
+            if created is not None:
+                created.append(new)
         elif kind == "WRITE_OFF":
             q = fnum("QTY")
             if q is None or q <= 0:
@@ -1255,7 +1284,19 @@ def replay_adjust(t, f, sq, bal, adjs, place, touched_place, bad):
         else:
             if fnum("BAL_BEFORE") is not None and abs(fnum("BAL_BEFORE") - bal[ei]) > EPS:
                 bad(f"seq {sq} {t} № {n}: BAL_BEFORE {f.get('BAL_BEFORE')} ≠ {bal[ei]}", 3)
-            if t.endswith("_DEL"):
+            if t == "SPLIT_DEL":
+                # the new EI is cancelled only as the split made it: its whole quantity goes back to the source
+                if abs(bal.get(a["new"], 0.0) + a["delta"]) > EPS:
+                    bad(f"seq {sq} SPLIT_DEL № {n}: у нового ЕИ {a['new']} остаток {bal.get(a['new'])} ≠ отделённому {-a['delta']}", "A")
+                if f.get("NEW_EI") != a["new"]:
+                    bad(f"seq {sq} SPLIT_DEL № {n}: NEW_EI {f.get('NEW_EI')!r} ≠ {a['new']!r}", "A")
+                bal[ei] -= a["delta"]
+                bal[a["new"]] = 0.0
+                a["state"] = "STORNO"
+            elif kind == "SPLIT":
+                bad(f"seq {sq} {t} № {n}: разделение не исправляется", "A")
+                return
+            elif t.endswith("_DEL"):
                 bal[ei] -= a["delta"]
                 a["state"] = "STORNO"
             else:

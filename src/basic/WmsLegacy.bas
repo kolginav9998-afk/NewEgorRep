@@ -405,13 +405,24 @@ Sub ExpectedBalances(ByRef ex() As Double, ByRef mv() As Double, ByRef src() As 
         For r0 = 1 To last Step CHECK_CHUNK_ROWS
             r1 = r0 + CHECK_CHUNK_ROWS - 1
             If r1 > last Then r1 = last
-            d = sh.getCellRangeByPosition(0, r0, AJ_STATE, r1).getDataArray()
+            d = sh.getCellRangeByPosition(0, r0, AJ_NEW, r1).getDataArray()
             For i = 0 To r1 - r0
                 If CStr(d(i)(AJ_STATE)) = RV_LIVE And VarType(d(i)(AJ_QTY)) = 5 Then
                     n = EiNum(CStr(d(i)(AJ_EI)), nextEI)
                     If n > 0 Then
                         ex(n) = ex(n) + d(i)(AJ_QTY)
                         mv(n) = mv(n) + d(i)(AJ_QTY)
+                    End If
+                End If
+                ' 1.0 (М1): the new EI of a split starts with what was taken from the source
+                If CStr(d(i)(AJ_KIND)) = "SPLIT" Then
+                    n = EiNum(CStr(d(i)(AJ_NEW)), nextEI)
+                    If n > 0 Then
+                        If src(n) = 0 Then src(n) = 5
+                        If CStr(d(i)(AJ_STATE)) = RV_LIVE And VarType(d(i)(AJ_QTY)) = 5 Then
+                            ex(n) = ex(n) - d(i)(AJ_QTY)
+                            mv(n) = mv(n) - d(i)(AJ_QTY)
+                        End If
                     End If
                 End If
             Next i

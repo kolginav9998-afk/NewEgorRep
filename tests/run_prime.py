@@ -662,9 +662,9 @@ def pr11_upgrade_072():
         fd = s.B("FindRun", "427", module="WmsFind")
         card = page(s, "Поиск", 9, 9)[0][1]
         main_btn = s.doc.Sheets.getByName("Главная").getDrawPage().getCount()
-        R.add(c, "обновлённая книга — с новыми страницами: «Дашборд» первым, «Поиск», «Карта склада», «Топология»; «Главная» 0.8 (20 кнопок над строками состояния); "
+        R.add(c, "обновлённая книга — с новыми страницами: «Дашборд» первым, «Поиск», «Карта склада», «Топология»; «Главная» 1.0 (21 кнопка над строками состояния, с «Справкой»); "
                  "дашборд считается; карточка ЕИ-00000427 — остаток сходится с движениями переноса и 0.7.2",
-              names[:2] == ["Дашборд", "Главная"] and "Поиск" in names and "Карта склада" in names and "Топология" in names and main_btn == 20
+              names[:2] == ["Дашборд", "Главная"] and "Поиск" in names and "Карта склада" in names and "Топология" in names and main_btn == 21
               and db.startswith("OK") and fd.startswith("OK:ЕИ-00000427") and card.startswith("✓"), f"{names}; {main_btn}; {db}; {fd}; {card}")
         btns = {}
         for n in ("Заказы", "Иной приход", "Выдачи", "Корректировки", "Наличие"):
@@ -1028,7 +1028,7 @@ def pr15_dashboard():
         iss = [issue(s, 1, "ЕИ-00000001", "2", who="Петров"), issue(s, 2, "ЕИ-00000001", "1", who="Сидоров"), issue(s, 3, "ЕИ-00000002", "1", who="Петров")]
         put(s, "Выдачи", 4, L="ЕИ-00000003", E="1", I="Петров")          # typed, not posted
         r, unmod, nj = unmodified_call(s, "DashRefresh", module="WmsDash")
-        v = page(s, "Дашборд", 0, 52, 0, 14)
+        v = page(s, "Дашборд", 0, 67, 0, 14)
         tiles = [v[4][1 + 2 * i] for i in range(6)]
         R.add(c, "дашборд считается по листам книги: плитки — ЕИ с остатком, ожидается позиций (частично полученная тоже), пришло и выдано сегодня, "
                  "машины, внимание (непроведённая строка выдачи); книга не помечена изменённой, журнал не тронут",
@@ -1047,9 +1047,9 @@ def pr15_dashboard():
         R.add(c, "«Последние 14 дней»: сегодня первым, число выдач и полоска", days[2] == "3" and "█" in days[3] and days[8] == "1", str(days[:10]))
         R.add(c, "в шапке — состояние WMS: «Работа разрешена»", "Работа разрешена" in v[0][8] and v[0][14].startswith("CLEAN"), v[0][8])
         # the page shown again with no new operation: nothing recounted; after an operation: recounted
-        foot0 = v[52][1]
+        foot0 = v[67][1]
         s.B("OnDashFocus", module="WmsDash")
-        same = page(s, "Дашборд", 52, 52)[0][1] == foot0
+        same = page(s, "Дашборд", 67, 67)[0][1] == foot0
         issue(s, 5, "ЕИ-00000002", "1", who="Иванов")
         s.B("OnDashFocus", module="WmsDash")
         v2 = page(s, "Дашборд", 4, 4)[0]
@@ -1922,6 +1922,60 @@ def pr25_status_colours():
               all(not v for v in bad.values()), str(bad))
     finally:
         s.close()
+
+
+@case
+def pr29_tool_data():
+    """1.0: «СДЕЛАТЬ РАБОЧЕЙ» carries the data of the old tools to the tools next to the new book: «Журнал работы», the acts
+    («История», the number of the next act), the settings, the folders WMS_Labels and WMS_Docs"""
+    c = "PR29"
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import upgrade
+    from wmslo import Office
+    d = os.path.join(OUT, "cases", "pr29")
+    shutil.rmtree(d, ignore_errors=True)
+    os.makedirs(d)
+    r = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "build_toolbox.py"), os.path.join(d, "rel")], capture_output=True, text=True,
+                       timeout=1200)
+    old_dir, new_dir = os.path.join(d, "OLD"), os.path.join(d, "NEW")
+    shutil.copytree(os.path.join(d, "rel", "WMS_TOOLBOX"), os.path.join(old_dir, "WMS_TOOLBOX"))
+    shutil.copytree(os.path.join(d, "rel", "WMS_TOOLBOX"), os.path.join(new_dir, "WMS_TOOLBOX"))
+    os.makedirs(os.path.join(old_dir, "WMS_Labels"))
+    open(os.path.join(old_dir, "WMS_Labels", "history.csv"), "w", encoding="utf-8").write("job;time;ei;copies;how\n1;2026-10-01;ЕИ-00000001;2;PDF\n")
+    o = Office(f"pr29{os.getpid()}", os.path.join(OUT, "profiles"))
+    try:
+        mg = o.load(os.path.join(old_dir, "WMS_TOOLBOX", "WMS_MANAGER.ods"), macros=0, hidden=True)
+        mg.Sheets.getByName("Журнал работы").getCellRangeByPosition(0, 1, 3, 2).setDataArray(
+            ((46300.0, "Разгрузка / погрузка", "фура", 2.5), (46301.0, "Работа погрузчиком", "стеллаж", 1.0)))
+        mg.store()
+        mg.close(True)
+        dc = o.load(os.path.join(old_dir, "WMS_TOOLBOX", "WMS_DOCS.ods"), macros=0, hidden=True)
+        st = dc.Sheets.getByName("Настройки")
+        row = [k for k in range(30) if st.getCellByPosition(0, k).getString() == "Номер следующего акта"][0]
+        st.getCellByPosition(1, row).setString("7")
+        st.getCellByPosition(1, 3).setString("file:///старый/снимок/")
+        dc.Sheets.getByName("История").getCellRangeByPosition(0, 1, 5, 1).setDataArray(((6.0, "01.10.2026", "акт передачи", "Петров", 3.0, "ACT-00006.odt"),))
+        dc.store()
+        dc.close(True)
+        rep = upgrade.carry_toolbox(o, os.path.join(old_dir, "WMS_TOOLBOX"), os.path.join(new_dir, "WMS_TOOLBOX"))
+        folders = upgrade.carry_tool_folders(old_dir, new_dir)
+        mg = o.load(os.path.join(new_dir, "WMS_TOOLBOX", "WMS_MANAGER.ods"), macros=0, hidden=True)
+        log = mg.Sheets.getByName("Журнал работы").getCellRangeByPosition(0, 1, 3, 2).getDataArray()
+        mg.close(True)
+        dc = o.load(os.path.join(new_dir, "WMS_TOOLBOX", "WMS_DOCS.ods"), macros=0, hidden=True)
+        st = dc.Sheets.getByName("Настройки")
+        nxt = st.getCellByPosition(1, row).getString()
+        snap = st.getCellByPosition(1, 3).getString()
+        hist = dc.Sheets.getByName("История").getCellRangeByPosition(0, 1, 5, 1).getDataArray()
+        dc.close(True)
+    finally:
+        o.terminate()
+    R.add(c, "данные старых инструментов переходят к новым: «Журнал работы» (2 строки), акты — «История» и номер следующего акта 7, "
+             "настройки (кроме снимка в работе), папка WMS_Labels с историей этикеток",
+          r.returncode == 0 and log[0][1] == "Разгрузка / погрузка" and log[1][3] == 1.0 and nxt == "7" and "старый" not in snap
+          and hist[0][5] == "ACT-00006.odt" and os.path.isfile(os.path.join(new_dir, "WMS_Labels", "history.csv"))
+          and any("WMS_MANAGER" in x and "Журнал работы" in x for x in rep) and folders == ["папка WMS_Labels скопирована"],
+          f"{rep}; {folders}; {log}; {nxt}; {snap}; {hist}")
 
 
 def main():

@@ -205,6 +205,9 @@ Sub BtnAdjFix(Optional oEvent As Variant)
         lbl0 = "Списать, количество (G)"
         v(0) = WmsIssue.QtyText(sh.getCellByPosition(AC_QTY, r).getValue())
         sInfo = "Списание " & sh.getCellByPosition(AC_EI, r).getString() & " " & sh.getCellByPosition(AC_NAME, r).getString() & "."
+    Case "SPLIT"
+        Refuse("Разделение № " & n & " не исправляется — удалите его («Удалить», пока у нового ЕИ не было движений) и проведите заново.")
+        Exit Sub
     Case "INV_ADJ"
         lbl0 = "Фактический остаток (H)"
         v(0) = WmsIssue.QtyText(sh.getCellByPosition(AC_FACT, r).getValue())
@@ -260,6 +263,8 @@ Sub BtnAdjDelete(Optional oEvent As Variant)
         what = "ЕИ вернётся на место «" & rd(AJ_FROM) & "»."
     Case "WRITE_OFF"
         what = "Списанное количество " & WmsIssue.QtyText(-rd(AJ_QTY)) & " вернётся в остаток."
+    Case "SPLIT"
+        what = "Отделённое количество " & WmsIssue.QtyText(-rd(AJ_QTY)) & " вернётся в остаток, новый ЕИ " & rd(AJ_NEW) & " будет закрыт (его номер не используется повторно)."
     Case Else
         what = "Разница " & IIf(rd(AJ_QTY) > 0, "+", "") & WmsIssue.QtyText(rd(AJ_QTY)) & " будет снята с остатка."
     End Select

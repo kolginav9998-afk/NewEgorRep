@@ -40,6 +40,9 @@ Private mBatch As String
 ' instead of G when the storekeeper chose the parts
 Private mShort As Boolean
 Private mAltQty As String
+' 1.0 (М1): the new EI of a split being posted
+Private mNewEi As Long
+Private mNewCanon As String
 
 ' ================================================================ sheets and kinds
 
@@ -318,9 +321,9 @@ Private Function CheckRowInputs(r As Long, bNeedAll As Boolean) As String
     mKind = KindCode(sh.getCellByPosition(AC_KIND, r).getString())
     If mKind = "" Then
         If IsBlank(sh.getCellByPosition(AC_KIND, r)) Then
-            CheckRowInputs = "не указан вид (B): Перемещение, Списание или Инвентаризация"
+            CheckRowInputs = "не указан вид (B): Перемещение, Списание, Инвентаризация или Разделение"
         Else
-            CheckRowInputs = "вид (B) «" & sh.getCellByPosition(AC_KIND, r).getString() & "» неизвестен: Перемещение, Списание или Инвентаризация"
+            CheckRowInputs = "вид (B) «" & sh.getCellByPosition(AC_KIND, r).getString() & "» неизвестен: Перемещение, Списание, Инвентаризация или Разделение"
         End If
         Exit Function
     End If
@@ -372,6 +375,35 @@ Private Function CheckRowInputs(r As Long, bNeedAll As Boolean) As String
                 Exit Function
             End If
         End If
+    Case "SPLIT"
+        ' 1.0 (М1): G — how much goes to the new EI (in parts too: «2 кан», «4,5 м»), J — its place (empty: the same place)
+        If Not IsBlank(sh.getCellByPosition(AC_FACT, r)) Or Not IsBlank(sh.getCellByPosition(AC_BOOK, r)) Then
+            CheckRowInputs = "для разделения заполняются G «сколько отделить» и, если нужно, J «Новое место» — очистите H «Фактический остаток» и I «Учётный остаток»"
+            Exit Function
+        End If
+        c = sh.getCellByPosition(AC_QTY, r)
+        If mAltQty <> "" Then
+            If Not WmsPack.QtyAsEI(Nothing, mAltQty, "сколько отделить (G)", mEi, mSbal, CStr(mSdata(SC_UNIT)), "OUT", 0, mQty, info, msg) Then
+                CheckRowInputs = msg
+                Exit Function
+            End If
+        ElseIf Not IsBlank(c) Or bNeedAll Then
+            If Not WmsPack.QtyAsEI(c, Empty, "сколько отделить (G)", mEi, mSbal, CStr(mSdata(SC_UNIT)), "OUT", 0, mQty, info, msg) Then
+                CheckRowInputs = msg
+                Exit Function
+            End If
+            If mQty > mSbal + 0.0000001 Then
+                mShort = True
+                CheckRowInputs = "отделить " & WmsIssue.QtyText(mQty) & " нельзя: остаток " & mCanon & " — " & WmsPack.QtyWithParts(mEi, mSbal, CStr(mSdata(SC_UNIT)))
+                Exit Function
+            End If
+            If mQty >= mSbal - 0.0000001 Then
+                CheckRowInputs = "отделить весь остаток " & mCanon & " нельзя — у ЕИ ничего не останется; чтобы переложить его целиком, выберите вид «Перемещение»"
+                Exit Function
+            End If
+        End If
+        mPlace = Trim(sh.getCellByPosition(AC_PLACE, r).getString())
+        If mPlace = "" Then mPlace = mSplace
     Case "INV_ADJ"
         If Not IsBlank(sh.getCellByPosition(AC_QTY, r)) Or Not IsBlank(sh.getCellByPosition(AC_PLACE, r)) Then
             CheckRowInputs = "для инвентаризации заполняется H «Фактический остаток» — очистите G «Списать» и J «Новое место»"
@@ -432,6 +464,9 @@ Private Function Describe() As String
         ' 1.0: an EI with a packing — the quantities in its parts too («списать 0,25 шт (1 кан), остаток 1 шт (4 кан) → …»)
         Describe = mCanon & ": списать " & WmsPack.QtyWithParts(mEi, mQty, CStr(mSdata(SC_UNIT))) & ", остаток " _
             & WmsPack.QtyWithParts(mEi, mSbal, CStr(mSdata(SC_UNIT))) & " → " & WmsPack.QtyWithParts(mEi, WmsIssue.Round3(mSbal - mQty), CStr(mSdata(SC_UNIT)))
+    Case "SPLIT"
+        Describe = mCanon & ": отделить " & WmsPack.QtyWithParts(mEi, mQty, CStr(mSdata(SC_UNIT))) & " в новый ЕИ (место «" & mPlace & "»), у " & mCanon _
+            & " останется " & WmsPack.QtyWithParts(mEi, WmsIssue.Round3(mSbal - mQty), CStr(mSdata(SC_UNIT)))
     Case "INV_ADJ"
         If mDiff = 0 Then
             Describe = mCanon & ": пересчёт совпал с учётом (" & WmsPack.QtyWithParts(mEi, mBook, CStr(mSdata(SC_UNIT))) _
@@ -472,6 +507,33 @@ Private Sub PlanAdjRow(n As Long, sState As String, r As Long, delta As Double, 
         PlanSetValue(SH_ADJ, n, AJ_FACT, mFact, False)
     End If
     PlanSetValue(SH_ADJ, n, AJ_DATE, mDate, False)
+    If mKind = "SPLIT" Then PlanSetValue(SH_ADJ, n, AJ_NEW, mNewCanon, False)
+End Sub
+
+' 1.0 (М1): the registry row of the new EI of a split — the card of the source (name, article, unit, category, the kind of
+' its source), its own place and balance; the packing of the source and the formula «Остаток частями»
+Private Sub PlanSplitStock(m As Long, q As Double, nAdj As Long)
+    Dim pu As String, pn As Double, pk As Object
+    PlanSetValue(SH_STOCK, m, SC_EI, mNewCanon, False)
+    PlanSetValue(SH_STOCK, m, SC_NAME, mSdata(SC_NAME), False)
+    If CStr(mSdata(SC_ART)) <> "" Then PlanSetValue(SH_STOCK, m, SC_ART, mSdata(SC_ART), False)
+    PlanSetValue(SH_STOCK, m, SC_UNIT, mSdata(SC_UNIT), False)
+    PlanSetValue(SH_STOCK, m, SC_QTY, q, False)
+    PlanSetValue(SH_STOCK, m, SC_PLACE, mPlace, False)
+    If CStr(mSdata(SC_CAT)) <> "" Then PlanSetValue(SH_STOCK, m, SC_CAT, mSdata(SC_CAT), False)
+    PlanSetValue(SH_STOCK, m, SC_STATE, EI_ST_ACTIVE, False)
+    PlanSetValue(SH_STOCK, m, SC_SRC, "Разделение " & mCanon & " (корректировка № " & nAdj & ")", False)
+    If CStr(mSdata(SC_STYPE)) <> "" Then PlanSetValue(SH_STOCK, m, SC_STYPE, mSdata(SC_STYPE), False)
+    If gDoc.Sheets.hasByName(SH_PACK) Then
+        If WmsPack.PackOf(mEi, pu, pn) Then
+            pk = gDoc.Sheets.getByName(SH_PACK)
+            PlanSetValue(SH_PACK, m, PK_EI, mNewCanon, False)
+            PlanSetValue(SH_PACK, m, PK_UNIT, pu, False)
+            PlanSetValue(SH_PACK, m, PK_N, pn, False)
+            PlanSetValue(SH_PACK, m, PK_NOTE, "как у " & mCanon & " (разделение)", False)
+            PlanFormula(SH_STOCK, m, 10, WmsPack.PartsFormula(m))
+        End If
+    End If
 End Sub
 
 ' 1.0: the questions after CheckRowInputs (see WmsIssue.AskBeforePost): the readings of a quantity WMS never guesses
@@ -505,6 +567,26 @@ Private Function AskAdjust(why As String, r As Long) As String
             End If
         Else
             st = WmsPack.QtyAsk(mEi, nm, u, "Списать", "OUT", mSbal, 0, True, mQty, info, msg)
+        End If
+    Case "SPLIT"
+        If why <> "" Then
+            msg = why
+            st = WmsPack.QtyAsk(mEi, nm, u, "Отделить", "OUT", mSbal, 0, False, mQty, info, msg)
+            If st = 0 Then
+                mAltQty = WmsPack.PartsText(gPkParts, gPkUnit)
+                msg = CheckRowInputs(r, True)
+                mAltQty = ""
+                If msg <> "" Then st = 2
+            End If
+        Else
+            st = WmsPack.QtyAsk(mEi, nm, u, "Отделить", "OUT", mSbal, 0, True, mQty, info, msg)
+        End If
+        If st = 0 And LCase(mPlace) <> LCase(Trim(mSplace)) Then
+            msg = WmsMap.PlaceAsk(mPlace, "разделение не проведено")
+            If msg <> "" Then
+                AskAdjust = msg
+                Exit Function
+            End If
         End If
     Case "INV_ADJ"
         st = WmsPack.QtyAsk(mEi, nm, u, "Факт", "FACT", mBook, 0, True, mFact, info, msg)
@@ -588,14 +670,33 @@ Function AdjustPostRow(r As Long) As String
         AdjustPostRow = "ERR-SYS:" & why
         Exit Function
     End If
+    ' 1.0 (М1): a split issues a new EI — the counter must be safe, as for a receipt (D-059)
+    If mKind = "SPLIT" Then
+        mNewEi = CLng(SysNum(SK_NEXT_EI))
+        why = WmsOrders.NewEIProblem(mNewEi)
+        If why <> "" Then
+            SetCtl(r, "Не проведено: " & why)
+            AdjustPostRow = "ERR-SYS:" & why
+            Exit Function
+        End If
+        mNewCanon = WmsIssue.EiCanon(mNewEi)
+    End If
     b2 = mSbal
     delta = 0
-    If mKind = "WRITE_OFF" Then delta = -mQty
+    If mKind = "WRITE_OFF" Or mKind = "SPLIT" Then delta = -mQty
     If mKind = "INV_ADJ" Then delta = mDiff
     b2 = WmsIssue.Round3(mSbal + delta)
     PlanBegin(mKind, CStr(n))
     PlanCommonFields(n, r)
     Select Case mKind
+    Case "SPLIT"
+        PlanField("QTY", mQty)
+        PlanField("NEW_EI", mNewCanon)
+        PlanField("FROM", mSplace)
+        PlanField("TO", mPlace)
+        PlanField("BAL_BEFORE", mSbal)
+        PlanField("BAL_AFTER", b2)
+        WmsPack.PlanQtyFields()
     Case "MOVE"
         PlanField("FROM", mSplace)
         PlanField("TO", mPlace)
@@ -615,9 +716,14 @@ Function AdjustPostRow(r As Long) As String
     End Select
     ' one operation, the writes grouped by sheet: _SYS → «Наличие» → _ADJ → «Корректировки» → «Заказы».X
     PlanSetValue(SYS_SHEET, SK_NEXT_ADJ, 1, n + 1, False)
+    If mKind = "SPLIT" Then PlanSetValue(SYS_SHEET, SK_NEXT_EI, 1, mNewEi + 1, False)
     If mKind = "MOVE" Then
         PlanSetValue(SH_STOCK, mEi, SC_PLACE, mPlace, False)
         PlanAdjRow(n, RV_LIVE, r, 0, mSplace, mPlace)
+    ElseIf mKind = "SPLIT" Then
+        PlanSetValue(SH_STOCK, mEi, SC_QTY, b2, False)
+        PlanSplitStock(mNewEi, mQty, n)
+        PlanAdjRow(n, RV_LIVE, r, delta, mSplace, mPlace)
     Else
         PlanSetValue(SH_STOCK, mEi, SC_QTY, b2, False)
         PlanAdjRow(n, RV_LIVE, r, delta, mSplace, "")
@@ -634,6 +740,10 @@ Function AdjustPostRow(r As Long) As String
     Case "WRITE_OFF"
         PlanSetValue(SH_ADJUST, r, AC_QTY, mQty, True)
         PlanSetValue(SH_ADJUST, r, AC_DIFF, delta, True)
+    Case "SPLIT"
+        PlanSetValue(SH_ADJUST, r, AC_QTY, mQty, True)
+        PlanSetValue(SH_ADJUST, r, AC_PLACE, mPlace, True)
+        PlanSetValue(SH_ADJUST, r, AC_DIFF, delta, True)
     Case "INV_ADJ"
         PlanSetValue(SH_ADJUST, r, AC_FACT, mFact, True)
         PlanSetValue(SH_ADJUST, r, AC_BOOK, mBook, True)
@@ -644,7 +754,8 @@ Function AdjustPostRow(r As Long) As String
     PlanSetValue(SH_ADJUST, r, AC_FROM, mSplace, True)
     PlanSetValue(SH_ADJUST, r, AC_BEFORE, mSbal, True)
     PlanSetValue(SH_ADJUST, r, AC_AFTER, b2, True)
-    PlanSetValue(SH_ADJUST, r, AC_CTL, ST_POSTED, True)
+    ' 1.0 (М1): the row of a split names the new EI (the start «Проведено» is what every check reads)
+    PlanSetValue(SH_ADJUST, r, AC_CTL, ST_POSTED & IIf(mKind = "SPLIT", " · новый " & mNewCanon, ""), True)
     ' the batch the row came from (a tool's file) is restored with the row after a crash, like the other inputs
     If mBatch <> "" Then PlanSetValue(SH_ADJUST, r, AC_BATCH, mBatch, True)
     PlanLockBits(SH_ADJUST, r, 0, AC_LAST, ADJUST_LOCKS_POSTED)
@@ -724,7 +835,7 @@ Private Function LoadPosted(r As Long, rd As Variant) As String
         Exit Function
     End If
     mKind = CStr(rd(AJ_KIND))
-    If mKind <> "MOVE" And mKind <> "WRITE_OFF" And mKind <> "INV_ADJ" Then
+    If mKind <> "MOVE" And mKind <> "WRITE_OFF" And mKind <> "INV_ADJ" And mKind <> "SPLIT" Then
         LoadPosted = "ERR-SYS:в " & SH_ADJ & " у корректировки № " & gAjN & " неизвестный вид «" & mKind & "»"
         Exit Function
     End If
@@ -780,6 +891,12 @@ Function AdjustFixRow(r As Long, vMain As Variant, vDate As Variant, vReason As 
     why = LoadPosted(r, rd)
     If why <> "" Then
         AdjustFixRow = why
+        Exit Function
+    End If
+    ' 1.0 (М1): a split is not corrected — its new EI has its own card and label; cancel it and split again
+    If mKind = "SPLIT" Then
+        AdjustFixRow = "ERR:разделение № " & n & " не исправляется — удалите его (сторно; можно, пока у нового ЕИ " & rd(AJ_NEW) _
+            & " не было движений) и проведите заново"
         Exit Function
     End If
     delta1 = rd(AJ_QTY)
@@ -1007,6 +1124,15 @@ Function AdjustDeleteRow(r As Long) As String
         PlanField("BAL_BEFORE", mSbal)
         PlanField("BAL_AFTER", b2)
         PlanSetValue(SH_STOCK, mEi, SC_QTY, b2, False)
+    Case "SPLIT"
+        ' the quantity back to the source; the new EI closed (balance 0, «Приход удалён (сторно)» — its number is not reused)
+        PlanField("QTY", -delta1)
+        PlanField("NEW_EI", mNewCanon)
+        PlanField("BAL_BEFORE", mSbal)
+        PlanField("BAL_AFTER", b2)
+        PlanSetValue(SH_STOCK, mEi, SC_QTY, b2, False)
+        PlanSetValue(SH_STOCK, mNewEi, SC_QTY, 0, False)
+        PlanSetValue(SH_STOCK, mNewEi, SC_STATE, EI_ST_STORNO, False)
     End Select
     PlanSetValue(SH_ADJ, n, AJ_STATE, RV_STORNO, False)
     If CLng(rd(AJ_ROW)) <> r Then PlanSetValue(SH_ADJ, n, AJ_ROW, r, False)
@@ -1034,6 +1160,9 @@ Function DeleteProblem(r As Long, rd As Variant) As String
     End If
     delta1 = rd(AJ_QTY)
     Select Case mKind
+    Case "SPLIT"
+        DeleteProblem = SplitDeleteProblem(rd)
+        Exit Function
     Case "MOVE"
         If LCase(Trim(mSplace)) <> LCase(Trim(CStr(rd(AJ_TO)))) Then
             DeleteProblem = "ERR:после перемещения № " & gAjN & " место " & mCanon & " менялось (сейчас «" & mSplace & "», перемещено в «" _
@@ -1048,6 +1177,48 @@ Function DeleteProblem(r As Long, rd As Variant) As String
         End If
     End Select
     DeleteProblem = ""
+End Function
+
+' 1.0 (М1): a split is cancelled only while its new EI is as the split made it — the whole quantity, no movement, no line
+' that names it; then the quantity goes back to the source EI and the new EI is closed (its number is never reused)
+Private Function SplitDeleteProblem(rd As Variant) As String
+    Dim m As Long, canonM As String, p As String, bm As Double, d As Variant, nIss As Long, nRet As Long, nAdj As Long, nLive As Long
+    canonM = CStr(rd(AJ_NEW))
+    If Not WmsOrders.StrictEI(canonM, m) Then
+        SplitDeleteProblem = "ERR-SYS:в " & SH_ADJ & " у разделения № " & gAjN & " неверный новый ЕИ «" & canonM & "»"
+        Exit Function
+    End If
+    p = WmsIssue.StockRowProblem(m, canonM)
+    If p <> "" Then
+        SplitDeleteProblem = "ERR:" & p
+        Exit Function
+    End If
+    d = WmsIssue.StockData(m)
+    If Not WmsIssue.StockQty(m, bm) Then
+        SplitDeleteProblem = "ERR:остаток " & canonM & " в «" & SH_STOCK & "» не число — реестр повреждён"
+        Exit Function
+    End If
+    If Abs(bm + rd(AJ_QTY)) > 0.0000005 Then
+        SplitDeleteProblem = "ERR:у нового ЕИ " & canonM & " остаток уже " & WmsIssue.QtyText(bm) & " (при разделении " & WmsIssue.QtyText(-rd(AJ_QTY)) _
+            & ") — по нему были движения; разделение не удаляется. Верните остаток обычными операциями"
+        Exit Function
+    End If
+    If Not WmsReturn.LiveDependents(canonM, nIss, nRet) Or Not LiveAdjustments(canonM, nAdj) Or Not WmsSpecial.LiveLinesOfEI(canonM, nLive) Then
+        SplitDeleteProblem = "ERR-SYS:не удалось проверить движения нового ЕИ " & canonM & " (формула движка Calc) — сторно не выполнено"
+        Exit Function
+    End If
+    If nIss + nRet + nAdj + nLive > 0 Then
+        SplitDeleteProblem = "ERR:у нового ЕИ " & canonM & " есть действующие движения (выдач " & nIss & ", возвратов " & nRet & ", корректировок " & nAdj _
+            & ", строк иного прихода " & nLive & ") — сначала их сторно"
+        Exit Function
+    End If
+    If WmsIssue.Round3(mSbal - rd(AJ_QTY)) < -0.0000001 Then
+        SplitDeleteProblem = "ERR-SYS:сторно разделения № " & gAjN & " дало бы отрицательный остаток " & mCanon
+        Exit Function
+    End If
+    mNewEi = m
+    mNewCanon = canonM
+    SplitDeleteProblem = ""
 End Function
 
 ' ================================================================ «Проверить»
@@ -1191,7 +1362,7 @@ Sub PreviewAdjustRow(r As Long)
     If IsBlank(sh.getCellByPosition(AC_EI, r)) Then
         ClearDerived(r, False)
         SetCtl(r, IIf(KindCode(sh.getCellByPosition(AC_KIND, r).getString()) = "" And Not IsBlank(sh.getCellByPosition(AC_KIND, r)), _
-            "Ошибка: вид (B) — Перемещение, Списание или Инвентаризация", "Укажите вид (B) и ЕИ (C)"))
+            "Ошибка: вид (B) — Перемещение, Списание, Инвентаризация или Разделение", "Укажите вид (B) и ЕИ (C)"))
         Exit Sub
     End If
     why = LoadEI(sh.getCellByPosition(AC_EI, r).getString())
@@ -1223,6 +1394,13 @@ Sub PreviewAdjustRow(r As Long)
     Case "WRITE_OFF"
         If IsBlank(sh.getCellByPosition(AC_QTY, r)) Then
             SetCtl(r, "Укажите количество списания (G); остаток " & WmsIssue.QtyText(mSbal))
+            Exit Sub
+        End If
+        WmsOrders.SetIfDiff(sh.getCellByPosition(AC_DIFF, r), -mQty)
+        WmsOrders.SetIfDiff(sh.getCellByPosition(AC_AFTER, r), WmsIssue.Round3(mSbal - mQty))
+    Case "SPLIT"
+        If IsBlank(sh.getCellByPosition(AC_QTY, r)) Then
+            SetCtl(r, "Укажите, сколько отделить в новый ЕИ (G); остаток " & WmsPack.QtyWithParts(mEi, mSbal, CStr(mSdata(SC_UNIT))))
             Exit Sub
         End If
         WmsOrders.SetIfDiff(sh.getCellByPosition(AC_DIFF, r), -mQty)
@@ -1377,7 +1555,7 @@ End Function
 Function AdjustCheck() As String
     Dim ad As Object, sh As Object, last As Long, r0 As Long, r1 As Long, i As Long, d As Variant, t0 As Long, nextAdj As Long
     Dim n As Long, nBad As Long, first As String, nStale As Long, nLive As Long, nStorno As Long, maxN As Long, x As Double, lastR As Long
-    Dim colA As Variant, colA0 As Long, k As String, st As String, ei As Long, nKind(2) As Long
+    Dim colA As Variant, colA0 As Long, k As String, st As String, ei As Long, nKind(3) As Long
     On Error GoTo EH
     t0 = GetSystemTicks()
     ad = AdjSheet()
@@ -1407,6 +1585,13 @@ Function AdjustCheck() As String
                         nKind(1) = nKind(1) + 1
                     ElseIf k = "INV_ADJ" Then
                         nKind(2) = nKind(2) + 1
+                    ElseIf k = "SPLIT" Then
+                        nKind(3) = nKind(3) + 1
+                        If Not WmsOrders.StrictEI(CStr(d(i)(AJ_NEW)), ei) Then
+                            Bad(nBad, first, "разделение № " & (r0 + i) & ": неверный новый ЕИ «" & d(i)(AJ_NEW) & "»")
+                        ElseIf ei >= SysNum(SK_NEXT_EI) Then
+                            Bad(nBad, first, "разделение № " & (r0 + i) & ": новый ЕИ " & d(i)(AJ_NEW) & " не выдавался")
+                        End If
                     Else
                         Bad(nBad, first, "корректировка № " & (r0 + i) & ": неизвестный вид «" & k & "»")
                     End If
@@ -1419,8 +1604,8 @@ Function AdjustCheck() As String
                         Bad(nBad, first, "корректировка № " & (r0 + i) & ": изменение остатка не число")
                     ElseIf k = "MOVE" And d(i)(AJ_QTY) <> 0 Then
                         Bad(nBad, first, "перемещение № " & (r0 + i) & ": изменение остатка " & d(i)(AJ_QTY) & " (должно быть 0)")
-                    ElseIf k = "WRITE_OFF" And d(i)(AJ_QTY) >= 0 Then
-                        Bad(nBad, first, "списание № " & (r0 + i) & ": изменение остатка " & d(i)(AJ_QTY) & " (должно быть меньше 0)")
+                    ElseIf (k = "WRITE_OFF" Or k = "SPLIT") And d(i)(AJ_QTY) >= 0 Then
+                        Bad(nBad, first, KindName(k) & " № " & (r0 + i) & ": изменение остатка " & d(i)(AJ_QTY) & " (должно быть меньше 0)")
                     End If
                     If st = RV_LIVE Then
                         nLive = nLive + 1
@@ -1452,7 +1637,7 @@ Function AdjustCheck() As String
     If nBad > 0 Then
         AdjustCheck = "ОШИБКА: расхождений " & nBad & " (" & first & ")"
     Else
-        AdjustCheck = "корректировок " & n & " (перемещений " & nKind(0) & ", списаний " & nKind(1) & ", инвентаризаций " & nKind(2) & "; из них сторно " _
+        AdjustCheck = "корректировок " & n & " (перемещений " & nKind(0) & ", списаний " & nKind(1) & ", инвентаризаций " & nKind(2) & IIf(nKind(3) > 0, ", разделений " & nKind(3), "") & "; из них сторно " _
             & nStorno & "), расхождений нет, NEXT_ADJ " & nextAdj & " выше всех №" _
             & IIf(nStale > 0, ", устаревших подсказок строк " & nStale & " (исправятся при следующей операции)", "") & ", " & (GetSystemTicks() - t0) & " мс"
     End If

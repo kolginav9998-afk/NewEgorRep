@@ -14,6 +14,8 @@ Global gPrShown As String
 ' UiButtons: the window being shown and the button pressed (Global: the button listener is a call of its own)
 Global gWmsBtnDlg As Object
 Global gWmsBtnPick As Integer
+' 1.0: the test seam of UiForm2 — the next form is answered by its second action button
+Global gPrFormNext As Boolean
 
 Public Const FORM_KEEP = "<как предложено>"
 
@@ -246,6 +248,118 @@ Function UiForm(sTitle As String, sInfo As String, labels As Variant, v() As Str
         UiForm = True
     End If
     dlg.dispose()
+End Function
+
+' 1.0: UiForm with two action buttons (sOk, sOk2 — «Выдать», «Выдать и следующую»): 1 — sOk, 2 — sOk2, 0 — «Отмена» or
+' the window closed. The values as for UiForm
+Function UiForm2(sTitle As String, sInfo As String, labels As Variant, v() As String, lists As Variant, sOk As String, sOk2 As String) As Integer
+    Dim dm As Object, dlg As Object, i As Integer, m As Object, n As Integer, top As Integer, infoH As Integer, lis As Object, r As Integer
+    n = UBound(labels) + 1
+    gPrShown = sTitle & Chr(10) & sInfo & Chr(10) & Join(v, Chr(9))
+    If gUiAuto <> 0 Then
+        If gPrFormSet Then
+            For i = 0 To n - 1
+                If gPrFormIn(i) <> FORM_KEEP Then v(i) = gPrFormIn(i)
+            Next i
+            gPrFormSet = False
+            UiForm2 = IIf(gPrFormNext, 2, 1)
+            gPrFormNext = False
+        End If
+        Exit Function
+    End If
+    infoH = 0
+    If sInfo <> "" Then infoH = 12 * (1 + Len(sInfo) \ 70) + 4
+    top = 8 + infoH
+    dm = CreateUnoService("com.sun.star.awt.UnoControlDialogModel")
+    dm.Title = sTitle
+    dm.Width = 300
+    dm.Height = top + n * 18 + 30
+    If sInfo <> "" Then
+        m = dm.createInstance("com.sun.star.awt.UnoControlFixedTextModel")
+        m.PositionX = 8
+        m.PositionY = 6
+        m.Width = 284
+        m.Height = infoH
+        m.MultiLine = True
+        m.Label = sInfo
+        dm.insertByName("lInfo", m)
+    End If
+    For i = 0 To n - 1
+        m = dm.createInstance("com.sun.star.awt.UnoControlFixedTextModel")
+        m.PositionX = 8
+        m.PositionY = top + 3 + i * 18
+        m.Width = 120
+        m.Height = 12
+        m.Label = labels(i)
+        dm.insertByName("l" & i, m)
+        If CStr(lists(i)) <> "" Then
+            m = dm.createInstance("com.sun.star.awt.UnoControlComboBoxModel")
+            m.Dropdown = True
+            m.Autocomplete = True
+            m.StringItemList = Split(CStr(lists(i)), "|")
+        Else
+            m = dm.createInstance("com.sun.star.awt.UnoControlEditModel")
+        End If
+        m.PositionX = 130
+        m.PositionY = top + i * 18
+        m.Width = 162
+        m.Height = 14
+        m.Text = v(i)
+        dm.insertByName("e" & i, m)
+    Next i
+    m = dm.createInstance("com.sun.star.awt.UnoControlButtonModel")
+    m.PositionX = 8
+    m.PositionY = top + n * 18 + 8
+    m.Width = 70
+    m.Height = 15
+    m.Label = sOk
+    m.DefaultButton = True
+    dm.insertByName("b1", m)
+    m = dm.createInstance("com.sun.star.awt.UnoControlButtonModel")
+    m.PositionX = 82
+    m.PositionY = top + n * 18 + 8
+    m.Width = 140
+    m.Height = 15
+    m.Label = sOk2
+    dm.insertByName("b2", m)
+    m = dm.createInstance("com.sun.star.awt.UnoControlButtonModel")
+    m.PositionX = 232
+    m.PositionY = top + n * 18 + 8
+    m.Width = 60
+    m.Height = 15
+    m.Label = "Отмена"
+    m.PushButtonType = 2
+    dm.insertByName("bCancel", m)
+    dlg = CreateUnoService("com.sun.star.awt.UnoControlDialog")
+    dlg.setModel(dm)
+    dlg.createPeer(CreateUnoService("com.sun.star.awt.Toolkit"), Null)
+    lis = CreateUnoListener("WmsBtn_", "com.sun.star.awt.XActionListener")
+    dlg.getControl("b1").setActionCommand("1")
+    dlg.getControl("b1").addActionListener(lis)
+    dlg.getControl("b2").setActionCommand("2")
+    dlg.getControl("b2").addActionListener(lis)
+    gWmsBtnDlg = dlg
+    gWmsBtnPick = -1
+    dlg.execute()
+    r = gWmsBtnPick
+    If r = 1 Or r = 2 Then
+        For i = 0 To n - 1
+            v(i) = dlg.getControl("e" & i).getText()
+        Next i
+        UiForm2 = r
+    End If
+    gWmsBtnDlg = Nothing
+    dlg.dispose()
+End Function
+
+Function TestPrimeFormNext() As String
+    WmsInit()
+    If SysStr(SK_MODE) <> "TEST" Then
+        TestPrimeFormNext = "REFUSED:не тестовая книга"
+        Exit Function
+    End If
+    gPrFormNext = True
+    TestPrimeFormNext = "OK"
 End Function
 
 Private Function Payload(res As String) As String

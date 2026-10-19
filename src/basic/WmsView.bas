@@ -465,8 +465,9 @@ End Function
 ' The sheets of movements: name | EI column | date column | control column (-1: every row with an EI is a movement — the
 ' receipts of «Заказы») — the same as the card of an EI reads them
 Function MoveSpecs() As Variant
+    ' 1.0 (М1): the new EIs of the splits (_ADJ L) moved on the day of their split
     MoveSpecs = Array(Array(SH_ORDERS, OC_EI, OC_RDATE, -1), Array(SH_SPECIAL, XC_EI, XC_DATE, XC_STATUS), Array(SH_ISSUES, IC_EI, IC_DATE, IC_CTL), _
-        Array(SH_RETURNS, RC_EI, RC_DATE, RC_CTL), Array(SH_ADJUST, AC_EI, AC_DATE, AC_CTL))
+        Array(SH_RETURNS, RC_EI, RC_DATE, RC_CTL), Array(SH_ADJUST, AC_EI, AC_DATE, AC_CTL), Array(SH_ADJ, AJ_NEW, AJ_DATE, -1))
 End Function
 
 ' the movement condition of a spec over its data rows 1 … last

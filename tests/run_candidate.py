@@ -85,7 +85,13 @@ def c01_release_folder():
     need = [BOOK] + [f"docs/{d}" for d in build_release.DOCS] + [f"tools/{t}" for t in build_release.TOOLS + build_release.ORACLES] + \
         [f"WMS_TOOLBOX/{b_}.ods" for b_ in ("WMS_TOOLBOX", "WMS_INVENTORY", "WMS_ANALYTICS", "WMS_MANAGER", "WMS_SEARCH", "WMS_DOCTOR",
                                              "WMS_LABELS", "WMS_DOCS", "WMS_ARCHIVE", "WMS_IMPORTER")] + \
-        [f"src/basic/{f}" for f in sorted(os.listdir(os.path.join(ROOT, "src", "basic"))) if f.endswith(".bas")]
+        [f"src/basic/{f}" for f in sorted(os.listdir(os.path.join(ROOT, "src", "basic"))) if f.endswith(".bas")] + \
+        ["ПРОЧТИ СНАЧАЛА.txt", "tools/pc_check.py", "tools/basic_compile_check.py", "tests/harness.py", "tests/run_candidate.py",
+         "src/upgrade/UpMain.bas", "src/toolbox/TbCommon.bas", "src/transfer/LtMain.bas"]
+    start = open(os.path.join(rel, "ПРОЧТИ СНАЧАЛА.txt"), encoding="utf-8").read() if os.path.exists(os.path.join(rel, "ПРОЧТИ СНАЧАЛА.txt")) else ""
+    R.add(c, "1.0: «ПРОЧТИ СНАЧАЛА.txt» — какую книгу открывать (мастер обновления для склада с данными, пустая книга — только для нового "
+             "склада), проверка ПК из архива без git", "WMS_UPGRADE.ods" in start and "ПУСТАЯ" in start and "pc_check" in start
+          and "git" in start, start[:200])
     R.add(c, "папка выпуска: книга WMS_PROD_CANDIDATE.ods, WMS_TOOLBOX (9 инструментов, launcher, скрипты), docs (руководство кладовщика, "
              "примечания к выпуску, резервные копии и восстановление, контракт, инструменты, проверка ПК), tools (перенос и его оракул, "
              "обновление 0.6 → 0.7) и модули src/basic для обновления, RELEASE_MANIFEST.csv — версии как в исходниках; в манифесте каждый "
@@ -124,7 +130,7 @@ def c02_candidate_book():
               st.get("STATE") == "CLEAN" and st.get("REG") == "own" and sys_mode == "PROD" and f"версия {V['WMS_PRODUCT_VERSION']}" in ver
               and V["WMS_SYS_SCHEMA"] in ver
               and names == ["Дашборд", "Главная", "Заказы", "Иной приход", "Приход авто", "Выдачи", "Возврат", "Корректировки", "Наличие", "Поиск",
-                           "Карта склада", "Сверка переноса", "Получатели", "Топология", "Места", "Справка"]
+                           "Карта склада", "Получатели", "Топология", "Места", "Сверка переноса", "Справка"]
               and s.sysv("NEXT_EI") == 1.0, f"{st}; {sys_mode}; «{ver}»; {names}")
         R.add(c, "«Справка»: руководство кладовщика, примечания к выпуску и руководство по резервным копиям и восстановлению (без разметки "
                  "Markdown); лист защищён",

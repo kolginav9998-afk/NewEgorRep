@@ -114,10 +114,10 @@ ADJUST_HEADERS = ["№", "Вид", "Внутренний код", "Наимен�
                   "Остаток после", "Разница", "Контроль", "Пакет", "Комментарий"]
 ADJUST_WIDTHS = [1500, 3000, 3300, 6000, 3000, 2300, 2300, 2500, 2500, 2800, 2600, 5000, 2800, 2300, 2300, 2300, 7000, 3500, 4500]
 ADJUST_LOCKS_OPEN = "1001110000001111100"      # WmsConfig.ADJUST_LOCKS_OPEN: unposted rows, inputs B C G H I J K L R S open
-ADJUST_KINDS = ["Перемещение", "Списание", "Инвентаризация"]      # WmsConfig.ADJ_KIND_NAMES
+ADJUST_KINDS = ["Перемещение", "Списание", "Инвентаризация", "Разделение"]      # WmsConfig.ADJ_KIND_NAMES
 ADJ = "_ADJ"
 ADJ_HEADERS = ["№", "Вид", "ЕИ", "Изменение остатка", "Состояние", "Строка (индекс)", "Место до", "Место после", "Учётный остаток",
-               "Фактический остаток", "Дата"]                                                   # WmsConfig AJ_*
+               "Фактический остаток", "Дата", "Новый ЕИ"]                                                   # WmsConfig AJ_*
 # «Приход авто» — the journal of vehicles (M6 PRIME §1; WmsConfig CP_*, CC_*, CR_*, CD_*): a panel of frozen rows 0..4 (two
 # input cells, the hint, the indicators, the threshold) above the table (header row 5, visit n on row 5 + n); _CAR — the visits
 # PRIME 0.8: the registry of the transfer (WmsConfig LG_*) and its report «Сверка переноса» (LEGREP_*)
@@ -619,6 +619,9 @@ MAP_COLORS = {      # WmsMap.LayerColors: (background, text) of the codes 0 … 
     "STALE": [(0xF4F6F8, 0x263238), (0xDCEBFA, 0x263238), (0x9CC3EB, 0x263238), (0x5B97D6, 0xFFFFFF), (0x2F6DB5, 0xFFFFFF)],
     "ATT": [(0xF4F6F8, 0x263238), (0xE8ECF0, 0x263238), (0xFFC061, 0x263238), (0xD9472B, 0xFFFFFF), (0xE8ECF0, 0x263238)],
     "FREE": [(0xE8ECF0, 0x263238), (0x8FD19E, 0x263238), (0xE8ECF0, 0x263238), (0xE8ECF0, 0x263238), (0xE8ECF0, 0x263238)],
+    # 1.0: «Заполненность» (М4) and «Товар» (М5)
+    "FILL": [(0xF4F6F8, 0x263238), (0xC6E8C9, 0x263238), (0xE8ECF0, 0x263238), (0xFFC061, 0x263238), (0xD9472B, 0xFFFFFF)],
+    "FIND": [(0xF4F6F8, 0x263238), (0xE8ECF0, 0x263238), (0xE8ECF0, 0x263238), (0xE8ECF0, 0x263238), (0x2F6DB5, 0xFFFFFF)],
 }
 
 
@@ -767,12 +770,29 @@ def build_dash(doc, sh):
     for c in (4, 5, 11, 12):
         sh.getCellRangeByPosition(c, 24, c, 33).HoriJustify = 3
     sh.getCellRangeByPosition(12, 9, 12, 20).HoriJustify = 3
-    merge(sh, 1, 52, 12, 52)
-    text_cell(sh, 1, 52, "Страница считается по листам книги при открытии и после каждой операции; она ничего не изменяет.", size=8, color=MUTED)
+    # 1.0 (Ч5): the tails — a balance below one part (WmsDash.DB_TAILS_HEAD … ), «Списать хвосты…»
+    section(54, 1, 12, "Хвосты — остаток меньше одной части")
+    heads(55, [(1, "ЕИ"), (2, "Наименование"), (6, "Остаток"), (9, "Место")])
+    for r in range(56, 66):
+        sh.getRows().getByIndex(r).Height = 440
+        merge(sh, 2, r, 5, r)
+        merge(sh, 6, r, 8, r)
+        merge(sh, 9, r, 12, r)
+        underline(sh.getCellRangeByPosition(1, r, 12, r), 0xEEF1F4, 10)
+    tl = sh.getCellRangeByPosition(1, 56, 12, 65)
+    tl.CharHeight = 9
+    tl.CharColor = TEXT
+    tl.VertJustify = 2
+    for r, h in ((53, 350), (54, 650), (55, 480), (66, 350)):
+        sh.getRows().getByIndex(r).Height = h
+    y = sh.getCellByPosition(0, 54).Position.Y
+    add_button(doc, sh, "btnTails", "Списать хвосты…", "WmsDash.BtnTails", sh.getCellByPosition(10, 54).Position.X, y + 40, 7400, 560, back=0xF4CCCC)
+    merge(sh, 1, 67, 12, 67)
+    text_cell(sh, 1, 67, "Страница считается по листам книги при открытии и после каждой операции; она ничего не изменяет.", size=8, color=MUTED)
     view_nav(doc, sh, 1, "dbNav", DASH, total=26900)
     y = sh.getCellByPosition(0, 1).Position.Y
     add_button(doc, sh, "btnDashRefresh", "Обновить", "WmsDash.BtnDashRefresh", 150 + 27000, y + 70, 2850, 760, bold=True, back=0xC6E0B4)
-    sh.getCellRangeByPosition(0, 0, 14, 60).CellProtection = protection(True)
+    sh.getCellRangeByPosition(0, 0, 14, 70).CellProtection = protection(True)
 
 
 def build_find(doc, sh):
@@ -940,6 +960,8 @@ def layout_10(doc, sheets):
     «5.12.3» typed there stays a place, Calc does not take it for a date (Заказы U, Возврат J, Иной приход I, Корректировки J);
     the directory «Места» after «Топология»; the events of «Топология» and «Места» (the known places are read again)"""
     text = number_format(doc, "@", ("ru", "RU"))
+    # the styles of the layers of the map, the new ones of 1.0 too (a protected book cannot create them at run time)
+    view_styles(doc)
     for sheet, c in ((ORDERS, 20), (RETURNS, 9), (SPECIAL, 8), (ADJUST, 9)):
         sheets.getByName(sheet).getCellRangeByPosition(c, 1, c, LAST_ROW).NumberFormat = text
     # the headers of the working sheets: the buttons never hide a line of a header and no word is cut in two
@@ -947,6 +969,29 @@ def layout_10(doc, sheets):
     for sheet, titles, height in ((ISSUES, ISSUE_HEADERS, 2500), (RETURNS, RETURN_HEADERS, 2500), (SPECIAL, SPECIAL_HEADERS, 2500),
                                   (ADJUST, ADJUST_HEADERS, 2500), (ORDERS, ORDER_HEADERS, 3100)):
         fit_headers(sheets.getByName(sheet), titles, height)
+    # the recipient of «Выдачи» (I) and «Возврат» (I): a list of «Получатели» to choose from — any other text may still be typed,
+    # WMS asks about a name it does not know
+    for sheet in (ISSUES, RETURNS):
+        list_validation(sheets.getByName(sheet).getCellRangeByPosition(8, 1, 8, LAST_ROW), f"$'{RCPT}'.$B$2:$B$1048576")
+    # 1.0 (М1): the kind «Разделение» in the list of «Корректировки» B, the column «Новый ЕИ» of _ADJ (L)
+    rng = sheets.getByName(ADJUST).getCellRangeByPosition(1, 1, 1, LAST_ROW)
+    v = rng.Validation
+    v.setFormula1(";".join(f'"{t}"' for t in ADJUST_KINDS))
+    rng.Validation = v
+    adj = sheets.getByName(ADJ)
+    if adj.getCellByPosition(len(ADJ_HEADERS) - 1, 0).getString() == "":
+        adj.getCellByPosition(len(ADJ_HEADERS) - 1, 0).setString(ADJ_HEADERS[-1])
+    # «Наличие» K: the balance in the parts of the packing («3 кан», a formula WMS puts in the row of an EI with a packing — Ч1)
+    st = sheets.getByName(STOCK)
+    k = st.getCellByPosition(len(STOCK_HEADERS), 0)
+    if k.getString() == "":
+        j = st.getCellByPosition(len(STOCK_HEADERS) - 1, 0)
+        k.setString("Остаток частями")
+        for prop in ("CharWeight", "CellBackColor", "IsTextWrapped", "VertJustify", "HoriJustify", "TopBorder", "BottomBorder", "LeftBorder",
+                     "RightBorder", "CharHeight"):
+            setattr(k, prop, getattr(j, prop))
+    if st.getColumns().getByIndex(len(STOCK_HEADERS)).Width < 3000:
+        st.getColumns().getByIndex(len(STOCK_HEADERS)).Width = 3000
     # the status W of «Заказы» is read whole («Частично получено / остаток отменён»)
     w = sheets.getByName(ORDERS).getColumns().getByIndex(22)
     if w.Width < 5600:
@@ -957,6 +1002,204 @@ def layout_10(doc, sheets):
         build_places(doc, sheets.getByName(PLACES))
     bind_event(sheets.getByName(TOPO).Events, "OnChange", "WmsMap.OnTopoChange")
     bind_event(sheets.getByName(PLACES).Events, "OnChange", "WmsMap.OnPlacesChange")
+    # the state line of «Дашборд» is written while the book is saved («WMS не запущена» for the macros off): unlocked, so that
+    # no change of the protection is needed then (WmsDash.DashSavedState)
+    sheets.getByName(DASH).getCellByPosition(8, 0).CellProtection = protection(False)
+
+
+# 1.0 (В5): the columns frozen with the header row (№ / EI and the name of the row)
+FREEZE_COLS_10 = {ISSUES: 3, ORDERS: 2, RETURNS: 4, ADJUST: 4, SPECIAL: 4, STOCK: 2}
+# 1.0 (В9): the colour of the sheet tabs by group — pages, the sheets the storekeeper works in, the registers and directories,
+# the service sheets
+TAB_COLORS_10 = [((DASH, MAIN, FIND, MAP), 0x5B9BD5), ((ORDERS, SPECIAL, CARS, ISSUES, RETURNS, ADJUST), 0x70AD47),
+                 ((STOCK, RCPT, TOPO, PLACES), 0xED7D31), ((LEGREP, HELP), 0xA5A5A5)]
+# 1.0 (В1): what the storekeeper fills in is white, what WMS writes is grey (data rows), the headers likewise
+INPUT_HEAD_10 = 0xFFF2CC
+WMS_HEAD_10 = 0xE7E6E6
+WMS_FILL_10 = 0xF5F5F5
+LOCKS_10 = {ISSUES: ISSUE_LOCKS_OPEN, ORDERS: ORDER_LOCKS_OPEN, RETURNS: RETURN_LOCKS_OPEN, SPECIAL: SPECIAL_LOCKS_OPEN, ADJUST: ADJUST_LOCKS_OPEN}
+# 1.0 (В2): one meaning per colour of a button — doing (green), undoing (red), helping (blue), the rest neutral
+BTN_GREEN, BTN_RED, BTN_BLUE = 0xC6E0B4, 0xF4CCCC, 0xDDEBF7
+
+
+def button_color(name):
+    n = name.lower()
+    if any(k in n for k in ("post", "receive", "issuewin", "issuefrom", "returnhands", "find")) and "go" not in n:
+        return BTN_GREEN
+    if any(k in n for k in ("delete", "cancel", "abandon", "unlock", "clear")):
+        return BTN_RED
+    return BTN_BLUE
+
+
+def colors_10(doc, sheets):
+    """В1, В2, В9 (the data are not touched): the input columns and those WMS writes, the buttons by meaning, the tabs by group"""
+    for sheet, locks in LOCKS_10.items():
+        sh = sheets.getByName(sheet)
+        for c, bit in enumerate(locks):
+            sh.getCellByPosition(c, 0).CellBackColor = INPUT_HEAD_10 if bit == "0" else WMS_HEAD_10
+            if bit == "1":
+                sh.getCellRangeByPosition(c, 1, c, LAST_ROW).CellBackColor = WMS_FILL_10
+    for i in range(sheets.getCount()):
+        sh = sheets.getByIndex(i)
+        dp = sh.getDrawPage()
+        if dp.getForms().getCount() == 0:
+            continue
+        form = dp.getForms().getByIndex(0)
+        for k in range(form.getCount()):
+            m = form.getByIndex(k)
+            if m.supportsService("com.sun.star.form.component.CommandButton") and sh.Name not in (MAIN, DASH, MAP):
+                m.BackgroundColor = button_color(m.Name)
+    for names, color in TAB_COLORS_10:
+        for name in names:
+            if sheets.hasByName(name):
+                sheets.getByName(name).TabColor = color
+    # «Сверка переноса» is looked at once after the transfer: it goes to the end, before «Справка»
+    if sheets.hasByName(LEGREP) and sheets.hasByName(HELP):
+        names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+        if names.index(LEGREP) != names.index(HELP) - 1:
+            sheets.moveByName(LEGREP, names.index(HELP))
+
+
+# 1.0 (В8): «Наличие» reads easier — a zero balance grey, every second row a shade darker, a gap between the balance and the place.
+# One conditional format per column range (Calc applies the first true entry of the first format of a cell): the status of H
+# keeps its colours first
+STOCK_ZERO, STOCK_BAND = 0x9AA3AD, 0xF3F6FA
+
+
+def stock_view_10(doc, sheets):
+    sh = sheets.getByName(STOCK)
+    cell_style(doc, "WMS_StockZero", CharColor=STOCK_ZERO)
+    cell_style(doc, "WMS_StockBand", CellBackColor=STOCK_BAND)
+    cell_style(doc, "WMS_StockZeroBand", CharColor=STOCK_ZERO, CellBackColor=STOCK_BAND)
+    used, zero, even = '$A2<>""', 'N($E2)=0', 'ISEVEN(ROW())'
+    common = [(f"AND({used};{zero};{even})", "WMS_StockZeroBand"), (f"AND({used};{zero})", "WMS_StockZero"), (f"AND({used};{even})", "WMS_StockBand")]
+    status = [('$H2="Требует разбора"', "ST_Part"), ('LEFT($H2;13)="Приход удалён"', "ST_Gray")]
+    last = len(STOCK_HEADERS)          # with K «Остаток частями»
+    for c0, c1, rules in ((0, 6, common), (7, 7, status + common), (8, last, common)):
+        rng = sh.getCellRangeByPosition(c0, 1, c1, LAST_ROW)
+        cf = rng.ConditionalFormat
+        cf.clear()
+        rng.ConditionalFormat = cf
+        for formula, style in rules:
+            add_cond(sh, rng, formula, style, c0, 1)
+    sh.getCellRangeByPosition(5, 1, 5, LAST_ROW).ParaIndent = 300
+
+
+# 1.0 (В3): what may be typed in a column — the input help of Calc (shown while the cell is selected) and the same text as a
+# note of the header (shown when the mouse is over it). (title, text) by column; the data and the lists of the columns stay
+_DATE = ("Дата", "ДД.ММ.ГГГГ, например 14.10.2026. Будущая или очень старая дата — WMS переспросит.")
+_EI = ("ЕИ", "EI-427, просто 427 или скан этикетки. Не помните номер — «Подобрать ЕИ» (Ctrl+Shift+E).")
+_PLACE = ("Место", "1-2-3; несколько мест — через запятую: 1-2-3, 1-2-4. Свободное место подскажет «Куда положить?» (Ctrl+Shift+Q).")
+_QTY_IN = ("Количество", "Сколько пришло: 4 · 2,5 · 10 — в единице документа.")
+HINTS_10 = {
+    ISSUES: {1: ("№ документа", "Необязательно. Несколько выдач одним документом: выделите строки и «Провести» — WMS предложит общий номер."),
+             4: ("Количество", "2 · 0,25 · 1 кан · 1,5 м · всё (весь остаток). Целое число у ЕИ с фасовкой — WMS спросит: шт или кан."),
+             5: ("Количество в %", "25 = 25 % прихода этого ЕИ (можно и «25%» в «Количество»). Меньше 1 % — WMS переспросит."),
+             7: ("Дата выдачи", "Обязательно. " + _DATE[1]),
+             8: ("Кому выдано", "Из списка (стрелка справа) или новое имя — WMS спросит, добавить ли его в «Получатели»."),
+             11: _EI},
+    ORDERS: {5: ("Фактическое количество", "Сколько пришло по факту: 4 · 2,5 · 10. Затем «Провести приход» — или всё в одном окне: «Принять…»."),
+             13: ("Дата поступления", _DATE[1]), 20: _PLACE},
+    RETURNS: {1: ("№ выдачи", "Номер проведённой выдачи (колонка A «Выдач»). Всё, что на руках у человека, — «Поиск»: имя и «Вернуть выделенное»."),
+              5: ("Количество возврата", "2 · 0,5 · 1 кан · 1,5 м — не больше, чем выдано и ещё не возвращено."),
+              7: ("Дата возврата", _DATE[1]),
+              8: ("От кого возвращено", "Кто вернул — из списка (стрелка справа) или имя, как в «Получатели»."),
+              9: ("Место", "Куда положили: 1-2-3. У ЕИ на нескольких местах WMS спросит — добавить место или заменить.")},
+    SPECIAL: {1: ("Тип прихода", "Офис, Производство, Детали, Старый склад или Иной — из списка."), 5: _QTY_IN,
+              7: ("Дата поступления", _DATE[1]), 8: _PLACE},
+    ADJUST: {1: ("Вид", "Перемещение, Списание, Инвентаризация или Разделение (часть ЕИ — в новый ЕИ со своей этикеткой) — из списка."), 2: _EI,
+             6: ("Списать / отделить", "Списание: 2 · 0,25 · 1 кан · 1,5 м · всё (весь остаток). Разделение: сколько отделить в новый ЕИ — 2 кан, 4,5 м."),
+             7: ("Фактический остаток", "Инвентаризация: сколько насчитали — 3 · 3 кан · 4,5 м; 0 — на месте пусто. Совпало с учётом — так и запишется."),
+             9: ("Новое место", "Перемещение: куда переложили — 1-2-3 или несколько мест через запятую. Разделение: место нового ЕИ (пусто — то же место)."),
+             10: _DATE},
+}
+
+
+def hints_10(doc, sheets):
+    from com.sun.star.table import CellAddress
+    for sheet, cols in HINTS_10.items():
+        sh = sheets.getByName(sheet)
+        notes = sh.getAnnotations()
+        for c, (title, text) in cols.items():
+            rng = sh.getCellRangeByPosition(c, 1, c, LAST_ROW)
+            v = rng.Validation
+            v.ShowInputMessage = True
+            v.InputTitle = title
+            v.InputMessage = text
+            rng.Validation = v
+            head = sh.getCellByPosition(c, 0)
+            if head.getAnnotation().getString() == "":
+                a = CellAddress()
+                a.Sheet, a.Column, a.Row = sh.RangeAddress.Sheet, c, 0
+                notes.insertNew(a, text)
+
+
+# 1.0 (Р11): the keyboard shortcuts of the book (stored in the document: they act in this book only)
+HOTKEYS_10 = [("P", "WmsDaily.KeyPost", "Провести (лист в работе)"), ("E", "WmsFind.BtnPickEI", "Подобрать ЕИ"),
+              ("F", "WmsDaily.KeyFind", "Найти (страница «Поиск»)"), ("W", "WmsDaily.BtnIssueWindow", "Выдать… (окно)"),
+              ("Q", "WmsMap.BtnWherePut", "Куда положить?")]
+
+
+def hotkeys_10(doc):
+    from com.sun.star.awt import KeyEvent
+    sm = doc.getUIConfigurationManager().getShortCutManager()
+    mods = uno.getConstantByName("com.sun.star.awt.KeyModifier.SHIFT") | uno.getConstantByName("com.sun.star.awt.KeyModifier.MOD1")
+    for key, macro, _ in HOTKEYS_10:
+        ke = KeyEvent()
+        ke.KeyCode = uno.getConstantByName(f"com.sun.star.awt.Key.{key}")
+        ke.Modifiers = mods
+        sm.setKeyEvent(ke, macro_url(macro))
+    sm.store()
+    doc.getUIConfigurationManager().store()
+
+
+def has_button(sheet, name):
+    dp = sheet.getDrawPage()
+    if dp.getForms().getCount() == 0:
+        return False
+    form = dp.getForms().getByIndex(0)
+    return any(form.getByIndex(i).Name == name for i in range(form.getCount()))
+
+
+# 1.0: the buttons of the everyday work (stage B): «Выдачи» gets a second row of buttons (its header as high as that of
+# «Заказы»), «Наличие» and «Поиск» get «Выдать». (sheet, name, label, macro, x, y, w, h, colour); only the missing ones are added
+BUTTONS_10 = [
+    (ISSUES, "btnIssueWin", "Выдать…", "WmsDaily.BtnIssueWindow", 150, 880, 2750, 650, 0xC6E0B4),
+    (ISSUES, "btnRepeat", "Повторить", "WmsDaily.BtnRepeatIssue", 150 + 2900, 880, 2750, 650, 0xDDEBF7),
+    (ISSUES, "btnWhy", "Почему?", "WmsDaily.BtnWhy", 150 + 2 * 2900, 880, 2750, 650, 0xDDEBF7),
+    (ISSUES, "btnOffcut", "Обрезок…", "WmsDaily.BtnOffcut", 150 + 3 * 2900, 880, 2750, 650, 0xDDEBF7),
+    (ORDERS, "btnWhy", "Почему?", "WmsDaily.BtnWhy", 150 + 6 * 3050, 120, 2900, 650, 0xDDEBF7),
+    (RETURNS, "btnWhy", "Почему?", "WmsDaily.BtnWhy", 150 + 6 * 2900, 120, 2750, 650, 0xDDEBF7),
+    (SPECIAL, "btnWhy", "Почему?", "WmsDaily.BtnWhy", 150 + 7 * 2900, 120, 2750, 650, 0xDDEBF7),
+    (ADJUST, "btnWhy", "Почему?", "WmsDaily.BtnWhy", 150 + 7 * 2900, 120, 2750, 650, 0xDDEBF7),
+    (STOCK, "btnIssueFrom", "Выдать", "WmsDaily.BtnIssueFrom", 11800, 120, 2400, 650, 0xC6E0B4),
+    (STOCK, "btnPackBatch", "Фасовка пачкой…", "WmsPack.BtnPackBatch", 14350, 120, 3600, 650, 0xDDEBF7),
+    (STOCK, "btnSplit", "Разделить ЕИ…", "WmsDaily.BtnSplitWindow", 18100, 120, 3400, 650, 0xDDEBF7),
+    # 1.0: the map edited on the map itself (по просьбе пользователя) and the check of the layout (М3)
+    (MAP, "btnMapEdit", "Править карту", "WmsMap.BtnMapEdit", 9000, 170, 3400, 760, 0xDDEBF7),
+    (MAP, "btnMapSave", "Сохранить карту", "WmsMap.BtnMapSave", 12500, 170, 3600, 760, 0xC6E0B4),
+    (MAP, "btnMapCancel", "Отменить правку", "WmsMap.BtnMapCancel", 16200, 170, 3600, 760, 0xF4CCCC),
+    (MAP, "btnTopoCheck", "Проверить топологию", "WmsMap.BtnTopoCheck", 19900, 170, 4300, 760, 0xDDEBF7),
+    (MAP, "btnMapFill", "Заполненность", "WmsMap.BtnMapFill", 24300, 170, 3400, 760, 0xFCE8B2),
+    (FIND, "btnShowOnMap", "Показать на карте", "WmsFind.BtnShowOnMap", None, None, 3900, 720, 0xDDEBF7),
+    (ADJUST, "btnSplit", "Разделить ЕИ…", "WmsDaily.BtnSplitWindow", 150 + 8 * 2900, 120, 2750, 650, 0xDDEBF7),
+    (ORDERS, "btnReceiveWin", "Принять…", "WmsDaily.BtnReceiveWindow", 150 + 5 * 3050, 120, 2900, 650, 0xC6E0B4),
+    (ORDERS, "btnReceiveAll", "Принять всё по заказу", "WmsDaily.BtnReceiveAll", 150 + 5 * 3050, 120 + 760, 3900, 650, 0xC6E0B4),
+    (FIND, "btnIssueFrom", "Выдать", "WmsDaily.BtnIssueFrom", None, None, 2400, 720, 0xC6E0B4),
+    (FIND, "btnReturnHands", "Вернуть выделенное", "WmsDaily.BtnReturnHands", None, None, 3900, 720, 0xC6E0B4),
+]
+
+
+def buttons_10(doc, sheets):
+    fit_headers(sheets.getByName(ISSUES), ISSUE_HEADERS, 3100)
+    for sheet, name, label, macro, x, y, w, h, back in BUTTONS_10:
+        sh = sheets.getByName(sheet)
+        if x is None:
+            # «Поиск»: the row of its buttons (build_find), after «Фасовка ЕИ»
+            y = sh.getCellByPosition(0, 3).Position.Y + 90
+            x = sh.getCellByPosition(6, 3).Position.X + {"btnIssueFrom": 13100, "btnReturnHands": 15580, "btnShowOnMap": 19560}[name]
+        if not has_button(sh, name):
+            add_button(doc, sh, name, label, macro, x, y, w, h, back=back)
 
 
 def where_buttons(doc, sheets):
@@ -981,6 +1224,7 @@ def view_events(sheets):
     bind_event(sheets.getByName(FIND).Events, "OnDoubleClick", "WmsFind.OnFindDoubleClick")
     bind_event(sheets.getByName(MAP).Events, "OnSelect", "WmsMap.OnMapSelect")
     bind_event(sheets.getByName(MAP).Events, "OnFocus", "WmsMap.OnMapFocus")
+    bind_event(sheets.getByName(MAP).Events, "OnDoubleClick", "WmsMap.OnMapDoubleClick")
 
 
 def build_views(doc, sheets):
@@ -1140,7 +1384,7 @@ def add_nav(doc, sh):
            ("navStock", STOCK, "WmsUi.NavStock"))
     w = 3200
     for i, (name, label, macro) in enumerate(nav):
-        add_button(doc, sh, name, label, macro, 100 + i * (w + 60), y + 80, w, 840, bold=True, back=0xDDEBF7)
+        add_button(doc, sh, name, label, macro, MAIN_LEFT + 100 + i * (w + 60), y + 80, w, 840, bold=True, back=0xDDEBF7)
 
 
 def main_nav_views(doc, sh):
@@ -1148,8 +1392,8 @@ def main_nav_views(doc, sh):
     sh.getRows().getByIndex(2).Height = 1000
     y = sh.getCellByPosition(0, 2).Position.Y
     for i, (name, label, macro) in enumerate((("navDash", "Дашборд", "WmsUi.NavDash"), ("navFind", "Поиск и карточка ЕИ", "WmsUi.NavFind"),
-                                              ("navMap", "Карта склада", "WmsUi.NavMap"))):
-        add_button(doc, sh, name, label, macro, 100 + i * 7560, y + 80, 7500, 840, bold=True, back=0xC6E0B4)
+                                              ("navMap", "Карта склада", "WmsUi.NavMap"), ("navHelp", "Справка", "WmsDaily.NavHelp"))):
+        add_button(doc, sh, name, label, macro, MAIN_LEFT + 100 + i * 5700, y + 80, 5640, 840, bold=True, back=0xC6E0B4)
 
 
 def version_text():
@@ -1161,29 +1405,21 @@ MAIN_HELP_ROW = 15
 
 
 def main_help_text():
-    return (
-        "Приход: на листе «Заказы» в строке заказа укажите фактическое количество (F), дату поступления (N), место хранения (U), "
-        "при наличии — документ (C, G, O) и нажмите «Провести приход»: будет создан новый ЕИ. Следующая поставка той же позиции — "
-        "«Ещё поступление» (новая строка встаёт сразу под позицией, внутри блока заказа). Выдача: на листе «Выдачи» введите ЕИ в "
-        "«Внутренний код», количество, дату и получателя и нажмите «Провести». "
-        "Возврат: на листе «Возврат» укажите № выдачи (B) или нажмите «Найти выдачу», затем количество (F) и дату возврата (H) и "
-        "нажмите «Провести»: количество вернётся в остаток того же ЕИ. "
-        "Приход не по заказу (Офис, Производство, Детали, Старый склад, Иной): лист «Иной приход» — тип прихода (B), наименование, "
-        "артикул (для деталей обязателен: тот же артикул пополняет тот же ЕИ), количество, единица, дата, место и «Провести»; "
-        "несколько выделенных строк можно провести одним поступлением (один № OFF/PROD/DET/OLD/OTH). "
-        "Перемещение, списание, инвентаризация: лист «Корректировки» — вид (B), ЕИ (C), для списания количество (G), для "
-        "инвентаризации фактический остаток (H), для перемещения новое место (J), дата (K), причина (L) и «Провести». "
-        "Машины: лист «Приход авто» — впишите марку/номер → поставщика → ПРИЕХАЛ; при выезде выделите машину → УЕХАЛ "
-        "(остатки не меняются). "
-        "«Экспорт для инструментов» создаёт снимок для WMS_TOOLBOX в папке WMS_Export рядом с книгой; «Загрузить пакет» — "
-        "строки из файла инструмента (они проводятся обычными проверками). "
-        "«Исправить» и «Удалить» работают для проведённой строки под курсором, «Очистить» — для непроведённой строки или копии; "
-        "на «Заказах» «Исправить» спрашивает, что исправить: приход, позицию заказа, коррекцию переноса, снятие отмены. "
-        "«Дашборд» — склад сегодня; «Поиск» — номер ЕИ (карточка с бегущим остатком), получатель («на руках») или любое слово; "
-        "«Карта склада» — ваша схема из листа «Топология», раскрашенная по слоям; «Куда положить?» на «Заказах» и «Ином приходе» "
-        "подсказывает место. "
-        "Перед началом рабочего дня — «Проверка перед работой»; версии, журнал и резервные копии — «Состояние системы»; "
-        "руководство кладовщика, что нового в версии и как восстановить WMS из резервной копии — лист «Справка».")
+    """1.0 (В4): six short «Как…» instead of a wall of text; everything else is in «Справка»"""
+    return "\n".join([
+        "КАК РАБОТАТЬ — коротко (подробно — лист «Справка»)",
+        "1. Начать день: «Проверка перед работой» — всё в порядке → работайте.",
+        "2. Принять товар: «Заказы» → строка заказа → «Принять…» (или F, N, U и «Провести приход»). Не по заказу — «Иной приход».",
+        "3. Выдать: «Выдачи» → «Выдать…» (Ctrl+Shift+W) или ЕИ, количество, дата, кому → «Провести» (Ctrl+Shift+P).",
+        "4. Принять возврат: «Поиск» → имя человека → выделить строки → «Вернуть выделенное» (или лист «Возврат»).",
+        "5. Исправить ошибку: проведённая строка → «Исправить» или «Удалить»; непроведённая — «Очистить». Не проводится — «Почему?».",
+        "6. Найти: «Поиск» — номер ЕИ, получатель или любое слово (Ctrl+Shift+F); где лежит и куда положить — «Карта склада».",
+        "Если вверху «ЗАБЛОКИРОВАНО» — ничего не проводится: прочтите «Что сделать» и нажмите кнопку из красной рамки."])
+
+
+# 1.0 (В4): «Главная» as a menu — the group of each row of buttons (row, caption, colour of the caption)
+MAIN_GROUPS = [(1, "Каждый день", 0x1F3864), (3, "Только если WMS просит", 0xB3261E), (4, "Инструменты", 0x1F3864)]
+MAIN_LEFT = 5200       # the width of column A (the captions); the buttons are in column B
 
 
 MAIN_ROWS = 7          # WmsUi.MR_STATE: the lines of the state start here (rows 7 … 13)
@@ -1192,8 +1428,8 @@ MAIN_ROWS = 7          # WmsUi.MR_STATE: the lines of the state start here (rows
 def build_main(doc, sh):
     """«Главная» (PRIME 0.8 layout): the title, the ways to the sheets and pages, the actions of the system — all above the lines
     of the state, which grow with their text (nothing below them is a button: they never cover one)"""
-    sh.getColumns().getByIndex(0).Width = 5200
-    sh.getColumns().getByIndex(1).Width = 17500
+    sh.getColumns().getByIndex(0).Width = MAIN_LEFT
+    sh.getColumns().getByIndex(1).Width = 23000
     t = sh.getCellByPosition(0, 0)
     t.setString("Состояние WMS")
     t.CharWeight = 150
@@ -1210,12 +1446,26 @@ def build_main(doc, sh):
     sh.getRows().getByIndex(6).Height = 300
     buttons = (("btnRecover", "Восстановить", "WmsUi.BtnRecover"), ("btnAbandon", "Отложить хвост журнала", "WmsUi.BtnAbandon"),
                ("btnUnlock", "Снять блокировку WMS", "WmsUi.BtnUnlock"), ("btnRegister", "Сделать рабочим файлом", "WmsUi.BtnRegister"),
-               ("btnSelfCheck", "Самопроверка", "WmsUi.BtnSelfCheck"), ("btnBackup", "Резервная копия", "WmsUi.BtnBackup"),
-               ("btnExport", "Экспорт для инструментов", "WmsExport.BtnExport"), ("btnLoadBatch", "Загрузить пакет", "WmsExport.BtnLoadBatch"),
-               ("btnStatus", "Состояние системы", "WmsStatus.BtnSystemStatus"), ("btnPreWork", "Проверка перед работой", "WmsStatus.BtnPreWorkCheck"))
+               ("btnPreWork", "Проверка перед работой", "WmsStatus.BtnPreWorkCheck"), ("btnSelfCheck", "Самопроверка", "WmsUi.BtnSelfCheck"),
+               ("btnBackup", "Резервная копия", "WmsUi.BtnBackup"), ("btnStatus", "Состояние системы", "WmsStatus.BtnSystemStatus"),
+               ("btnExport", "Экспорт для инструментов", "WmsExport.BtnExport"), ("btnLoadBatch", "Загрузить пакет", "WmsExport.BtnLoadBatch"))
     for i, (name, label, macro) in enumerate(buttons):
         y = sh.getCellByPosition(0, 3 + i // 4).Position.Y
-        add_button(doc, sh, name, label, macro, 100 + (i % 4) * 5660, y + 50, 5600, 750)
+        add_button(doc, sh, name, label, macro, MAIN_LEFT + 100 + (i % 4) * 5700, y + 50, 5640, 750,
+                   back=0xF4CCCC if i < 4 else (0xC6E0B4 if name == "btnPreWork" else 0xDDEBF7))
+    for r, cap, color in MAIN_GROUPS:
+        c = sh.getCellByPosition(0, r)
+        c.setString(cap)
+        c.CharWeight = 150
+        c.CharColor = color
+        c.VertJustify = 2
+        c.IsTextWrapped = True
+    # the buttons that only WMS asks for: a red frame around their row
+    red = border_line(70, 0xB3261E)
+    frame = sh.getCellRangeByPosition(0, 3, 1, 3)
+    frame.CellBackColor = 0xFDE2DD
+    for side in ("TopBorder", "BottomBorder", "LeftBorder", "RightBorder"):
+        setattr(frame, side, red)
     captions = ["Состояние", "Причина", "Что сделать", "Непроведённые строки", "Заметки запуска", "Последнее действие", "Обновлено"]
     for i, cap in enumerate(captions):
         c = sh.getCellByPosition(0, MAIN_ROWS + i)
@@ -1230,7 +1480,7 @@ def build_main(doc, sh):
     sh.getCellRangeByPosition(0, help_row, 1, help_row).merge(True)
     sh.getCellByPosition(0, help_row).IsTextWrapped = True
     sh.getCellByPosition(0, help_row).VertJustify = 1
-    sh.getRows().getByIndex(help_row).Height = 7000
+    sh.getRows().getByIndex(help_row).Height = 4600
     t = sh.getCellByPosition(0, STATUS_ROW)
     t.setString("СОСТОЯНИЕ СИСТЕМЫ")
     t.CharWeight = 150
@@ -1287,9 +1537,10 @@ def apply_views(doc):
     where the work starts; the book opens on «Дашборд» (PRIME 0.8)"""
     ctl = doc.getCurrentController()
     sheets = doc.Sheets
+    # 1.0 (В5): with the header the columns that say whose row it is stay in view when scrolled right (№ / EI and the name)
     for name in (ORDERS, SPECIAL, ISSUES, RETURNS, ADJUST, STOCK, RCPT):
         ctl.setActiveSheet(sheets.getByName(name))
-        ctl.freezeAtPosition(0, 1)
+        ctl.freezeAtPosition(FREEZE_COLS_10.get(name, 0), 1)
     ctl.setActiveSheet(sheets.getByName(LEGREP))
     ctl.freezeAtPosition(1, LEGREP_HEAD + 1)
     ctl.setActiveSheet(sheets.getByName(CARS))
@@ -1383,6 +1634,11 @@ def build(office, out_path, test=False, instance_id=None):
     status_colors(doc, sheets)
     where_buttons(doc, sheets)
     layout_10(doc, sheets)
+    buttons_10(doc, sheets)
+    colors_10(doc, sheets)
+    hints_10(doc, sheets)
+    stock_view_10(doc, sheets)
+    hotkeys_10(doc)
     build_service(doc, sheets)
     order = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
     autofilter(doc, order.index(ORDERS), "WMS_ORDERS", len(ORDER_HEADERS))

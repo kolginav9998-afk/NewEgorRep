@@ -1174,8 +1174,10 @@ def w34_buttons_bound():
             code = ev[0].ScriptCode if ev else ""
             names[form.getByIndex(i).Label] = script_macro(code)
         want = {"Найти выдачу": "WmsReturnUi.BtnRetFind", "Проверить": "WmsReturnUi.BtnRetCheck", "Провести": "WmsReturnUi.BtnRetPost",
-                "Исправить": "WmsReturnUi.BtnRetFix", "Удалить": "WmsReturnUi.BtnRetDelete", "Очистить": "WmsReturnUi.BtnRetClear"}
-        R.add(c, "6 кнопок листа «Возврат» привязаны к макросам (запуск через меню не нужен)", names == want, str(names))
+                "Исправить": "WmsReturnUi.BtnRetFix", "Удалить": "WmsReturnUi.BtnRetDelete", "Очистить": "WmsReturnUi.BtnRetClear",
+                # 1.0 (В6)
+                "Почему?": "WmsDaily.BtnWhy"}
+        R.add(c, "6 кнопок листа «Возврат» привязаны к макросам (запуск через меню не нужен) и «Почему?» 1.0", names == want, str(names))
     finally:
         s.close()
 

@@ -444,8 +444,8 @@ Public Const ADJUST_LOCKS_OPEN = "1001110000001111100"
 Public Const ADJUST_LOCKS_POSTED = "1111111111111111110"
 
 ' the kinds: name in column B, code in _ADJ and the journal
-Public Const ADJ_KIND_NAMES = "Перемещение|Списание|Инвентаризация"
-Public Const ADJ_KIND_CODES = "MOVE|WRITE_OFF|INV_ADJ"
+Public Const ADJ_KIND_NAMES = "Перемещение|Списание|Инвентаризация|Разделение"
+Public Const ADJ_KIND_CODES = "MOVE|WRITE_OFF|INV_ADJ|SPLIT"
 
 ' _ADJ — the corrections, one row per № (row index = №, dense like «Наличие»): kind, EI, change of the balance
 ' (WRITE_OFF < 0, INV_ADJ the difference, MOVE 0), state LIVE / STORNO, row hint, places before and after the move,
@@ -461,7 +461,9 @@ Public Const AJ_TO = 7
 Public Const AJ_BOOK = 8
 Public Const AJ_FACT = 9
 Public Const AJ_DATE = 10
-Public Const AJ_LAST = 10
+' 1.0 (М1): the new EI of a split («Разделение»)
+Public Const AJ_NEW = 11
+Public Const AJ_LAST = 11
 
 ' ---------------------------------------------------------------- M6: «Приход авто» — the journal of vehicles (M6 PRIME §1)
 ' Not a receipt of goods: the balances never change. The user types two cells of the panel above the table («Марка /

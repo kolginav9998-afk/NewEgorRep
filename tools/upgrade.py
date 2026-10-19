@@ -325,6 +325,11 @@ def step_08(doc, leg, from_text, done):
     B.status_colors(doc, sheets)
     B.where_buttons(doc, sheets)
     B.layout_10(doc, sheets)
+    B.buttons_10(doc, sheets)
+    B.colors_10(doc, sheets)
+    B.hints_10(doc, sheets)
+    B.stock_view_10(doc, sheets)
+    B.hotkeys_10(doc)
     B.rebuild_main(doc, sheets.getByName(B.MAIN))
     done.append(f"страницы «{B.DASH}», «{B.FIND}», «{B.MAP}» и лист «{B.TOPO}» (вставьте туда схему склада); «{B.MAIN}» этого выпуска (кнопки к страницам)")
     return [B.LEGREP, B.LEG, B.PACK, B.DASH, B.FIND, B.MAP]
@@ -533,6 +538,12 @@ def allowed_change(sheet, r, c):
         return (r, c) in ((B.SYS_KEYS.index("SCHEMA"), 1), (B.SK_SAVE_STAMP, 1)) or r == B.SYS_KEYS.index("UPGRADE_FROM")
     if sheet == B.MAIN:
         return (r, c) in ((0, 1), (B.MAIN_HELP_ROW, 0))
+    if sheet == B.STOCK:
+        # 1.0: the header of «Остаток частями» (K)
+        return (r, c) == (0, len(B.STOCK_HEADERS))
+    if sheet == B.ADJ:
+        # 1.0 (М1): the header «Новый ЕИ» (L)
+        return (r, c) == (0, len(B.ADJ_HEADERS) - 1)
     return sheet == B.HELP
 
 
@@ -653,8 +664,17 @@ def progress(folder, text):
 
 
 def free_space(folder):
-    st = os.statvfs(folder)
-    return st.f_bavail * st.f_frsize
+    """free bytes of the disk of folder (Windows too: shutil.disk_usage)"""
+    while folder and not os.path.isdir(folder):
+        folder = os.path.dirname(folder)
+    return shutil.disk_usage(folder or ".").free
+
+
+def space_needed(book):
+    """the room an upgrade needs: three copies of the book (the copy, the verification copy, the save), two of the journal, and
+    the work room of LibreOffice"""
+    jdir = os.path.join(os.path.dirname(book), JOURNAL_DIR)
+    return 3 * os.path.getsize(book) + 2 * journal_size(jdir) + (50 << 20)
 
 
 def write_reports(folder, rep, summary):
@@ -692,6 +712,16 @@ def cmd_check(book, out=print):
     lines = [f"Книга: {book}", f"схема {facts.get('schema')}, ядро {facts.get('core')}, режим {facts.get('mode')}, операций {facts.get('last_seq')}, "
              f"журнал до seq {facts.get('journal_max')}, SHA-256 {facts.get('book_hash', '')[:16]}…"]
     lines += [f"ПРЕДУПРЕЖДЕНИЕ: {w}" for w in warns]
+    # 1.0: the free space is checked already here (the build needs the copy of the book and of the journal, and the room
+    # LibreOffice works in); the build checks it again for its own folder
+    need = space_needed(book) if os.path.isfile(book) else 0
+    free = free_space(os.path.dirname(book))
+    if not need:
+        pass
+    elif free < need:
+        stops.append(f"мало места на диске: свободно {free >> 20} МБ, для обновления нужно не меньше {need >> 20} МБ — освободите место")
+    else:
+        lines.append(f"место на диске: свободно {free >> 20} МБ (нужно не меньше {need >> 20} МБ)")
     if stops:
         out("\n".join(lines + ["СТОП — обновлять нельзя, пока не исправлено:"] + [f"- {s}" for s in stops]))
         return 1
@@ -735,7 +765,7 @@ def cmd_build(book, to, rehearsal=False, out=print):
         summary += [f"source schema={facts.get('schema')} core={facts.get('core')} mode={facts.get('mode')} last_seq={facts.get('last_seq')} "
                     f"journal_max={facts.get('journal_max')} journal_files={len(facts.get('journal_hashes', {}))}",
                     f"source sha256={facts.get('book_hash')}"]
-        need = 3 * facts.get("book_size", 0) + 2 * facts.get("journal_size", 0) + (50 << 20)
+        need = space_needed(book) if os.path.isfile(book) else 0
         if not stops and free_space(to) < need:
             stops.append(f"мало места на диске: свободно {free_space(to) >> 20} МБ, нужно не меньше {need >> 20} МБ")
         if stops:
@@ -902,21 +932,39 @@ def cmd_promote(to, out=print):
     # the tools of this release next to the new working book (the toolbox reads the book of its folder)
     tb_src, tb_dst = os.path.join(os.path.dirname(HERE), "WMS_TOOLBOX"), os.path.join(to, "WMS_TOOLBOX")
     toolbox = ""
+    carried = []
     if os.path.isdir(tb_src) and not os.path.exists(tb_dst):
         try:
             shutil.copytree(tb_src, tb_dst)
             toolbox = tb_dst
         except OSError as e:
             toolbox = f"не скопированы ({e}) — скопируйте папку WMS_TOOLBOX выпуска рядом с книгой вручную"
+        # 1.0: the data of the old tools (journal of work, acts and their number, labels history, settings) come along
+        old_tb = os.path.join(os.path.dirname(src), "WMS_TOOLBOX")
+        if toolbox == tb_dst and os.path.isdir(old_tb):
+            prof = tempfile.mkdtemp(prefix="wms_upgrade_tb_")
+            o = Office(f"upgtb{os.getpid()}", prof)
+            try:
+                carried = carry_toolbox(o, old_tb, tb_dst)
+            except Exception as e:
+                carried = [f"данные инструментов не перенесены ({e}) — они остаются в старой папке WMS_TOOLBOX"]
+            finally:
+                o.terminate()
+                shutil.rmtree(prof, ignore_errors=True)
+        try:
+            carried += carry_tool_folders(os.path.dirname(src), to)
+        except OSError as e:
+            carried.append(f"папки инструментов не скопированы ({e})")
     locked = lock_old_book(src, target)
-    state.d["promote"] = dict(ok=True, time=now(), book=target, report=lr, toolbox=toolbox, old_locked=locked)
+    state.d["promote"] = dict(ok=True, time=now(), book=target, report=lr, toolbox=toolbox, old_locked=locked, tool_data=carried)
     state.save()
     with open(os.path.join(to, "ПЕРЕХОД_ВЫПОЛНЕН.txt"), "w", encoding="utf-8") as f:
         f.write(f"Переход выполнен {now()}.\n\nРабочая WMS теперь: {target}\nОткрывайте только её.\n\n"
                 f"Старая книга {src} не изменена — это откат. Для работы её больше не открывайте: операции в ней не попадут в новую WMS\n"
                 "(новая WMS при запуске предупредит, если в старой книге что-то провели).\n"
                 + (f"{locked[0].upper() + locked[1:]}.\n" if locked else "") + "\n"
-                f"Сверка переноса в новой книге: {lr}\n" + (f"\nИнструменты выпуска (WMS_TOOLBOX): {toolbox}\n" if toolbox else ""))
+                f"Сверка переноса в новой книге: {lr}\n" + (f"\nИнструменты выпуска (WMS_TOOLBOX): {toolbox}\n" if toolbox else "")
+                + ("Перенесено из старых инструментов: " + "; ".join(carried) + "\n" if carried else ""))
     with open(os.path.join(to, REPORT_NAME), "a", encoding="utf-8") as f:
         f.write(f"\n## СДЕЛАТЬ РАБОЧЕЙ\n\n- {now()}: новая книга зарегистрирована рабочей в своей папке, самопроверка без ошибок, сохранена и "
                 f"открыта снова.\n- Сверка переноса: {lr}\n" + (f"- {locked}.\n" if locked else ""))
@@ -924,6 +972,86 @@ def cmd_promote(to, out=print):
         f.write(f"PROMOTE=OK {now()}\n")
     out(f"Готово: рабочая WMS — {target}. Старая книга не изменена" + (f"; {locked}." if locked else "."))
     return 0
+
+
+# 1.0: what the storekeeper keeps in the tools — it goes to the tools next to the new book (it was lost: the numbers of the
+# acts began again from 1). The sheets of data (all rows), the settings (column B by the caption in A; not the snapshot in
+# use), and the folders of the tools next to the book (copied, the old ones stay)
+TB_DATA_SHEETS = {"WMS_MANAGER.ods": ("Журнал работы",), "WMS_DOCS.ods": ("История",)}
+TB_SETTINGS = "Настройки"
+TB_SETTING_SKIP = (3,)                 # 0-based rows of «Настройки» not carried: B4 — the snapshot in use (a path of the old folder)
+TB_FOLDERS = ("WMS_Labels", "WMS_Docs")
+
+
+def _used_rows(sh):
+    cur = sh.createCursor()
+    cur.gotoEndOfUsedArea(False)
+    a = cur.getRangeAddress()
+    return a.EndRow, a.EndColumn
+
+
+def carry_toolbox(o, old_tb, new_tb):
+    """the data of the tool books of old_tb copied into the books of new_tb (opened with the macros disabled, nothing else of
+    them changes); returns the lines of the report"""
+    import uno
+    rep = []
+    for f in sorted(os.listdir(new_tb)):
+        if not f.endswith(".ods") or not os.path.isfile(os.path.join(old_tb, f)):
+            continue
+        old = o.load(os.path.join(old_tb, f), macros=0, hidden=True, ReadOnly=True)
+        if old is None:
+            rep.append(f"{f}: старая книга инструмента не открылась — данные не перенесены")
+            continue
+        new = o.load(os.path.join(new_tb, f), macros=0, hidden=True)
+        try:
+            done = []
+            if old.Sheets.hasByName(TB_SETTINGS) and new.Sheets.hasByName(TB_SETTINGS):
+                so, sn = old.Sheets.getByName(TB_SETTINGS), new.Sheets.getByName(TB_SETTINGS)
+                ro, _ = _used_rows(so)
+                rn, _ = _used_rows(sn)
+                olds = {so.getCellByPosition(0, r).getString(): so.getCellByPosition(1, r) for r in range(ro + 1) if r not in TB_SETTING_SKIP}
+                k = 0
+                for r in range(rn + 1):
+                    cap = sn.getCellByPosition(0, r).getString()
+                    if r in TB_SETTING_SKIP or not cap or cap not in olds:
+                        continue
+                    c = olds[cap]
+                    if c.getType().value == "VALUE":
+                        sn.getCellByPosition(1, r).setValue(c.getValue())
+                    elif c.getString() != sn.getCellByPosition(1, r).getString():
+                        sn.getCellByPosition(1, r).setString(c.getString())
+                    k += 1
+                done.append(f"настройки {k}")
+            for name in TB_DATA_SHEETS.get(f, ()):
+                if not (old.Sheets.hasByName(name) and new.Sheets.hasByName(name)):
+                    continue
+                so, sn = old.Sheets.getByName(name), new.Sheets.getByName(name)
+                ro, co = _used_rows(so)
+                if ro < 1:
+                    continue
+                sn.getCellRangeByPosition(0, 1, co, ro).setDataArray(so.getCellRangeByPosition(0, 1, co, ro).getDataArray())
+                done.append(f"«{name}» строк {ro}")
+            if done:
+                new.store()
+                rep.append(f"{f}: " + ", ".join(done))
+        finally:
+            for d in (old, new):
+                try:
+                    d.close(True)
+                except Exception:
+                    pass
+    return rep
+
+
+def carry_tool_folders(old_dir, new_dir):
+    """the folders of the tools next to the old book copied next to the new one (labels history, created acts)"""
+    rep = []
+    for d in TB_FOLDERS:
+        a, b = os.path.join(old_dir, d), os.path.join(new_dir, d)
+        if os.path.isdir(a) and not os.path.exists(b):
+            shutil.copytree(a, b)
+            rep.append(f"папка {d} скопирована")
+    return rep
 
 
 def lock_old_book(src, target):
@@ -1099,6 +1227,29 @@ def run(book, check_only=False, out=print):
 
 
 def main(argv=None):
+    """1.0: an unexpected failure is said in Russian, with what was not changed (it was an English Traceback in the window of
+    the wizard); the technical details go to upgrade_error.log next to this tool"""
+    try:
+        return _main(argv)
+    except SystemExit:
+        raise
+    except KeyboardInterrupt:
+        print("ОСТАНОВЛЕНО: обновление прервано. Старая книга не изменена; новую папку можно удалить и начать заново")
+        return 2
+    except Exception as e:
+        import traceback
+        log = os.path.join(HERE, "upgrade_error.log")
+        try:
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(f"\n===== {now()}\n{traceback.format_exc()}")
+        except OSError:
+            log = "(не записан)"
+        print(f"ОШИБКА ИНСТРУМЕНТА: {type(e).__name__}: {e}\nСтарая книга не изменена — работайте в ней как обычно. Подробности для "
+              f"ответственного за WMS — в файле {log}")
+        return 2
+
+
+def _main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] in ("check", "build", "promote", "status"):
         ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)

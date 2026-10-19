@@ -69,8 +69,8 @@ def run(cmd, timeout=60, **kw):
 def fingerprint():
     """SHA-256 (16 знаков) исходников, которыми проверяется ПК: src, tools, tests, docs"""
     h = hashlib.sha256()
-    pats = ["src/basic/*.bas", "src/toolbox/*.bas", "src/toolbox/scripts/*/*.py", "src/transfer/*.bas", "tools/*.py", "tests/*.py", "tests/basic/*.bas",
-            "docs/*.md"]
+    pats = ["src/basic/*.bas", "src/toolbox/*.bas", "src/toolbox/scripts/*/*.py", "src/transfer/*.bas", "src/upgrade/*.bas", "tools/*.py", "tests/*.py",
+            "tests/basic/*.bas", "docs/*.md"]
     for p in sorted(f for pat in pats for f in glob.glob(os.path.join(ROOT, pat))):
         h.update(os.path.relpath(p, ROOT).encode())
         h.update(open(p, "rb").read())
@@ -240,6 +240,16 @@ def step_compile(out, display):
     ok = rc3 == 0 and log4.startswith("COMPILE OK")
     steps.append(dict(key="compile_transfer", title="Компиляция книги WMS_LEGACY_TRANSFER", rc=rc4, seconds=round(time.time() - t0),
                       bad=[] if ok else [(log3 + log4).strip()[-400:]], **{"pass": 1 if ok else 0, "fail": 0 if ok else 1, "skip": 0}))
+    # 1.0: the wizard of the upgrade (WMS_UPGRADE.ods) is compiled too — it is the book the storekeeper starts the transfer with
+    t0 = time.time()
+    up = os.path.join(out, "upgrade_build")
+    shutil.rmtree(up, ignore_errors=True)
+    rc5, log5 = run([sys.executable, os.path.join(ROOT, "tools", "build_upgrade.py"), up], timeout=1200, cwd=ROOT)
+    rc6, log6 = run([sys.executable, os.path.join(ROOT, "tools", "tb_compile_check.py"), up, "--display", display], timeout=1200, cwd=ROOT)
+    open(os.path.join(out, "compile_upgrade.log"), "w", encoding="utf-8").write(log5 + "\n" + log6)
+    ok = rc5 == 0 and log6.startswith("COMPILE OK")
+    steps.append(dict(key="compile_upgrade", title="Компиляция книги мастера WMS_UPGRADE", rc=rc6, seconds=round(time.time() - t0),
+                      bad=[] if ok else [(log5 + log6).strip()[-400:]], **{"pass": 1 if ok else 0, "fail": 0 if ok else 1, "skip": 0}))
     return steps
 
 

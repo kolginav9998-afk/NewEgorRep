@@ -20,6 +20,8 @@ OUT_DIR (it must not exist) gets:
                            — the upgrade of a working book of the previous release (0.6, WMS-SYS-3) to this one in place;
                            legacy_transfer.py — the engine of WMS_LEGACY_TRANSFER.ods (it imports migrate.py and the oracles);
   src/basic/               the Basic modules of this release: what upgrade.py puts into the upgraded book;
+  ПРОЧТИ СНАЧАЛА.txt       1.0: which book to open for what (the upgrade, the transfer, a new warehouse), the check of the PC;
+  src/ tools/ tests/       1.0: every source tools/pc_check.py builds and tests from — the PC is checked from the archive;
   RELEASE_MANIFEST.csv     versions and every file of the folder with its size and SHA-256.
 --zip: also WMS_RELEASE_<product version>.zip next to OUT_DIR — the folder packed under the name WMS_RELEASE_<version>/
 (an existing archive of another version is never touched; the same version is refused).
@@ -95,7 +97,11 @@ def build_release(out, name="WMS_PROD_CANDIDATE.ods"):
     for f in sorted(os.listdir(os.path.join(ROOT, "src", "basic"))):
         if f.endswith(".bas"):
             shutil.copy2(os.path.join(ROOT, "src", "basic", f), os.path.join(out, "src", "basic", f))
+    # 1.0: the check of the warehouse PC runs from the archive itself (no git, no download of the sources): every source it
+    # builds and tests from — src/, tools/, tests/ (with the fixtures), docs/
+    copy_sources_for_pc_check(out)
     v = versions()
+    write_start_here(out, name, v)
     lines = ["key;value", f"product;{v['WMS_PRODUCT_VERSION']}", f"core;{v['WMS_CORE_VERSION']}", f"schema;{v['WMS_SYS_SCHEMA']}", f"book;{name}"]
     files = []
     for base, dirs, names in os.walk(out):
@@ -107,6 +113,62 @@ def build_release(out, name="WMS_PROD_CANDIDATE.ods"):
     with open(os.path.join(out, "RELEASE_MANIFEST.csv"), "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines) + "\n")
     return out, v
+
+
+def copy_sources_for_pc_check(out):
+    """the sources tools/pc_check.py needs next to the built books (files already there are kept)"""
+    def walk(rel, keep):
+        for base, dirs, names in os.walk(os.path.join(ROOT, rel)):
+            dirs[:] = sorted(d for d in dirs if d != "__pycache__")
+            for n in sorted(names):
+                if not keep(n):
+                    continue
+                src = os.path.join(base, n)
+                dst = os.path.join(out, os.path.relpath(src, ROOT))
+                if not os.path.exists(dst):
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    shutil.copy2(src, dst)
+    walk("src", lambda n: n.endswith((".bas", ".py")))
+    walk("tools", lambda n: n.endswith(".py"))
+    walk("tests", lambda n: not n.endswith((".pyc", ".ods")) or "fixtures" in n)
+    walk("docs", lambda n: n.endswith(".md"))
+
+
+START_HERE = "ПРОЧТИ СНАЧАЛА.txt"
+
+
+def write_start_here(out, name, v):
+    """1.0: the first file of the archive — which book to open for what (the empty candidate book was opened instead of the
+    upgrade and showed an empty warehouse)"""
+    t = f"""WMS {v['WMS_PRODUCT_VERSION']} — С ЧЕГО НАЧАТЬ
+
+1. У ВАС УЖЕ ЕСТЬ РАБОЧАЯ WMS С ДАННЫМИ (0.7.x или 0.8)
+   - Закройте рабочую WMS.
+   - Откройте WMS_UPGRADE.ods из этой папки с включёнными макросами — мастер «Обновление из текущей WMS».
+   - «Выбрать…» — укажите рабочую книгу, затем по порядку: «1. ПРОВЕРИТЬ» → (по желанию «2. РЕПЕТИЦИЯ») →
+     «3. СОБРАТЬ И СВЕРИТЬ» → в конце рабочего дня «4. СДЕЛАТЬ РАБОЧЕЙ».
+   - Старая книга не меняется: новая со всеми данными и журналом появляется в новой папке, старая запирается
+     («ЭТА КНИГА БОЛЬШЕ НЕ РАБОЧАЯ»). Подробно — docs/OPERATOR_GUIDE.md, раздел 11.
+
+2. У ВАС СТАРАЯ ТАБЛИЦА «ЗАКАЗЫ» (НЕ WMS)
+   - WMS_LEGACY_TRANSFER.ods — перенос таблицы в WMS (docs/LEGACY_TRANSFER.md).
+
+3. НОВЫЙ СКЛАД С НУЛЯ
+   - {name} — ПУСТАЯ книга WMS. Скопируйте её в рабочую папку и откройте.
+   - Для склада, где уже есть данные, её НЕ открывайте: в ней пусто (данные — через пункт 1 или 2).
+
+ПЕРЕД ПЕРВЫМ ДНЁМ
+   - Проверка складского ПК: в этой папке выполните  python3 tools/pc_check.py  (docs/PC_VALIDATION.md).
+     Интернет и git для неё не нужны — исходники лежат здесь же.
+   - Макросы: Сервис → Параметры → LibreOffice → Безопасность → «Безопасность макросов…» → «Доверенные источники» →
+     «Добавить» — папка рабочей WMS. Без этого WMS открывается с надписью «WMS не запущена — макросы выключены».
+   - Инструменты (WMS_TOOLBOX) — рядом с рабочей книгой; обновлению их данные переносятся сами.
+
+ДОКУМЕНТЫ: docs/OPERATOR_GUIDE.md — руководство кладовщика; docs/RELEASE_NOTES.md — что нового;
+docs/BACKUP_RECOVERY.md — резервные копии и восстановление; RELEASE_MANIFEST.csv — файлы выпуска с SHA-256.
+"""
+    with open(os.path.join(out, START_HERE), "w", encoding="utf-8", newline="\r\n") as f:
+        f.write(t)
 
 
 def pack(out, version):

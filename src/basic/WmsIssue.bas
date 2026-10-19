@@ -696,8 +696,9 @@ End Sub
 
 ' Posts row r (0-based) of «Выдачи». Returns OK:<seq>, SKIP:<why> (nothing done), ERR:<why> (nothing done, the reason
 ' is in «Контроль»), BLOCKED:<why> or an ApplyOperation error (ERR-RB, ERR-CRITICAL).
-Function IssuePostRow(r As Long) As String
-    Dim why As String, sh As Object, kind As String, k As Long, res As String, s2 As Double
+' 1.0: sDoc — the common document of a block of issues (WmsDaily.PostIssueBlock): written into «Документ» (B) when B is empty
+Function IssuePostRow(r As Long, Optional sDoc As Variant) As String
+    Dim why As String, sh As Object, kind As String, k As Long, res As String, s2 As Double, sB As String
     WmsInit()
     If r < 1 Or r > MAX_SHEET_ROW Then
         IssuePostRow = "ERR:выберите строку выдачи (не заголовок)"
@@ -760,12 +761,17 @@ Function IssuePostRow(r As Long) As String
     PlanField("UNIT", mCdata(SC_UNIT))
     PlanField("WHO", mCwho)
     PlanField("DATE", Format(mCdate, "YYYY-MM-DD"))
-    PlanField("DOC", sh.getCellByPosition(IC_DOC, r).getString())
+    sB = sh.getCellByPosition(IC_DOC, r).getString()
+    If Not IsMissing(sDoc) Then
+        If Trim(sB) = "" And CStr(sDoc) <> "" Then sB = CStr(sDoc)
+    End If
+    PlanField("DOC", sB)
     PlanField("ROW", r + 1)
     PlanField("BAL_BEFORE", mCstock)
     PlanField("BAL_AFTER", s2)
     WmsPack.PlanQtyFields()
-    PlanRowValues(r, k, mCstock, s2, ST_POSTED)
+    PlanRowValues(r, k, mCstock, s2, ST_POSTED & WmsPack.PostedSuffix())
+    If sB <> sh.getCellByPosition(IC_DOC, r).getString() Then PlanSetValue(SH_ISSUES, r, IC_DOC, sB, True)
     PlanLockBits(SH_ISSUES, r, 0, IC_LAST, ISSUE_LOCKS_POSTED)
     PlanSetValue(SH_STOCK, mCn, SC_QTY, s2, False)
     PlanSetValue(SYS_SHEET, SK_NEXT_NO, 1, k + 1, False)
@@ -945,7 +951,7 @@ Function IssueFixRow(r As Long, vEI As Variant, vQty As Variant, vWho As Variant
     PlanField("BAL_BEFORE", pNew)
     PlanField("BAL_AFTER", qNew)
     WmsPack.PlanQtyFields()
-    PlanRowValues(r, k, pNew, qNew, ST_FIXED)
+    PlanRowValues(r, k, pNew, qNew, ST_FIXED & WmsPack.PostedSuffix())
     ' 1.0: «Количество в %» (F) tells the new quantity, never the old one: the percent of the correction or empty
     If gPkKind = "PCT" Then
         PlanSetValue(SH_ISSUES, r, IC_PCT, QtyText(gPkPct) & "%", True)

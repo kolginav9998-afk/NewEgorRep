@@ -1075,7 +1075,7 @@ def t35_timing_large_journal():
               ok,
               f"запуск (позиция подтверждена): {ms(rep_fast)} мс; запуск (позиция не подтвердилась — файл месяца): {ms(rep_file)} мс; "
               f"запуск (файла позиции нет — все файлы): {ms(rep_full)} мс; операция: {op_ms:.0f} мс; "
-              f"самопроверка (все файлы): {sc_ms:.0f} мс; {sc.splitlines()[0]}",
+              f"самопроверка (все файлы): {sc_ms:.0f} мс; {sc.splitlines()[0]}" + ("" if ok else f" || {rep_fast[:200]} || {rep_file[:200]} || {rep_full[:300]}"),
               timing=dict(entries=n, files=nfiles, start_fast_ms=ms(rep_fast), start_file_ms=ms(rep_file), start_full_ms=ms(rep_full),
                           op_ms=round(op_ms), selfcheck_ms=round(sc_ms)))
     finally:

@@ -16,6 +16,8 @@ Public Const MP_KEY_COL = 1100
 ' 1.0 (М2): the directory of the places outside the racks of the map (a floor, the yard, an office): known places, not
 ' «не на карте»; A the place, B its kind, C the zone, D the capacity in cells, E «закрыто», F a note
 Public Const SH_PLACES = "Места"
+' 1.0: the layout «Топология» had before the last «Сохранить карту» (hidden)
+Public Const SH_TOPO_PREV = "_TOPO_PREV"
 Public Const PD_PLACE = 0
 Public Const PD_KIND = 1
 Public Const PD_ZONE = 2
@@ -32,6 +34,10 @@ Global gMpEIs() As String
 Global gMpCells As Object
 Global gMpPanelCol As Long
 Global gMpBusy As Boolean
+' 1.0: the map is being edited on the map itself (BtnMapEdit … BtnMapSave / BtnMapCancel); a cell of the map keeps the mode
+' over a save and a reopening of the book
+Global gMpEdit As Boolean
+Public Const MP_EDIT_COL = 1105
 
 Private Function TopoSheet() As Object
     TopoSheet = gDoc.Sheets.getByName(SH_TOPO)
@@ -78,6 +84,55 @@ End Sub
 Sub BtnMapFree(Optional oEvent As Variant)
     MapShow("FREE")
 End Sub
+
+Sub BtnMapFill(Optional oEvent As Variant)
+    Dim s As String
+    WmsInit()
+    s = MapBuild("FILL")
+    If Left(s, 4) = "ERR:" Then WmsUi.UiMessage(Mid(s, 5))
+End Sub
+
+' 1.0 (М5): the places of the EIs eis (numbers, separated by «,») painted on the map — the layer «Товар»; the map is shown
+Function ShowOnMap(sEIs As String, sName As String) As String
+    Dim a As Variant, i As Long, n As Long, pls As Variant, j As Long, idx As Long, keyIdx As Object, st As Variant, nOn As Long, nOff As Long
+    WmsInit()
+    If MapEditing() Then
+        ShowOnMap = "ERR:карта в режиме правки — сначала «Сохранить карту» или «Отменить правку»"
+        Exit Function
+    End If
+    If gMpN = 0 Or gMpStatSeq <> SysNum(SK_LAST_SEQ) Then MapBuild(IIf(gMpLayer <> "", gMpLayer, "OCC"))
+    If gMpN = 0 Then
+        ShowOnMap = "ERR:карта склада не построена — нужна топология (лист «" & SH_TOPO & "»)"
+        Exit Function
+    End If
+    ReDim gMpFind(gMpN)
+    keyIdx = New Collection
+    For j = 0 To gMpN - 1
+        If gMpFirst(j) = j Then CollPut(keyIdx, j, gMpKey(j))
+    Next j
+    a = Split(sEIs, ",")
+    For i = 0 To UBound(a)
+        n = CLng(Val(a(i)))
+        If n > 0 Then
+            st = WmsIssue.StockSheet().getCellByPosition(SC_PLACE, n).getString()
+            pls = PlaceList(CStr(st))
+            For j = 0 To UBound(pls)
+                idx = CollGet(keyIdx, CStr(pls(j)))
+                If idx >= 0 Then
+                    gMpFind(idx) = True
+                    nOn = nOn + 1
+                Else
+                    nOff = nOff + 1
+                End If
+            Next j
+        End If
+    Next i
+    gMpFindName = sName
+    ShowOnMap = MapBuild("FIND")
+    gDoc.getCurrentController().setActiveSheet(gDoc.Sheets.getByName(SH_MAP))
+    If Left(ShowOnMap, 3) = "OK:" Then ShowOnMap = "OK:мест на карте " & nOn & IIf(nOff > 0, ", вне карты " & nOff, "")
+    gUiLastMsg = ShowOnMap
+End Function
 
 Sub BtnMapRefresh(Optional oEvent As Variant)
     Dim s As String
@@ -143,6 +198,10 @@ Sub BtnTopoLoad(Optional oEvent As Variant)
     Dim fp As Object, s As String
     WmsInit()
     On Error GoTo EH
+    If MapEditing() Then
+        WmsUi.UiMessage("Карта в режиме правки — сначала «Сохранить карту» или «Отменить правку».")
+        Exit Sub
+    End If
     fp = CreateUnoService("com.sun.star.ui.dialogs.FilePicker")
     fp.initialize(Array(com.sun.star.ui.dialogs.TemplateDescription.FILEOPEN_SIMPLE))
     fp.setTitle("Файл с топологией склада (лист, где места подписаны «ряд-секция-ярус»)")
@@ -277,11 +336,21 @@ Global gPd As Object
 Global gPdN As Long
 Global gPdClosed() As Boolean
 Global gPdName() As String
+' 1.0 (М4): the capacity of a place in cells («Места» D; 1 when not given) — a rack place listed in «Места» gets its own
+Global gPdCap() As Long
+' 1.0 (М5): the places of the layer «Товар» (ShowOnMap)
+Global gMpFind() As Boolean
+Global gMpFindName As String
 
 ' builds (or recolours) the map in the layer sLayer (OCC, ISS, STALE, ATT, FREE). OK:<counts> / ERR:<why>
 Function MapBuild(sLayer As String, Optional bForce As Variant) As String
     Dim mp As Object, why As String, force As Boolean, nOcc As Long, nFree As Long, nAtt As Long, i As Long, lbl As String
     If gMpBusy Then Exit Function
+    ' 1.0: never over the edits of the storekeeper — the map is built again by «Сохранить карту» or «Отменить правку»
+    If MapEditing() Then
+        MapBuild = "ERR:карта в режиме правки — сначала «Сохранить карту» или «Отменить правку»"
+        Exit Function
+    End If
     gMpBusy = True
     On Error GoTo EH
     WmsInit()
@@ -312,6 +381,8 @@ Function MapBuild(sLayer As String, Optional bForce As Variant) As String
     gMpLayer = sLayer
     Select Case sLayer
     Case "OCC": lbl = "Занятость: сколько ЕИ с остатком лежит на месте"
+    Case "FILL": lbl = "Заполненность: ЕИ на месте против его вместимости (лист «" & SH_PLACES & "», колонка «Вместимость, ячеек»; без неё — 1)"
+    Case "FIND": lbl = "Где лежит «" & gMpFindName & "»"
     Case "ISS": lbl = "Выдачи за 30 дней: сколько раз выдавали ЕИ, что лежат на месте"
     Case "STALE": lbl = "Без движения: сколько ЕИ места не двигались 90 дней и больше"
     Case "ATT": lbl = "Требует внимания: места, где лежит ЕИ «Требует разбора»"
@@ -321,8 +392,7 @@ Function MapBuild(sLayer As String, Optional bForce As Variant) As String
         & CLng(nOcc / gMpN * 100) & "%), свободно " & NumText(nFree) & IIf(nAtt > 0, ", требуют внимания " & NumText(nAtt), "") _
         & IIf(gMpNDir > 0, "   ·   вне стеллажей («" & SH_PLACES & "»): " & NumText(gMpNDir) & " ЕИ", "") _
         & "   ·   ЕИ не на карте: " & NumText(gMpNOff) & IIf(gMpNOff > 0, " — кнопка «Не на карте»", ""))
-    mp.getCellByPosition(0, MP_INFO_ROW).setString("Щёлкните по месту — здесь появится, что на нём лежит.   Обновлено " & Format(Now(), "DD.MM.YYYY HH:MM") _
-        & " за " & ViewMs() & " мс")
+    mp.getCellByPosition(0, MP_INFO_ROW).setString("Щёлкните по месту — здесь появится, что на нём лежит.   Обновлено " & Format(Now(), "DD.MM.YYYY HH:MM"))
     Legend(mp, sLayer)
     ViewDone(mp)
     gMpBusy = False
@@ -541,9 +611,11 @@ End Function
 ' for that moment only)
 Private Sub EnsureMapStyles()
     Dim fam As Object, k As Integer, st As Object, layers As Variant, j As Integer, cols As Variant, ink As Variant, nm As String, opened As Boolean
+    ' the build makes the styles; a missing one (a book of another release) is made when the book allows it — never an error
+    On Error Resume Next
     fam = gDoc.StyleFamilies.getByName("CellStyles")
-    layers = Array("OCC", "ISS", "STALE", "ATT", "FREE")
-    For j = 0 To 4
+    layers = Array("OCC", "ISS", "STALE", "ATT", "FREE", "FILL", "FIND")
+    For j = 0 To 6
         LayerColors(layers(j), cols, ink)
         For k = 0 To 4
             nm = "MAP_" & layers(j) & "_" & k
@@ -778,7 +850,7 @@ End Sub
 
 ' the colour code 0 … 4 of place i in the layer
 Private Function Bucket(sLayer As String, i As Long) As Integer
-    Dim v As Double
+    Dim v As Double, k As Long
     Select Case sLayer
     Case "OCC"
         v = gMpOcc(i)
@@ -799,6 +871,24 @@ Private Function Bucket(sLayer As String, i As Long) As Integer
         End If
     Case "ATT"
         Bucket = IIf(gMpOcc(i) = 0, 0, IIf(gMpAtt(i) = 1, 2, 1))
+    Case "FILL"
+        ' 1.0 (М4): the EIs of the place against its capacity
+        v = gMpOcc(i)
+        If v = 0 Then
+            Bucket = 0
+        Else
+            k = PlaceCap(gMpKey(i))
+            Bucket = IIf(v < k, 1, IIf(v = k, 3, 4))
+        End If
+    Case "FIND"
+        ' 1.0 (М5): the places of the goods shown
+        If UBound(gMpFind) >= i Then
+            If gMpFind(i) Then
+                Bucket = 4
+                Exit Function
+            End If
+        End If
+        Bucket = IIf(gMpOcc(i) > 0, 1, 0)
     Case Else
         Bucket = IIf(gMpOcc(i) = 0, 1, 0)
     End Select
@@ -823,6 +913,12 @@ Private Sub LayerColors(sLayer As String, ByRef cols As Variant, ByRef ink As Va
     Case "ATT"
         cols = Array(RGB(244, 246, 248), gray, RGB(255, 192, 97), RGB(217, 71, 43), gray)
         ink = Array(dk, dk, dk, wh, dk)
+    Case "FILL"
+        cols = Array(RGB(244, 246, 248), RGB(198, 232, 201), gray, RGB(255, 192, 97), RGB(217, 71, 43))
+        ink = Array(dk, dk, dk, dk, wh)
+    Case "FIND"
+        cols = Array(RGB(244, 246, 248), gray, gray, gray, RGB(47, 109, 181))
+        ink = Array(dk, dk, dk, dk, wh)
     Case Else
         cols = Array(gray, RGB(143, 209, 158), gray, gray, gray)
         ink = Array(dk, dk, dk, dk, dk)
@@ -845,6 +941,8 @@ Private Sub Legend(mp As Object, sLayer As String)
     Case "ISS": txt = Array("не выдавали", "1–2 раза", "3–5 раз", "6–10 раз", "больше 10")
     Case "STALE": txt = Array("пусто", "всё двигалось", "1 ЕИ без движения", "2–4 ЕИ", "5 и больше")
     Case "ATT": txt = Array("пусто", "в порядке", "требует разбора", "", "")
+    Case "FILL": txt = Array("пусто", "есть место", "", "заполнено", "больше вместимости")
+    Case "FIND": txt = Array("пусто", "другой товар", "", "", "«" & gMpFindName & "»")
     Case Else: txt = Array("занято", "свободно", "", "", "")
     End Select
     cell = mp.getCellByPosition(0, MP_LEGEND_ROW)
@@ -863,6 +961,256 @@ Private Sub Legend(mp As Object, sLayer As String)
     Next i
 End Sub
 
+' ================================================================ 1.0: the map edited on the map itself
+
+' True while the map is edited (the mode is kept in a cell of the map: it outlives a save and a reopening)
+Function MapEditing() As Boolean
+    On Error GoTo EH
+    If gMpEdit Then
+        MapEditing = True
+        Exit Function
+    End If
+    If gDoc.Sheets.hasByName(SH_MAP) Then
+        If gDoc.Sheets.getByName(SH_MAP).getCellByPosition(MP_EDIT_COL, 0).getString() = "EDIT" Then
+            gMpEdit = True
+            MapEditing = True
+        End If
+    End If
+EH:
+End Function
+
+Sub BtnMapEdit(Optional oEvent As Variant)
+    Dim s As String
+    WmsInit()
+    s = MapEditStart()
+    If Left(s, 4) = "ERR:" Then WmsUi.UiMessage(Mid(s, 5))
+End Sub
+
+' «Править карту»: the map shows the plain layout of «Топология» (no layer), its cells may be typed, cleared, coloured, merged;
+' a place is «ряд-секция-ярус» (5-12-3) — typed as text, Calc does not turn it into a date
+Function MapEditStart() As String
+    Dim mp As Object, rng As Object, cf As Object, nr As Long, nc As Long, nf As Object, loc As New com.sun.star.lang.Locale, k As Long
+    If MapEditing() Then
+        MapEditStart = "ERR:карта уже в режиме правки — «Сохранить карту» или «Отменить правку»"
+        Exit Function
+    End If
+    If gMpN = 0 Then MapBuild("OCC", True)
+    mp = gDoc.Sheets.getByName(SH_MAP)
+    If mp.isProtected() Then mp.unprotect(PROTECT_PWD)
+    nr = IIf(gMpN > 0, gMpRows, 0)
+    nc = IIf(gMpN > 0, gMpCols, 0)
+    If nr < 40 Then nr = 40
+    If nc < 30 Then nc = 30
+    rng = mp.getCellRangeByPosition(0, MP_TOP, nc - 1, MP_TOP + nr - 1)
+    cf = rng.ConditionalFormat
+    cf.clear()
+    rng.ConditionalFormat = cf
+    mp.getCellRangeByPosition(MP_GRID_COL, MP_TOP, MP_GRID_COL + nc, MP_TOP + nr).clearContents(1 + 2 + 4)
+    ' empty cells of the edit area: text, so that «5.12.3» stays a place
+    loc.Language = "ru"
+    loc.Country = "RU"
+    nf = gDoc.getNumberFormats()
+    k = nf.queryKey("@", loc, False)
+    If k < 0 Then k = nf.addNew("@", loc)
+    rng.NumberFormat = k
+    mp.getCellByPosition(MP_EDIT_COL, 0).setString("EDIT")
+    mp.getCellByPosition(0, MP_INFO_ROW).setString("РЕЖИМ ПРАВКИ КАРТЫ: впишите места «ряд-секция-ярус» (5-12-3) в клетки, очистите лишние, раскрасьте и объедините " _
+        & "клетки как на складе — затем «Сохранить карту» (WMS проверит схему) или «Отменить правку».")
+    mp.getCellByPosition(0, MP_SUM_ROW).setString("Карта — как лист «" & SH_TOPO & "»: сохранённая правка заменяет его (прежняя схема сохраняется в скрытом листе).")
+    gMpEdit = True
+    gDoc.getCurrentController().setActiveSheet(mp)
+    gDoc.getCurrentController().select(mp.getCellByPosition(0, MP_TOP))
+    MapEditStart = "OK:правка карты"
+    gUiLastMsg = MapEditStart
+End Function
+
+Sub BtnMapCancel(Optional oEvent As Variant)
+    WmsInit()
+    MapEditCancel()
+End Sub
+
+Function MapEditCancel() As String
+    Dim mp As Object
+    If Not MapEditing() Then
+        MapEditCancel = "SKIP:карта не в режиме правки"
+        Exit Function
+    End If
+    mp = gDoc.Sheets.getByName(SH_MAP)
+    If mp.isProtected() Then mp.unprotect(PROTECT_PWD)
+    mp.getCellByPosition(MP_EDIT_COL, 0).setString("")
+    gMpEdit = False
+    MapEditCancel = MapBuild(IIf(gMpLayer <> "", gMpLayer, "OCC"), True)
+    gUiLastMsg = MapEditCancel
+End Function
+
+' the edit area of the map: the frame of the layout it was built from and every cell written since
+Private Sub MapEditFrame(mp As Object, ByRef nr As Long, ByRef nc As Long)
+    Dim q As Object, a As Variant, i As Long
+    nr = IIf(gMpN > 0, gMpRows, 1)
+    nc = IIf(gMpN > 0, gMpCols, 1)
+    q = mp.getCellRangeByPosition(0, MP_TOP, MP_GRID_COL - 1, MP_TOP + 2999).queryContentCells(1 + 2 + 4 + 16)
+    a = q.getRangeAddresses()
+    For i = 0 To UBound(a)
+        If a(i).EndRow - MP_TOP + 1 > nr Then nr = a(i).EndRow - MP_TOP + 1
+        If a(i).EndColumn + 1 > nc Then nc = a(i).EndColumn + 1
+    Next i
+End Sub
+
+' М3: the check of a layout (the data of its cells): places, repeated addresses, places without a tier («5-12»), and what the
+' current map loses — the places where EIs lie. nPl — the places found; the report "" when nothing needs a look
+Function TopoReport(d As Variant, ByRef nPl As Long) As String
+    Dim r As Long, c As Long, k As String, seen As Object, dup As String, nDup As Long, two As String, nTwo As Long, s As String, i As Long
+    Dim lost As String, nLost As Long, nLostEI As Long, t As String
+    seen = New Collection
+    nPl = 0
+    For r = 0 To UBound(d)
+        For c = 0 To UBound(d(r))
+            If VarType(d(r)(c)) = 8 Then
+                t = Trim(CStr(d(r)(c)))
+                k = PlaceTextKey(t)
+                If k <> "" Then
+                    nPl = nPl + 1
+                    If Not CollPut(seen, 1, k) Then
+                        nDup = nDup + 1
+                        If nDup <= 5 Then dup = dup & IIf(dup <> "", ", ", "") & k
+                    End If
+                ElseIf TwoPartPlace(t) Then
+                    nTwo = nTwo + 1
+                    If nTwo <= 5 Then two = two & IIf(two <> "", ", ", "") & t
+                End If
+            End If
+        Next c
+    Next r
+    For i = 0 To gMpN - 1
+        If CollGet(seen, gMpKey(i)) < 0 And gMpFirst(i) = i Then
+            If UBound(gMpOcc) >= i Then
+                If gMpOcc(i) > 0 Then
+                    nLost = nLost + 1
+                    nLostEI = nLostEI + gMpOcc(i)
+                    If nLost <= 5 Then lost = lost & IIf(lost <> "", ", ", "") & gMpKey(i)
+                End If
+            End If
+        End If
+    Next i
+    If nDup > 0 Then s = s & "• адрес повторяется: " & dup & IIf(nDup > 5, " …", "") & " — одно место должно быть в одной клетке" & Chr(10)
+    If nTwo > 0 Then s = s & "• похоже на место без яруса: " & two & IIf(nTwo > 5, " …", "") & " — место пишется «ряд-секция-ярус» (5-12-3)" & Chr(10)
+    If nLost > 0 Then s = s & "• исчезнут места, где лежат ЕИ (" & nLostEI & "): " & lost & IIf(nLost > 5, " …", "") _
+        & " — эти ЕИ станут «не на карте» (их место не меняется)" & Chr(10)
+    TopoReport = s
+End Function
+
+Private Function TwoPartPlace(t As String) As Boolean
+    Dim i As Long, ch As String, nParts As Integer, inNum As Boolean, other As Boolean
+    For i = 1 To Len(t)
+        ch = Mid(t, i, 1)
+        If ch >= "0" And ch <= "9" Then
+            If Not inNum Then nParts = nParts + 1
+            inNum = True
+        ElseIf ch = "-" Or ch = "." Or ch = "/" Then
+            inNum = False
+        Else
+            other = True
+        End If
+    Next i
+    TwoPartPlace = (nParts = 2 And Not other And Len(t) >= 3)
+End Function
+
+' «Проверить топологию» (М3): the layout of «Топология» checked, nothing changed
+Sub BtnTopoCheck(Optional oEvent As Variant)
+    Dim topo As Object, cur As Object, d As Variant, nPl As Long, s As String, a As Object
+    WmsInit()
+    topo = TopoSheet()
+    cur = topo.createCursor()
+    cur.gotoEndOfUsedArea(False)
+    a = cur.getRangeAddress()
+    d = topo.getCellRangeByPosition(0, 0, a.EndColumn, a.EndRow).getDataArray()
+    If gMpN = 0 And Not MapEditing() Then MapBuild("OCC")
+    s = TopoReport(d, nPl)
+    WmsUi.UiMessage("Топология: мест " & nPl & "." & IIf(s <> "", Chr(10) & Chr(10) & s, Chr(10) & "Повторов адресов и мест без яруса нет."))
+    gUiLastMsg = "OK:мест " & nPl & IIf(s <> "", Chr(10) & s, "")
+End Sub
+
+Sub BtnMapSave(Optional oEvent As Variant)
+    Dim s As String
+    WmsInit()
+    s = MapEditSave()
+    If Left(s, 4) = "ERR:" Then WmsUi.UiMessage(Mid(s, 5))
+End Sub
+
+' «Сохранить карту»: the edited map is checked (М3) and replaces «Топология» (the previous layout is kept in a hidden sheet);
+' the map is built again from it
+Function MapEditSave() As String
+    Dim mp As Object, topo As Object, nr As Long, nc As Long, d As Variant, nPl As Long, rep As String, k As Integer, prev As Object
+    Dim cur As Object, a As Object, dest As New com.sun.star.table.CellAddress, srcA As New com.sun.star.table.CellRangeAddress, c As Long, r As Long
+    Dim wasProt As Boolean, wasDoc As Boolean, cp As Object
+    On Error GoTo EH
+    If Not MapEditing() Then
+        MapEditSave = "ERR:карта не в режиме правки — сначала «Править карту»"
+        Exit Function
+    End If
+    mp = gDoc.Sheets.getByName(SH_MAP)
+    MapEditFrame(mp, nr, nc)
+    d = mp.getCellRangeByPosition(0, MP_TOP, nc - 1, MP_TOP + nr - 1).getDataArray()
+    rep = TopoReport(d, nPl)
+    If nPl = 0 Then
+        MapEditSave = "ERR:на карте нет ни одного места «ряд-секция-ярус» (например 5-12-3) — впишите места или нажмите «Отменить правку»"
+        Exit Function
+    End If
+    k = WmsPrimeUi.UiButtons("Сохранить карту", "Мест на карте: " & nPl & IIf(gMpN > 0, " (было " & gMpN & ")", "") & "." & IIf(rep <> "", Chr(10) & Chr(10) _
+        & "Проверьте:" & Chr(10) & rep, Chr(10) & "Повторов адресов и мест без яруса нет.") & Chr(10) & "Карта заменит схему на листе «" & SH_TOPO _
+        & "»; прежняя схема сохранится в скрытом листе «" & SH_TOPO_PREV & "».", Array("Сохранить карту", "Вернуться к правке"), Array(1, 0))
+    If k <> 1 Then
+        MapEditSave = "SKIP:правка продолжается"
+        gUiLastMsg = MapEditSave
+        Exit Function
+    End If
+    topo = TopoSheet()
+    wasProt = topo.isProtected()
+    If wasProt Then topo.unprotect(PROTECT_PWD)
+    ' the previous layout: a hidden copy (one), then «Топология» is emptied and gets the map
+    wasDoc = gDoc.isProtected()
+    If wasDoc Then gDoc.unprotect(PROTECT_PWD)
+    If gDoc.Sheets.hasByName(SH_TOPO_PREV) Then gDoc.Sheets.removeByName(SH_TOPO_PREV)
+    gDoc.Sheets.copyByName(SH_TOPO, SH_TOPO_PREV, gDoc.Sheets.getCount())
+    prev = gDoc.Sheets.getByName(SH_TOPO_PREV)
+    prev.IsVisible = False
+    If wasDoc Then gDoc.protect(PROTECT_PWD)
+    cur = topo.createCursor()
+    cur.gotoEndOfUsedArea(False)
+    a = cur.getRangeAddress()
+    topo.getRows().removeByIndex(0, a.EndRow + 1)
+    dest.Sheet = SheetIndex(SH_TOPO)
+    dest.Column = 0
+    dest.Row = 0
+    srcA.Sheet = SheetIndex(SH_MAP)
+    srcA.StartColumn = 0
+    srcA.StartRow = MP_TOP
+    srcA.EndColumn = nc - 1
+    srcA.EndRow = MP_TOP + nr - 1
+    If mp.isProtected() Then mp.unprotect(PROTECT_PWD)
+    topo.copyRange(dest, srcA)
+    For c = 0 To nc - 1
+        topo.getColumns().getByIndex(c).Width = mp.getColumns().getByIndex(c).Width
+    Next c
+    For r = 0 To nr - 1
+        topo.getRows().getByIndex(r).Height = mp.getRows().getByIndex(MP_TOP + r).Height
+    Next r
+    cp = topo.getCellRangeByPosition(0, 0, nc - 1, nr - 1).CellProtection
+    cp.IsLocked = False
+    topo.getCellRangeByPosition(0, 0, nc - 1, nr - 1).CellProtection = cp
+    If wasProt Then topo.protect(PROTECT_PWD)
+    mp.getCellByPosition(MP_EDIT_COL, 0).setString("")
+    gMpEdit = False
+    gTkValid = False
+    MapEditSave = MapBuild(IIf(gMpLayer <> "", gMpLayer, "OCC"), True)
+    If Left(MapEditSave, 3) = "OK:" Then MapEditSave = "OK:карта сохранена: мест " & nPl
+    gUiLastMsg = MapEditSave
+    Exit Function
+EH:
+    MapEditSave = "ERR:карта не сохранена: " & Error$ & " (строка " & Erl & ") — режим правки остаётся; «Отменить правку» вернёт карту по листу «" & SH_TOPO & "»"
+    gUiLastMsg = MapEditSave
+End Function
+
 ' ================================================================ a click on the map
 
 ' the selection changed: a place → what lies there (in the line over the map and in the panel)
@@ -875,6 +1223,7 @@ Sub OnMapSelect(Optional oSel As Variant)
     a = oSel.getRangeAddress()
     If a.StartRow < MP_TOP Then Exit Sub
     WmsInit()
+    If gMpEdit Then Exit Sub
     If gMpN = 0 Or IsNull(gMpCells) Then Exit Sub
     If UBound(gMpEIs) < gMpN Then Exit Sub
     idx = CollGet(gMpCells, a.StartRow & ":" & a.StartColumn)
@@ -901,12 +1250,30 @@ EH:
     gUiLastMsg = "ERR:" & Error$ & " (строка " & Erl & ")"
 End Sub
 
+' 1.0 (М6): a double click on a place of the map — «Поиск» lists what lies there and the history of the place
+Function OnMapDoubleClick(Optional oTarget As Variant) As Boolean
+    Dim a As Object, idx As Long
+    On Error GoTo EH
+    WmsInit()
+    If MapEditing() Then Exit Function
+    a = oTarget.getCellAddress()
+    If a.Row < MP_TOP Or gMpN = 0 Or IsNull(gMpCells) Then Exit Function
+    idx = CollGet(gMpCells, a.Row & ":" & a.Column)
+    If idx < 0 Then Exit Function
+    OnMapDoubleClick = True
+    WmsFind.FindRun(gMpKey(idx))
+    WmsView.GoCell(SH_FIND, 3, 2)
+    gUiLastMsg = "OK:" & gMpKey(idx)
+    Exit Function
+EH:
+End Function
+
 ' the map is shown: built when it was never built in this session, and (1.0) counted again when operations were posted since
 ' it was counted — it showed the warehouse of the moment it was built (the layer of the last time)
 Sub OnMapFocus(Optional oEvent As Variant)
     On Error GoTo EH
     WmsInit()
-    If gMpBusy Then Exit Sub
+    If gMpBusy Or MapEditing() Then Exit Sub
     If gMpN = 0 Or gMpStatSeq <> SysNum(SK_LAST_SEQ) Then MapBuild(IIf(gMpLayer <> "", gMpLayer, "OCC"))
 EH:
 End Sub
@@ -999,6 +1366,7 @@ Function WhereSuggest(nm As String, art As String) As String
     Dim nextEI As Long, r As Long, r1x As Long, i As Long, st As Variant, same As Object, sKeys() As String, sCnt() As Long, nS As Long, idx As Long
     Dim pk As String, out As String, nOut As Integer, j As Long, best As Long, bestD As Double, d As Double, a As Variant, b As Variant, used() As Boolean
     Dim anchorKey As String, k As Integer, pls As Variant, desc As Object, found As Object, addrs As Variant, q As Long
+    Dim plan() As Long, cap() As Long, anchorIdx As Long
     nextEI = CLng(SysNum(SK_NEXT_EI))
     same = New Collection
     ReDim sKeys(50)
@@ -1049,12 +1417,38 @@ Function WhereSuggest(nm As String, art As String) As String
     If gMpN = 0 Or gMpStatSeq <> SysNum(SK_LAST_SEQ) Then MapBuild(IIf(gMpLayer <> "", gMpLayer, "OCC"))
     If gMpN > 0 Then
         ReDim used(gMpN)
+        ' 1.0 (М4, М9): a place has room while its EIs and the rows not yet posted that name it are fewer than its capacity;
+        ' «рядом» is measured on the map itself when the goods lie on it (the cells of the schema), otherwise by the address
+        MapPlanned(plan)
+        anchorIdx = -1
+        If anchorKey <> "" Then
+            For j = 0 To gMpN - 1
+                If gMpKey(j) = anchorKey Then
+                    anchorIdx = j
+                    Exit For
+                End If
+            Next j
+        End If
+        ReDim cap(gMpN)
+        For j = 0 To gMpN - 1
+            cap(j) = PlaceCap(gMpKey(j))
+        Next j
+        ' the places where the goods lie are already named above
+        For i = 0 To nS - 1
+            For j = 0 To gMpN - 1
+                If gMpKey(j) = PlaceKey(sKeys(i)) Then used(j) = True
+            Next j
+        Next i
         For k = 1 To 8 - nOut
             best = -1
             bestD = 1E+30
             For j = 0 To gMpN - 1
-                If gMpOcc(j) = 0 And Not used(j) And gMpFirst(j) = j And Not PlaceClosed(gMpKey(j)) Then
-                    d = PlaceDistance(anchorKey, gMpKey(j), j)
+                If gMpOcc(j) + plan(j) < cap(j) And Not used(j) And gMpFirst(j) = j And Not PlaceClosed(gMpKey(j)) Then
+                    If anchorIdx >= 0 Then
+                        d = Abs(gMpRow(j) - gMpRow(anchorIdx)) * 3 + Abs(gMpCol(j) - gMpCol(anchorIdx))
+                    Else
+                        d = PlaceDistance(anchorKey, gMpKey(j), j)
+                    End If
                     If d < bestD Then
                         bestD = d
                         best = j
@@ -1063,7 +1457,8 @@ Function WhereSuggest(nm As String, art As String) As String
             Next j
             If best < 0 Then Exit For
             used(best) = True
-            out = out & IIf(out <> "", Chr(10), "") & gMpKey(best) & "|" & gMpKey(best) & " — свободно" & IIf(anchorKey <> "", IIf(bestD < 1000, ", рядом", ""), "")
+            out = out & IIf(out <> "", Chr(10), "") & gMpKey(best) & "|" & gMpKey(best) & IIf(gMpOcc(best) + plan(best) = 0, " — свободно", " — есть место (занято " _
+                & (gMpOcc(best) + plan(best)) & " из " & cap(best) & ")") & IIf(anchorKey <> "", IIf(bestD < IIf(anchorIdx >= 0, 12, 1000), ", рядом", ""), "")
             nOut = nOut + 1
         Next k
     End If
@@ -1184,11 +1579,16 @@ Private Sub PlacesDirLoad()
     d = sh.getCellRangeByPosition(0, 1, PD_NOTE, last).getDataArray()
     ReDim gPdClosed(last)
     ReDim gPdName(last)
+    ReDim gPdCap(last)
     For i = 0 To UBound(d)
         If Trim(CStr(d(i)(PD_PLACE))) <> "" Then
             k = PlaceKeyAny(CStr(d(i)(PD_PLACE)))
             If CollPut(gPd, gPdN, k) Then
                 gPdName(gPdN) = Trim(CStr(d(i)(PD_PLACE)))
+                gPdCap(gPdN) = 1
+                If VarType(d(i)(PD_CAP)) = 5 Then
+                    If d(i)(PD_CAP) >= 1 Then gPdCap(gPdN) = CLng(Int(d(i)(PD_CAP)))
+                End If
                 gPdClosed(gPdN) = (LCase(Left(Trim(CStr(d(i)(PD_CLOSED))), 2)) = "да" Or LCase(Trim(CStr(d(i)(PD_CLOSED)))) = "закрыто")
                 gPdN = gPdN + 1
             End If
@@ -1206,6 +1606,46 @@ Function PlaceKnown(k As String) As Integer
         PlaceKnown = 2
     End If
 End Function
+
+' 1.0 (М4): the capacity of place key k in cells — «Места» D, 1 when the place is not there or D is empty
+Function PlaceCap(k As String) As Long
+    Dim i As Long
+    If Not gPdValid Then PlacesDirLoad()
+    i = CollGet(gPd, k)
+    PlaceCap = 1
+    If i >= 0 Then PlaceCap = gPdCap(i)
+End Function
+
+' 1.0 (М9): the places already promised by rows not yet posted («Заказы» U, «Иной приход» I, «Возврат» J, «Корректировки» J):
+' plan(j) — how many of them name place j of the map
+Sub MapPlanned(plan() As Long)
+    Dim specs As Variant, i As Integer, sh As Object, last As Long, a As Variant, nItems As Long, k As Long, pls As Variant, j As Long, idx As Long
+    Dim keyIdx As Object
+    ReDim plan(gMpN)
+    If gMpN = 0 Then Exit Sub
+    keyIdx = New Collection
+    For j = 0 To gMpN - 1
+        If gMpFirst(j) = j Then CollPut(keyIdx, j, gMpKey(j))
+    Next j
+    specs = Array(Array(SH_ORDERS, OC_PLACE, OC_EI), Array(SH_SPECIAL, XC_PLACE, XC_NO), Array(SH_RETURNS, RC_PLACE, RC_NO), Array(SH_ADJUST, AC_PLACE, AC_NO))
+    For i = 0 To UBound(specs)
+        If gDoc.Sheets.hasByName(specs(i)(0)) Then
+            sh = gDoc.Sheets.getByName(specs(i)(0))
+            last = WmsOrders.LastRow(sh)
+            If last >= 1 Then
+                a = EngList("TEXTJOIN("";"";1;IF((" & ColRng(specs(i)(0), specs(i)(2), 1, last) & "="""")*(" & ColRng(specs(i)(0), specs(i)(1), 1, last) _
+                    & "<>"""");" & ColRng(specs(i)(0), specs(i)(1), 1, last) & ";""""))", nItems)
+                For k = 0 To nItems - 1
+                    pls = PlaceList(CStr(a(k)))
+                    For j = 0 To UBound(pls)
+                        idx = CollGet(keyIdx, CStr(pls(j)))
+                        If idx >= 0 Then plan(idx) = plan(idx) + 1
+                    Next j
+                Next k
+            End If
+        End If
+    Next i
+End Sub
 
 ' the place is in «Места» and marked «закрыто»
 Function PlaceClosed(k As String) As Boolean
@@ -1358,6 +1798,17 @@ Function TestMapClick(r As Long, c As Long) As String
     gUiLastMsg = ""
     OnMapSelect(cell)
     TestMapClick = gUiLastMsg
+End Function
+
+Function TestMapBucket(sKey As String, sLayer As String) As String
+    Dim i As Long
+    For i = 0 To gMpN - 1
+        If gMpKey(i) = sKey Then
+            TestMapBucket = CStr(Bucket(sLayer, i))
+            Exit Function
+        End If
+    Next i
+    TestMapBucket = "-"
 End Function
 
 Function TestMapPlace(sKey As String) As String

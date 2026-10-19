@@ -18,6 +18,7 @@ Private Const MR_TIME = 13
 ' Global on purpose: LibreOffice Basic resets module-level Private variables at every new macro call.
 Global gUiAuto As Integer
 Global gUiLastMsg As String
+Global gUiLastIcon As Integer
 Global gUiConfirms As Long
 Global gUiFixSet As Boolean
 Global gUiFixEI As String
@@ -143,10 +144,10 @@ Sub UiRefresh(sLast As String)
         s = s & Chr(10) & "корректировки: не удалось посчитать — отфильтруйте «№» = пусто"
     End If
     PutB(sh, MR_UNPOSTED, s)
-    PutB(sh, MR_NOTES, Replace(gReport, " | ", Chr(10)))
+    PutB(sh, MR_NOTES, NotesText(gReport))
     If sLast <> "" Then
-        PutB(sh, MR_LAST, sLast)
-        PutB(sh, MR_TIME, Replace(TS(), "T", " "))
+        PutB(sh, MR_LAST, HumanText(sLast))
+        PutB(sh, MR_TIME, Format(Now(), "DD.MM.YYYY HH:MM"))
     End If
     If Not wasModified Then gDoc.setModified(False)
     Exit Sub
@@ -157,26 +158,36 @@ End Sub
 ' folder): «WMS не запущена» and how to start it; after the save (False) — the panel of this session again. The book stays
 ' «not modified» (the panel is derived state)
 Sub UiSavedState(bSaving As Boolean)
-    Dim sh As Object, c As Object, wasModified As Boolean
+    Dim sh As Object, wasModified As Boolean, um As Object
     On Error GoTo EH
     If Not gDoc.Sheets.hasByName(SH_MAIN) Then Exit Sub
+    wasModified = gDoc.isModified()
+    ' never undoable: Ctrl+Z after a save must not bring back the texts of the save — Calc records cell writes even under the lock
+    ' of the Undo manager (and undoing a write of the save could take LibreOffice down), so after the save the stack is cleared,
+    ' as WMS does after every operation (D-102)
+    um = gDoc.getUndoManager()
+    um.lock()
     If Not bSaving Then
         UiRefresh("")
         WmsDash.DashSavedState(False)
+        um.unlock()
+        um.clear()
+        If Not wasModified Then gDoc.setModified(False)
         Exit Sub
+    Else
+        sh = gDoc.Sheets.getByName(SH_MAIN)
+        PutB(sh, MR_STATE, "WMS не запущена — макросы выключены")
+        PutB(sh, MR_REASON, "Книга открыта без макросов WMS: ничего не проводится, кнопки не работают, листы показывают последнее сохранённое состояние.")
+        PutB(sh, MR_HINT, "Закройте книгу и откройте её снова с включёнными макросами. Если LibreOffice макросы не предлагает — добавьте папку WMS в " _
+            & "доверенные: Сервис → Параметры → LibreOffice → Безопасность → «Безопасность макросов…» → «Доверенные источники» → «Добавить».")
+        WmsDash.DashSavedState(True)
     End If
-    wasModified = gDoc.isModified()
-    sh = gDoc.Sheets.getByName(SH_MAIN)
-    PutB(sh, MR_STATE, "WMS не запущена — макросы выключены")
-    PutB(sh, MR_REASON, "Книга открыта без макросов WMS: ничего не проводится, кнопки не работают, листы показывают последнее сохранённое состояние.")
-    PutB(sh, MR_HINT, "Закройте книгу и откройте её снова с включёнными макросами. Если LibreOffice макросы не предлагает — добавьте папку WMS в " _
-        & "доверенные: Сервис → Параметры → LibreOffice → Безопасность → «Безопасность макросов…» → «Доверенные источники» → «Добавить».")
-    c = sh.getCellByPosition(1, MR_STATE)
-    If c.CellBackColor <> RGB(217, 217, 217) Then c.CellBackColor = RGB(217, 217, 217)
-    WmsDash.DashSavedState(True)
+    um.unlock()
     If Not wasModified Then gDoc.setModified(False)
     Exit Sub
 EH:
+    On Error Resume Next
+    um.unlock()
 End Sub
 
 ' end of every start: the panel is refreshed; a blocked WMS shows «Главная» so that the reason is seen at once
@@ -192,9 +203,77 @@ End Sub
 
 Sub UiMessage(s As String)
     gUiLastMsg = s
+    gUiLastIcon = UiIcon(s)
     If gUiAuto <> 0 Then Exit Sub
-    MsgBox s, 48, "WMS"
+    MsgBox HumanText(s), gUiLastIcon, "WMS"
 End Sub
+
+' 1.0: the icon of a message by its meaning — 16 (stop) when something was not done, 48 (!) when it needs a look,
+' 64 (i) for a hint or a result
+Function UiIcon(s As String) As Integer
+    Dim t As String, w As Variant
+    t = LCase(Left(s, 160))
+    For Each w In Array("ошибка", "не выполн", "не провед", "не отмен", "не загруж", "не построен", "не принят", "нельзя", "заблокир", _
+        "не удалось", "запрещ", "отказ")
+        If InStr(t, w) > 0 Then
+            UiIcon = 16
+            Exit Function
+        End If
+    Next w
+    For Each w In Array("внимание", "с ошибками", "уже удал", "проверьте", "предупрежд", "не найден", "— копия")
+        If InStr(t, w) > 0 Then
+            UiIcon = 48
+            Exit Function
+        End If
+    Next w
+    UiIcon = 64
+End Function
+
+' 1.0: a text for people — the milliseconds of the timing («, 87 мс», « за 259 мс») stay in the results the tests and the
+' diagnostics read, not in what the storekeeper reads
+Function HumanText(s As String) As String
+    Dim t As String, p As Long, a As Long, b As Long, nxt As String
+    t = s
+    p = InStr(t, " мс")
+    Do While p > 0
+        a = p - 1
+        Do While a >= 1
+            If InStr("0123456789", Mid(t, a, 1)) = 0 Then Exit Do
+            a = a - 1
+        Loop
+        nxt = Mid(t, p + 3, 1)
+        b = 0
+        If a < p - 1 And (nxt = "" Or InStr(" ,;.)|·" & Chr(10), nxt) > 0) Then
+            If a >= 4 Then
+                If Mid(t, a - 3, 4) = " за " Then b = a - 3
+            End If
+            If b = 0 And a >= 2 Then
+                If Mid(t, a - 1, 2) = ", " Or Mid(t, a - 1, 2) = "; " Then b = a - 1
+            End If
+            If b = 0 And a >= 1 Then
+                If Mid(t, a, 1) = " " Then b = a
+            End If
+        End If
+        If b > 0 Then
+            t = Left(t, b - 1) & Mid(t, p + 3)
+            p = InStr(b, t, " мс")
+        Else
+            p = InStr(p + 3, t, " мс")
+        End If
+    Loop
+    HumanText = t
+End Function
+
+' the notes of the start for «Главная»: one per line, without the timing of the start
+Private Function NotesText(sRep As String) As String
+    Dim parts As Variant, i As Long, t As String, sOut As String
+    parts = Split(sRep, " | ")
+    For i = 0 To UBound(parts)
+        t = HumanText(CStr(parts(i)))
+        If t <> "запуск WMS" And t <> "" Then sOut = sOut & IIf(sOut = "", "", Chr(10)) & t
+    Next i
+    NotesText = sOut
+End Function
 
 Function UiConfirm(s As String) As Boolean
     gUiLastMsg = s
@@ -333,13 +412,21 @@ End Function
 
 ' «Провести»: the result is written into «Контроль» of the row; nothing modal on success
 Sub BtnPost(Optional oEvent As Variant)
-    Dim r As Long, why As String, res As String
+    Dim r As Long, why As String, res As String, r0 As Long, r1 As Long
+    WmsInit()
+    ' 1.0: several rows selected — posted as a block under one document (WmsDaily, Р1)
+    If WmsDaily.IssueSelection(r0, r1) Then
+        WmsDaily.PostIssueBlock(r0, r1)
+        Exit Sub
+    End If
     If Not ActiveIssueRow(r, why) Then
         UiMessage(why)
         Exit Sub
     End If
     res = WmsIssue.IssuePostRow(r)
     WmsAsk.ShowRowResult("Выдача не проведена", res)
+    ' 1.0 (Ч7): metres cut from a bar — the rest of the bar may become an offcut of its own
+    If Left(res, 3) = "OK:" Then WmsDaily.OffcutAfterIssue(r)
     gUiLastMsg = res
     If Left(res, 8) = "BLOCKED:" Or Left(res, 13) = "ERR-CRITICAL:" Then UiRefresh("«Провести»: " & res)
     If Left(res, 13) = "ERR-CRITICAL:" Or Left(res, 5) = "BUSY:" Then UiMessage(Mid(res, InStr(res, ":") + 1))

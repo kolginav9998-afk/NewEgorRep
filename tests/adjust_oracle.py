@@ -17,7 +17,7 @@ import special_oracle
 
 EPS = 1e-6
 ST_POSTED, ST_FIXED, ST_DELETED = "Проведено", "Проведено (исправлено)", "Удалено (сторно)"
-KIND_NAME = {"MOVE": "Перемещение", "WRITE_OFF": "Списание", "INV_ADJ": "Инвентаризация"}
+KIND_NAME = {"MOVE": "Перемещение", "WRITE_OFF": "Списание", "INV_ADJ": "Инвентаризация", "SPLIT": "Разделение"}
 
 
 def check(doc, jdir, initial, expect_tail=0, today=None, base=None, legacy_mn_empty=True):
@@ -30,7 +30,7 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, legacy_mn_em
 
     adjs, sysv = st["adjs"], st["sysv"]
     # ------------------------------------------------------------ _ADJ
-    rows = ro.read(doc, "_ADJ", 11)
+    rows = ro.read(doc, "_ADJ", 12)
     book = {}
     for n, row in enumerate(rows):
         if n == 0 or row[0] == "":
@@ -55,6 +55,8 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, legacy_mn_em
             bad(f"инвентаризация № {n}: _ADJ учётный/факт {row[8]!r}/{row[9]!r} ≠ {a['book']}/{a['fact']}")
         if row[10] != float(ro.iso_serial(a["date"])):
             bad(f"корректировка № {n}: _ADJ дата {row[10]!r} ≠ {a['date']}")
+        if a["kind"] == "SPLIT" and (row[11], row[6], row[7]) != (a["new"], a["frm"] or "", a["to"] or ""):
+            bad(f"разделение № {n}: _ADJ новый ЕИ / места {(row[11], row[6], row[7])} ≠ {(a['new'], a['frm'], a['to'])}")
     for n in book:
         if n not in adjs:
             bad(f"_ADJ: корректировка № {n} без операции в журнале")
@@ -72,7 +74,7 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, legacy_mn_em
         if row[0] == "":
             if any(row[i] != "" for i in (1, 2, 6, 7, 9, 10, 11)):
                 open_rows += 1
-                if ctl in (ST_POSTED, ST_FIXED, ST_DELETED):
+                if ctl in (ST_POSTED, ST_FIXED, ST_DELETED) or ctl.startswith(ST_POSTED + " ·"):
                     bad(f"«Корректировки» строка {r + 1}: без № , но со статусом проведения «{ctl}»")
             continue
         if not isinstance(row[0], float):
@@ -88,6 +90,8 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, legacy_mn_em
             bad(f"«Корректировки» строка {r + 1}: № {n} без операции в журнале")
             continue
         want_st = ST_DELETED if a["state"] == "STORNO" else (ST_FIXED if a["fixes"] else ST_POSTED)
+        if a["kind"] == "SPLIT" and a["state"] != "STORNO":
+            want_st = f"{ST_POSTED} · новый {a['new']}"
         if ctl != want_st:
             bad(f"корректировка № {n}: статус «{ctl}», ожидался «{want_st}»")
         if (row[1], row[2]) != (KIND_NAME[a["kind"]], a["ei"]):
@@ -99,9 +103,11 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, legacy_mn_em
         if a["kind"] == "MOVE":
             if (row[9], row[12]) != (a["to"], a["frm"] or ""):
                 bad(f"перемещение № {n}: J/M {(row[9], row[12])} ≠ {(a['to'], a['frm'])}")
-        elif a["kind"] == "WRITE_OFF":
+        elif a["kind"] in ("WRITE_OFF", "SPLIT"):
             if not isinstance(row[6], float) or abs(row[6] + a["delta"]) > EPS or not isinstance(row[15], float) or abs(row[15] - a["delta"]) > EPS:
-                bad(f"списание № {n}: G/P {(row[6], row[15])} ≠ {(-a['delta'], a['delta'])}")
+                bad(f"{KIND_NAME[a['kind']]} № {n}: G/P {(row[6], row[15])} ≠ {(-a['delta'], a['delta'])}")
+            if a["kind"] == "SPLIT" and row[9] != (a["to"] or ""):
+                bad(f"разделение № {n}: J «{row[9]}» ≠ месту нового ЕИ «{a['to']}»")
         else:
             if (not isinstance(row[7], float) or abs(row[7] - a["fact"]) > EPS or not isinstance(row[8], float) or abs(row[8] - a["book"]) > EPS
                     or not isinstance(row[15], float) or abs(row[15] - a["delta"]) > EPS):

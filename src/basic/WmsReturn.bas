@@ -1060,7 +1060,8 @@ Function LiveDependents(canon As String, ByRef nIss As Long, ByRef nRet As Long)
     If li >= 1 Then
         l = "$'" & SH_ISSUES & "'.$L$2:$L$" & (li + 1)
         rr = "$'" & SH_ISSUES & "'.$R$2:$R$" & (li + 1)
-        f = "COUNTIFS(" & l & ";" & q & ";" & rr & ";""" & ST_POSTED & """)+COUNTIFS(" & l & ";" & q & ";" & rr & ";""" & ST_FIXED & """)"
+        ' 1.0: by the start of «Контроль» — «Проведено», «Проведено (исправлено)», «Проведено · 1 кан» (D-104) are all live
+        f = "SUMPRODUCT((" & l & "=" & q & ")*(LEFT(" & rr & ";" & Len(ST_POSTED) & ")=""" & ST_POSTED & """))"
     End If
     g = "0"
     If lr >= 1 Then

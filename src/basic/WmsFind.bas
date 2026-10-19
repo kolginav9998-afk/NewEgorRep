@@ -26,6 +26,8 @@ Global gFdSpecial As Boolean
 Global gFdCardEI As Long
 ' 1.0: the regular expression of the place being searched ("" — a plain text search)
 Global gFdPlaceRx As String
+' 1.0: the number of EIs with a balance that «Подобрать ЕИ» found (it shows at most 15)
+Global gPickAll As Long
 
 Private Function FindSheet() As Object
     FindSheet = gDoc.Sheets.getByName(SH_FIND)
@@ -324,6 +326,83 @@ End Function
 
 ' 1.0: the regular expression of place key k (5-12-3): its parts as people write them — any separator, leading zeros, «Р5»,
 ' «C12» in Latin — and nothing glued to it («15-12-3», «5-12-31» are other places)
+' 1.0 (М6): what lies on place key now — the EIs of «Наличие» with a balance whose list of places holds it («пусто» when none)
+Function PlaceNow(k As String) As String
+    Dim st As Object, last As Long, desc As Object, found As Object, a As Variant, i As Long, r As Long, d As Variant, pls As Variant, j As Integer
+    Dim s As String, n As Long
+    st = WmsIssue.StockSheet()
+    last = CLng(SysNum(SK_NEXT_EI)) - 1
+    If last >= 1 Then
+        desc = st.createSearchDescriptor()
+        desc.SearchString = PlaceRegex(k)
+        desc.SearchRegularExpression = True
+        desc.SearchCaseSensitive = False
+        found = st.getCellRangeByPosition(SC_PLACE, 1, SC_PLACE, last).findAll(desc)
+        If Not IsNull(found) Then
+            a = found.getRangeAddresses()
+            For i = 0 To UBound(a)
+                For r = a(i).StartRow To a(i).EndRow
+                    d = st.getCellRangeByPosition(0, r, SC_STATE, r).getDataArray()(0)
+                    If VarType(d(SC_QTY)) = 5 Then
+                        If d(SC_QTY) > 0.0000005 And CStr(d(SC_STATE)) <> EI_ST_STORNO Then
+                            pls = PlaceList(CStr(d(SC_PLACE)))
+                            For j = 0 To UBound(pls)
+                                If pls(j) = k Then
+                                    n = n + 1
+                                    If n <= 8 Then s = s & IIf(s <> "", "; ", "") & d(SC_EI) & " " & d(SC_NAME) & " — " & WmsPack.QtyWithParts(r, CDbl(d(SC_QTY)), CStr(d(SC_UNIT)))
+                                    Exit For
+                                End If
+                            Next j
+                        End If
+                    End If
+                Next r
+            Next i
+        End If
+    End If
+    PlaceNow = IIf(n = 0, "пусто", NumText(n) & " ЕИ: " & s & IIf(n > 8, " …", ""))
+End Function
+
+' 1.0 (М5): «Показать на карте» — the goods of the card of «Поиск» (the same article, or the same name) on the map
+Sub BtnShowOnMap(Optional oEvent As Variant)
+    Dim s As String
+    WmsInit()
+    s = ShowCardOnMap()
+    If Left(s, 4) = "ERR:" Then WmsUi.UiMessage(Mid(s, 5))
+End Sub
+
+Function ShowCardOnMap() As String
+    Dim n As Long, d As Variant, desc As Object, found As Object, a As Variant, i As Long, r As Long, s As String, col As Integer, v As String, st As Object
+    If gFdMode <> "CARD" Or gFdCardEI <= 0 Then
+        ShowCardOnMap = "ERR:откройте карточку ЕИ на «" & SH_FIND & "» (номер ЕИ в поле поиска) — WMS покажет на карте все места этого товара"
+        Exit Function
+    End If
+    n = gFdCardEI
+    st = WmsIssue.StockSheet()
+    d = st.getCellRangeByPosition(0, n, SC_ART, n).getDataArray()(0)
+    If Trim(CStr(d(SC_ART))) <> "" Then
+        col = SC_ART
+        v = Trim(CStr(d(SC_ART)))
+    Else
+        col = SC_NAME
+        v = Trim(CStr(d(SC_NAME)))
+    End If
+    desc = st.createSearchDescriptor()
+    desc.SearchString = "^" & EscRegex(v) & "$"
+    desc.SearchRegularExpression = True
+    desc.SearchCaseSensitive = False
+    found = st.getCellRangeByPosition(col, 1, col, CLng(SysNum(SK_NEXT_EI)) - 1).findAll(desc)
+    s = CStr(n)
+    If Not IsNull(found) Then
+        a = found.getRangeAddresses()
+        For i = 0 To UBound(a)
+            For r = a(i).StartRow To a(i).EndRow
+                If r <> n And st.getCellByPosition(SC_QTY, r).getValue() > 0.0000005 Then s = s & "," & r
+            Next r
+        Next i
+    End If
+    ShowCardOnMap = WmsMap.ShowOnMap(s, CStr(d(SC_NAME)))
+End Function
+
 Function PlaceRegex(k As String) As String
     Dim a As Variant, i As Integer, r As String, x As String
     a = Split(k, "-")
@@ -387,6 +466,11 @@ Function FindList(sQuery As String) As String
     sh.getCellByPosition(1, FD_HEAD).setString(IIf(nAll = 0, "Ничего не найдено: «" & sQuery & "»", "Найдено «" & sQuery & "»: " & NumText(nAll) _
         & " " & Plural(nAll, "строка", "строки", "строк") & IIf(nAll > nOut, " (показаны первые " & nOut & ")", "")))
     sh.getCellByPosition(1, FD_INFO).setString(IIf(totals <> "", "В «" & SH_STOCK & "» по найденному: " & totals, ""))
+    ' 1.0 (М6, М12): a place — what lies on it now; the rows below are its history (receipts, issues, moves through it)
+    If gFdPlaceRx <> "" Then
+        sh.getCellByPosition(1, FD_HEAD).setString("Место " & PlaceTextKey(sQuery) & ": сейчас — " & PlaceNow(PlaceTextKey(sQuery)) _
+            & IIf(nAll > 0, " · история места — строки ниже (" & NumText(nAll) & ")", ""))
+    End If
     sh.getCellByPosition(1, FD_INFO + 1).setString(IIf(nAll > 0, "Двойной щелчок по строке с ЕИ — карточка ЕИ; по другой строке — переход к ней. " _
         & "«Перейти к строке» — открыть строку на её листе.", "Ищется в «" & SH_STOCK & "», «" & SH_ORDERS & "», «" & SH_ISSUES & "», «" & SH_RETURNS _
         & "», «" & SH_SPECIAL & "», «" & SH_ADJUST & "», «" & SH_CARS & "», «" & SH_RCPT & "» — по тому, что видно в ячейках, без учёта регистра."))
@@ -582,6 +666,8 @@ Function CardShow(n As Long) As String
     SheetMoves(SH_ISSUES, IC_EI, IC_LAST, canon, mKey, mRow, nM)
     SheetMoves(SH_RETURNS, RC_EI, RC_LAST, canon, mKey, mRow, nM)
     SheetMoves(SH_ADJUST, AC_EI, AC_LAST, canon, mKey, mRow, nM)
+    ' 1.0 (М1): an EI split from another one starts with that split
+    If SplitOrigin(canon, mKey, mRow, nM) Then gFdSpecial = True
     ' a source of the balance: a receipt by an order, a transfer, a special receipt (the synthetic EIs of a test book have none)
     hasSrc = (CStr(rv(RV_EI)) <> "" Or CStr(lg(LG_KIND)) <> "" Or gFdSpecial)
     ReDim idx(IIf(nM > 0, nM - 1, 0))
@@ -728,6 +814,29 @@ Private Sub SheetMoves(sName As String, cEI As Integer, cLast As Integer, canon 
     Next k
 End Sub
 
+' 1.0 (М1): the split that made EI canon (_ADJ L = canon): its first movement. True when there is one
+Private Function SplitOrigin(canon As String, mKey() As Double, mRow() As Variant, nM As Long) As Boolean
+    Dim sh As Object, last As Long, desc As Object, found As Object, a As Variant, r As Long, d As Variant, live As Boolean
+    If Not gDoc.Sheets.hasByName(SH_ADJ) Then Exit Function
+    sh = gDoc.Sheets.getByName(SH_ADJ)
+    last = WmsOrders.LastRow(sh)
+    If last < 1 Then Exit Function
+    desc = sh.createSearchDescriptor()
+    desc.SearchString = "^" & canon & "$"
+    desc.SearchRegularExpression = True
+    desc.SearchCaseSensitive = True
+    found = sh.getCellRangeByPosition(AJ_NEW, 1, AJ_NEW, last).findAll(desc)
+    If IsNull(found) Then Exit Function
+    a = found.getRangeAddresses()
+    r = a(0).StartRow
+    d = sh.getCellRangeByPosition(0, r, AJ_LAST, r).getDataArray()(0)
+    If CStr(d(AJ_KIND)) <> "SPLIT" Then Exit Function
+    live = (CStr(d(AJ_STATE)) = RV_LIVE)
+    AddMove(mKey, mRow, nM, DateOf(d(AJ_DATE)), 1, "", "Отделён от " & d(AJ_EI) & " (корректировка № " & d(AJ_NO) & ")", "", "", _
+        IIf(live And VarType(d(AJ_QTY)) = 5, -d(AJ_QTY), 0), 0, SH_ADJUST, -1, IIf(live, "место «" & d(AJ_TO) & "»", "разделение удалено (сторно)"), Not live)
+    SplitOrigin = True
+End Function
+
 Private Sub AdjMove(d As Variant, live As Boolean, dt As Double, sName As String, r As Long, mKey() As Double, mRow() As Variant, nM As Long)
     Dim kind As String, ch As Double, note As String
     kind = CStr(d(AC_KIND))
@@ -737,6 +846,8 @@ Private Sub AdjMove(d As Variant, live As Boolean, dt As Double, sName As String
         ch = 0
     ElseIf kind = "Инвентаризация" Then
         note = "учётный " & d(AC_BOOK) & ", фактический " & d(AC_FACT)
+    ElseIf kind = "Разделение" Then
+        note = Mid(CStr(d(AC_CTL)), InStr(CStr(d(AC_CTL)), "·") + 2) & " · место «" & d(AC_PLACE) & "»"
     End If
     If Not live Then
         ch = 0
@@ -812,22 +923,31 @@ Function PickEI() As String
     For k = 0 To n - 1
         opts(k) = Mid(lines(k), InStr(lines(k), "|") + 1)
     Next k
-    c = WmsPrimeUi.UiChoose("Подобрать ЕИ — «" & v(0) & "»", "ЕИ с остатком (старые первыми — их и выдавать первыми). Выберите и нажмите «Выбрать»:", opts)
+    c = WmsPrimeUi.UiChoose("Подобрать ЕИ — «" & v(0) & "»", "ЕИ с остатком (старые первыми — их и выдавать первыми)" _
+        & IIf(gPickAll > n, ". Показано " & n & " из " & gPickAll & " — чтобы найти нужный быстрее, уточните: добавьте слово, артикул или место", "") _
+        & ". Выберите и нажмите «Выбрать»:", opts)
     If c < 0 Or c >= n Then
         gUiLastMsg = "SKIP:ЕИ не выбран"
         PickEI = gUiLastMsg
         Exit Function
     End If
     sh.getCellByPosition(cEI, r).setString(Left(lines(c), InStr(lines(c), "|") - 1))
-    gUiLastMsg = "OK:" & Left(lines(c), InStr(lines(c), "|") - 1) & " записан в строку " & (r + 1)
+    ' 1.0 (Р10): the row shows what it will do at once, and the cursor goes to the quantity
+    If sName = SH_ISSUES Then
+        WmsIssue.PreviewRow(r, True, False)
+        GoCell(sName, r, IC_QTY)
+    Else
+        GoCell(sName, r, AC_QTY)
+    End If
+    gUiLastMsg = "OK:" & Left(lines(c), InStr(lines(c), "|") - 1) & " записан в строку " & (r + 1) & IIf(gPickAll > n, "; показано " & n & " из " & gPickAll, "")
     PickEI = gUiLastMsg
 End Function
 
 ' EIs with a balance whose name, article or place holds sWhat: lines «EI|EI · name · balance unit · place», the oldest first, at most 15
 Function PickCandidates(sWhat As String) As String
-    Dim sh As Object, last As Long, desc As Object, found As Object, addrs As Variant, k As Long, r As Long, d As Variant, seen() As Boolean, out As String
-    Dim nOut As Integer, i As Long
-    If sWhat = "" Then
+    Dim sh As Object, last As Long, desc As Object, found As Object, addrs As Variant, k As Long, r As Long, d As Variant, seen() As Integer, out As String
+    Dim nOut As Integer, i As Long, words As Variant, w As Integer, nWords As Integer, nAll As Long, sKey As String
+    If Trim(sWhat) = "" Then
         PickCandidates = "ERR:ничего не вписано — впишите наименование, артикул или место"
         Exit Function
     End If
@@ -837,37 +957,50 @@ Function PickCandidates(sWhat As String) As String
         PickCandidates = "ERR:в «" & SH_STOCK & "» ещё нет ЕИ"
         Exit Function
     End If
-    desc = sh.createSearchDescriptor()
-    desc.SearchString = sWhat
-    desc.SearchCaseSensitive = False
-    desc.SearchWords = False
-    desc.SearchRegularExpression = False
+    ' 1.0 (Р10): the words in any order — «болт м8» finds «Болт оцинкованный М8х30»: a row counts when every word is in its
+    ' name, article or place
+    words = Split(Trim(Replace(sWhat, Chr(160), " ")), " ")
     ReDim seen(last)
-    ' the name, the article (B, C) and the place (F)
-    For i = 0 To 1
-        If i = 0 Then found = sh.getCellRangeByPosition(SC_NAME, 1, SC_ART, last).findAll(desc) Else found = sh.getCellRangeByPosition(SC_PLACE, 1, SC_PLACE, last).findAll(desc)
-        If Not IsNull(found) Then
-            addrs = found.getRangeAddresses()
-            For k = 0 To UBound(addrs)
-                For r = addrs(k).StartRow To addrs(k).EndRow
-                    seen(r) = True
-                Next r
-            Next k
+    For w = 0 To UBound(words)
+        If Trim(words(w)) <> "" Then
+            nWords = nWords + 1
+            desc = sh.createSearchDescriptor()
+            desc.SearchString = Trim(words(w))
+            desc.SearchCaseSensitive = False
+            desc.SearchWords = False
+            desc.SearchRegularExpression = False
+            ' the name, the article (B, C) and the place (F); a row is counted once per word
+            sKey = "|"
+            For i = 0 To 1
+                If i = 0 Then found = sh.getCellRangeByPosition(SC_NAME, 1, SC_ART, last).findAll(desc) Else found = sh.getCellRangeByPosition(SC_PLACE, 1, SC_PLACE, last).findAll(desc)
+                If Not IsNull(found) Then
+                    addrs = found.getRangeAddresses()
+                    For k = 0 To UBound(addrs)
+                        For r = addrs(k).StartRow To addrs(k).EndRow
+                            If seen(r) = nWords - 1 Then seen(r) = nWords
+                        Next r
+                    Next k
+                End If
+            Next i
         End If
-    Next i
-    ' the oldest EI first (the row is the number of the EI)
+    Next w
+    ' the oldest EI first (the row is the number of the EI); all the matching EIs with a balance are counted
     For r = 1 To last
-        If seen(r) And nOut < 15 Then
+        If seen(r) = nWords And nWords > 0 Then
             d = sh.getCellRangeByPosition(0, r, SC_STATE, r).getDataArray()(0)
             If VarType(d(SC_QTY)) = 5 Then
                 If d(SC_QTY) > 0.0000005 And CStr(d(SC_STATE)) <> EI_ST_STORNO Then
-                    out = out & IIf(out <> "", Chr(10), "") & d(SC_EI) & "|" & d(SC_EI) & " · " & d(SC_NAME) & " · " _
-                        & WmsPack.QtyWithParts(r, CDbl(d(SC_QTY)), CStr(d(SC_UNIT))) & IIf(CStr(d(SC_PLACE)) <> "", " · " & d(SC_PLACE), "")
-                    nOut = nOut + 1
+                    nAll = nAll + 1
+                    If nOut < 15 Then
+                        out = out & IIf(out <> "", Chr(10), "") & d(SC_EI) & "|" & d(SC_EI) & " · " & d(SC_NAME) & " · " _
+                            & WmsPack.QtyWithParts(r, CDbl(d(SC_QTY)), CStr(d(SC_UNIT))) & IIf(CStr(d(SC_PLACE)) <> "", " · " & d(SC_PLACE), "")
+                        nOut = nOut + 1
+                    End If
                 End If
             End If
         End If
     Next r
+    gPickAll = nAll
     If out = "" Then
         PickCandidates = "ERR:ЕИ с остатком по «" & sWhat & "» нет — проверьте написание или поищите на странице «" & SH_FIND & "»"
     Else

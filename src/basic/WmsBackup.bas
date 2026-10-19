@@ -23,6 +23,16 @@ Function KeepFor(kind As String) As Integer
     End Select
 End Function
 
+' 1.0: the kind as the storekeeper reads it (the name of the file keeps the code)
+Private Function KindName(kind As String) As String
+    Select Case kind
+    Case "daily": KindName = "ежедневная"
+    Case "preupgrade": KindName = "перед обновлением"
+    Case "premigration": KindName = "перед переносом"
+    Case Else: KindName = "ручная"
+    End Select
+End Function
+
 ' kind: daily | manual | preupgrade | premigration
 Function BackupNow(kind As String) As String
     Dim src As String, dst As String, d As Date, t0 As Long, stamp As String, nSrc As Double, nDst As Double, sClock As String
@@ -52,7 +62,7 @@ Function BackupNow(kind As String) As String
         Exit Function
     End If
     Rotate(kind, KeepFor(kind), FileNameOf(dst))
-    BackupNow = "резервная копия " & kind & " (последнее сохранённое состояние): " & FileNameOf(dst) & ", " & (GetSystemTicks() - t0) & " мс" & sClock
+    BackupNow = "резервная копия «" & KindName(kind) & "» (последнее сохранённое состояние): " & FileNameOf(dst) & ", " & (GetSystemTicks() - t0) & " мс" & sClock
     Exit Function
 EH:
     BackupNow = "ОШИБКА резервной копии: " & Error$
