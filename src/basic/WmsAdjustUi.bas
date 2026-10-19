@@ -142,6 +142,7 @@ Sub BtnAdjPost(Optional oEvent As Variant)
         res = WmsAdjust.AdjustPostRow(r0)
         AfterOperation("«Провести» (корректировка)", res)
         If Left(res, 13) = "ERR-CRITICAL:" Or Left(res, 5) = "BUSY:" Or Left(res, 8) = "ERR-SYS:" Then UiMessage(Payload(res))
+        WmsAsk.ShowRowResult("Корректировка не проведена", res)
         gUiLastMsg = res
         Exit Sub
     End If

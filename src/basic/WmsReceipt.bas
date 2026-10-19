@@ -6,6 +6,11 @@
 ' или не меняются вовсе. Порядок записей в плане: _SYS → «Наличие» → _RCV → _ORD → «Заказы».
 Option Explicit
 
+' 1.0: what a receipt posted but could not finish (its packing) — the window after the posting says it
+Global gRcvNote As String
+' 1.0: OrderCancelCheck — the checks of a cancellation run without the operation (the question comes after them)
+Private mCheckOnly As Boolean
+
 ' validated receipt values (filled by the checks)
 Private mFact As Double
 Private mHasDocQty As Boolean
@@ -407,7 +412,7 @@ End Sub
 ' nothing done), BLOCKED:<why> or an ApplyOperation error (ERR-RB, ERR-CRITICAL). IsSystemResult tells them apart.
 Function ReceiptPostRow(r As Long) As String
     Dim why As String, kind As String, n As Long, canon As String, olid As Long, res As String, sKey As String, dup As String
-    Dim packN As Double, packU As String
+    Dim packN As Double, packU As String, sPlace0 As String
     Dim fp As String, st As String, ctl As String, nodoc As Integer, own As String, sOrder As String, sArt As String, sSupplier As String
     WmsInit()
     If r < 1 Or r > MAX_SHEET_ROW Then
@@ -450,7 +455,8 @@ Function ReceiptPostRow(r As Long) As String
         ReceiptPostRow = "ERR:" & why
         Exit Function
     End If
-    why = PackFromReceipt(r, packN, packU)
+    gRcvNote = ""
+    why = PackFromReceipt(r, packN, packU, 0, "", "")
     If why <> "" Then
         ReceiptPostRow = why
         Exit Function
@@ -471,6 +477,18 @@ Function ReceiptPostRow(r As Long) As String
     sSupplier = Trim(Txt(r, OC_SUPPLIER))
     sKey = WmsOrders.DupKeyText(sSupplier, mDoc, sArt, mName, mFact, DupDate())
     dup = WmsOrders.FindDuplicate(sKey, 0)
+    ' 1.0: a possible repeat is asked about before posting (it was only marked in AB)
+    why = DupQuestion(r, dup, True)
+    If why = "" Then
+        ' 1.0: the place checked against the map and «Места» («1-24» instead of «1-2-4» is asked about)
+        sPlace0 = mPlace
+        why = WmsMap.PlaceAsk(mPlace, "приход не проведён")
+        If why <> "" Then SetCtl(r, "Не проведено: проверьте место хранения (U) «" & sPlace0 & "»")
+    End If
+    If why <> "" Then
+        ReceiptPostRow = why
+        Exit Function
+    End If
     nodoc = DocsMissing(mDoc, mHasDdate)
     st = WmsOrders.PositionStatus(mOrdQty, mFact, nodoc, "")
     own = WmsOrders.ReceiptControl(mFact, mHasDocQty, mDocQty, mDoc <> "", mHasDdate, mUnit)
@@ -494,6 +512,7 @@ Function ReceiptPostRow(r As Long) As String
     PlanOrderInputs(r)
     PlanOrderValues(r)
     PlanReceiptValues(r, True, False)
+    If mPlace <> sPlace0 Then PlanSetValue(SH_ORDERS, r, OC_PLACE, mPlace, True)
     PlanSetValue(SH_ORDERS, r, OC_EI, canon, False)
     PlanDerived(SH_ORDERS, r, OC_STATUS, st)
     PlanDerived(SH_ORDERS, r, OC_STOCK, mFact)
@@ -505,7 +524,8 @@ Function ReceiptPostRow(r As Long) As String
     ' the packing of the new EI (its own operation EI_PACK): if it fails, the receipt stands and «Фасовка ЕИ» sets it later
     If Left(res, 3) = "OK:" And packN > 0 Then
         why = WmsPack.PackSet(canon, WmsIssue.QtyText(packN), packU, "по документу " & WmsIssue.QtyText(mDocQty) & " " & mUnit & ", факт частями")
-        If Left(why, 3) <> "OK:" Then gUiLastMsg = canon & ": фасовка не записана (" & why & ") — задайте её кнопкой «Фасовка ЕИ»"
+        If Left(why, 3) <> "OK:" Then gRcvNote = "Приход проведён (" & canon & "), но фасовка не записана: " & Mid(why, InStr(why, ":") + 1) _
+            & Chr(10) & "Задайте её кнопкой «Фасовка ЕИ» на листе «" & SH_STOCK & "»."
     End If
     ReceiptPostRow = res
     Exit Function
@@ -516,25 +536,35 @@ EH:
     SetCtl(r, "Не проведено: " & Mid(ReceiptPostRow, 9))
 End Function
 
-' D-099: «в документе 1 шт, в наименовании 4 канистры, факт 4» — the fact was counted in parts. Asked: «Да» — the receipt by
-' the document (G) and the packing from the name, «Нет» — the fact as typed, «Отмена» — nothing. "" to go on, SKIP:… cancelled
-Private Function PackFromReceipt(r As Long, ByRef pn As Double, ByRef pu As String) As String
-    Dim gn As Double, gu As String, ans As Integer, u As String
+' D-099: «в документе 1 шт, в наименовании 4 канистры, факт 4» — the fact was counted in parts. Asked (1.0: the buttons
+' name what they do): the receipt by the document (G) with the packing, the fact as typed, or nothing. knownN, knownU — the
+' packing of the EI of the same position («Ещё поступление»: the new EI gets it in any case), sFrom — that EI.
+' "" to go on (pn, pu — the packing to record for the new EI), SKIP:… cancelled
+Private Function PackFromReceipt(r As Long, ByRef pn As Double, ByRef pu As String, knownN As Double, knownU As String, sFrom As String) As String
+    Dim gn As Double, gu As String, ans As Integer, u As String, sPack As String
     pn = 0
     pu = ""
+    If knownN > 0 Then
+        gn = knownN
+        gu = knownU
+        pn = knownN
+        pu = knownU
+    Else
+        WmsPack.PackGuess(mName, gn, gu)
+    End If
     If Not mHasDocQty Then Exit Function
     If mDocQty <= 0 Or Abs(mFact - mDocQty) < 0.0000001 Then Exit Function
-    WmsPack.PackGuess(mName, gn, gu)
     If gn <= 1 Then Exit Function
     If Abs(mFact - WmsIssue.Round3(mDocQty * gn)) > 0.0000001 Then Exit Function
     u = IIf(mUnit <> "", mUnit, "шт")
-    ans = WmsUi.UiAsk3("«" & mName & "»: по документу " & WmsIssue.QtyText(mDocQty) & " " & u & ", факт " & WmsIssue.QtyText(mFact) _
-        & " — а в наименовании " & WmsPack.PartsText(gn, gu) & " в 1 " & u & ": похоже, факт посчитан частями." & Chr(10) & Chr(10) _
-        & "Учёт ведётся по документу." & Chr(10) & "«Да» — провести " & WmsIssue.QtyText(mDocQty) & " " & u & " и записать фасовку «в 1 " & u & " — " _
-        & WmsPack.PartsText(gn, gu) & "» (выдавать можно по 1 " & gu & ")," & Chr(10) & "«Нет» — провести " & WmsIssue.QtyText(mFact) & " " & u _
-        & " как есть,   «Отмена» — не проводить")
+    sPack = "в 1 " & u & " — " & WmsPack.PartsText(gn, gu)
+    ans = WmsPrimeUi.UiAsk3b("«" & mName & "»: по документу " & WmsIssue.QtyText(mDocQty) & " " & u & ", факт " & WmsIssue.QtyText(mFact) _
+        & " — а " & IIf(sFrom <> "", "у " & sFrom & " этой позиции фасовка «" & sPack & "»", "в наименовании " & WmsPack.PartsText(gn, gu) & " в 1 " & u) _
+        & ": похоже, факт посчитан частями." & Chr(10) & "Учёт ведётся по документу; выдавать можно будет по 1 " & gu & ".", _
+        "Провести " & WmsIssue.QtyText(mDocQty) & " " & u & " по документу (фасовка «" & sPack & "»)", _
+        "Провести " & WmsIssue.QtyText(mFact) & " " & u & " как есть" & IIf(knownN > 0, " (фасовка та же)", ""), "Не проводить — уточню факт")
     If ans = 2 Then
-        SetCtl(r, "Не проведено: уточните факт (F) — по документу " & WmsIssue.QtyText(mDocQty) & " " & u & ", в 1 " & u & " — " & WmsPack.PartsText(gn, gu))
+        If sFrom = "" Then SetCtl(r, "Не проведено: уточните факт (F) — по документу " & WmsIssue.QtyText(mDocQty) & " " & u & ", " & sPack)
         PackFromReceipt = "SKIP:приход не проведён — факт не подтверждён"
         Exit Function
     End If
@@ -543,6 +573,19 @@ Private Function PackFromReceipt(r As Long, ByRef pn As Double, ByRef pu As Stri
         pn = gn
         pu = gu
     End If
+End Function
+
+' 1.0: a receipt that looks like one already posted (the same supplier, document, article or name, quantity and date):
+' asked before posting. bRow — a first receipt in its row («Контроль» gets the reason). "" to post, SKIP:… otherwise
+Private Function DupQuestion(r As Long, dup As String, bRow As Boolean) As String
+    Dim k As Integer
+    If dup = "" Then Exit Function
+    k = WmsPrimeUi.UiButtons("WMS — возможный повтор", "Похожее поступление уже проведено: " & dup & "." & Chr(10) _
+        & "Совпадают поставщик, документ, артикул (или наименование), количество и дата." & Chr(10) _
+        & "Если это та же поставка — второй раз её проводить не нужно.", Array("Провести — это другое поступление", "Не проводить"), Array(0, 1))
+    If k = 0 Then Exit Function
+    If bRow Then SetCtl(r, "Не проведено: похоже на повтор поступления " & dup & " — проверьте документ и дату")
+    DupQuestion = "SKIP:приход не проведён — похоже на повтор поступления " & dup
 End Function
 
 ' D-059: True when a result means that WMS itself failed, not the row: posting blocked (fail-closed) or busy, a rollback
@@ -579,7 +622,9 @@ Function ReceiptAddRow(r As Long, vFact As Variant, vDocQty As Variant, vDoc As 
     Dim why As String, kind As String, olid As Long, od As Variant, src As Long, srcMoved As Boolean, sd As Variant, newRow As Long
     Dim n As Long, canon As String, sKey As String, dup As String, nodoc As Integer, rcv2 As Double, nodoc2 As Double, res As String
     Dim cols As Variant, i As Integer, own As String, curN As Long, curMoved As Boolean, bIns As Boolean
+    Dim nSrc As Long, sSrcEI As String, msg As String, pkN As Double, pkU As String, packN As Double, packU As String
     WmsInit()
+    gRcvNote = ""
     If r < 1 Or r > MAX_SHEET_ROW Then
         ReceiptAddRow = "ERR:выберите строку заказа (не заголовок)"
         Exit Function
@@ -624,6 +669,28 @@ Function ReceiptAddRow(r As Long, vFact As Variant, vDocQty As Variant, vDoc As 
         Exit Function
     End If
     why = CheckReceiptValues(vFact, vDocQty, vDoc, vDdate, vRdate, vPlace, vPrice)
+    ' 1.0: the packing of the position (of the EI of its first receipt) goes to the new EI; «по документу 1 шт, факт 4»
+    ' is asked as at the first receipt; a delivery that looks like one already posted is asked about
+    If why = "" Then
+        sd = OSh().getCellRangeByPosition(0, src, OC_LAST, src).getDataArray()(0)
+        mName = Trim(CStr(sd(OC_NAME)))
+        mUnit = Trim(CStr(sd(OC_UNIT)))
+        If WmsIssue.NormalizeEI(CStr(sd(OC_EI)), nSrc, sSrcEI, msg) Then
+            If Not WmsPack.PackOf(nSrc, pkU, pkN) Then pkN = 0
+        End If
+        why = PackFromReceipt(r, packN, packU, pkN, pkU, IIf(pkN > 0, sSrcEI, ""))
+        If why <> "" Then
+            ReceiptAddRow = why
+            Exit Function
+        End If
+        sKey = WmsOrders.DupKeyText(Trim(CStr(sd(OC_SUPPLIER))), mDoc, Trim(CStr(sd(OC_ART))), Trim(CStr(sd(OC_NAME))), mFact, DupDate())
+        why = DupQuestion(r, WmsOrders.FindDuplicate(sKey, 0), False)
+        If why = "" Then why = WmsMap.PlaceAsk(mPlace, "приход не проведён")
+        If why <> "" Then
+            ReceiptAddRow = why
+            Exit Function
+        End If
+    End If
     ' the new row: inside the block of the order, under the source row and its earlier deliveries (M6 §18)
     newRow = DeliveryRowAfter(src, olid)
     If why = "" And newRow > MAX_SHEET_ROW Then why = "на листе «" & SH_ORDERS & "» нет свободной строки"
@@ -697,6 +764,11 @@ Function ReceiptAddRow(r As Long, vFact As Variant, vDocQty As Variant, vDoc As 
     ' the source row shows the status of the whole position
     PlanSourceStatus(src, od, rcv2, nodoc2, CStr(od(OD_CANCEL)))
     res = ApplyOperation(0, 0)
+    If Left(res, 3) = "OK:" And packN > 0 Then
+        msg = WmsPack.PackSet(canon, WmsIssue.QtyText(packN), packU, IIf(pkN > 0, "как у " & sSrcEI & " (та же позиция)", "по документу, факт частями"))
+        If Left(msg, 3) <> "OK:" Then gRcvNote = "Поступление проведено (" & canon & "), но фасовка не записана: " & Mid(msg, InStr(msg, ":") + 1) _
+            & Chr(10) & "Задайте её кнопкой «Фасовка ЕИ» на листе «" & SH_STOCK & "»."
+    End If
     If Left(res, 3) = "OK:" Then
         res = res & "|строка " & (newRow + 1) & "|" & canon
     ElseIf bIns And (Left(res, 7) = "ERR-RB:" Or Left(res, 8) = "BLOCKED:" Or Left(res, 5) = "BUSY:") Then
@@ -792,6 +864,14 @@ Function ReceiptFixRow(r As Long, vFact As Variant, vDocQty As Variant, vDoc As 
         ReceiptFixRow = "SKIP:ничего не изменилось"
         Exit Function
     End If
+    ' 1.0: a new place of the receipt checked against the map and «Места»
+    If mPlace <> oldPlace Then
+        why = WmsMap.PlaceAsk(mPlace, "приход не исправлен")
+        If why <> "" Then
+            ReceiptFixRow = why
+            Exit Function
+        End If
+    End If
     newBal = WmsIssue.Round3(s + mFact - oldF)
     nodocOld = rv(RV_NODOC)
     nodocNew = DocsMissing(mDoc, mHasDdate)
@@ -824,7 +904,15 @@ Function ReceiptFixRow(r As Long, vFact As Variant, vDocQty As Variant, vDoc As 
     PlanField("POS_RCV", rcv2)
     If dup <> "" Then PlanField("DUP", dup)
     PlanSetValue(SH_STOCK, n, SC_QTY, newBal, False)
-    If mPlace <> oldPlace Then PlanSetValue(SH_STOCK, n, SC_PLACE, mPlace, False)
+    ' 1.0: the place of the receipt changes the current place of the EI only while the EI still lies there; an EI moved
+    ' since keeps its place (the row of the receipt keeps the history)
+    If mPlace <> oldPlace Then
+        If LCase(Trim(CStr(WmsIssue.StockData(n)(SC_PLACE)))) = LCase(oldPlace) Then
+            PlanSetValue(SH_STOCK, n, SC_PLACE, mPlace, False)
+        Else
+            PlanField("PLACE_KEPT", Trim(CStr(WmsIssue.StockData(n)(SC_PLACE))))
+        End If
+    End If
     PlanSetValue(SH_RCV, n, RV_QTY, mFact, False)
     PlanSetValue(SH_RCV, n, RV_NODOC, nodocNew, False)
     PlanSetValue(SH_RCV, n, RV_DUP, WmsOrders.DupHash(sKey), False)
@@ -1137,12 +1225,24 @@ Function OrderCancelRow(r As Long) As String
         If gSmoved Then PlanSetValue(SH_ORD, olid, OD_ROW, src, False)
         PlanSourceStatus(src, od, 0, 0, OD_CANCEL_ORDER)
     End If
+    If mCheckOnly Then
+        OrderCancelRow = "OK:можно отменить"
+        Exit Function
+    End If
     res = ApplyOperation(0, 0)
     If kind = "OPEN" And Left(res, 6) = "ERR-RB" Then SetCtl(r, "Не отменено: " & Mid(res, 8))
     OrderCancelRow = res
     Exit Function
 EH:
     OrderCancelRow = "ERR:внутренняя ошибка проверки отмены: " & Error$ & " (код " & Err & ", строка " & Erl & ")"
+End Function
+
+' 1.0: «Отменить заказ» / «Отменить остаток» check first and ask after (the question came before a refusal): OK:… when the
+' operation can be done now; the refusal (SKIP:/ERR:…) as the operation would give it. Nothing is written but «Контроль»
+Function OrderCancelCheck(r As Long, bRest As Boolean) As String
+    mCheckOnly = True
+    If bRest Then OrderCancelCheck = OrderCancelRestRow(r) Else OrderCancelCheck = OrderCancelRow(r)
+    mCheckOnly = False
 End Function
 
 ' ================================================================ «Отменить остаток» — ORDER_CANCEL_REST
@@ -1212,6 +1312,10 @@ Function OrderCancelRestRow(r As Long) As String
     PlanSetValue(SH_ORD, olid, OD_CANCEL, OD_CANCEL_REST, False)
     If gSmoved Then PlanSetValue(SH_ORD, olid, OD_ROW, src, False)
     PlanSourceStatus(src, od, od(OD_RCV), od(OD_NODOC), OD_CANCEL_REST)
+    If mCheckOnly Then
+        OrderCancelRestRow = "OK:можно отменить"
+        Exit Function
+    End If
     OrderCancelRestRow = ApplyOperation(0, 0)
     Exit Function
 EH:

@@ -7,6 +7,7 @@ processes (headless). Results: WMS_TEST_OUT/results_phase1.json and a Markdown t
 """
 import glob
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -105,7 +106,7 @@ def t02_normal_operation():
               and stt["LAST_SEQ"] == "1" and stt["NEXT_NO"] == "2" and stt["TX"] == "COMMITTED:1"
               and stt["UNDO_LOCKED"] == "False" and stt["UNDO_CAN"] == "False"
               and len(ents) == 1 and e["type"] == "TEST" and e["fields"].get("QTY") == "1.5" and len(e["writes"]) == 6
-              and jpos == f"{os.path.basename(jf[-1])}|{os.path.getsize(jf[-1])}|1")
+              and jpos.split("|")[:3] == [os.path.basename(jf[-1]), str(os.path.getsize(jf[-1])), "1"])
         R.add(c, "операция: план → STARTED → запись → журнал → COMMITTED", ok,
               f"{res}; строка {tuple(row)}; защита {locks}; {stt}; журнал: {e.get('raw', '')[:200]}; JOURNAL_POS {jpos}", timing=round(dt, 1))
         P, inf = s.check()
@@ -331,7 +332,7 @@ def t10_close_without_save():
               and "не требуется" in rec2 and not P,
               f"запуск: {rep[:200]}; проведение до восстановления: {blocked_post[:80]}; {rec[:100]}; повторно: {rec2[:60]}; {inf}; {P[:3]}")
         jpos = s2.sysv("JOURNAL_POS")
-        pinned = jpos.split("|")[-1] == str(int(s2.sysv("LAST_SEQ")))
+        pinned = jpos.split("|")[2] == str(int(s2.sysv("LAST_SEQ")))
     finally:
         s2.close(save=True)
     s3 = Session(p)
@@ -434,7 +435,7 @@ def t14_invalid_saved_offset():
     s.input_rows_api(1, [(f"Позиция {i}", "1") for i in range(1, 8)])
     s.T("TestPostRange", 1, 5)
     jpos = s.sysv("JOURNAL_POS")
-    f, off, seq = jpos.split("|")
+    f, off, seq = jpos.split("|")[:3]
     out = []
     for bad in (f"{f}|{int(off) - 7}|{seq}", f"{f}|{off}|{int(seq) - 1}", f"{f}|abc|{seq}", "WMS_journal_1999-01.csv|10|5"):
         s.set_sys("JOURNAL_POS", bad)
@@ -1282,6 +1283,115 @@ def t38_commit_failed_undo():
                       f"{harmless_start}/{harmless_rec}; {nxt}; {inf}; {P[:3]}")
         finally:
             s.close()
+
+
+# ================================================================ T39–T40 (1.0) the journal behind the book, a book of another copy, backups
+
+@case
+def t39_journal_lost_tail_and_other_copy():
+    c = "T39"
+    # A: the last line of the journal did not reach the disk (power lost right after the book was saved)
+    p = new_wms("t39a")
+    jdir = os.path.join(os.path.dirname(p), "WMS_Journal")
+    s = Session(p)
+    s.input_rows_api(1, [(f"Позиция {i}", "1") for i in range(1, 5)])
+    s.T("TestPostRange", 1, 3)
+    jpos = s.sysv("JOURNAL_POS")
+    s.close(save=True)
+    f = journal_files(jdir)[-1]
+    lines = open(f, "rb").read().split(b"\n")
+    open(f, "wb").write(b"\n".join(lines[:-2]) + b"\n")
+    s = Session(p)
+    try:
+        _, block = st(s)
+        s.U("TestUiAuto", 1)
+        s.U("BtnRegister")
+        state, _ = st(s)
+        arch = [d for d in os.listdir(jdir) if d.startswith("старый_журнал_")]
+        archived = os.listdir(os.path.join(jdir, arch[0])) if arch else []
+        ents, _ = s.journal()
+        modified = s.doc.isModified()
+        res = s.T("TestPost", 4)
+        P, inf = s.check()
+        R.add(c, "потеряна последняя строка журнала (питание пропало после сохранения) → «журнал отстаёт»; «Сделать рабочим файлом» → "
+                 "прежний журнал перенесён в «старый_журнал_…», новый начат с № 4 (START), книга сохранена, проведение работает",
+              block == "JOURNAL_BEHIND" and state == "CLEAN" and len(arch) == 1 and archived == [os.path.basename(f)]
+              and [e["type"] for e in ents] == ["START"] and ents[0]["seq"] == 4 and not modified and res == "OK:5" and not P
+              and re.fullmatch(r"старый_журнал_\d{4}-\d\d-\d\d_\d{6}", arch[0])
+              and len(jpos.split("|")) == 4,
+              f"{block}; {state}; {arch}; {archived}; {[(e['seq'], e['type']) for e in ents]}; изменена {modified}; {res}; {inf}; {P[:3]}; "
+              f"позиция {jpos}")
+    finally:
+        s.close()
+    # B: the book of a copy that went its own way is put back over the working book
+    p = new_wms("t39b")
+    d = os.path.dirname(p)
+    s = Session(p)
+    s.input_rows_api(1, [("Позиция 1", "1"), ("Позиция 2", "1"), ("Работа в офисе", "1")])
+    s.T("TestPostRange", 1, 2)
+    s.close(save=True)
+    other = os.path.join(d, "домашняя копия")
+    os.makedirs(other)
+    shutil.copy(p, os.path.join(other, "WMS.ods"))
+    shutil.copytree(os.path.join(d, "WMS_Journal"), os.path.join(other, "WMS_Journal"), ignore=shutil.ignore_patterns("wms.lock"))
+    s = Session(p)
+    s.T("TestPost", 3)
+    s.close(save=True)
+    s = Session(os.path.join(other, "WMS.ods"))
+    s.B("ActionRegisterHere")
+    s.input_row(3, "Совсем другая работа дома", "2")
+    home = s.T("TestPost", 3)
+    s.close(save=True)
+    shutil.copy(os.path.join(other, "WMS.ods"), p)
+    s = Session(p)
+    try:
+        s.B("ActionRegisterHere")
+        _, block = st(s)
+        rep = s.report()
+        tail = s.B("ActionRecover")
+        s.U("TestUiAuto", 1)
+        s.U("BtnRegister")
+        state, _ = st(s)
+        ents, _ = s.journal()
+        P, inf = s.check()
+        R.add(c, "книга копии, с которой работали отдельно, положена на место рабочей → «книга и журнал от разных копий» (операция № 3 в книге "
+                 "и в журнале — разные), «Восстановить» не смешивает их; «Сделать рабочим файлом» → новый журнал с № 4",
+              home == "OK:3" and block == "JOURNAL_OTHER_COPY" and "разных копий" in rep and "не требуется" in tail and state == "CLEAN"
+              and [e["type"] for e in ents] == ["START"] and ents[0]["seq"] == 4 and not P,
+              f"{home}; {block}; {rep[:260]}; {tail[:80]}; {state}; {[(e['seq'], e['type']) for e in ents]}; {P[:3]}")
+    finally:
+        s.close()
+
+
+@case
+def t40_backup_guards():
+    c = "T40"
+    p = new_wms("t40")
+    d = os.path.dirname(p)
+    bdir = os.path.join(d, "WMS_Backups")
+    s = Session(p)
+    s.close(save=True)
+    today = time.strftime("%Y-%m-%d")
+    for f in glob.glob(os.path.join(bdir, "*_daily.ods")):
+        os.remove(f)
+    open(os.path.join(bdir, f"WMS_{today}_000001_daily.ods"), "wb").close()
+    shutil.copy(p, os.path.join(bdir, f"Другая книга_{today}_000002_daily.ods"))
+    future = [os.path.join(bdir, f"WMS_2099-01-{i:02d}_000000_manual.ods") for i in range(1, 11)]
+    for f in future:
+        shutil.copy(p, f)
+    s = Session(p)
+    try:
+        rep = s.report()
+        daily = sorted(os.path.basename(f) for f in glob.glob(os.path.join(bdir, "WMS_*_daily.ods")) if os.path.getsize(f) > 0)
+        bk = s.B("ActionBackupNow")
+        manual = sorted(os.path.basename(f) for f in glob.glob(os.path.join(bdir, "WMS_*_manual*.ods")))
+        new = [m for m in manual if not m.startswith("WMS_2099")]
+        R.add(c, "копия за сегодня: пустой файл и копия другой книги не считаются — ежедневная копия сделана",
+              len(daily) == 1 and daily[0].startswith(f"WMS_{today}_") and "ежедневная копия за сегодня уже есть" not in rep, f"{daily}; {rep[:200]}")
+        R.add(c, "часы компьютера позади последней копии → предупреждение; новая копия не удаляется ротацией (удалена самая старая по имени)",
+              "часы компьютера" in bk and len(manual) == 10 and len(new) == 1 and not os.path.exists(future[0]), f"{bk[:220]}; {manual}")
+    finally:
+        s.close()
 
 
 # ================================================================ runner

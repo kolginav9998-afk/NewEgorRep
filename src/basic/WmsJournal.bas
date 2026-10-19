@@ -24,6 +24,8 @@ Global gJR_Foreign As Long
 Global gJR_Order As String
 Global gJR_Lines As Long
 Global gJR_Files As Long
+' 1.0: the mark («time/length») of the journal entry with the book's last seq, as read now ("" — not read)
+Global gJR_LastMark As String
 
 Function JournalFileName(d As Date) As String
     JournalFileName = JOURNAL_PREFIX & Format(d, "YYYY-MM") & JOURNAL_EXT
@@ -67,6 +69,20 @@ Function BuildLine(seq As Long, sType As String, fields As Variant) As String
         body = body & ";" & fields(i)
     Next i
     BuildLine = body & ";END;" & Len(body)
+End Function
+
+' 1.0: the mark of an entry — its time and length («2026-10-15T09:30:12/245»). The book keeps the mark of its last entry
+' in the journal position: an entry with the same seq but another mark means the book and the journal belong to two
+' copies of the WMS that went separate ways (a copy worked on elsewhere and put back)
+Function LineMark(ByVal ln As String) As String
+    Dim p As Long, a As Variant
+    ln = StripEol(ln)
+    If Left(ln, 1) = Chr(10) Then ln = Mid(ln, 2)
+    p = EndPos(ln)
+    If p = 0 Or Left(ln, 3) <> "J1;" Then Exit Function
+    a = Split(Left(ln, p - 1), ";", 4)
+    If UBound(a) < 3 Then Exit Function
+    LineMark = a(2) & "/" & Mid(ln, p + 5)
 End Function
 
 ' position of ";END;" (it can only occur once, near the end: field values are escaped)
@@ -182,15 +198,15 @@ Function AppendLine(sLine As String, seq As Long, ByRef why As String) As Intege
     nsz = gSfa.getSize(url)
     gJFile = fn
     gJSize = nsz
-    WmsCore.SysPutStr(SK_JPOS, fn & "|" & NumStr(nsz) & "|" & seq)
+    WmsCore.SysPutStr(SK_JPOS, fn & "|" & NumStr(nsz) & "|" & seq & "|" & LineMark(sLine))
     AppendLine = 1
     Exit Function
 EH:
     why = "ошибка записи журнала: " & Error$
-    AppendLine = VerifyAfterError(url, fn, sz, prefix & sLine & Chr(10), seq)
+    AppendLine = VerifyAfterError(url, fn, sz, prefix & sLine & Chr(10), seq, LineMark(sLine))
 End Function
 
-Private Function VerifyAfterError(url As String, fn As String, sz As Double, expected As String, seq As Long) As Integer
+Private Function VerifyAfterError(url As String, fn As String, sz As Double, expected As String, seq As Long, sMark As String) As Integer
     Dim nsz As Double, got As String
     On Error GoTo UNKNOWN
     If Not gSfa.exists(url) Then
@@ -206,7 +222,7 @@ Private Function VerifyAfterError(url As String, fn As String, sz As Double, exp
     gJFile = fn
     gJSize = nsz
     If got = expected Then
-        WmsCore.SysPutStr(SK_JPOS, fn & "|" & NumStr(nsz) & "|" & seq)
+        WmsCore.SysPutStr(SK_JPOS, fn & "|" & NumStr(nsz) & "|" & seq & "|" & sMark)
         VerifyAfterError = 1
     ElseIf got = Left(expected, Len(expected) - 1) Then
         ' the whole line without its LF: every reader accepts it, so the operation is committed
@@ -250,16 +266,17 @@ End Function
 
 ' ---------------------------------------------------------------- saved position (spec §20)
 
+' «файл|смещение|seq» (up to 0.8) or «файл|смещение|seq|отметка» (1.0, LineMark of the entry seq)
 Function PosFile() As String
     Dim a As Variant
     a = Split(SysStr(SK_JPOS), "|")
-    If UBound(a) = 2 Then PosFile = a(0) Else PosFile = ""
+    If UBound(a) = 2 Or UBound(a) = 3 Then PosFile = a(0) Else PosFile = ""
 End Function
 
 Function PosOffset() As Double
     Dim a As Variant
     a = Split(SysStr(SK_JPOS), "|")
-    If UBound(a) = 2 Then
+    If UBound(a) = 2 Or UBound(a) = 3 Then
         If WmsCore.IsDigits(CStr(a(1))) Then PosOffset = Val(a(1)) Else PosOffset = -1
     Else
         PosOffset = -1
@@ -270,14 +287,28 @@ Function PosSeq() As Long
     Dim a As Variant
     a = Split(SysStr(SK_JPOS), "|")
     PosSeq = -1
-    If UBound(a) = 2 Then
+    If UBound(a) = 2 Or UBound(a) = 3 Then
         If WmsCore.IsDigits(CStr(a(2))) Then PosSeq = CLng(a(2))
     End If
 End Function
 
+' the mark kept with the position ("" — a position saved before 1.0)
+Function PosMark() As String
+    Dim a As Variant
+    a = Split(SysStr(SK_JPOS), "|")
+    If UBound(a) = 3 Then PosMark = a(3)
+End Function
+
 ' the journal line that ends exactly at byte off must be entry seq ("J1;<seq>;"), reading at most 4 KB
 Function PosValid(url As String, off As Double, seq As Long) As Boolean
-    Dim xs As Object, st As Double, n As Long, k As Long, j As Long, want As String, buf()
+    Dim sMark As String
+    PosValid = PosCheck(url, off, seq, sMark)
+End Function
+
+' PosValid that also gives the mark of that line (LineMark; its time and length are plain ASCII, read from the bytes)
+Function PosCheck(url As String, off As Double, seq As Long, ByRef sMark As String) As Boolean
+    Dim xs As Object, st As Double, n As Long, k As Long, j As Long, want As String, buf(), e As Long, sTs As String, sLen As String
+    sMark = ""
     On Error GoTo EH
     If seq < 1 Or off <= 0 Then Exit Function
     If Not gSfa.exists(url) Then Exit Function
@@ -301,10 +332,25 @@ Function PosValid(url As String, off As Double, seq As Long) As Boolean
         If k + j > n - 1 Then Exit Function
         If buf(k + j) <> Asc(Mid(want, j, 1)) Then Exit Function
     Next j
-    PosValid = True
+    ' the time: 19 characters after the seq; the length: the digits after the last ";" of the line
+    For j = k + Len(want) + 1 To k + Len(want) + 19
+        If j > n - 2 Then Exit For
+        sTs = sTs & Chr(buf(j))
+    Next j
+    e = n - 2
+    If e >= 0 Then
+        If buf(e) = 13 Then e = e - 1
+    End If
+    Do While e > k
+        If buf(e) < 48 Or buf(e) > 57 Then Exit Do
+        sLen = Chr(buf(e)) & sLen
+        e = e - 1
+    Loop
+    If Len(sTs) = 19 And sLen <> "" Then sMark = sTs & "/" & sLen
+    PosCheck = True
     Exit Function
 EH:
-    PosValid = False
+    PosCheck = False
 End Function
 
 ' ---------------------------------------------------------------- reading
@@ -329,6 +375,7 @@ Private Sub ResetResults()
     gJR_Order = ""
     gJR_Lines = 0
     gJR_Files = 0
+    gJR_LastMark = ""
 End Sub
 
 Private Sub AddTail(seq As Long, sType As String, ts As String, fields As Variant)
@@ -399,7 +446,7 @@ Sub ReadJournal(lastSeq As Long, bForceFull As Boolean, bBaseline As Boolean)
             why = "файла «" & pf & "» нет"
         ElseIf ps <> lastSeq Then
             why = "в ней seq " & ps & ", а в книге " & lastSeq
-        ElseIf PosValid(gJDir & pf, po, ps) Then
+        ElseIf PosCheck(gJDir & pf, po, ps, gJR_LastMark) Then
             gJR_HasLast = True
             gJR_MaxSeq = lastSeq
             ReadRange(files, idx, po, lastSeq, lastSeq, myInst)
@@ -481,7 +528,10 @@ Private Sub ReadRange(files As Variant, startIdx As Long, startOff As Double, By
                         gJR_MaxSeq = seq
                         gJR_MaxFile = fn
                     End If
-                    If seq = lastSeq Then gJR_HasLast = True
+                    If seq = lastSeq Then
+                        gJR_HasLast = True
+                        gJR_LastMark = LineMark(ln)
+                    End If
                     If seq > lastSeq Then
                         If Not ParseLine(ln, seq, ts, inst, sType, fields) Then
                             gJR_Damaged = gJR_Damaged + 1
@@ -495,15 +545,41 @@ Private Sub ReadRange(files As Variant, startIdx As Long, startOff As Double, By
     Next i
 End Sub
 
+' 1.0: «Сделать рабочим файлом» with a new journal while the journal is behind the book or belongs to another copy: the
+' journal files are moved into WMS_Journal/старый_журнал_<дата_время> — copied, checked by size, and only then removed
+' (nothing is deleted). sDir — the folder (for the message). "" — done; otherwise why not, and no file was removed
+Function ArchiveFiles(ByRef sDir As String) As String
+    Dim files As Variant, i As Long, dst As String
+    On Error GoTo EH
+    files = ListFiles()
+    dst = ConvertToURL(ConvertFromURL(gJDir) & "старый_журнал_" & Format(Now(), "YYYY-MM-DD") & "_" & Format(Now(), "HHMMSS")) & "/"
+    If gSfa.exists(dst) Then dst = Left(dst, Len(dst) - 1) & "_" & WmsCore.NewId(4) & "/"
+    gSfa.createFolder(dst)
+    For i = 0 To UBound(files)
+        gSfa.copy(gJDir & files(i), dst & files(i))
+        If gSfa.getSize(dst & files(i)) <> gSfa.getSize(gJDir & files(i)) Then
+            ArchiveFiles = "копия файла журнала «" & files(i) & "» неполная — проверьте место на диске; журнал не тронут"
+            Exit Function
+        End If
+    Next i
+    For i = 0 To UBound(files)
+        gSfa.kill(gJDir & files(i))
+    Next i
+    sDir = ConvertFromURL(dst)
+    Exit Function
+EH:
+    ArchiveFiles = "не удалось перенести журнал: " & Error$
+End Function
+
 ' after «Восстановить» has replayed the whole tail read by ReadJournal: the saved position moves to its last entry
 ' (only when that entry ends its file with a LF; otherwise the next start re-establishes it by reading)
 Sub PinPosition(seq As Long)
-    Dim url As String, sz As Double
+    Dim url As String, sz As Double, sMark As String
     On Error GoTo EH
     If gJR_MaxFile = "" Or seq <> gJR_MaxSeq Then Exit Sub
     url = gJDir & gJR_MaxFile
     sz = gSfa.getSize(url)
-    If PosValid(url, sz, seq) Then WmsCore.SysPutStr(SK_JPOS, gJR_MaxFile & "|" & NumStr(sz) & "|" & seq)
+    If PosCheck(url, sz, seq, sMark) Then WmsCore.SysPutStr(SK_JPOS, gJR_MaxFile & "|" & NumStr(sz) & "|" & seq & IIf(sMark <> "", "|" & sMark, ""))
     Exit Sub
 EH:
 End Sub

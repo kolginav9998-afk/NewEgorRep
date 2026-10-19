@@ -773,7 +773,7 @@ Q_STYLES = ["WMS_OrderStartLate", "WMS_OrderStart", "WMS_LateDate"]
 # PRIME 0.8: the status W and the control Y of «Заказы» are coloured; their own formats keep the line of an order: the start of
 # an order with a status (the line and the colour), the line, the colour
 W_STYLES = ["ST_Done_Line", "ST_Wait_Line", "ST_Part_Line", "ST_Gray_Line", "WMS_OrderStart", "ST_Done", "ST_Wait", "ST_Part", "ST_Gray"]
-Y_STYLES = ["ST_Bad_Line", "ST_Bad_Line", "WMS_OrderStart", "ST_Bad", "ST_Bad"]
+Y_STYLES = ["ST_Bad_Line", "ST_Bad_Line", "ST_Bad_Line", "ST_Part_Line", "WMS_OrderStart", "ST_Bad", "ST_Bad", "ST_Bad", "ST_Part"]
 
 
 def order_cf(sh):

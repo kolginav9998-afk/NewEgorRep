@@ -14,6 +14,8 @@ Global gPkUnit As String
 Global gPkN As Double
 Global gPkPct As Double
 Global gPkBase As Double
+' 1.0: the last quantity was a bare number («1», no unit word) — for an EI with a packing it may mean 1 шт or 1 кан (QtyAsk)
+Global gPkPlain As Boolean
 
 ' ================================================================ the packing of an EI
 
@@ -142,6 +144,38 @@ Private Sub PkSplit(ByVal s As String, ByRef sNum As String, ByRef sWord As Stri
     sWord = Trim(Mid(s, i))
 End Sub
 
+' a unit word with something after it: a digit or a second word («кан 2», «кан и»); a final dot is part of the word («кан.»)
+Private Function PkHasTail(w As String) As Boolean
+    Dim i As Long, ch As String
+    If w = "%" Then Exit Function
+    For i = 1 To Len(w)
+        ch = Mid(w, i, 1)
+        If (ch >= "0" And ch <= "9") Or ch = " " Or ch = Chr(9) Or ch = "%" Or ch = "," Or ch = ";" Or ch = "+" Then
+            PkHasTail = True
+            Exit Function
+        End If
+    Next i
+End Function
+
+' the word is exactly the unit of the document or of the packing («м2», «м³» keep their digits)
+Private Function PkExactUnit(w As String, n As Long, sUnit As String) As Boolean
+    Dim pu As String, pn As Double
+    If LCase(Trim(w)) = LCase(Trim(sUnit)) Then
+        PkExactUnit = True
+    ElseIf PackOf(n, pu, pn) Then
+        PkExactUnit = (LCase(Trim(w)) = LCase(pu))
+    End If
+End Function
+
+Private Function PkFirstWord(w As String) As String
+    Dim i As Long, ch As String
+    For i = 1 To Len(w)
+        ch = Mid(w, i, 1)
+        If (ch >= "0" And ch <= "9") Or ch = " " Or ch = Chr(9) Or ch = "%" Or ch = "," Or ch = ";" Or ch = "+" Then Exit For
+    Next i
+    PkFirstWord = Left(w, i - 1)
+End Function
+
 ' ================================================================ a quantity typed for an EI
 
 ' A quantity typed for EI n (balance b in the unit of its document), as WMS reads it:
@@ -157,13 +191,23 @@ Function QtyEIText(ByVal s As String, n As Long, b As Double, sUnit As String, s
     q = 0
     info = ""
     gPkKind = ""
+    gPkPlain = False
     PkSplit(s, sNum, sWord)
     ' a number and a word after it («1 кан», «25%»); anything else — the strict parser of a quantity with its own messages
     ' («-1»: отрицательное, «1/2»: дробь, «abc»: недопустимый символ)
     If sWord = "" Or sNum = "" Or Not PkIsWord(sWord) Then
         st = ParseQtyText(s, q, msg)
-        If st = 0 Then info = PlainInfo(n, q, sUnit)
+        If st = 0 Then
+            info = PlainInfo(n, q, sUnit)
+            gPkPlain = True
+        End If
         QtyEIText = st
+        Exit Function
+    End If
+    ' 1.0: one quantity and one word — «1 кан 2» or «1 кан и 2» is not guessed
+    If PkHasTail(sWord) And Not PkExactUnit(sWord, n, sUnit) Then
+        msg = "«" & Trim(s) & "»: после единицы лишнее — напишите одно количество, например «" & sNum & " " & PkFirstWord(sWord) & "»"
+        QtyEIText = 2
         Exit Function
     End If
     If sMode = "FACT" And Replace(Replace(Replace(sNum, "0", ""), ",", ""), ".", "") = "" Then
@@ -211,6 +255,7 @@ Function QtyEICell(oCell As Object, n As Long, b As Double, sUnit As String, sMo
     q = 0
     info = ""
     gPkKind = ""
+    gPkPlain = False
     Select Case oCell.getType()
     Case com.sun.star.table.CellContentType.TEXT
         QtyEICell = QtyEIText(oCell.getString(), n, b, sUnit, sMode, capQty, q, info, msg)
@@ -220,7 +265,10 @@ Function QtyEICell(oCell As Object, n As Long, b As Double, sUnit As String, sMo
             QtyEICell = QtyPercent(WmsIssue.Round3(oCell.getValue() * 100), n, sUnit, sMode, q, info, msg)
         Else
             st = ParseQtyCell(oCell, q, msg)
-            If st = 0 Then info = PlainInfo(n, q, sUnit)
+            If st = 0 Then
+                info = PlainInfo(n, q, sUnit)
+                gPkPlain = True
+            End If
             QtyEICell = st
         End If
     Case Else
@@ -234,6 +282,7 @@ Function QtyAsEI(oCell As Object, v As Variant, sField As String, n As Long, b A
     ByRef q As Double, ByRef info As String, ByRef msg As String) As Boolean
     Dim st As Integer
     gPkKind = ""
+    gPkPlain = False
     info = ""
     If Not (oCell Is Nothing) Then
         st = QtyEICell(oCell, n, b, sUnit, sMode, capQty, q, info, msg)
@@ -241,6 +290,7 @@ Function QtyAsEI(oCell As Object, v As Variant, sField As String, n As Long, b A
         st = QtyEIText(CStr(v), n, b, sUnit, sMode, capQty, q, info, msg)
     Else
         QtyAsEI = WmsOrders.ParseQtyValueAs(v, sField, q, msg)
+        gPkPlain = True
         Exit Function
     End If
     If st <> 0 Then
@@ -349,6 +399,136 @@ Sub PlanQtyFields()
         PlanField("PCT_BASE", gPkBase)
     End If
 End Sub
+
+' ================================================================ 1.0: the two readings WMS never guesses
+
+' After a quantity of EI n was read (QtyEIText / QtyEICell / QtyAsEI: q, info and gPk*), before it is used:
+'   a bare whole number for an EI with a packing — «1»: 1 шт (4 кан) or 1 кан;
+'   a percent below 1 — «0,25%»: 0,25 % or 25 %.
+' sVerb names the action on the buttons («Выдать», «Списать», «Вернуть», «Факт»); sMode, b, capQty — as for QtyEIText.
+' bFits False: the quantity as read does not fit (more than the balance, msg holds why) — only the parts may.
+' 0 — use q (the other reading when chosen: info and the journal fields follow it), 1 — not posted by the storekeeper
+' (msg), 2 — nothing fits (msg).
+Function QtyAsk(n As Long, sName As String, sUnit As String, sVerb As String, sMode As String, b As Double, capQty As Double, bFits As Boolean, _
+    ByRef q As Double, ByRef info As String, ByRef msg As String) As Integer
+    Dim pu As String, pn As Double, x As Double, q2 As Double, info2 As String, msg2 As String, k As Integer, sText As String, sHead As String
+    Dim labels As Variant, codes As Variant, alt As String, pct As Double, pctBase As Double
+    sHead = WmsIssue.EiCanon(n) & IIf(sName <> "", " «" & sName & "»", "")
+    If gPkKind = "PCT" And bFits Then
+        If gPkPct >= 1 Then Exit Function
+        pct = gPkPct
+        pctBase = gPkBase
+        sText = sHead & ": " & WmsIssue.QtyText(pct) & "% от пришедших " & WmsIssue.QtyText(pctBase) & " " & sUnit & " = " & WmsIssue.QtyText(q) & " " _
+            & sUnit & " — это меньше одного процента." & Chr(10) & "Если имелось в виду " & WmsIssue.QtyText(WmsIssue.Round3(pct * 100)) _
+            & "%, выберите вторую кнопку."
+        labels = Array(sVerb & " " & WmsIssue.QtyText(pct) & "% — это " & WmsIssue.QtyText(q) & " " & sUnit, "", "Не проводить")
+        codes = Array(0, 1, 2)
+        If WmsIssue.Round3(pct * 100) <= 100 Then
+            alt = WmsIssue.QtyText(WmsIssue.Round3(pct * 100)) & "%"
+            If QtyEIText(alt, n, b, sUnit, sMode, capQty, q2, info2, msg2) = 0 And q2 <= b + 0.0000001 Then
+                labels(1) = sVerb & " " & alt & " — это " & WmsIssue.QtyText(q2) & " " & sUnit
+            End If
+        End If
+        If labels(1) = "" Then
+            labels = Array(labels(0), "Не проводить")
+            codes = Array(0, 2)
+        End If
+        ' QtyEIText of the other reading changed gPk*: the reading as typed is restored unless the other one is chosen
+        gPkKind = "PCT"
+        gPkPct = pct
+        gPkBase = pctBase
+        k = WmsPrimeUi.UiButtons("WMS — проверьте процент", sText, labels, codes)
+        If k = 1 Then
+            QtyAsk = QtyAskOther(alt, n, b, sUnit, sMode, capQty, q, info, msg)
+            Exit Function
+        End If
+        If k <> 0 Then
+            msg = "проверьте процент «" & WmsIssue.QtyText(pct) & "%» (может быть, имелось в виду " & WmsIssue.QtyText(WmsIssue.Round3(pct * 100)) & "%)"
+            QtyAsk = 1
+        End If
+        Exit Function
+    End If
+    If Not gPkPlain Or gPkKind <> "" Then
+        If Not bFits Then QtyAsk = 2
+        Exit Function
+    End If
+    x = q
+    If x < 1 Or Abs(x - Int(x)) > 0.0000001 Or Not PackOf(n, pu, pn) Then
+        If Not bFits Then QtyAsk = 2
+        Exit Function
+    End If
+    alt = WmsIssue.QtyText(x) & " " & pu
+    If QtyEIText(alt, n, b, sUnit, sMode, capQty, q2, info2, msg2) <> 0 Then
+        ' the parts do not fit either: as typed (or the refusal of it)
+        gPkKind = ""
+        gPkPlain = True
+        If Not bFits Then QtyAsk = 2
+        Exit Function
+    End If
+    gPkKind = ""
+    gPkPlain = True
+    sText = sHead & ": в 1 " & sUnit & " — " & PartsText(pn, pu) & ". " & IIf(sMode = "FACT", "Учётный остаток", "Остаток") & " " _
+        & QtyWithParts(n, b, sUnit) & "." & Chr(10) & "Написано «" & WmsIssue.QtyText(x) & "» — " & IIf(sMode = "FACT", "сколько на самом деле?", "это штуки документа или части?")
+    If bFits Then
+        labels = Array(sVerb & " " & WmsIssue.QtyText(x) & " " & sUnit & " — это " & PartsText(PartsOf(x, pn), pu) & AskRest(n, b, x, sUnit, sMode), _
+            sVerb & " " & alt & " — это " & WmsIssue.QtyText(q2) & " " & sUnit & AskRest(n, b, q2, sUnit, sMode), "Не проводить")
+        codes = Array(0, 1, 2)
+    Else
+        sText = sText & Chr(10) & WmsIssue.QtyText(x) & " " & sUnit & " нельзя: " & msg
+        labels = Array(sVerb & " " & alt & " — это " & WmsIssue.QtyText(q2) & " " & sUnit & AskRest(n, b, q2, sUnit, sMode), "Не проводить")
+        codes = Array(1, 2)
+    End If
+    k = WmsPrimeUi.UiButtons("WMS — штуки или части?", sText, labels, codes)
+    If k = 1 Then
+        QtyAsk = QtyAskOther(alt, n, b, sUnit, sMode, capQty, q, info, msg)
+    ElseIf k = 0 Then
+        QtyAsk = 0
+    Else
+        msg = "уточните количество: «" & WmsIssue.QtyText(x) & " " & sUnit & "» или «" & alt & "»"
+        QtyAsk = 1
+    End If
+End Function
+
+' the other reading chosen: read again so that q, info and gPk* (the journal fields) are its own
+Private Function QtyAskOther(alt As String, n As Long, b As Double, sUnit As String, sMode As String, capQty As Double, ByRef q As Double, _
+    ByRef info As String, ByRef msg As String) As Integer
+    If QtyEIText(alt, n, b, sUnit, sMode, capQty, q, info, msg) <> 0 Then
+        QtyAskOther = 2
+    ElseIf sMode = "OUT" And q > b + 0.0000001 Then
+        msg = "недостаточно: остаток " & QtyWithParts(n, b, sUnit) & ", запрошено " & WmsIssue.QtyText(q) & " " & sUnit
+        QtyAskOther = 2
+    End If
+End Function
+
+' «, останется 3 кан» after an issue or a write-off of q; «, станет …» after a return; "" for a count
+Private Function AskRest(n As Long, b As Double, q As Double, sUnit As String, sMode As String) As String
+    If sMode = "OUT" Then
+        AskRest = ", останется " & QtyWithParts(n, WmsIssue.Round3(b - q), sUnit)
+    ElseIf sMode = "IN" Then
+        AskRest = ", станет " & QtyWithParts(n, WmsIssue.Round3(b + q), sUnit)
+    End If
+End Function
+
+' the name of a part of EI n («кан»), "" without a packing
+Function PartUnitOf(n As Long) As String
+    Dim pu As String, pn As Double
+    If PackOf(n, pu, pn) Then PartUnitOf = pu
+End Function
+
+' 1.0: a quantity of EI n for a field of a window («Исправить»): in the parts when it is a whole count of them («1 кан»),
+' otherwise as a number of the unit of the document («0,25»)
+Function QtyForInput(n As Long, q As Double) As String
+    Dim pu As String, pn As Double, x As Double
+    QtyForInput = WmsIssue.QtyText(q)
+    If Not PackOf(n, pu, pn) Then Exit Function
+    x = PartsOf(q, pn)
+    If Abs(WmsIssue.Round3(x / pn) - q) < 0.0000001 Then QtyForInput = PartsText(x, pu)
+End Function
+
+' what is left after an issue of q from b: «0,75 шт (3 кан)» (1.0: «Контроль» shows it before the posting)
+Function RestText(n As Long, b As Double, q As Double, sUnit As String) As String
+    RestText = QtyWithParts(n, WmsIssue.Round3(b - q), sUnit)
+End Function
 
 ' what came in by EI n in the unit of its document (the base of a percent): its receipt of «Заказы» (_RCV, a transferred
 ' receipt too), the lines of «Иной приход» posted for it (a part replenished — all of them), a migrated balance (_LEG);
@@ -471,11 +651,25 @@ End Function
 
 ' a guess of the packing from the name of the EI: «Незамерзайка 4 канистры по 5 л» → 4 кан, «Профиль 40х20 6 м» → 6 м,
 ' «… L=6000 мм» → 6 м. pn = 0 when the name says nothing
+' 1.0: a comma between two digits is a decimal comma («2,5 м», «11,7 м»): it becomes a dot, so that the separators that
+' follow do not cut the number in two (it was read as «5 м», «7 м»)
+Private Function PkDecimalCommas(s As String) As String
+    Dim i As Long, ch As String, r As String
+    For i = 1 To Len(s)
+        ch = Mid(s, i, 1)
+        If ch = "," And i > 1 And i < Len(s) Then
+            If Mid(s, i - 1, 1) >= "0" And Mid(s, i - 1, 1) <= "9" And Mid(s, i + 1, 1) >= "0" And Mid(s, i + 1, 1) <= "9" Then ch = "."
+        End If
+        r = r & ch
+    Next i
+    PkDecimalCommas = r
+End Function
+
 Sub PackGuess(sName As String, ByRef pn As Double, ByRef pu As String)
     Dim s As String, t As Variant, i As Integer, w As Variant, x As Double, msg As String, nm As Variant, k As Integer, num As String, rest As String
     pn = 0
     pu = ""
-    s = LCase(sName)
+    s = PkDecimalCommas(LCase(sName))
     For Each w In Array("(", ")", ",", ";", "/", "\", ":", "=", "+", "×", "*")
         s = Replace(s, w, " ")
     Next w

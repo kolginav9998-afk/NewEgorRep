@@ -13,7 +13,7 @@ import sys
 import uno  # noqa: F401  (LibreOffice Python-UNO)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from harness import Session, git_sources  # noqa: E402
+from harness import Session, git_sources, NoHistory  # noqa: E402
 
 COMMIT_072 = "7e05447"          # release 0.7.2 (HOTFIX 0.7.2)
 ENV = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
@@ -44,7 +44,7 @@ def warehouse_072(folder):
     src = os.path.join(folder, "src072")
     why = git_sources(COMMIT_072, src)
     if why:
-        raise RuntimeError(why)
+        raise NoHistory(why)
     cand = os.path.join(folder, "WMS_PROD_CANDIDATE.ods")
     rc, out = run_old(src, "build_ods.py", cand)
     if rc != 0:

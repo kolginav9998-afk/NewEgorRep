@@ -218,7 +218,8 @@ Function PreWorkCheck() As String
     End If
     mv = Movements()
     s = s & L(IIf(mv > PLANNED_MOVEMENTS * 0.8, "WARN", "OK"), "размер", mv & " строк движений" & IIf(mv > PLANNED_MOVEMENTS * 0.8, _
-        " — близко к ориентиру " & PLANNED_MOVEMENTS & ": пора архивировать историю (WMS_ARCHIVE)", ""))
+        " — близко к ориентиру " & PLANNED_MOVEMENTS & ": книга начнёт работать медленнее. WMS_ARCHIVE сохраняет копию старой истории, но книгу " _
+        & "не сокращает; сокращение — отдельная процедура «Закрытие года» с проверкой восстановления. Сообщите ответственному за WMS", ""))
     p = ForeignProtectedSheets()
     If p <> "" Then s = s & L("FAIL", "пароли листов", "листы " & p & " защищены не паролем WMS — операции по ним не проводятся. " & ForeignProtectionHint())
     p = Protections()
@@ -252,7 +253,7 @@ Function Protections() As String
     For i = 0 To gDoc.Sheets.getCount() - 1
         sh = gDoc.Sheets.getByIndex(i)
         ' «Получатели» and «Топология» are the sheets of the user's own input (D-095)
-        If Not sh.isProtected() And sh.Name <> SH_RCPT And sh.Name <> SH_TOPO Then p = p & IIf(p <> "", "; ", "") & "лист «" & sh.Name & "» не защищён"
+        If Not sh.isProtected() And sh.Name <> SH_RCPT And sh.Name <> SH_TOPO And sh.Name <> "Места" Then p = p & IIf(p <> "", "; ", "") & "лист «" & sh.Name & "» не защищён"
         If InStr(svc, "|" & sh.Name & "|") > 0 And sh.IsVisible Then p = p & IIf(p <> "", "; ", "") & "служебный лист «" & sh.Name & "» не скрыт"
     Next i
     If Not gDoc.isProtected() Then p = p & IIf(p <> "", "; ", "") & "структура книги не защищена"

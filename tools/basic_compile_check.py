@@ -15,7 +15,48 @@ from wmslo import Office  # noqa: E402
 from build_ods import build  # noqa: E402
 
 
+# words of LibreOffice Basic that break a module (or LibreOffice itself) when used as the name of a variable or a parameter:
+# «like» is an operator (a variable «like» crashes LibreOffice while it compiles the library), «base» and «name» are keywords
+RESERVED = {"like", "base", "name", "any", "type", "mod", "is", "step", "output", "input", "line", "print", "error", "and", "or", "not",
+            "xor", "eqv", "imp", "to", "then", "else", "next", "loop", "wend", "select", "case", "exit", "resume", "set", "let", "get",
+            "put", "open", "close", "access", "lock", "binary", "random", "append", "shared", "global", "public", "private", "static", "dim",
+            "redim", "preserve", "const", "function", "sub", "property", "option", "explicit", "compare", "new", "call", "goto", "gosub",
+            "return", "on", "while", "until", "for", "each", "in", "do", "if", "with", "end", "true", "false", "nothing", "null", "empty"}
+
+
+def reserved_names(src_dir):
+    """the variables and parameters of the Basic sources named by a reserved word: ["Module.bas:line: name", ...]"""
+    import re
+    bad = []
+    decl = re.compile(r"^\s*(?:Dim|Private|Public|Global|Static|ReDim(?:\s+Preserve)?)\s+(.*)$", re.I)
+    proc = re.compile(r"^\s*(?:Private\s+|Public\s+)?(?:Function|Sub)\s+\w+\s*\((.*)\)", re.I)
+    for fn in sorted(os.listdir(src_dir)):
+        if not fn.endswith(".bas"):
+            continue
+        for i, line in enumerate(open(os.path.join(src_dir, fn), encoding="utf-8"), 1):
+            code = line.split("'")[0]
+            names = []
+            m = proc.match(code)
+            if m:
+                names = [re.sub(r"^(?:Optional\s+)?(?:ByRef\s+|ByVal\s+)?", "", x.strip(), flags=re.I).split()[0] for x in m.group(1).split(",") if x.strip()]
+            else:
+                m = decl.match(code)
+                if m and not re.match(r"^\s*(?:Private|Public|Global)?\s*(?:Const|Function|Sub)\b", m.group(1), re.I):
+                    names = [x.strip().split()[0].split("(")[0] for x in m.group(1).split(",") if x.strip()]
+            for n in names:
+                if n.lower() in RESERVED:
+                    bad.append(f"{fn}:{i}: {n}")
+            # after a one-line «If … Then ReDim …» LibreOffice Basic takes the next line into the If as well
+            if re.search(r"\bThen\s+ReDim\b", code, re.I):
+                bad.append(f"{fn}:{i}: однострочный If … Then ReDim (следующая строка попадёт в If)")
+    return bad
+
+
 def main():
+    bad = reserved_names(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src", "basic"))
+    if bad:
+        print("COMPILE FAILED: ловушки LibreOffice Basic (зарезервированное слово в имени, однострочный If … ReDim): " + "; ".join(bad))
+        sys.exit(1)
     ap = argparse.ArgumentParser()
     ap.add_argument("--display", default=os.environ.get("DISPLAY", ":99"))
     a = ap.parse_args()
@@ -35,6 +76,10 @@ def main():
             doc = o.load(book, macros=0)
             res["doc"] = doc
             res["r"] = o.basic(doc, "WmsTestOps", "TestEscRoundTrip", "a;b|c=d~e%f")
+            # PRIME 0.8: the second library (the pages and the additions) compiles on its first call too
+            if res["r"] is True:
+                res["r"] = "WmsPlus"
+                res["r"] = o.basic(doc, "WmsPack", "PackDec", 4.0) == 2
         except Exception as e:
             res["e"] = str(e)[:300]
 

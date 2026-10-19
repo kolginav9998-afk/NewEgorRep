@@ -19,6 +19,7 @@ import uno  # noqa: E402  (LibreOffice Python-UNO)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from harness import OUT, Session, Results, new_wms, template, INITIAL_STOCK, synthetic_registry  # noqa: E402
+from wmslo import macro_url, script_macro  # noqa: E402
 from com.sun.star.sheet import TableFilterField  # noqa: E402
 from com.sun.star.sheet.FilterOperator import EQUAL  # noqa: E402
 from com.sun.star.sheet import TableFilterField3, FilterFieldValue  # noqa: E402
@@ -847,8 +848,9 @@ def v27_ui_blocked_and_buttons():
         for i in range(form.getCount()):
             ev = form.getScriptEvents(i)
             code = ev[0].ScriptCode if ev else ""
-            ok_loc = code.startswith("vnd.sun.star.script:Standard.") and code.endswith("?language=Basic&location=document")
-            names[form.getByIndex(i).Label] = (sheet, code.split("Standard.", 1)[1].split("?")[0] if ok_loc else code)
+            # the macro of the button in the library of its module (WmsPlus for the pages, Standard for the core), in the book
+            ok_loc = code == macro_url(script_macro(code))
+            names[form.getByIndex(i).Label] = (sheet, script_macro(code) if ok_loc else code)
     want = {"Провести": "WmsUi.BtnPost", "Исправить": "WmsUi.BtnFix", "Удалить": "WmsUi.BtnDelete", "Очистить": "WmsUi.BtnClear",
             "Восстановить": "WmsUi.BtnRecover", "Отложить хвост журнала": "WmsUi.BtnAbandon", "Снять блокировку WMS": "WmsUi.BtnUnlock",
             "Сделать рабочим файлом": "WmsUi.BtnRegister", "Самопроверка": "WmsUi.BtnSelfCheck", "Резервная копия": "WmsUi.BtnBackup"}
@@ -862,7 +864,7 @@ def v27_ui_blocked_and_buttons():
         fill(s, 1, "1", "1")
         res = s.post(1)
         r_status = s.iss(1)[17]
-        ok1 = (active == "Главная" and ms[0].startswith("ЗАБЛОКИРОВАНО [LOCKED]") and "WMS уже открыта" in ms[1]
+        ok1 = (active == "Главная" and ms[0].startswith("ЗАБЛОКИРОВАНО") and "(код LOCKED)" in ms[0] and "WMS уже открыта" in ms[1]
                and "Снять блокировку WMS" in ms[2] and res.startswith("BLOCKED") and "WMS заблокирована" in r_status and "Главная" in r_status)
         R.add(c, "блокировка при запуске: книга открывается на «Главной» с причиной и подсказкой; «Провести» отказывает и пишет причину в R",
               ok1, f"активный лист {active}; {ms[:3]}; R: {r_status[:120]}")
@@ -879,7 +881,7 @@ def v27_ui_blocked_and_buttons():
         s.U("BtnRecover")
         ms2 = s.main_status()
         R.add(c, "несохранённая выдача: «Главная» показывает хвост журнала; кнопка «Восстановить» доводит его",
-              ms[0].startswith("ЗАБЛОКИРОВАНО [TAIL]") and "Восстановить" in ms[2] and ms2[0] == "Работа разрешена"
+              ms[0].startswith("ЗАБЛОКИРОВАНО") and "(код TAIL)" in ms[0] and "Восстановить" in ms[2] and ms2[0] == "Работа разрешена"
               and "восстановлено операций: 1" in ms2[5] and s.iss(1)[17] == "Проведено", f"{ms[:3]}; {ms2[5][:80]}")
         s.U("BtnSelfCheck")
         sc = s.main_status()[5]

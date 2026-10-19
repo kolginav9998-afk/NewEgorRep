@@ -30,6 +30,10 @@ Private mTop(1) As Long
 Private mRcp(1) As Long
 Private mCarDays(1) As Long
 Private mCarSup(1) As Long
+' 1.0: the columns of the loaded tables read once per «Обновить» (the sums by unit read them many times)
+Private mColKey() As String
+Private mColVal() As Variant
+Private mColN As Integer
 
 Sub BtnAnRefresh(Optional oEvent As Variant)
     TbMsg(AnRefresh(0))
@@ -38,7 +42,7 @@ End Sub
 ' dToday: the date the months count back from (0 — today; the tests fix it)
 Function AnRefresh(dToday As Double) As String
     Dim why As String, snap As String, t As Variant, i As Integer, n(5) As Long, last As Long, m As Integer, a As Double, b As Double
-    Dim ms As Variant, nCar As Long, carMsg As String
+    Dim ms As Variant, nCar As Long, carMsg As String, un() As String, sm() As Double, nu As Integer, un2() As String, sm2() As Double, nu2 As Integer
     On Error GoTo EH
     snap = TbPickSnapshot(why)
     If snap = "" Then
@@ -51,12 +55,15 @@ Function AnRefresh(dToday As Double) As String
     Next i
     nCar = TbLoadOptional(snap, "cars.csv", "_cars", True, TB_CAR_KEYS)
     TbPutSetting(3, snap)
+    mColN = 0
+    ReDim mColKey(15)
+    ReDim mColVal(15)
     If dToday = 0 Then dToday = Int(CDbl(Now()))
     mSh = ThisComponent.Sheets.getByName(SH_DASH)
     last = TbLastRow(mSh)
     If last >= 0 Then mSh.getCellRangeByPosition(0, 0, 8, last + 1).clearContents(1023)
     mR = 0
-    Put0("Сводка WMS по снимку " & SnapName(snap) & " (LAST_SEQ " & TbManifestValue(snap, "last_seq") & ", " & TbManifestValue(snap, "created") & ")", "", "")
+    Put0("Сводка WMS по снимку " & SnapName(snap) & " (LAST_SEQ " & TbManifestValue(snap, "last_seq") & ") — " & TbSnapAge(snap), "", "")
     mR = mR + 1
     ' 1. stock
     Put0("ОСТАТКИ", "", "")
@@ -73,16 +80,19 @@ Function AnRefresh(dToday As Double) As String
     mSrc(0) = mR - 1
     mSrc(1) = 6
     For Each ms In Array("Поставщик", "Офис", "Производство", "Детали", "Старый склад", "Иной приход")
-        PutF2(ms, "=COUNTIF($_stock.J2:J" & (n(0) + 1) & ";""" & ms & """)", "=SUMIF($_stock.J2:J" & (n(0) + 1) & ";""" & ms & """;$_stock.E2:E" & (n(0) + 1) & ")")
+        PutF(ms, "=COUNTIF($_stock.J2:J" & (n(0) + 1) & ";""" & ms & """)")
+        ' 1.0: the balance by unit (5 шт and 2 м are not «7»)
+        UnitSumWhere("_stock", 4, 3, 9, CStr(ms), -1, 0, 0, -1, un, sm, nu)
+        TbUnitCell(mSh.getCellByPosition(2, mR - 1), un, sm, nu)
     Next ms
     mR = mR + 1
     Put0("КАТЕГОРИИ", "ЕИ", "Остаток")
     mCat(0) = mR - 1
-    mCat(1) = PutGroups("_stock", 6, n(0), 4, 30, -1, -1, -1, 0)
+    mCat(1) = PutGroups("_stock", 6, n(0), 4, 30, -1, -1, -1, 0, 3)
     mR = mR + 1
     Put0("МЕСТА (больше всего ЕИ)", "ЕИ", "Остаток")
     mPlace(0) = mR - 1
-    mPlace(1) = PutGroups("_stock", 5, n(0), 4, 20, -1, -1, -1, 0)
+    mPlace(1) = PutGroups("_stock", 5, n(0), 4, 20, -1, -1, -1, 0, 3)
     mR = mR + 1
     ' 3. movements by month (the last 12 months)
     Put0("ДВИЖЕНИЯ ПО МЕСЯЦАМ", "Приходы", "Выдачи")
@@ -102,15 +112,15 @@ Function AnRefresh(dToday As Double) As String
         mSh.getCellByPosition(4, mR).setFormula(AdjCount(n(5), a, b, "Списание"))
         mSh.getCellByPosition(5, mR).setFormula(AdjCount(n(5), a, b, "Инвентаризация"))
         mSh.getCellByPosition(6, mR).setFormula(AdjCount(n(5), a, b, "Перемещение"))
-        mSh.getCellByPosition(7, mR).setFormula("=SUMIFS($_issues.E2:E" & (n(3) + 1) & ";$_issues.H2:H" & (n(3) + 1) & ";"">=" & a & """;$_issues.H2:H" _
-            & (n(3) + 1) & ";""<" & b & """;$_issues.R2:R" & (n(3) + 1) & ";""Проведено*"")")
+        UnitSumWhere("_issues", 4, 6, -1, "", 7, a, b, 17, un, sm, nu)
+        TbUnitCell(mSh.getCellByPosition(7, mR), un, sm, nu)
         mR = mR + 1
     Next m
     mR = mR + 1
     ' the most issued positions: posted issues of the last 90 days, the EI with its name
     Put0("НАИБОЛЕЕ ВЫДАВАЕМЫЕ ПОЗИЦИИ (90 дней)", "Выдач", "Выдано, кол-во")
     mTop(0) = mR - 1
-    mTop(1) = PutGroups("_issues", 11, n(3), 4, 10, 17, 2, 7, dToday - 89)
+    mTop(1) = PutGroups("_issues", 11, n(3), 4, 10, 17, 2, 7, dToday - 89, 6)
     mR = mR + 1
     ' 4. orders
     Put0("ЗАКАЗЫ", "", "")
@@ -123,10 +133,15 @@ Function AnRefresh(dToday As Double) As String
     ' 5. turnover and frequency
     a = dToday - 90
     Put0("ОБОРАЧИВАЕМОСТЬ И ЧАСТОТА", "", "")
-    PutF("Выдано за 90 дней, кол-во", "=SUMIFS($_issues.E2:E" & (n(3) + 1) & ";$_issues.H2:H" & (n(3) + 1) & ";"">=" & a & """;$_issues.R2:R" & (n(3) + 1) _
-        & ";""Проведено*"")")
-    PutF("Остаток всего, кол-во", "=SUM($_stock.E2:E" & (n(0) + 1) & ")")
-    PutF("Оборачиваемость за 90 дней (выдано / остаток)", "=IFERROR(B" & (mR - 1) & "/B" & mR & ";0)")
+    ' 1.0: by unit — the turnover of each unit apart (выдано шт / остаток шт)
+    UnitSumWhere("_issues", 4, 6, -1, "", 7, a, 1E+9, 17, un, sm, nu)
+    PutS("Выдано за 90 дней, кол-во", "")
+    TbUnitCell(mSh.getCellByPosition(1, mR - 1), un, sm, nu)
+    UnitSumWhere("_stock", 4, 3, -1, "", -1, 0, 0, -1, un2, sm2, nu2)
+    PutS("Остаток всего, кол-во", "")
+    TbUnitCell(mSh.getCellByPosition(1, mR - 1), un2, sm2, nu2)
+    PutS("Оборачиваемость за 90 дней (выдано / остаток)", "")
+    Turnover(mSh.getCellByPosition(1, mR - 1), un, sm, nu, un2, sm2, nu2)
     PutF("Операций за 30 дней в день (приходы, выдачи, возвраты, корректировки)", "=(COUNTIFS($_issues.H2:H" & (n(3) + 1) & ";"">=" & (dToday - 30) _
         & """)+COUNTIFS($_returns.H2:H" & (n(4) + 1) & ";"">=" & (dToday - 30) & """)+COUNTIFS($_special.H2:H" & (n(2) + 1) & ";"">=" & (dToday - 30) _
         & """)+COUNTIFS($_orders.N2:N" & (n(1) + 1) & ";"">=" & (dToday - 30) & """)+COUNTIFS($_adjustments.K2:K" & (n(5) + 1) & ";"">=" & (dToday - 30) & """))/30")
@@ -134,7 +149,7 @@ Function AnRefresh(dToday As Double) As String
     ' 6. recipients
     Put0("ПОЛУЧАТЕЛИ (больше всего выдач)", "Выдач", "Выдано, кол-во")
     mRcp(0) = mR - 1
-    mRcp(1) = PutGroups("_issues", 8, n(3), 4, 15, 17, -1, -1, 0)
+    mRcp(1) = PutGroups("_issues", 8, n(3), 4, 15, 17, -1, -1, 0, 6)
     mR = mR + 1
     ' 7. problem positions
     Put0("ПРОБЛЕМНЫЕ ПОЗИЦИИ", "", "")
@@ -247,9 +262,10 @@ End Function
 ' the rows whose status starts with «Проведено» (a cancelled issue is not counted); labelCol ≥ 0: the value is shown with
 ' the label of its first row (the EI with its name); dateCol ≥ 0: only the rows dated dFrom or later
 Private Function PutGroups(sTable As String, keyCol As Integer, nRows As Long, qtyCol As Integer, nTop As Integer, statusCol As Integer, _
-    labelCol As Integer, dateCol As Integer, dFrom As Double) As Long
-    Dim src As Object, d As Variant, i As Long, g() As Variant, k As Long, cur As String, cnt As Long, sm As Double, j As Long, rows() As Variant
-    Dim tmp As Variant, lbl As String, dk As Variant, dq As Variant, ds As Variant, dl As Variant, dt As Variant
+    labelCol As Integer, dateCol As Integer, dFrom As Double, unitCol As Integer) As Long
+    Dim src As Object, d As Variant, i As Long, g() As Variant, k As Long, cur As String, cnt As Long, j As Long, rows() As Variant
+    Dim tmp As Variant, lbl As String, dk As Variant, dq As Variant, ds As Variant, dl As Variant, dt As Variant, du As Variant
+    Dim un() As String, sm() As Double, nu As Integer
     If nRows < 1 Then
         mSh.getCellByPosition(0, mR).setString("(нет данных)")
         mR = mR + 1
@@ -262,11 +278,14 @@ Private Function PutGroups(sTable As String, keyCol As Integer, nRows As Long, q
     ds = src.getCellRangeByPosition(IIf(statusCol >= 0, statusCol, keyCol), 1, IIf(statusCol >= 0, statusCol, keyCol), nRows).getDataArray()
     dl = src.getCellRangeByPosition(IIf(labelCol >= 0, labelCol, keyCol), 1, IIf(labelCol >= 0, labelCol, keyCol), nRows).getDataArray()
     dt = src.getCellRangeByPosition(IIf(dateCol >= 0, dateCol, keyCol), 1, IIf(dateCol >= 0, dateCol, keyCol), nRows).getDataArray()
+    du = src.getCellRangeByPosition(unitCol, 1, unitCol, nRows).getDataArray()
     ReDim rows(nRows - 1)
     For i = 0 To nRows - 1
-        rows(i) = Array(dk(i)(0), dq(i)(0), ds(i)(0), dl(i)(0), dt(i)(0))
+        rows(i) = Array(dk(i)(0), dq(i)(0), ds(i)(0), dl(i)(0), dt(i)(0), du(i)(0))
     Next i
-    d = SortedRows(rows, 5, -1)
+    d = SortedRows(rows, 6, -1)
+    ReDim un(7)
+    ReDim sm(7)
     ReDim g(nRows)
     cur = Chr(1)
     For i = 0 To nRows - 1
@@ -279,7 +298,7 @@ Private Function PutGroups(sTable As String, keyCol As Integer, nRows As Long, q
         End If
         If CStr(d(i)(0)) <> cur Then
             If cur <> Chr(1) And cur <> "" Then
-                g(k) = Array(lbl, cnt, sm)
+                g(k) = Array(lbl, cnt, GroupSum(un, sm, nu))
                 k = k + 1
             End If
             cur = CStr(d(i)(0))
@@ -288,14 +307,14 @@ Private Function PutGroups(sTable As String, keyCol As Integer, nRows As Long, q
                 If CStr(d(i)(3)) <> "" Then lbl = cur & " «" & d(i)(3) & "»"
             End If
             cnt = 0
-            sm = 0
+            nu = 0
         End If
         cnt = cnt + 1
-        If VarType(d(i)(1)) = 5 Then sm = sm + d(i)(1)
+        If VarType(d(i)(1)) = 5 Then TbUnitAdd(un, sm, nu, CStr(d(i)(5)), d(i)(1))
 NEXT_ROW:
     Next i
     If cur <> Chr(1) And cur <> "" Then
-        g(k) = Array(lbl, cnt, sm)
+        g(k) = Array(lbl, cnt, GroupSum(un, sm, nu))
         k = k + 1
     End If
     ' the largest groups first (a short insertion sort over the groups)
@@ -312,7 +331,7 @@ NEXT_ROW:
     For i = 0 To IIf(k > nTop, nTop, k) - 1
         mSh.getCellByPosition(0, mR).setString(g(i)(0))
         mSh.getCellByPosition(1, mR).setValue(g(i)(1))
-        mSh.getCellByPosition(2, mR).setValue(g(i)(2))
+        If VarType(g(i)(2)) = 8 Then mSh.getCellByPosition(2, mR).setString(g(i)(2)) Else mSh.getCellByPosition(2, mR).setValue(g(i)(2))
         mR = mR + 1
     Next i
     PutGroups = IIf(k > nTop, nTop, k)
@@ -321,6 +340,91 @@ NEXT_ROW:
         mR = mR + 1
     End If
 End Function
+
+' the sum of a group: a number (one unit), otherwise the text «10 шт · 2 м»
+Private Function GroupSum(un() As String, sm() As Double, nu As Integer) As Variant
+    If nu = 0 Then
+        GroupSum = 0#
+    ElseIf nu = 1 Then
+        GroupSum = sm(0)
+    Else
+        GroupSum = TbUnitText(un, sm, nu)
+    End If
+End Function
+
+' a column (1 … the last row) of a loaded table, read once per «Обновить»
+Private Function TableCol(sTable As String, c As Integer, nLast As Long) As Variant
+    Dim i As Integer, k As String
+    k = sTable & "|" & c
+    For i = 0 To mColN - 1
+        If mColKey(i) = k Then
+            TableCol = mColVal(i)
+            Exit Function
+        End If
+    Next i
+    If mColN > UBound(mColKey) Then
+        ReDim Preserve mColKey(2 * mColN + 1)
+        ReDim Preserve mColVal(2 * mColN + 1)
+    End If
+    mColKey(mColN) = k
+    mColVal(mColN) = ThisComponent.Sheets.getByName(sTable).getCellRangeByPosition(c, 1, c, nLast).getDataArray()
+    TableCol = mColVal(mColN)
+    mColN = mColN + 1
+End Function
+
+' 1.0: the sums of column qCol of table sTable by unit (column uCol) over its rows: keyCol ≥ 0 — only the rows with sKey
+' there; dCol ≥ 0 — only the rows dated in [a, b); sCol ≥ 0 — only the rows whose status starts with «Проведено»
+Private Sub UnitSumWhere(sTable As String, qCol As Integer, uCol As Integer, keyCol As Integer, sKey As String, dCol As Integer, a As Double, _
+    b As Double, sCol As Integer, un() As String, sm() As Double, nu As Integer)
+    Dim last As Long, dq As Variant, du As Variant, dk As Variant, dd As Variant, ds As Variant, i As Long
+    ReDim un(7)
+    ReDim sm(7)
+    nu = 0
+    If Not ThisComponent.Sheets.hasByName(sTable) Then Exit Sub
+    last = TbLastRow(ThisComponent.Sheets.getByName(sTable))
+    If last < 1 Then Exit Sub
+    dq = TableCol(sTable, qCol, last)
+    du = TableCol(sTable, uCol, last)
+    If keyCol >= 0 Then dk = TableCol(sTable, keyCol, last)
+    If dCol >= 0 Then dd = TableCol(sTable, dCol, last)
+    If sCol >= 0 Then ds = TableCol(sTable, sCol, last)
+    For i = 0 To UBound(dq)
+        If VarType(dq(i)(0)) <> 5 Then GoTo NEXT_ROW
+        If keyCol >= 0 Then
+            If CStr(dk(i)(0)) <> sKey Then GoTo NEXT_ROW
+        End If
+        If dCol >= 0 Then
+            If VarType(dd(i)(0)) <> 5 Then GoTo NEXT_ROW
+            If dd(i)(0) < a Or dd(i)(0) >= b Then GoTo NEXT_ROW
+        End If
+        If sCol >= 0 Then
+            If Left(CStr(ds(i)(0)), 9) <> "Проведено" Then GoTo NEXT_ROW
+        End If
+        TbUnitAdd(un, sm, nu, CStr(du(i)(0)), dq(i)(0))
+NEXT_ROW:
+    Next i
+End Sub
+
+' the turnover «выдано / остаток» of each unit apart: a number (one unit), otherwise «шт 0,5 · м 1,2»
+Private Sub Turnover(oCell As Object, un() As String, sm() As Double, nu As Integer, un2() As String, sm2() As Double, nu2 As Integer)
+    Dim i As Integer, j As Integer, s As String, x As Double, n As Integer
+    For j = 0 To nu2 - 1
+        x = 0
+        For i = 0 To nu - 1
+            If un(i) = un2(j) Then x = sm(i)
+        Next i
+        If sm2(j) > 0 Then
+            s = s & IIf(n > 0, " · ", "") & IIf(un2(j) <> "", un2(j), "(без ед.)") & " " & TbNumText(x / sm2(j))
+            n = n + 1
+            If n = 1 Then oCell.setValue(Round(x / sm2(j), 4))
+        End If
+    Next j
+    If n = 0 Then
+        oCell.setValue(0)
+    ElseIf n > 1 Then
+        oCell.setString(s)
+    End If
+End Sub
 
 ' ================================================================ «Транспорт»
 

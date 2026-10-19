@@ -24,6 +24,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 from harness import OUT, Session, Results, new_wms, wms_versions  # noqa: E402
+from wmslo import script_macro  # noqa: E402
 import build_release  # noqa: E402
 
 R = Results()
@@ -117,13 +118,13 @@ def c02_candidate_book():
         btn = {}
         for i in range(form.getCount()):
             ev = form.getScriptEvents(i)
-            btn[form.getByIndex(i).Label] = ev[0].ScriptCode.split("Standard.", 1)[1].split("?")[0] if ev else ""
+            btn[form.getByIndex(i).Label] = script_macro(ev[0].ScriptCode) if ev else ""
         R.add(c, "книга-кандидат: режим PROD, первый запуск — «работа разрешена» (рабочий файл зарегистрирован), реестр пуст; на «Главной» — "
                  "версия продукта, ядра и схемы; листы по порядку, последний видимый — «Справка»",
               st.get("STATE") == "CLEAN" and st.get("REG") == "own" and sys_mode == "PROD" and f"версия {V['WMS_PRODUCT_VERSION']}" in ver
               and V["WMS_SYS_SCHEMA"] in ver
               and names == ["Дашборд", "Главная", "Заказы", "Иной приход", "Приход авто", "Выдачи", "Возврат", "Корректировки", "Наличие", "Поиск",
-                           "Карта склада", "Сверка переноса", "Получатели", "Топология", "Справка"]
+                           "Карта склада", "Сверка переноса", "Получатели", "Топология", "Места", "Справка"]
               and s.sysv("NEXT_EI") == 1.0, f"{st}; {sys_mode}; «{ver}»; {names}")
         R.add(c, "«Справка»: руководство кладовщика, примечания к выпуску и руководство по резервным копиям и восстановлению (без разметки "
                  "Markdown); лист защищён",

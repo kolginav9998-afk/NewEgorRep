@@ -138,6 +138,9 @@ Sub BtnRcvPost(Optional oEvent As Variant)
         res = WmsReceipt.ReceiptPostRow(r0)
         AfterOperation("«Провести приход»", res)
         If Left(res, 13) = "ERR-CRITICAL:" Or Left(res, 5) = "BUSY:" Or Left(res, 8) = "ERR-SYS:" Then UiMessage(Payload(res))
+        WmsAsk.ShowRowResult("Приход не проведён", res)
+        ' 1.0: what the receipt could not finish (its packing) is said, not lost under the next message
+        If Left(res, 3) = "OK:" And gRcvNote <> "" Then UiMessage(gRcvNote)
         gUiLastMsg = res
         Exit Sub
     End If
@@ -228,10 +231,12 @@ Sub BtnRcvMore(Optional oEvent As Variant)
     res = WmsReceipt.ReceiptAddRow(r, v(0), v(1), v(2), v(3), v(4), v(5), v(6))
     AfterOperation("«Ещё поступление»", res)
     If Left(res, 3) <> "OK:" Then
-        UiMessage("Поступление не проведено: " & Payload(res))
+        ' 1.0: «Не проводить» in a question needs no window
+        If Not (Left(res, 5) = "SKIP:" And InStr(res, "не проведён") > 0) Then UiMessage("Поступление не проведено: " & Payload(res))
         gUiLastMsg = res
         Exit Sub
     End If
+    If gRcvNote <> "" Then UiMessage(gRcvNote)
     ' the new row is shown to the user (its new EI in V); a row inserted inside a filtered range may be hidden by the filter
     ' (M6 §18: the delivery row stays in the block of its order) — it is shown, the filter itself stays
     a = Split(res, "|")
@@ -361,6 +366,13 @@ Sub BtnOrdCancel(Optional oEvent As Variant)
         Exit Sub
     End If
     sh = gDoc.Sheets.getByName(SH_ORDERS)
+    ' 1.0: a cancellation that cannot be done is refused before the question
+    res = WmsReceipt.OrderCancelCheck(r, False)
+    If Left(res, 3) <> "OK:" Then
+        If Left(res, 5) = "SKIP:" Then UiMessage(Payload(res)) Else UiMessage("Заказ не отменён: " & Payload(res))
+        gUiLastMsg = res
+        Exit Sub
+    End If
     If Not UiConfirm("Отменить заказ?" & Chr(10) & Chr(10) & "Заказ " & sh.getCellByPosition(OC_ORDER, r).getString() & ": " _
         & sh.getCellByPosition(OC_NAME, r).getString() & Chr(10) & Chr(10) & "Позиция получит статус «Отменено», строка останется в истории. " _
         & "ЕИ не создаётся.") Then Exit Sub
@@ -381,6 +393,12 @@ Sub BtnOrdCancelRest(Optional oEvent As Variant)
         Exit Sub
     End If
     sh = gDoc.Sheets.getByName(SH_ORDERS)
+    res = WmsReceipt.OrderCancelCheck(r, True)
+    If Left(res, 3) <> "OK:" Then
+        If Left(res, 5) = "SKIP:" Then UiMessage(Payload(res)) Else UiMessage("Остаток не отменён: " & Payload(res))
+        gUiLastMsg = res
+        Exit Sub
+    End If
     If Not UiConfirm("Отменить остаток позиции?" & Chr(10) & Chr(10) & "Заказ " & sh.getCellByPosition(OC_ORDER, r).getString() & ": " _
         & sh.getCellByPosition(OC_NAME, r).getString() & Chr(10) & Chr(10) & "Полученное количество и заказанное (H) не меняются, " _
         & "неполученный остаток больше не ожидается.") Then Exit Sub

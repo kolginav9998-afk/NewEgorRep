@@ -54,8 +54,11 @@ Function BlockHint(code As String) As String
         BlockHint = "Если этот файл — рабочая WMS (перенесена намеренно), нажмите «Сделать рабочим файлом». Резервную копию так открывать нельзя: " _
             & "скопируйте её на место рабочей книги."
     Case "JOURNAL_BEHIND"
-        BlockHint = "Журнал отстаёт от книги. Если WMS перенесена без папки WMS_Journal — «Сделать рабочим файлом» (будет начат новый журнал). " _
-            & "Иначе верните папку WMS_Journal рядом с книгой."
+        BlockHint = "Журнал отстаёт от книги (книга — главный источник, её данные целы). Если папка WMS_Journal заменена старой копией — верните " _
+            & "правильную. Иначе — «Сделать рабочим файлом»: начнётся новый журнал, прежний будет сохранён рядом, в папке «старый_журнал_…»."
+    Case "JOURNAL_OTHER_COPY"
+        BlockHint = "Книгу, похоже, заменили копией, с которой работали отдельно. Не проводите и не сохраняйте: верните на место правильную " _
+            & "рабочую книгу. Если правильная — именно эта, нажмите «Сделать рабочим файлом»: начнётся новый журнал, прежний будет сохранён рядом."
     Case "ROLLBACK_FAILED", "COMMIT_FAILED", "JOURNAL_UNCERTAIN", "JOURNAL_FOREIGN_WRITE", "STARTUP_ERROR"
         BlockHint = "Закройте книгу и откройте WMS заново — запуск сам разберёт незавершённую операцию."
     Case "PROTECTION_FOREIGN"
@@ -80,13 +83,20 @@ Sub UiRefresh(sLast As String)
     wasModified = gDoc.isModified()
     sh = gDoc.Sheets.getByName(SH_MAIN)
     c = sh.getCellByPosition(1, MR_STATE)
-    If gState = "CLEAN" Then
+    If gState = "CLEAN" And gOldNote <> "" Then
+        ' 1.0: posted in the old book after the upgrade — the panel says it in colour, not only among the notes
+        PutB(sh, MR_STATE, "Работа разрешена — но в старой книге проводились операции")
+        PutB(sh, MR_REASON, gOldNote)
+        PutB(sh, MR_HINT, "Работайте только в этой книге. Проведённое в старой книге внесите сюда заново; старую книгу закройте и больше не открывайте.")
+        color = RGB(255, 235, 156)
+    ElseIf gState = "CLEAN" Then
         PutB(sh, MR_STATE, "Работа разрешена")
         PutB(sh, MR_REASON, "")
         PutB(sh, MR_HINT, "")
         color = RGB(198, 239, 206)
     Else
-        PutB(sh, MR_STATE, "ЗАБЛОКИРОВАНО" & IIf(gBlock <> "", " [" & gBlock & "]", "") & " — проведение запрещено")
+        ' 1.0: the words first, the code (for the support) at the end — it was «ЗАБЛОКИРОВАНО [TAIL]»
+        PutB(sh, MR_STATE, "ЗАБЛОКИРОВАНО — проведение запрещено" & IIf(gBlock <> "", " (код " & gBlock & ")", ""))
         PutB(sh, MR_REASON, gBlockText)
         PutB(sh, MR_HINT, BlockHint(gBlock))
         color = RGB(255, 199, 206)
@@ -138,6 +148,32 @@ Sub UiRefresh(sLast As String)
         PutB(sh, MR_LAST, sLast)
         PutB(sh, MR_TIME, Replace(TS(), "T", " "))
     End If
+    If Not wasModified Then gDoc.setModified(False)
+    Exit Sub
+EH:
+End Sub
+
+' 1.0: bSaving — the panel as the saved file shows it to someone who opens it with the macros off (or outside the trusted
+' folder): «WMS не запущена» and how to start it; after the save (False) — the panel of this session again. The book stays
+' «not modified» (the panel is derived state)
+Sub UiSavedState(bSaving As Boolean)
+    Dim sh As Object, c As Object, wasModified As Boolean
+    On Error GoTo EH
+    If Not gDoc.Sheets.hasByName(SH_MAIN) Then Exit Sub
+    If Not bSaving Then
+        UiRefresh("")
+        WmsDash.DashSavedState(False)
+        Exit Sub
+    End If
+    wasModified = gDoc.isModified()
+    sh = gDoc.Sheets.getByName(SH_MAIN)
+    PutB(sh, MR_STATE, "WMS не запущена — макросы выключены")
+    PutB(sh, MR_REASON, "Книга открыта без макросов WMS: ничего не проводится, кнопки не работают, листы показывают последнее сохранённое состояние.")
+    PutB(sh, MR_HINT, "Закройте книгу и откройте её снова с включёнными макросами. Если LibreOffice макросы не предлагает — добавьте папку WMS в " _
+        & "доверенные: Сервис → Параметры → LibreOffice → Безопасность → «Безопасность макросов…» → «Доверенные источники» → «Добавить».")
+    c = sh.getCellByPosition(1, MR_STATE)
+    If c.CellBackColor <> RGB(217, 217, 217) Then c.CellBackColor = RGB(217, 217, 217)
+    WmsDash.DashSavedState(True)
     If Not wasModified Then gDoc.setModified(False)
     Exit Sub
 EH:
@@ -225,6 +261,20 @@ End Sub
 Sub BtnRegister(Optional oEvent As Variant)
     Dim res As String, bNew As Boolean
     WmsInit()
+    If gState = "" Then WmsStartup()
+    ' 1.0: the registered book whose journal is behind it or belongs to another copy — a new journal, the old one moved aside
+    If (gBlock = "JOURNAL_BEHIND" Or gBlock = "JOURNAL_OTHER_COPY") And SysStr(SK_REG_URL) = gDoc.getURL() And UBound(WmsJournal.ListFiles()) >= 0 Then
+        If WmsPrimeUi.UiButtons("WMS — журнал", gBlockText & "." & Chr(10) & Chr(10) _
+            & IIf(gBlock = "JOURNAL_BEHIND", "Так бывает, если питание пропало сразу после сохранения книги (последние строки журнала не успели " _
+            & "записаться на диск) или если папку WMS_Journal заменили старой копией.", "Так бывает, если книгу заменили копией, с которой " _
+            & "работали отдельно (на другом компьютере, с флешки). Если правильная рабочая книга — другая, нажмите «Отмена» и верните её на место.") _
+            & Chr(10) & Chr(10) & "Можно начать новый журнал с текущего состояния этой книги: её данные не меняются, прежний журнал не удаляется — " _
+            & "он будет перенесён в папку «старый_журнал_…» внутри WMS_Journal. Книга сразу сохранится. После этого сделайте резервную копию.", _
+            Array("Начать новый журнал", "Отмена"), Array(0, 1)) <> 0 Then Exit Sub
+        res = WmsCore.ActionRegisterHere(True)
+        UiRefresh("«Сделать рабочим файлом»: " & FirstPart(res))
+        Exit Sub
+    End If
     If Not UiConfirm("Сделать этот файл рабочей WMS?" & Chr(10) & Chr(10) & ConvertFromURL(gDoc.getURL()) & Chr(10) & Chr(10) _
         & "Делайте это, только если WMS перенесена сюда намеренно. Резервную копию так открывать нельзя.") Then Exit Sub
     If gJDir <> "" And UBound(WmsJournal.ListFiles()) < 0 Then
@@ -289,6 +339,7 @@ Sub BtnPost(Optional oEvent As Variant)
         Exit Sub
     End If
     res = WmsIssue.IssuePostRow(r)
+    WmsAsk.ShowRowResult("Выдача не проведена", res)
     gUiLastMsg = res
     If Left(res, 8) = "BLOCKED:" Or Left(res, 13) = "ERR-CRITICAL:" Then UiRefresh("«Провести»: " & res)
     If Left(res, 13) = "ERR-CRITICAL:" Or Left(res, 5) = "BUSY:" Then UiMessage(Mid(res, InStr(res, ":") + 1))
@@ -296,6 +347,7 @@ End Sub
 
 Sub BtnFix(Optional oEvent As Variant)
     Dim r As Long, why As String, res As String, sh As Object, sEI As String, sQty As String, sWho As String, sDate As String, k As Long
+    Dim q0 As Double, n0 As Long, sCanon As String, sMsg As String, sQty0 As String
     If Not ActiveIssueRow(r, why) Then
         UiMessage(why)
         Exit Sub
@@ -315,11 +367,18 @@ Sub BtnFix(Optional oEvent As Variant)
     End Select
     k = CLng(sh.getCellByPosition(IC_NO, r).getValue())
     sEI = sh.getCellByPosition(IC_EI, r).getString()
-    sQty = WmsIssue.QtyText(sh.getCellByPosition(IC_QTY, r).getValue())
+    q0 = sh.getCellByPosition(IC_QTY, r).getValue()
+    ' 1.0: an EI with a packing shows its quantity in the parts («1 кан», not «0,25»); kept as proposed — the same number
+    If WmsIssue.NormalizeEI(sEI, n0, sCanon, sMsg) Then sQty = WmsPack.QtyForInput(n0, q0) Else sQty = WmsIssue.QtyText(q0)
+    sQty0 = sQty
     sWho = sh.getCellByPosition(IC_WHO, r).getString()
     sDate = Format(sh.getCellByPosition(IC_DATE, r).getValue(), "DD.MM.YYYY")
     If Not FixDialog(k, sEI, sQty, sWho, sDate) Then Exit Sub
-    res = WmsIssue.IssueFixRow(r, sEI, sQty, sWho, sDate)
+    If Trim(sQty) = sQty0 And Trim(sEI) = sCanon Then
+        res = WmsIssue.IssueFixRow(r, sEI, q0, sWho, sDate)
+    Else
+        res = WmsIssue.IssueFixRow(r, sEI, sQty, sWho, sDate)
+    End If
     gUiLastMsg = res
     If Left(res, 3) <> "OK:" Then UiMessage("Исправление не выполнено: " & Mid(res, InStr(res, ":") + 1))
     If Left(res, 8) = "BLOCKED:" Or Left(res, 13) = "ERR-CRITICAL:" Then UiRefresh("«Исправить»: " & res)

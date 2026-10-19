@@ -464,6 +464,49 @@ Function BalanceCheck() As String
     BalanceCheck = s
 End Function
 
+' 1.0: the rule «остаток = сумма движений» for the snapshot of the tools (WmsExport.ExportSnapshot): manifest lines
+' balance_eis, balance_legacy (transferred EIs — their start is in the journal and _LEG, which the tools do not read),
+' balance_bad and balance_first (the first disagreement, without «;»)
+Function BalanceManifest() As String
+    Dim s As String, f As String
+    On Error GoTo EH
+    s = BalanceCheck()
+    f = s
+    If InStr(f, ";") > 0 Then f = Left(f, InStr(f, ";") - 1)
+    f = Replace(Replace(f, Chr(10), " "), ";", ",")
+    BalanceManifest = "balance_eis;" & gLgEIs & Chr(10) & "balance_legacy;" & gLgLegacy & Chr(10) & "balance_bad;" & gLgBad & Chr(10) _
+        & "balance_first;" & f & Chr(10)
+    Exit Function
+EH:
+    BalanceManifest = ""
+End Function
+
+' 1.0: the lines of «Самопроверка» (WmsDiagnostics.SelfCheck) for the rule «остаток = сумма движений» of every EI and for
+' the packing table _PACK — «WARN …» / «OK …», one per line. A disagreement is a warning: it is named, the details are on
+' «Сверка переноса»; nothing is changed
+Function SelfCheckLines() As String
+    Dim s As String, r As String, t0 As Long
+    On Error GoTo EH
+    t0 = GetSystemTicks()
+    s = BalanceCheck()
+    If s <> "" Then
+        r = "WARN остаток = движения: не сходится у ЕИ: " & gLgBad & " (" & s & IIf(gLgBad > 5, "; …", "") & ") — подробности на листе «" & SH_LEGREP _
+            & "», кнопка «Обновить»" & Chr(10)
+    Else
+        r = "OK остаток = движения: сходится у всех ЕИ (" & gLgEIs & "), " & (GetSystemTicks() - t0) & " мс" & Chr(10)
+    End If
+    s = WmsPack.PackProblems()
+    If s <> "" Then
+        r = r & "WARN фасовка: " & s & Chr(10)
+    Else
+        r = r & "OK фасовка: строки " & SH_PACK & " — на своих ЕИ" & Chr(10)
+    End If
+    SelfCheckLines = r
+    Exit Function
+EH:
+    SelfCheckLines = "WARN остаток = движения: проверка не выполнена: " & Error$ & Chr(10)
+End Function
+
 ' ================================================================ the sheet «Сверка переноса»
 ' One row per transferred EI (and per other EI whose balance disagrees with its movements): the numbers of the transfer,
 ' where the balance came from, what moved after it, the expected and the actual balance, and what to check. Rows that need

@@ -454,10 +454,16 @@ def wms_versions():
     return {k: re.search(rf'Public Const {k} = "([^"]+)"', txt).group(1) for k in ("WMS_PRODUCT_VERSION", "WMS_CORE_VERSION", "WMS_SYS_SCHEMA")}
 
 
+class NoHistory(RuntimeError):
+    """the sources hold no history of git (a ZIP, a shallow clone, a copy): a test that needs the book of an earlier release
+    is skipped with the reason, not failed"""
+
+
 def git_sources(commit, dest, parts=("tools", "src", "tests", "docs")):
     """the sources of an earlier release (git archive of its commit) extracted into dest: "" when done, otherwise why not —
-    sources without the history of git (a ZIP of GitHub, a shallow clone) cannot build an earlier release"""
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sources without the history of git (a ZIP of GitHub, a shallow clone) cannot build an earlier release. WMS_GIT_ROOT names
+    a clone with the history when the tests run from a copy of the sources"""
+    root = os.environ.get("WMS_GIT_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     try:
         r = subprocess.run(["git", "-C", root, "archive", commit] + list(parts), capture_output=True)
     except OSError as e:
@@ -481,6 +487,9 @@ class Results:
         print(f"[{st}] {case} {name}: {detail[:400]}", flush=True)
 
     def error(self, case, exc):
+        if isinstance(exc, NoHistory):
+            self.add(case, "пропущено: нужна книга прежнего выпуска", "SKIP", str(exc)[:600])
+            return
         self.add(case, "исключение теста", False, "".join(traceback.format_exception_only(type(exc), exc)).strip()[:600])
 
     def save(self, path):

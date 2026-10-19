@@ -23,6 +23,7 @@ import uno  # noqa: F401  (LibreOffice Python-UNO)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from harness import OUT, Session, Results, new_wms, template, INITIAL_STOCK  # noqa: E402
+from wmslo import script_macro  # noqa: E402
 from com.sun.star.sheet import TableFilterField  # noqa: E402
 from com.sun.star.sheet.FilterOperator import EQUAL  # noqa: E402
 
@@ -274,8 +275,11 @@ def w05_find_issue_dialog():
         s.RU("TestRetInput", "6", KEEP, "Б-1", -1)
         f3 = s.click_ret("BtnRetFind", 3)
         _, _, lst3 = dialog(s)
+        # 1.0: another place in the return row is asked about («Добавить место» / «Перенести весь ЕИ» / «Оставить» / «Не проводить»)
+        s.B("TestPrimeChoice", 1, module="WmsPrimeUi")
         p3 = post_ret(s, 3)
-        R.add(c, "№ выдачи в B: окно этой выдачи (одна строка), место изменено на «Б-1» — оно становится текущим местом ЕИ той же операцией",
+        R.add(c, "№ выдачи в B: окно этой выдачи (одна строка), место изменено на «Б-1», в вопросе о месте — «Перенести весь ЕИ»: оно "
+                 "становится текущим местом ЕИ той же операцией",
               len(lst3) == 1 and lst3[0].startswith("№ 2 ") and f3.startswith("OK") and p3 == "OK:6" and s.stock_row(7)[5] == "Б-1", f"{lst3}; {p3}")
         s.RU("TestRetKey", "")
         f4 = s.click_ret("BtnRetFind", 4)
@@ -1168,7 +1172,7 @@ def w34_buttons_bound():
         for i in range(form.getCount()):
             ev = form.getScriptEvents(i)
             code = ev[0].ScriptCode if ev else ""
-            names[form.getByIndex(i).Label] = code.split("Standard.", 1)[1].split("?")[0] if "Standard." in code else code
+            names[form.getByIndex(i).Label] = script_macro(code)
         want = {"Найти выдачу": "WmsReturnUi.BtnRetFind", "Проверить": "WmsReturnUi.BtnRetCheck", "Провести": "WmsReturnUi.BtnRetPost",
                 "Исправить": "WmsReturnUi.BtnRetFix", "Удалить": "WmsReturnUi.BtnRetDelete", "Очистить": "WmsReturnUi.BtnRetClear"}
         R.add(c, "6 кнопок листа «Возврат» привязаны к макросам (запуск через меню не нужен)", names == want, str(names))
@@ -1239,6 +1243,8 @@ def w37_place_change():
         issue(s, 1, "8", "5")
         ret_row(s, 1, "1", "2", place="Б-7")
         note = N(s, 1)
+        # 1.0: part of the EI is still on S-08 — asked: add the place, move the whole EI, keep the places; here — the whole EI
+        s.B("TestPrimeChoice", 1, module="WmsPrimeUi")
         a = post_ret(s, 1)
         e = [x for x in s.journal()[0] if x["type"] == "RETURN"][0]
         R.add(c, "место при возврате изменено: до проведения «Контроль» предупреждает «место ЕИ изменится: S-08 → Б-7»; «Наличие».F = Б-7 в той же "

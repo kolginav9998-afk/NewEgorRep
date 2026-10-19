@@ -682,6 +682,13 @@ def pr11_upgrade_072():
               wst == ["ST_Done_Line", "ST_Wait_Line", "ST_Part_Line", "ST_Gray_Line", "WMS_OrderStart", "ST_Done", "ST_Wait", "ST_Part", "ST_Gray"]
               and acf.getCount() == 1 and acf.getByIndex(0).getStyleName() == "WMS_OrderStart", str(wst))
         pk = s.B("PackSet", "ЕИ-00000427", "4", "кан", "", module="WmsPack")
+        # 1.0: a recipient not in «Получатели» is asked about (a window a test of a working book cannot answer) — added as people do
+        rc = s.doc.Sheets.getByName("Получатели")
+        rr = 1
+        while rc.getCellByPosition(1, rr).getString():
+            rr += 1
+        rc.getCellByPosition(1, rr).setString("Петров")
+        s.I("OnRecipientsChange")
         put(s, "Выдачи", 300, L="ЕИ-00000427", E="2 кан", H=serial(), I="Петров")
         pi = s.I("IssuePostRow", 300)
         R.add(c, "в обновлённой книге фасовка и выдача частями работают: в 1 шт — 4 кан, «2 кан» — 0,5 шт", pk.startswith("OK") and pi.startswith("OK")
@@ -689,12 +696,19 @@ def pr11_upgrade_072():
         oracle(c, s, "журнал 0.7.2 + 0.8 в обновлённой книге", initial={}, legacy_mn_empty=False)
     finally:
         s.close(save=True)
-    # someone works in the old book after the switch
+    # someone opens the old book after the switch: it is locked (1.0); after «Снять блокировку WMS» an issue is posted in it
+    lock = open(os.path.join(d, "OLD", "WMS_Journal", "wms.lock"), encoding="utf-8").read() if os.path.exists(
+        os.path.join(d, "OLD", "WMS_Journal", "wms.lock")) else ""
     s = Session(p)
     try:
+        rep_old = s.report()
+        blocked = "LOCKED" in s.B("StateDump") and "ЭТА КНИГА БОЛЬШЕ НЕ РАБОЧАЯ" in rep_old
+        s.B("ActionForceUnlock")
         r = issue(s, 9, "ЕИ-00000427", "1", who="Петров")
     finally:
         s.close(save=True)
+    R.add(c, "старая книга после перехода заперта: открывается с блокировкой «ЭТА КНИГА БОЛЬШЕ НЕ РАБОЧАЯ: WMS перенесена в папку …»; "
+             "журнал и книга не тронуты до «Снять блокировку WMS»", blocked and "session=MOVED-" in lock, f"{rep_old[:300]}; {lock[:160]}")
     s = ready(Session(nb))
     try:
         rep = s.report()
@@ -1176,8 +1190,8 @@ def pr17_map():
         R.add(c, "после перемещения на место карты — ЕИ на карте (занято 3, не на карте на один меньше)", mv.startswith("OK") and "занято 3" in r2
               and f"не на карте {off0 + 1}," in r2, f"{mv}; {r2}")
         keys = [s.B("PlaceKey", x, module="WmsView") for x in ("5.12.3", "05/12/03", "Р5 С12 Я3", "R5-S12-L3", "A-01-1", "B-01-1", "5-12", "Офис", "12")]
-        R.add(c, "место читается как его пишут: 5.12.3, 05/12/03, «Р5 С12 Я3», R5-S12-L3 → 5-12-3; буквы ряда сохраняются (A-1-1 ≠ B-1-1); 5-12 — без яруса",
-              keys == ["5-12-3"] * 4 + ["A-1-1", "B-1-1", "5-12", "", ""], str(keys))
+        R.add(c, "место читается как его пишут: 5.12.3, 05/12/03, «Р5 С12 Я3», R5-S12-L3 → 5-12-3; буквы ряда сохраняются (A-1-1 ≠ B-1-1; латинские A, B — как русские А, В); 5-12 — без яруса",
+              keys == ["5-12-3"] * 4 + ["А-1-1", "В-1-1", "5-12", "", ""], str(keys))
         oracle(c, s, "карта ничего не провела")
     finally:
         s.close()
@@ -1215,14 +1229,14 @@ def pr18_topology_file():
         s0.close()
     s = ready(Session(p))
     try:
+        order = lambda: [s.doc.Sheets.getByIndex(i).Name for i in range(s.doc.Sheets.getCount())]
+        before = order()
         r = s.B("TopoLoad", __import__("uno").systemPathToFileUrl(f), module="WmsMap")
         t = s.doc.Sheets.getByName("Топология")
         R.add(c, "из файла взят лист с местами (16 мест, лист «Схема»), он стал «Топология» на своём месте, книга защищена как была",
               r.startswith("OK:мест 16") and "«Схема»" in r and t.getCellByPosition(3, 1).getString() == "3-3-2"
-              and abs(t.getColumns().getByIndex(3).Width - 1500) <= 20 and s.doc.isProtected()
-              and [s.doc.Sheets.getByIndex(i).Name for i in range(s.doc.Sheets.getCount())].index("Топология")
-              == [s.doc.Sheets.getByIndex(i).Name for i in range(s.doc.Sheets.getCount())].index("Справка") - 1,
-              f"{r}; {t.getCellByPosition(3, 1).getString()}; {t.getColumns().getByIndex(3).Width}; {s.doc.isProtected()}")
+              and abs(t.getColumns().getByIndex(3).Width - 1500) <= 20 and s.doc.isProtected() and order() == before,
+              f"{r}; {t.getCellByPosition(3, 1).getString()}; {t.getColumns().getByIndex(3).Width}; {s.doc.isProtected()}; {order()}")
         m = s.B("MapBuild", "OCC", module="WmsMap")
         R.add(c, "карта по загруженной топологии: 16 мест", m.startswith("OK:мест 16"), m)
         bad = os.path.join(os.path.dirname(p), "empty.ods")
@@ -1399,8 +1413,8 @@ def pr22_parts():
         prev = s.iss(1)[17]
         a1 = s.I("IssuePostRow", 1)
         j1 = journal_last(s, "ISSUE")
-        R.add(c, "«1 кан» в «Количество»: до проведения в «Контроле» — «К выдаче: 1 кан = 0,25 шт»; проведено 0,25 шт (учёт по документу), в журнале — 1 кан",
-              prev == "К выдаче: 1 кан = 0,25 шт" and a1.startswith("OK") and s.iss(1)[4] == 0.25 and s.stock(ei_row(ant)) == 0.75
+        R.add(c, "«1 кан» в «Количество»: до проведения в «Контроле» — «К выдаче: 1 кан = 0,25 шт · останется 0,75 шт (3 кан)»; проведено 0,25 шт (учёт по документу), в журнале — 1 кан",
+              prev == "К выдаче: 1 кан = 0,25 шт · останется 0,75 шт (3 кан)" and a1.startswith("OK") and s.iss(1)[4] == 0.25 and s.stock(ei_row(ant)) == 0.75
               and j1.get("QTY") == "0.25" and j1.get("PARTS") == "1" and j1.get("PART_UNIT") == "кан", f"{prev}; {a1}; {s.iss(1)[4]}; {j1}")
         put(s, "Выдачи", 2, L=ant, E="2 канистры", H=serial(), I="егр")
         a2 = s.I("IssuePostRow", 2)
@@ -1534,6 +1548,243 @@ def pr22_parts():
 
 
 @case
+def pr26_parts_everywhere():
+    """1.0 (A1): «1 шт или 1 кан?» — в списании, инвентаризации, возврате и «Исправить», «1» больше остатка (это может быть 1 кан),
+    процент меньше 1 («0,25» в %), «1 кан 2», «останется …» в «Контроле», % после «Исправить», дата в будущем, получатель с опечаткой"""
+    c = "PR26"
+    p = new_wms("pr26")
+    s = ready(Session(p))
+    try:
+        order(s, 1, "1", "Незамерзайка (4 канистры)", qty="2")
+        receive(s, 1, "2", place="1-1-1")
+        ei = ords(s, 1)[21]
+        n = ei_row(ei)
+        s.B("PackSet", ei, "4", "кан", "", module="WmsPack")
+        put(s, "Выдачи", 1, L=ei, E="1 кан", H=serial(), I="егр")
+        s.I("PreviewRow", 1, False, False)
+        prev = s.iss(1)[17]
+        put(s, "Выдачи", 1, E="1")
+        s.I("PreviewRow", 1, False, False)
+        prev1 = s.iss(1)[17]
+        R.add(c, "«Контроль» до проведения: сколько останется частями; у «1» без единицы — как написать канистры",
+              prev == "К выдаче: 1 кан = 0,25 шт · останется 1,75 шт (7 кан)" and "если 1 кан — так и напишите «1 кан»" in prev1, f"{prev!r}; {prev1!r}")
+        put(s, "Выдачи", 1, E="1 кан 2")
+        bad = s.I("IssuePostRow", 1)
+        R.add(c, "«1 кан 2» — отказ (не 1 кан молча)", bad.startswith("ERR:") and "лишнее" in bad, bad)
+        # write-off «1»: asked — the second button is 1 кан
+        s.U("TestUiAuto", 2)
+        put(s, "Корректировки", 1, B="Списание", C=ei, G="1", K=serial(), L="разлили")
+        wo = s.B("AdjustPostRow", 1, module="WmsAdjust")
+        s.U("TestUiAuto", 1)
+        shown = s.B("TestPrimeShown", module="WmsPrimeUi")
+        R.add(c, "списание «1» у ЕИ с фасовкой — вопрос с кнопками по действию; «Списать 1 кан» — 0,25 шт",
+              wo.startswith("OK") and s.doc.Sheets.getByName("Корректировки").getCellByPosition(6, 1).getValue() == 0.25 and s.stock(n) == 1.75
+              and "Списать 1 шт — это 4 кан" in shown and "Списать 1 кан — это 0,25 шт" in shown and "Не проводить" in shown, f"{wo}; {shown!r}")
+        # a count «3»: 3 шт or 3 кан
+        s.U("TestUiAuto", 2)
+        put(s, "Корректировки", 2, B="Инвентаризация", C=ei, H="3", K=serial(), L="пересчёт")
+        inv = s.B("AdjustPostRow", 2, module="WmsAdjust")
+        s.U("TestUiAuto", 1)
+        R.add(c, "инвентаризация «3» — вопрос; «Факт 3 кан» — остаток 0,75 шт (а не 3 шт с излишком)", inv.startswith("OK") and s.stock(n) == 0.75,
+              f"{inv}; {s.stock(n)}")
+        # «1» more than the balance (0,75 шт = 3 кан): only «1 кан» can be meant — asked with that button first
+        put(s, "Выдачи", 2, L=ei, E="1", H=serial(), I="егр")
+        sh1 = s.I("IssuePostRow", 2)
+        shown2 = s.B("TestPrimeShown", module="WmsPrimeUi")
+        R.add(c, "«1» больше остатка 0,75 шт — вопрос «Выдать 1 кан?»: выдано 1 кан = 0,25 шт", sh1.startswith("OK") and s.iss(2)[4] == 0.25
+              and s.stock(n) == 0.5 and "Выдать 1 кан" in shown2 and "1 шт нельзя" in shown2, f"{sh1}; {s.iss(2)[4]}; {shown2!r}")
+        # a return «1» of an issue of 1 кан: only 1 кан can come back
+        put(s, "Возврат", 1, B=str(int(s.iss(2)[0])), F="1", H=serial(), I="егр")
+        rt = s.B("ReturnPostRow", 1, module="WmsReturn")
+        R.add(c, "возврат «1» по выдаче 1 кан — «Вернуть 1 кан»: ровно 0,25 шт", rt.startswith("OK")
+              and s.doc.Sheets.getByName("Возврат").getCellByPosition(5, 1).getValue() == 0.25 and s.stock(n) == 0.75, f"{rt}; {s.stock(n)}")
+        # a percent below 1: «0,25» in F — 0,25 % or 25 %
+        s.U("TestUiAuto", 2)
+        put(s, "Выдачи", 3, L=ei, F=0.25, H=serial(), I="егр")
+        pc = s.I("IssuePostRow", 3)
+        s.U("TestUiAuto", 1)
+        shown3 = s.B("TestPrimeShown", module="WmsPrimeUi")
+        R.add(c, "«0,25» в «%» — вопрос «0,25% или 25%?»: выбрано 25% от пришедших 2 шт = 0,5 шт", pc.startswith("OK") and s.iss(3)[4] == 0.5
+              and "меньше одного процента" in shown3 and "Выдать 25% — это 0,5 шт" in shown3, f"{pc}; {s.iss(3)[4]}; {shown3!r}")
+        # «Исправить» of that row: the quantity in parts, F tells the new quantity
+        fx = s.I("IssueFixRow", 3, ei, "1 кан", "егр", serial())
+        f_after = s.doc.Sheets.getByName("Выдачи").getCellByPosition(5, 3).getString()
+        fx2 = s.I("IssueFixRow", 3, ei, "10%", "егр", serial())
+        f_after2 = s.doc.Sheets.getByName("Выдачи").getCellByPosition(5, 3).getString()
+        inp = s.B("QtyForInput", n, 0.25, module="WmsPack")
+        R.add(c, "«Исправить» на «1 кан» — в «%» (F) не остаётся старый процент; на «10%» — в F 10%; окно «Исправить» показывает «1 кан», а не 0,25",
+              fx.startswith("OK") and f_after == "" and fx2.startswith("OK") and f_after2 == "10%" and s.iss(3)[4] == 0.2 and inp == "1 кан",
+              f"{fx}; {f_after!r}; {fx2}; {f_after2!r}; {inp}")
+        # the date of a movement in the future: asked; «Не проводить» leaves the row as it is
+        s.U("TestUiAuto", 2)
+        put(s, "Выдачи", 4, L=ei, E="1 кан", H=serial(30), I="егр")
+        fut = s.I("IssuePostRow", 4)
+        s.U("TestUiAuto", 1)
+        fut2 = s.I("IssuePostRow", 4)
+        R.add(c, "дата выдачи в будущем — вопрос: «Не проводить» — строка не проведена, «Провести с датой …» — проведена",
+              fut.startswith("SKIP:") and "дату" in fut and fut2.startswith("OK"), f"{fut}; {fut2}")
+        # a recipient with a typo: the name of the directory offered
+        put(s, "Получатели", 5, A="пи", B="Петров Иван")
+        s.I("OnRecipientsChange")
+        s.B("TestPrimeChoice", 0, module="WmsPrimeUi")
+        put(s, "Выдачи", 5, L=ei, E="1 кан", H=serial(), I="Петров  Иван.")
+        who = s.I("IssuePostRow", 5)
+        R.add(c, "получатель «Петров  Иван.» не из справочника — предложен «Петров Иван» и записан он (на руках не разделится на двоих)",
+              who.startswith("OK") and s.iss(5)[8] == "Петров Иван", f"{who}; {s.iss(5)[8]!r}")
+        oracle(c, s, "вопросы 1.0 перед проведением")
+    finally:
+        s.close()
+
+
+@case
+def pr27_receipts():
+    """1.0 (A2): приход — вопрос о возможном повторе, «Ещё поступление» с фасовкой позиции и вопросом «1 шт = 4 кан», подсказка
+    фасовки с запятой, «Отменить заказ» сначала проверяет, «Исправить приход» не меняет место перемещённого ЕИ"""
+    c = "PR27"
+    p = new_wms("pr27")
+    s = ready(Session(p))
+    today = serial()
+    try:
+        g = [s.B("TestPackGuess", x, module="WmsPack") for x in ("Профиль 20х20, 2,5 м", "Труба 11,7 м", "Уголок 4.5 м")]
+        R.add(c, "подсказка фасовки не теряет запятую: «2,5 м» → 2,5 м, «11,7 м» → 11,7 м, «4.5 м» → 4,5 м",
+              g == ["2,5|м", "11,7|м", "4,5|м"], str(g))
+        order(s, 1, "1", "Антифриз (4 канистры)", qty="2", supplier="Ромашка", art="AF-1")
+        put(s, "Заказы", 1, G=1.0)
+        r1 = receive(s, 1, "4", doc="УПД-7", place="1-1-1")
+        ei1 = ords(s, 1)[21]
+        # the same receipt again on another order row: asked; «Не проводить» leaves it unposted
+        order(s, 2, "2", "Антифриз (4 канистры)", qty="2", supplier="Ромашка", art="AF-1")
+        put(s, "Заказы", 2, G=1.0)
+        put(s, "Заказы", 2, F="1", C="УПД-7", O=today, N=today, U="1-1-2")
+        s.B("TestPrimeChoice", 1, module="WmsPrimeUi")
+        d1 = s.Rc("ReceiptPostRow", 2)
+        shown = s.B("TestPrimeShown", module="WmsPrimeUi")
+        d2 = s.Rc("ReceiptPostRow", 2)
+        R.add(c, "такое же поступление (поставщик, документ, артикул, количество, дата) — вопрос «возможный повтор»: «Не проводить» — не проведено; "
+                 "«Провести — это другое поступление» — проведено с отметкой в AB",
+              r1.startswith("OK") and d1.startswith("SKIP:") and "повтор" in d1 and "Провести — это другое поступление" in shown
+              and d2.startswith("OK") and "Возможный дубль" in str(ords(s, 2)[27]), f"{r1}; {d1}; {d2}; AB {ords(s, 2)[27]!r}")
+        # «Ещё поступление» of position 1: by the document 1 шт, the fact 4 — asked; the new EI gets the packing of ЕИ of the position
+        dtxt = T.strftime("%d.%m.%Y")
+        m1 = s.Rc("ReceiptAddRow", 1, "4", "1", "УПД-8", dtxt, dtxt, "1-1-3", "")
+        ei2 = m1.split("|")[-1] if m1.startswith("OK") else ""
+        pk2 = s.B("PackLine", ei_row(ei2), "шт", module="WmsPack") if ei2 else ""
+        R.add(c, "«Ещё поступление»: «по документу 1 шт, факт 4» — вопрос, проведено 1 шт; у нового ЕИ фасовка позиции «в 1 шт — 4 кан»",
+              m1.startswith("OK") and s.stock(ei_row(ei2)) == 1.0 and pk2 == "в 1 шт — 4 кан", f"{m1}; {pk2!r}")
+        # «Отменить заказ» of a position that was received: refused before any question
+        s.U("TestUiAuto", 2)
+        s.goto("Заказы", "$A$2")
+        s.OU("BtnOrdCancel")
+        msg = s.U("TestUiLastMessage")
+        s.U("TestUiAuto", 1)
+        R.add(c, "«Отменить заказ» по полученной позиции — сразу понятный отказ, без вопроса «Отменить заказ?»",
+              msg.startswith("ERR:") and "не отменяется" in msg, msg)
+        # «Исправить приход» of an EI moved since: its current place stays
+        put(s, "Корректировки", 1, B="Перемещение", C=ei1, J="2-2-2", K=today, L="переложили")
+        mv = s.B("AdjustPostRow", 1, module="WmsAdjust")
+        fx = s.Rc("ReceiptFixRow", 1, "4", "1", "УПД-7", dtxt, dtxt, "1-1-9", "")
+        R.add(c, "«Исправить приход» с новым местом после перемещения ЕИ — текущее место ЕИ (2-2-2) не меняется, строка прихода — 1-1-9",
+              mv.startswith("OK") and fx.startswith("OK") and s.stock_row(ei_row(ei1))[5] == "2-2-2" and ords(s, 1)[20] == "1-1-9",
+              f"{mv}; {fx}; {s.stock_row(ei_row(ei1))}; U {ords(s, 1)[20]!r}")
+        oracle(c, s, "приходы 1.0")
+    finally:
+        s.close()
+
+
+@case
+def pr28_places():
+    """1.0 (A3, A4): места и карта — проверка места при вводе с подсказкой, справочник «Места» (пол, улица), повтор адреса на
+    схеме, «5.12.3»-дата в схеме, латинские P/C/A, смешанные разделители, точный поиск места, «EI-…» латиницей, место возврата
+    «добавить / заменить», карта пересчитывается после операций, «на руках» без разделения по точкам и пробелам"""
+    c = "PR28"
+    p = new_wms("pr28")
+    s = ready(Session(p))
+    try:
+        topology(s, {1: (3, 2)})
+        t = s.doc.Sheets.getByName("Топология")
+        t.getCellByPosition(5, 1).setString("1-1-2")                 # the same address drawn twice (a long place)
+        cdate = t.getCellByPosition(6, 1)
+        cdate.NumberFormat = s.doc.NumberFormats.getStandardFormat(2, s.doc.CharLocale)
+        cdate.setValue(float((datetime.date(2003, 12, 5) - datetime.date(1899, 12, 30)).days))   # «5.12.3» became a date
+        s.B("OnTopoChange", module="WmsMap")
+        pl = s.doc.Sheets.getByName("Места")
+        pl.getCellByPosition(0, 1).setString("Улица")
+        pl.getCellByPosition(1, 1).setString("Улица")
+        pl.getCellByPosition(0, 2).setString("1-2-2")
+        pl.getCellByPosition(4, 2).setString("да")
+        s.B("OnPlacesChange", module="WmsMap")
+        known = [s.B("PlaceKnown", k, module="WmsMap") for k in ("1-1-1", "5-12-3", "УЛИЦА", "1-24")]
+        keys = [s.B("PlaceKey", x, module="WmsView") for x in ("P1-C1-1", "A-1-2", "А-1-2")]
+        lst = list(s.B("PlaceList", "1-1-1, 1-2-1; 1-3-1", module="WmsView"))
+        R.add(c, "место по схеме: 1-1-1 на карте, «5.12.3»-дата в схеме — место 5-12-3, «Улица» — из «Места», «1-24» неизвестно; "
+                 "латинские P/C — ряд и секция, латинская A = русская А; «, ;» вместе — три места",
+              known == [1, 1, 2, 0] and keys[0] == "1-1-1" and keys[1] == keys[2] and lst == ["1-1-1", "1-2-1", "1-3-1"], f"{known}; {keys}; {lst}")
+        # a place typed with a slip: asked, the nearest place of the map offered
+        order(s, 1, "1", "Болт М8", qty="5")
+        s.B("TestPrimeChoice", 1, module="WmsPrimeUi")
+        r1 = receive(s, 1, "5", place="1-11")
+        shown = s.B("TestPrimeShown", module="WmsPrimeUi")
+        ei1 = ords(s, 1)[21]
+        if not ei1:
+            raise RuntimeError(f"приход не проведён: {r1}; {shown!r}; контроль {ords(s, 1)[24]!r}")
+        R.add(c, "приход с местом «1-11» (нет на карте) — вопрос с похожими местами; выбрано «1-1-1» — оно и записано в строку и в «Наличие»",
+              r1.startswith("OK") and "нет на карте" in shown and s.stock_row(ei_row(ei1))[5] == "1-1-1" and ords(s, 1)[20] == "1-1-1",
+              f"{r1}; {shown!r}; {s.stock_row(ei_row(ei1))}; U {ords(s, 1)[20]!r}")
+        order(s, 2, "2", "Песок", qty="3")
+        r2 = receive(s, 2, "3", place="Улица")
+        order(s, 3, "3", "Гайка М8", qty="4")
+        r3 = receive(s, 3, "4", place="1-1-2")
+        mb = s.B("MapBuild", "OCC", True, module="WmsMap")
+        occ = s.B("TestMapEIsAll", "1-1-2", module="WmsMap").split(";")
+        R.add(c, "карта: ЕИ на «Улице» не «не на карте» (справочник «Места»); адрес 1-1-2 нарисован дважды — обе ячейки заняты",
+              r2.startswith("OK") and r3.startswith("OK") and "вне стеллажей 1," in mb and len(occ) == 2 and all(x.split("|")[1] != "" for x in occ),
+              f"{r2}; {r3}; {mb}; {occ}")
+        # where to put: neither the closed 1-2-2 nor the other cell of 1-1-2
+        s.goto("Заказы", "$A$5")
+        order(s, 4, "4", "Шайба", qty="1")
+        ws = s.B("WhereSuggest", "Шайба", "", module="WmsMap")
+        R.add(c, "«Куда положить?» не предлагает закрытое место (1-2-2 «закрыто» в «Местах») и занятое 1-1-2 во второй ячейке схемы",
+              "1-2-2" not in ws and "1-1-2|" not in ws, ws)
+        # the map is counted again when it is shown after operations
+        put(s, "Выдачи", 1, L=ei1, E="5", H=serial(), I="егр")
+        i1 = s.I("IssuePostRow", 1)
+        s.B("OnMapFocus", module="WmsMap")
+        after = s.B("TestMapEIs", "1-1-1", module="WmsMap")
+        R.add(c, "после выдачи всего остатка карта при открытии пересчитана: на 1-1-1 пусто", i1.startswith("OK") and after.endswith("|"), f"{i1}; {after!r}")
+        # the exact place in «Поиск», a Latin «EI-»
+        order(s, 5, "5", "Винт", qty="2")
+        r5 = receive(s, 5, "2", place="1-1-1")
+        order(s, 6, "6", "Шуруп", qty="2")
+        r6 = receive(s, 6, "2", place="11-1-1")
+        f1 = s.B("FindList", "1-1-1", module="WmsFind")
+        rows = [r for r in page(s, "Поиск", 12, 40, 0, 9) if r[1] == "Наличие"]
+        places = sorted(set(r[7] for r in rows))
+        n5 = int(ords(s, 5)[21].split("-")[1]) if ords(s, 5)[21] else 0
+        fe = s.B("FindRun", f"EI-{n5}", module="WmsFind")
+        R.add(c, "«Поиск» места 1-1-1 не находит 11-1-1; «EI-…» латиницей — карточка ЕИ",
+              r5.startswith("OK") and r6.startswith("OK") and f1.startswith("OK") and "11-1-1" not in places and fe.startswith("OK:ЕИ-"),
+              f"{r5}; {r6}; {f1}; {places}; {fe}")
+        # the place of a return: part of the EI still on the shelf — «добавить» (the first button)
+        e5 = ords(s, 5)[21]
+        put(s, "Выдачи", 2, L=e5, E="1", H=serial(), I="егр")
+        s.I("IssuePostRow", 2)
+        put(s, "Возврат", 1, B=str(int(s.iss(2)[0])), F="1", H=serial(), I="егр", J="1-3-1")
+        rt = s.B("ReturnPostRow", 1, module="WmsReturn")
+        R.add(c, "возврат на другое место, когда часть ЕИ лежит на прежнем — вопрос; «Добавить место» — у ЕИ «1-1-1, 1-3-1»",
+              rt.startswith("OK") and s.stock_row(ei_row(e5))[5] == "1-1-1, 1-3-1", f"{rt}; {s.stock_row(ei_row(e5))}")
+        # «на руках» — one person whatever the spaces and dots
+        put(s, "Выдачи", 3, L=e5, E="1", H=serial(), I="Петров И.И.")
+        put(s, "Выдачи", 4, L=ords(s, 6)[21], E="1", H=serial(), I="петров  и. и.")
+        s.I("IssuePostRow", 3)
+        s.I("IssuePostRow", 4)
+        h = s.B("HandsShow", "Петров И. И.", module="WmsFind")
+        R.add(c, "«на руках у Петров И. И.» — обе выдачи («Петров И.И.» и «петров  и. и.»)", h.startswith("OK") and ": 2 из 2" in h, h)
+        oracle(c, s, "места 1.0")
+    finally:
+        s.close()
+
+
+@case
 def pr23_many_places():
     """D-100: одна позиция на нескольких местах («1-2-3, 1-3-3»): карта, выдачи по местам, «Куда положить?» добавляет место, перемещение списком"""
     c = "PR23"
@@ -1656,10 +1907,12 @@ def pr25_status_colours():
         exp = {("Заказы", 22): {"Получено": "ST_Done", "Получено без документов": "ST_Done", "Дополнительное поступление": "ST_Done",
                                 "Ожидается": "ST_Wait", "Частично получено": "ST_Part", "Частично получено / остаток отменён": "ST_Part",
                                 "Отменено": "ST_Gray", "Поступление удалено (сторно)": "ST_Gray", "Заказ": ""},
-               ("Заказы", 24): {"КОПИЯ строки 5": "ST_Bad", "Не проведено: нет количества": "ST_Bad", "Проведено": ""},
+               ("Заказы", 24): {"КОПИЯ строки 5": "ST_Bad", "Не проведено: нет количества": "ST_Bad", "Проведено": "",
+                                "Ошибка: не указано место": "ST_Bad", "Внимание: возможный дубль": "ST_Part"},
                ("Наличие", 7): {"Требует разбора": "ST_Part", "Приход удалён (сторно)": "ST_Gray", "Активен": ""},
                ("Выдачи", 17): {"Проведено": "ST_Done", "Проведено, исправлено": "ST_Done", "Удалено (сторно)": "ST_Gray",
-                                "КОПИЯ строки 3": "ST_Bad", "Не проведено: остаток 1 кан": "ST_Bad", "К выдаче: 1 кан = 0,25 шт": ""}}
+                                "КОПИЯ строки 3": "ST_Bad", "Не проведено: остаток 1 кан": "ST_Bad", "К выдаче: 1 кан = 0,25 шт": "",
+                                "Ошибка: остаток 0": "ST_Bad", "Внимание: получатель не найден": "ST_Part"}}
         got = {k: {t: first_style(k[0], k[1], t) for t in v} for k, v in exp.items()}
         cell.setString("")
         bad = {k: {t: (got[k][t], v[t]) for t in v if got[k][t] != v[t]} for k, v in exp.items()}

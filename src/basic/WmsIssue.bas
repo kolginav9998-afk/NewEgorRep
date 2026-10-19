@@ -32,6 +32,11 @@ Private mCwhoNote As String
 Private mCdate As Double
 ' PRIME 0.8: how the quantity was given (WmsPack: parts «1 кан», a percent «25%») — a line for people and for the journal
 Private mCinfo As String
+' 1.0: CheckInputs refused because the quantity is more than the balance (QtyAsk may read it as parts); the balance the
+' quantity is taken from; how the recipient was found (ResolveRecipient)
+Private mCshort As Boolean
+Private mCavail As Double
+Private mCwhoSt As Integer
 
 ' ================================================================ sheets
 
@@ -380,6 +385,7 @@ End Sub
 ' qtyAvailExtra: quantity this row already holds of the same EI (a correction may reuse it). "" or the reason.
 Private Function CheckInputs(vEI As Variant, oQty As Object, vQty As Variant, oDate As Object, vDate As Variant, sWho As String, qtyAvailExtra As Double, extraEI As Long) As String
     Dim msg As String, st As Integer, p As String, s As Double, x As Double
+    mCshort = False
     If Not NormalizeEI(vEI, mCn, mCcanon, msg) Then
         CheckInputs = msg
         Exit Function
@@ -396,6 +402,7 @@ Private Function CheckInputs(vEI As Variant, oQty As Object, vQty As Variant, oD
     End If
     mCstock = s
     If mCn = extraEI Then s = s + qtyAvailExtra
+    mCavail = s
     If s <= 0 Then
         CheckInputs = "остаток " & mCcanon & " равен 0 — выдача невозможна"
         Exit Function
@@ -429,6 +436,7 @@ Private Function CheckInputs(vEI As Variant, oQty As Object, vQty As Variant, oD
         Exit Function
     End If
     If mCqty > s + 0.0000001 Then
+        mCshort = True
         CheckInputs = "недостаточно: остаток " & mCcanon & " — " & WmsPack.QtyWithParts(mCn, s, CStr(mCdata(SC_UNIT))) & ", запрошено " & QtyText(mCqty) _
             & " " & mCdata(SC_UNIT)
         Exit Function
@@ -448,6 +456,7 @@ Private Function CheckInputs(vEI As Variant, oQty As Object, vQty As Variant, oD
         Exit Function
     End If
     st = ResolveRecipient(sWho, mCwho, mCwhoNote)
+    mCwhoSt = st
     If st = 3 Or st = 4 Then
         CheckInputs = mCwhoNote
         Exit Function
@@ -480,6 +489,8 @@ End Sub
 Private Sub HandleRange(ra As Variant)
     Dim r As Long, r0 As Long, r1 As Long, n As Long, um As Object, sh As Object, cur As Object, last As Long, inCtx As Boolean
     If ra.EndRow < 1 Then Exit Sub
+    ' 1.0 (D-004): «Вернул» / «Вернул в %» (M, N) are notes — typed into, they are explained once (a return is a row of «Возврат»)
+    If Touches(ra, IC_RET) Or Touches(ra, IC_RETPCT) Then WmsAsk.RetColumnsHint(ra)
     ' only the inputs matter (A: a key that appeared by paste/fill, E F H I L: the preview and the row status)
     If Not (Touches(ra, IC_NO) Or Touches(ra, IC_QTY) Or Touches(ra, IC_PCT) Or Touches(ra, IC_DATE) Or Touches(ra, IC_WHO) Or Touches(ra, IC_EI)) Then Exit Sub
     mInHandler = True
@@ -597,6 +608,13 @@ Sub PreviewRow(r As Long, bKeyTouched As Boolean, bWhoTouched As Boolean)
                 status = msg
             ElseIf q > s + 0.0000001 Then
                 status = "недостаточно: остаток " & canon & " — " & WmsPack.QtyWithParts(n, s, CStr(d(SC_UNIT))) & ", запрошено " & QtyText(q) & " " & d(SC_UNIT)
+                If gPkPlain And info <> "" Then status = status & " (если имелись в виду части — напишите их единицу, например «" & QtyText(q) & " " _
+                    & WmsPack.PartUnitOf(n) & "»)"
+            ElseIf info <> "" Then
+                ' 1.0: an EI with a packing — what stays after the issue, and how to write the parts
+                info = info & " · останется " & WmsPack.RestText(n, s, q, CStr(d(SC_UNIT)))
+                If gPkPlain And q >= 1 And Abs(q - Int(q)) < 0.0000001 Then info = info & " · если " & QtyText(q) & " " & WmsPack.PartUnitOf(n) _
+                    & " — так и напишите «" & QtyText(q) & " " & WmsPack.PartUnitOf(n) & "»"
             End If
         End If
     End If
@@ -723,15 +741,13 @@ Function IssuePostRow(r As Long) As String
         why = CheckInputs(sh.getCellByPosition(IC_EI, r).getString(), sh.getCellByPosition(IC_QTY, r), Empty, sh.getCellByPosition(IC_DATE, r), Empty, _
             sh.getCellByPosition(IC_WHO, r).getString(), 0, 0)
     End If
+    ' 1.0: what WMS never guesses is asked before posting (a refusal of the checks stays a refusal, except «1» more than
+    ' the balance of an EI with a packing — it may be 1 кан)
+    why = AskBeforePost(why, sh.getCellByPosition(IC_EI, r).getString(), sh.getCellByPosition(IC_DATE, r), Empty, sh.getCellByPosition(IC_WHO, r).getString(), 0, 0, _
+        0, "")
     If why <> "" Then
-        SetStatus(r, "Не проведено: " & why)
-        IssuePostRow = "ERR:" & why
-        Exit Function
-    End If
-    ' D-099: a whole number without a unit for an EI with a packing — «1» may mean 1 шт (4 кан) or 1 кан: asked before posting
-    why = PackQuestion(r)
-    If why <> "" Then
-        IssuePostRow = why
+        SetStatus(r, "Не проведено: " & Mid(why, InStr(why, ":") + 1))
+        If Left(why, 5) = "SKIP:" Then IssuePostRow = "SKIP:выдача не проведена — " & Mid(why, 6) Else IssuePostRow = why
         Exit Function
     End If
     ' phase 2: one operation — the row, the registry balance and the counter change together
@@ -767,33 +783,50 @@ EH:
     SetStatus(r, "Не проведено: " & Mid(IssuePostRow, 5))
 End Function
 
-' "" to post as checked; SKIP:… when the storekeeper cancelled; ERR:… when the parts do not fit. A whole number typed in E
-' for an EI with a packing: «Да» — the unit of the document, «Нет» — that many parts (the candidate is checked again)
-Private Function PackQuestion(r As Long) As String
-    Dim pu As String, pn As Double, c As Object, ans As Integer, q As Double, info As String, msg As String, u As String
-    If gPkKind <> "" Or mCqty < 1 Or Abs(mCqty - Int(mCqty)) > 0.0000001 Then Exit Function
-    If Not WmsPack.PackOf(mCn, pu, pn) Then Exit Function
-    c = IssuesSheet().getCellByPosition(IC_QTY, r)
-    If c.getType() = com.sun.star.table.CellContentType.TEXT Then
-        If Trim(c.getString()) <> QtyText(mCqty) Then Exit Function
-    End If
-    u = CStr(mCdata(SC_UNIT))
-    ans = WmsUi.UiAsk3(mCcanon & " «" & mCdata(SC_NAME) & "»: в 1 " & u & " — " & WmsPack.PartsText(pn, pu) & "." & Chr(10) & Chr(10) _
-        & "Выдать " & QtyText(mCqty) & " " & u & " (это " & WmsPack.PartsText(WmsPack.PartsOf(mCqty, pn), pu) & ")?" & Chr(10) & Chr(10) _
-        & "«Да» — " & QtyText(mCqty) & " " & u & ",   «Нет» — " & WmsPack.PartsText(mCqty, pu) & ",   «Отмена» — не проводить")
-    If ans = 2 Then
-        SetStatus(r, "Не проведено: выдача отменена — уточните количество: «" & QtyText(mCqty) & " " & u & "» или «" & WmsPack.PartsText(mCqty, pu) & "»")
-        PackQuestion = "SKIP:выдача не проведена — количество не подтверждено"
-        Exit Function
-    End If
-    If ans = 7 Then
-        If WmsPack.QtyEIText(QtyText(mCqty) & " " & pu, mCn, mCstock, u, "OUT", 0, q, info, msg) <> 0 Then
-            SetStatus(r, "Не проведено: " & msg)
-            PackQuestion = "ERR:" & msg
+' 1.0: the questions after CheckInputs — WmsPack.QtyAsk («1» of an EI with a packing: 1 шт or 1 кан; a percent below 1),
+' WmsAsk.DateAsk (a date in the future or more than a year back), WmsAsk.WhoAsk (a recipient not in the directory: the
+' names that look alike). why — the refusal of CheckInputs. When the other reading of the quantity is chosen, the inputs
+' are checked again with it. "" to post the candidate; SKIP:… (not posted by the storekeeper) or ERR:… otherwise
+Private Function AskBeforePost(why As String, vEI As Variant, oDate As Object, vDate As Variant, sWho As String, qtyAvailExtra As Double, _
+    extraEI As Long, dOld As Double, sOldWho As String) As String
+    Dim st As Integer, msg As String, sAlt As String
+    If why <> "" Then
+        If Not mCshort Then
+            AskBeforePost = "ERR:" & why
             Exit Function
         End If
-        mCqty = q
-        mCinfo = info
+        msg = why
+        st = WmsPack.QtyAsk(mCn, CStr(mCdata(SC_NAME)), CStr(mCdata(SC_UNIT)), "Выдать", "OUT", mCavail, 0, False, mCqty, mCinfo, msg)
+        If st = 0 Then
+            sAlt = WmsPack.PartsText(gPkParts, gPkUnit)
+            why = CheckInputs(vEI, Nothing, sAlt, oDate, vDate, sWho, qtyAvailExtra, extraEI)
+            If why <> "" Then
+                st = 2
+                msg = why
+            End If
+        End If
+    ElseIf mCn = extraEI And Abs(mCqty - qtyAvailExtra) < 0.0000001 Then
+        ' a correction that keeps the quantity: nothing to ask about it
+        st = 0
+    Else
+        st = WmsPack.QtyAsk(mCn, CStr(mCdata(SC_NAME)), CStr(mCdata(SC_UNIT)), "Выдать", "OUT", mCavail, 0, True, mCqty, mCinfo, msg)
+    End If
+    If st = 1 Then
+        AskBeforePost = "SKIP:" & msg
+        Exit Function
+    ElseIf st = 2 Then
+        AskBeforePost = "ERR:" & msg
+        Exit Function
+    End If
+    ' the date and the recipient a correction keeps are not asked about again
+    If mCdate <> dOld Then
+        If WmsAsk.DateAsk(mCdate, "выдачи", IIf(dOld <> 0, "Исправить", "Провести"), msg) <> 0 Then
+            AskBeforePost = "SKIP:" & msg
+            Exit Function
+        End If
+    End If
+    If mCwhoSt = 2 And mCwho <> sOldWho Then
+        If WmsAsk.WhoAsk(mCwho, msg) <> 0 Then AskBeforePost = "SKIP:" & msg
     End If
 End Function
 
@@ -856,10 +889,12 @@ Function IssueFixRow(r As Long, vEI As Variant, vQty As Variant, vWho As Variant
         IssueFixRow = "ERR:остаток " & canon1 & " в «" & SH_STOCK & "» не число — реестр повреждён"
         Exit Function
     End If
-    ' the new movement: the old quantity of the same EI is available to it
+    ' the new movement: the old quantity of the same EI is available to it; 1.0: the questions of a posting (parts or
+    ' units, a percent below 1, a new date in the future, a new recipient not in the directory)
     why = CheckInputs(vEI, Nothing, vQty, Nothing, vDate, CStr(vWho), q1, n1)
+    why = AskBeforePost(why, vEI, Nothing, vDate, CStr(vWho), q1, n1, d1, who1)
     If why <> "" Then
-        IssueFixRow = "ERR:" & why
+        If Left(why, 5) = "SKIP:" Then IssueFixRow = "SKIP:выдача не исправлена — " & Mid(why, 6) Else IssueFixRow = why
         Exit Function
     End If
     If mCn = n1 And Abs(mCqty - q1) < 0.0000001 And mCwho = who1 And mCdate = d1 Then
@@ -911,6 +946,12 @@ Function IssueFixRow(r As Long, vEI As Variant, vQty As Variant, vWho As Variant
     PlanField("BAL_AFTER", qNew)
     WmsPack.PlanQtyFields()
     PlanRowValues(r, k, pNew, qNew, ST_FIXED)
+    ' 1.0: «Количество в %» (F) tells the new quantity, never the old one: the percent of the correction or empty
+    If gPkKind = "PCT" Then
+        PlanSetValue(SH_ISSUES, r, IC_PCT, QtyText(gPkPct) & "%", True)
+    ElseIf sh.getCellByPosition(IC_PCT, r).getType() <> com.sun.star.table.CellContentType.EMPTY Then
+        PlanSetValue(SH_ISSUES, r, IC_PCT, "", True)
+    End If
     PlanLockBits(SH_ISSUES, r, 0, IC_LAST, ISSUE_LOCKS_POSTED)
     If mCn = n1 Then
         PlanSetValue(SH_STOCK, n1, SC_QTY, qNew, False)

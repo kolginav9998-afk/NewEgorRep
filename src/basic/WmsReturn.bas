@@ -41,6 +41,10 @@ Private mSbal As Double
 Private mRqty As Double
 Private mRdate As Double
 Private mRplace As String
+' 1.0: the return was refused as more than can come back (QtyAsk may read it as parts); the text read instead of F when
+' the storekeeper chose the parts
+Private mRShort As Boolean
+Private mRAltQty As String
 
 ' ================================================================ sheets
 
@@ -381,6 +385,7 @@ Private Function CheckRowInputs(r As Long, bNeedAll As Boolean) As String
     Dim sh As Object, k As Long, why As String, n As Long, canon As String, msg As String, c As Object, who As String, full As String
     Dim note As String, st As Integer, av As Double, info As String
     sh = ReturnsSheet()
+    mRShort = False
     k = IssueNoOf(sh.getCellByPosition(RC_ISSUE, r))
     If k = 0 Then
         CheckRowInputs = "не указан № выдачи (B) — введите его или нажмите «Найти выдачу»"
@@ -421,9 +426,14 @@ Private Function CheckRowInputs(r As Long, bNeedAll As Boolean) As String
     End If
     av = Available(0)
     c = sh.getCellByPosition(RC_QTY, r)
-    If c.getType() <> com.sun.star.table.CellContentType.EMPTY Or bNeedAll Then
+    If c.getType() <> com.sun.star.table.CellContentType.EMPTY Or bNeedAll Or mRAltQty <> "" Then
         ' PRIME 0.8: «1 кан», «1,5 м» — parts of the packing of the EI (the whole issue returned in parts closes it exactly)
-        If Not WmsPack.QtyAsEI(c, Empty, "количество возврата (F)", mIei, mSbal, mIunit, "IN", av, mRqty, info, msg) Then
+        If mRAltQty <> "" Then
+            If Not WmsPack.QtyAsEI(Nothing, mRAltQty, "количество возврата (F)", mIei, mSbal, mIunit, "IN", av, mRqty, info, msg) Then
+                CheckRowInputs = msg
+                Exit Function
+            End If
+        ElseIf Not WmsPack.QtyAsEI(c, Empty, "количество возврата (F)", mIei, mSbal, mIunit, "IN", av, mRqty, info, msg) Then
             CheckRowInputs = msg
             Exit Function
         End If
@@ -432,6 +442,7 @@ Private Function CheckRowInputs(r As Long, bNeedAll As Boolean) As String
             Exit Function
         End If
         If mRqty > av + 0.0000001 Then
+            mRShort = True
             CheckRowInputs = "больше, чем можно вернуть: " & IssueInfo()
             Exit Function
         End If
@@ -503,6 +514,73 @@ End Sub
 
 ' ================================================================ «Провести» — RETURN
 
+' 1.0: the questions after CheckRowInputs (see WmsIssue.AskBeforePost): «1» of an EI with a packing (WmsPack.QtyAsk) and an
+' unusual date (WmsAsk.DateAsk). why — the refusal of CheckRowInputs. "" to post, SKIP:/ERR:…
+Private Function AskReturn(why As String, r As Long) As String
+    Dim st As Integer, msg As String, info As String
+    If why <> "" And Not mRShort Then
+        AskReturn = "ERR:" & why
+        Exit Function
+    End If
+    If why <> "" Then
+        msg = why
+        st = WmsPack.QtyAsk(mIei, CStr(mSdata(SC_NAME)), mIunit, "Вернуть", "IN", mSbal, Available(0), False, mRqty, info, msg)
+        If st = 0 Then
+            mRAltQty = WmsPack.PartsText(gPkParts, gPkUnit)
+            msg = CheckRowInputs(r, True)
+            mRAltQty = ""
+            If msg <> "" Then st = 2
+        End If
+    Else
+        st = WmsPack.QtyAsk(mIei, CStr(mSdata(SC_NAME)), mIunit, "Вернуть", "IN", mSbal, Available(0), True, mRqty, info, msg)
+    End If
+    If st = 1 Then
+        AskReturn = "SKIP:" & msg
+    ElseIf st = 2 Then
+        AskReturn = "ERR:" & msg
+    ElseIf WmsAsk.DateAsk(mRdate, "возврата", "Провести", msg) <> 0 Then
+        AskReturn = "SKIP:" & msg
+    Else
+        AskReturn = ReturnPlaceAsk(r)
+    End If
+End Function
+
+' 1.0: the place typed in J of a return — checked against the map and «Места»; when part of the EI still lies on its places,
+' the returned goods are added to them, replace them, or the EI keeps its places (J replaced them all: «1-2-3, 1-2-4»
+' became «1-2-5» while the goods were still there). With nothing left on the shelf (balance 0) J is the place of the EI.
+' mRplace — the place to record. "" to post, SKIP:… otherwise
+Private Function ReturnPlaceAsk(r As Long) As String
+    Dim sTyped As String, cur As String, msg As String, k As Integer
+    sTyped = Trim(ReturnsSheet().getCellByPosition(RC_PLACE, r).getString())
+    cur = Trim(CStr(mSdata(SC_PLACE)))
+    If sTyped = "" Then Exit Function
+    msg = WmsMap.PlaceAsk(sTyped, "возврат не проведён")
+    If msg <> "" Then
+        ReturnPlaceAsk = msg
+        Exit Function
+    End If
+    mRplace = sTyped
+    If cur = "" Or LCase(sTyped) = LCase(cur) Or mSbal <= 0.0000005 Then Exit Function
+    If InStr(", " & LCase(cur) & ",", ", " & LCase(sTyped) & ",") > 0 Then
+        ' the returned goods go to one of the places the EI already has
+        mRplace = cur
+        Exit Function
+    End If
+    k = WmsPrimeUi.UiButtons("WMS — место возврата", mIcanon & " сейчас лежит: «" & cur & "» (остаток " & WmsPack.QtyWithParts(mIei, mSbal, mIunit) _
+        & "). В строке возврата указано место «" & sTyped & "».", Array("Добавить место — будет «" & cur & ", " & sTyped & "»", _
+        "Перенести весь ЕИ на «" & sTyped & "»", "Оставить места как есть («" & cur & "»)", "Не проводить"), Array(6, 7, 8, 2))
+    Select Case k
+    Case 6
+        mRplace = cur & ", " & sTyped
+    Case 7
+        mRplace = sTyped
+    Case 8
+        mRplace = cur
+    Case Else
+        ReturnPlaceAsk = "SKIP:возврат не проведён — уточните место возврата (J)"
+    End Select
+End Function
+
 ' Posts row r (0-based) of «Возврат». OK:<seq>, SKIP:<why> (nothing done), ERR:<why> (a problem of the row: nothing done,
 ' the reason is in «Контроль»), ERR-SYS:<why> (a problem of WMS itself: the return counter is not safe, an internal error),
 ' BLOCKED:<why> or an ApplyOperation error (ERR-RB, ERR-CRITICAL).
@@ -542,9 +620,11 @@ Function ReturnPostRow(r As Long) As String
         Exit Function
     End If
     why = CheckRowInputs(r, True)
+    ' 1.0: «1» of an EI with a packing (1 шт or 1 кан), a date in the future or a year back — asked
+    why = AskReturn(why, r)
     If why <> "" Then
-        SetCtl(r, "Не проведено: " & why)
-        ReturnPostRow = "ERR:" & why
+        SetCtl(r, "Не проведено: " & Mid(why, InStr(why, ":") + 1))
+        If Left(why, 5) = "SKIP:" Then ReturnPostRow = "SKIP:возврат не проведён — " & Mid(why, 6) Else ReturnPostRow = why
         Exit Function
     End If
     ' the new return № must be safe: a failure here is a problem of WMS, not of this row (D-059)
@@ -639,7 +719,7 @@ End Function
 
 Function ReturnFixRow(r As Long, vQty As Variant, vDate As Variant, vPlace As Variant) As String
     Dim why As String, kind As String, n As Long, rd As Variant, k As Long, q1 As Double, d1 As Double, p1 As String, msg As String
-    Dim sh As Object, res As String, before As Double, b2 As Double, place0 As String, info As String
+    Dim sh As Object, res As String, before As Double, b2 As Double, place0 As String, info As String, st As Integer
     WmsInit()
     If r < 1 Or r > MAX_SHEET_ROW Then
         ReturnFixRow = "ERR:выберите строку возврата (не заголовок)"
@@ -680,6 +760,19 @@ Function ReturnFixRow(r As Long, vQty As Variant, vDate As Variant, vPlace As Va
         ReturnFixRow = "ERR:" & msg
         Exit Function
     End If
+    ' 1.0: a new quantity «1» of an EI with a packing — asked as at the posting
+    If Abs(mRqty - q1) > 0.0000001 Then
+        msg = "больше, чем можно вернуть по выдаче № " & k & ": можно не больше " & WmsIssue.QtyText(Available(q1))
+        st = WmsPack.QtyAsk(mIei, CStr(mSdata(SC_NAME)), mIunit, "Вернуть", "IN", WmsIssue.Round3(mSbal - q1), Available(q1), _
+            mRqty <= Available(q1) + 0.0000001, mRqty, info, msg)
+        If st = 1 Then
+            ReturnFixRow = "SKIP:возврат не исправлен — " & msg
+            Exit Function
+        ElseIf st = 2 Then
+            ReturnFixRow = "ERR:" & msg
+            Exit Function
+        End If
+    End If
     If VarType(vDate) = 8 Then
         If Not WmsOrders.ParseDateTextAs(CStr(vDate), "дата возврата", mRdate, msg) Then
             ReturnFixRow = "ERR:" & msg
@@ -690,6 +783,14 @@ Function ReturnFixRow(r As Long, vQty As Variant, vDate As Variant, vPlace As Va
     End If
     mRplace = Trim(CStr(vPlace))
     If mRplace = "" Then mRplace = CStr(mSdata(SC_PLACE))
+    ' 1.0: a new place of the return checked against the map and «Места»
+    If LCase(Trim(mRplace)) <> LCase(Trim(p1)) And Trim(CStr(vPlace)) <> "" Then
+        msg = WmsMap.PlaceAsk(mRplace, "возврат не исправлен")
+        If msg <> "" Then
+            ReturnFixRow = msg
+            Exit Function
+        End If
+    End If
     If mRqty > Available(q1) + 0.0000001 Then
         ReturnFixRow = "ERR:больше, чем можно вернуть по выдаче № " & k & ": выдано " & WmsIssue.QtyText(mIqty) & ", другими возвратами возвращено " _
             & WmsIssue.QtyText(WmsIssue.Round3(mIret - q1)) & ", можно не больше " & WmsIssue.QtyText(Available(q1))

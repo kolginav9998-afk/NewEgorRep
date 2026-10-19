@@ -33,7 +33,7 @@ Function SearchRefresh() As String
     s = s & ", cars " & IIf(n < 0, "нет в снимке (WMS до 0.7)", CStr(n))
     TbPutSetting(3, snap)
     ThisComponent.Sheets.getByName(SH_FIND).getCellByPosition(0, 1).setString("Снимок: " & ConvertFromURL(snap) & " (LAST_SEQ " _
-        & TbManifestValue(snap, "last_seq") & ")")
+        & TbManifestValue(snap, "last_seq") & ") — " & TbSnapAge(snap))
     SearchRefresh = "OK:" & s
     Exit Function
 EH:

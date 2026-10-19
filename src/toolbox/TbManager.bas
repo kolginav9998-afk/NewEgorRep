@@ -99,7 +99,7 @@ End Function
 ' the indicators of the period: formulas over the loaded tables and the work log
 Function MgrReport() As String
     Dim sh As Object, a As Double, b As Double, title As String, r As Long, n(5) As Long, t As Variant, i As Integer, k As Variant, last As Long, nCar As Long
-    Dim w As String
+    Dim w As String, un() As String, sm() As Double, nu As Integer
     On Error GoTo EH
     If Not ThisComponent.Sheets.hasByName("_issues") Then
         MgrReport = "ERR:сначала «Обновить из снимка»"
@@ -129,8 +129,9 @@ Function MgrReport() As String
     RowF(sh, r, "Приходов по заказам (ЕИ)", "=COUNTIFS($_orders.N2:N" & n(0) & ";"">=" & a & """;$_orders.N2:N" & n(0) & ";""<" & b & """;$_orders.V2:V" & n(0) & ";""<>"")")
     RowF(sh, r, "Иных приходов (строк)", "=COUNTIFS($_special.H2:H" & n(1) & ";"">=" & a & """;$_special.H2:H" & n(1) & ";""<" & b & """;$_special.A2:A" & n(1) & ";"">0"")")
     RowF(sh, r, "Выдач", "=COUNTIFS($_issues.H2:H" & n(2) & ";"">=" & a & """;$_issues.H2:H" & n(2) & ";""<" & b & """;$_issues.R2:R" & n(2) & ";""Проведено*"")")
-    RowF(sh, r, "Выдано, количество", "=SUMIFS($_issues.E2:E" & n(2) & ";$_issues.H2:H" & n(2) & ";"">=" & a & """;$_issues.H2:H" & n(2) & ";""<" & b _
-        & """;$_issues.R2:R" & n(2) & ";""Проведено*"")")
+    ' 1.0: by unit — 5 шт and 2 м are not «7»
+    UnitSum("_issues", 4, 6, 7, 17, -1, "", a, b, 0, un, sm, nu)
+    RowUnits(sh, r, "Выдано, количество", un, sm, nu)
     RowF(sh, r, "Возвратов", "=COUNTIFS($_returns.H2:H" & n(3) & ";"">=" & a & """;$_returns.H2:H" & n(3) & ";""<" & b & """;$_returns.N2:N" & n(3) & ";""Проведено*"")")
     For Each k In Array("Перемещение", "Списание", "Инвентаризация")
         RowF(sh, r, k & " (операций)", "=COUNTIFS($_adjustments.K2:K" & n(4) & ";"">=" & a & """;$_adjustments.K2:K" & n(4) & ";""<" & b _
@@ -139,8 +140,10 @@ Function MgrReport() As String
     w = "$_adjustments.K2:K" & n(4) & ";"">=" & a & """;$_adjustments.K2:K" & n(4) & ";""<" & b & """;$_adjustments.B2:B" & n(4) & ";""Инвентаризация"";$_adjustments.Q2:Q" _
         & n(4) & ";""Проведено*"""
     RowF(sh, r, "Инвентаризационных расхождений (строк с разницей)", "=COUNTIFS(" & w & ";$_adjustments.P2:P" & n(4) & ";""<>0"")")
-    RowF(sh, r, "Недостача по инвентаризации, количество", "=-SUMIFS($_adjustments.P2:P" & n(4) & ";" & w & ";$_adjustments.P2:P" & n(4) & ";""<0"")")
-    RowF(sh, r, "Излишек по инвентаризации, количество", "=SUMIFS($_adjustments.P2:P" & n(4) & ";" & w & ";$_adjustments.P2:P" & n(4) & ";"">0"")")
+    UnitSum("_adjustments", 15, 5, 10, 16, 1, "Инвентаризация", a, b, -1, un, sm, nu)
+    RowUnits(sh, r, "Недостача по инвентаризации, количество", un, sm, nu)
+    UnitSum("_adjustments", 15, 5, 10, 16, 1, "Инвентаризация", a, b, 1, un, sm, nu)
+    RowUnits(sh, r, "Излишек по инвентаризации, количество", un, sm, nu)
     RowV(sh, r, "ЕИ в движении (разных ЕИ с операциями)", EIsMoved(a, b))
     r = r + 1
     Head(sh, r, "ЗАКАЗЫ И ДОКУМЕНТЫ")
@@ -185,7 +188,7 @@ Private Function SnapLabel() As String
     If snap = "" Then Exit Function
     SnapLabel = Mid(snap, TbInStrRev(Left(snap, Len(snap) - 1), "/") + 1)
     If Right(SnapLabel, 1) = "/" Then SnapLabel = Left(SnapLabel, Len(SnapLabel) - 1)
-    SnapLabel = SnapLabel & " (" & Replace(TbManifestValue(snap, "created"), "T", " ") & ")"
+    SnapLabel = SnapLabel & " — " & TbSnapAge(snap)
 End Function
 
 Private Sub Head(sh As Object, ByRef r As Long, s As String)
@@ -204,6 +207,52 @@ Private Sub RowS(sh As Object, ByRef r As Long, sLabel As String, s As String)
     sh.getCellByPosition(0, r).setString(sLabel)
     sh.getCellByPosition(1, r).setString(s)
     r = r + 1
+End Sub
+
+' a sum by unit: the number (one unit) or «10,5 шт · 4 м» in B, the unit of one in C
+Private Sub RowUnits(sh As Object, ByRef r As Long, sLabel As String, un() As String, sm() As Double, nu As Integer)
+    Dim u As String
+    sh.getCellByPosition(0, r).setString(sLabel)
+    u = TbUnitCell(sh.getCellByPosition(1, r), un, sm, nu)
+    If nu = 1 And u <> "" Then sh.getCellByPosition(2, r).setString(u)
+    r = r + 1
+End Sub
+
+' the sums of column qCol of table sTable by unit (column uCol) over the rows whose date (dCol) is in [a, b) and whose
+' status (sCol) starts with «Проведено»; kCol ≥ 0 — only the rows with sKind there; sign 0 — every value, -1 — the
+' negatives (as positive numbers), 1 — the positives. One read of each column (the table is a sheet of the snapshot)
+Private Sub UnitSum(sTable As String, qCol As Integer, uCol As Integer, dCol As Integer, sCol As Integer, kCol As Integer, sKind As String, _
+    a As Double, b As Double, sign As Integer, un() As String, sm() As Double, nu As Integer)
+    Dim src As Object, last As Long, dq As Variant, du As Variant, dd As Variant, ds As Variant, dk As Variant, i As Long, q As Double
+    ReDim un(7)
+    ReDim sm(7)
+    nu = 0
+    If Not ThisComponent.Sheets.hasByName(sTable) Then Exit Sub
+    src = ThisComponent.Sheets.getByName(sTable)
+    last = TbLastRow(src)
+    If last < 1 Then Exit Sub
+    dq = src.getCellRangeByPosition(qCol, 1, qCol, last).getDataArray()
+    du = src.getCellRangeByPosition(uCol, 1, uCol, last).getDataArray()
+    dd = src.getCellRangeByPosition(dCol, 1, dCol, last).getDataArray()
+    ds = src.getCellRangeByPosition(sCol, 1, sCol, last).getDataArray()
+    If kCol >= 0 Then dk = src.getCellRangeByPosition(kCol, 1, kCol, last).getDataArray()
+    For i = 0 To last - 1
+        If VarType(dq(i)(0)) <> 5 Or VarType(dd(i)(0)) <> 5 Then GoTo NEXT_ROW
+        If dd(i)(0) < a Or dd(i)(0) >= b Then GoTo NEXT_ROW
+        If Left(CStr(ds(i)(0)), 9) <> "Проведено" Then GoTo NEXT_ROW
+        If kCol >= 0 Then
+            If CStr(dk(i)(0)) <> sKind Then GoTo NEXT_ROW
+        End If
+        q = dq(i)(0)
+        If sign < 0 Then
+            If q >= 0 Then GoTo NEXT_ROW
+            q = -q
+        ElseIf sign > 0 Then
+            If q <= 0 Then GoTo NEXT_ROW
+        End If
+        TbUnitAdd(un, sm, nu, CStr(du(i)(0)), q)
+NEXT_ROW:
+    Next i
 End Sub
 
 Private Sub RowV(sh As Object, ByRef r As Long, sLabel As String, v As Double)

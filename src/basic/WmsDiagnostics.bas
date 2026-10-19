@@ -154,6 +154,8 @@ Function SelfCheck() As String
     Else
         out = out & Ln("OK", "справочник «" & SH_RCPT & "»", "записей " & WmsIssue.RecipientsCount() & ", сокращения уникальны")
     End If
+    ' 1.0: «остаток = сумма движений» for every EI and the packing table (library WmsPlus)
+    If gDoc.Sheets.hasByName(SH_PACK) Then out = out & WmsLegacy.SelfCheckLines()
     s = FullKeyCheck(False)
     If Left(s, 6) = "ОШИБКА" Or InStr(s, "; ОШИБКА") > 0 Then
         out = out & Ln("FAIL", "ключи", s)

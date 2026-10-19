@@ -18,6 +18,8 @@ Public Const SNAPSHOT_FORMAT = "WMS-SNAPSHOT-1"
 Public Const CONTRACT_VERSION = "1.1"
 Public Const BATCH_FORMAT = "WMS-BATCH-1"
 Public Const EXPORT_DIR = "WMS_Export"
+' 1.0: the snapshots kept in WMS_Export (older ones are removed after a new one)
+Public Const EXPORT_KEEP = 10
 Public Const BATCH_MAX_ROWS = 5000
 
 ' test seam: the file of the next «Загрузить пакет» (the file window is not shown), the answer to «Провести сейчас?»
@@ -98,7 +100,10 @@ Function Sha256File(url As String, ByRef nBytes As Double) As String
         n = inp.readBytes(buf, 1048576)
         If n <= 0 Then Exit Do
         nBytes = nBytes + n
-        If n < 1048576 Then ReDim Preserve buf(n - 1)
+        ' block form: after a one-line «If … Then ReDim …» LibreOffice Basic takes the next line into the If
+        If n < 1048576 Then
+            ReDim Preserve buf(n - 1)
+        End If
         dc.updateDigest(buf)
     Loop While n = 1048576
     inp.closeInput()
@@ -270,6 +275,8 @@ Function ExportSnapshot() As String
         & "next_ei;" & SysStr(SK_NEXT_EI) & Chr(10) & "next_issue;" & SysStr(SK_NEXT_NO) & Chr(10) & "next_return;" & SysStr(SK_NEXT_RET) & Chr(10) _
         & "next_line;" & SysStr(SK_NEXT_SPL) & Chr(10) & "next_adj;" & SysStr(SK_NEXT_ADJ) & Chr(10) & "next_car;" & SysStr(SK_NEXT_CAR) & Chr(10) _
         & "contract;" & CONTRACT_VERSION & Chr(10) & "book_modified;" & IIf(gDoc.isModified(), "1", "0") & Chr(10)
+    ' 1.0: «остаток = сумма движений» of every EI, transferred ones included (the tools cannot check those themselves)
+    If gDoc.Sheets.hasByName(SH_PACK) Then man = man & WmsLegacy.BalanceManifest()
     ' the protections of the book (WMS_DOCTOR): every sheet — protected, visible; the structure of the book
     For i = 0 To gDoc.Sheets.getCount() - 1
         sh = gDoc.Sheets.getByIndex(i)
@@ -289,7 +296,7 @@ Function ExportSnapshot() As String
     sfa.move(tmp, fin)
     gLastSnapshot = fin
     gBusy = False
-    ExportSnapshot = "OK:" & ConvertFromURL(fin) & " — " & summary & "; " & (GetSystemTicks() - t0) & " мс"
+    ExportSnapshot = "OK:" & ConvertFromURL(fin) & " — " & summary & "; " & (GetSystemTicks() - t0) & " мс" & PruneSnapshots(sBase, fin)
     Exit Function
 EH:
     ExportSnapshot = "ERR:снимок не создан: " & Error$ & " (код " & Err & ", строка " & Erl & ")"
@@ -300,6 +307,47 @@ FAIL:
         If sfa.exists(tmp) Then sfa.kill(tmp)
     End If
     gBusy = False
+End Function
+
+' 1.0: a snapshot carries the whole journal (tens of MB on a big book) and nothing ever removed them: the newest
+' EXPORT_KEEP snapshots are kept, older ones are removed (a snapshot is made again from the book at any time; the batches
+' name their snapshot only for the record). The one just made is never removed. The text for the result ("" — nothing)
+Private Function PruneSnapshots(sBase As String, fin As String) As String
+    Dim sfa As Object, lst As Variant, names() As String, n As Long, i As Long, j As Long, t As String, nm As String, sNew As String, nDel As Long
+    On Error GoTo EH
+    sfa = CreateUnoService("com.sun.star.ucb.SimpleFileAccess")
+    sNew = FileNameOf(Left(fin, Len(fin) - 1))
+    lst = sfa.getFolderContents(sBase, True)
+    n = -1
+    For i = 0 To UBound(lst)
+        nm = lst(i)
+        If Right(nm, 1) = "/" Then nm = Left(nm, Len(nm) - 1)
+        nm = FileNameOf(nm)
+        If Left(nm, 13) = "WMS_SNAPSHOT_" And nm <> sNew And sfa.isFolder(lst(i)) Then
+            n = n + 1
+            ReDim Preserve names(n)
+            names(n) = nm
+        End If
+    Next i
+    If n + 1 <= EXPORT_KEEP - 1 Then Exit Function
+    For i = 1 To n
+        t = names(i)
+        j = i - 1
+        Do While j >= 0
+            If names(j) <= t Then Exit Do
+            names(j + 1) = names(j)
+            j = j - 1
+        Loop
+        names(j + 1) = t
+    Next i
+    For i = 0 To n - (EXPORT_KEEP - 1)
+        sfa.kill(sBase & names(i) & "/")
+        nDel = nDel + 1
+    Next i
+    If nDel > 0 Then PruneSnapshots = "; старых снимков удалено: " & nDel & " (хранятся последние " & EXPORT_KEEP & ")"
+    Exit Function
+EH:
+    PruneSnapshots = "; старые снимки не удалены: " & Error$
 End Function
 
 ' ================================================================ «Загрузить пакет»

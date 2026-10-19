@@ -146,7 +146,7 @@ Private Sub CheckProtections(snap As String)
         If UBound(f) >= 3 Then
             If f(0) = "sheet" Then
                 n = n + 1
-                If f(2) <> "1" And f(1) <> "Получатели" And f(1) <> "Топология" Then p = p & IIf(p <> "", "; ", "") & "лист «" & f(1) & "» не защищён"
+                If f(2) <> "1" And f(1) <> "Получатели" And f(1) <> "Топология" And f(1) <> "Места" Then p = p & IIf(p <> "", "; ", "") & "лист «" & f(1) & "» не защищён"
                 If InStr(svc, "|" & f(1) & "|") > 0 And f(3) = "1" Then p = p & IIf(p <> "", "; ", "") & "служебный лист «" & f(1) & "» не скрыт"
             End If
         End If
@@ -157,7 +157,7 @@ Private Sub CheckProtections(snap As String)
     End If
     If TbManifestValue(snap, "structure") <> "1" Then p = p & IIf(p <> "", "; ", "") & "структура книги не защищена"
     If p = "" Then
-        AddRow("OK", "защиты", "листов " & n & ": защищены (кроме «Получатели» и «Топология»), служебные скрыты, структура книги защищена", "")
+        AddRow("OK", "защиты", "листов " & n & ": защищены (кроме «Получатели», «Топология» и «Места»), служебные скрыты, структура книги защищена", "")
     Else
         AddRow("WARN", "защиты", p, "Ответственный за WMS восстанавливает защиту: Сервис → Защитить лист / Защитить структуру книги " _
             & "(пароль WMS). Защита не даёт изменить учёт мимо WMS; пока её нет, проверяйте изменения «Самопроверкой»")
@@ -239,7 +239,7 @@ Private Sub CheckStock(snap As String)
     Dim sumQ() As Double, hasMove() As Boolean, nEI As Long, nBadBal As Long, firstBad As String, nNeg As Long, nOrphan As Long, firstOrphan As String
     Dim issEI() As String, issSt() As Integer, maxIss As Long, nRetBad As Long, firstRet As String, nCopy As Long, nDup As Long, firstDup As String
     Dim seen As String, key As String, k As Long, nUnposted As Long, nPossDup As Long, nNoHist As Long, e As Long, q As Double
-    Dim hasRcpt() As Boolean, nNoRcpt As Long, firstNoRcpt As String, bTest As Boolean, nMig As Long
+    Dim hasRcpt() As Boolean, nNoRcpt As Long, firstNoRcpt As String, bTest As Boolean, nMig As Long, s As String
     st = TblRows("_stock", 10)
     o = TblRows("_orders", 28)
     sp = TblRows("_special", 19)
@@ -383,6 +383,21 @@ Private Sub CheckStock(snap As String)
     Else
         AddRow("OK", "остатки", "ЕИ " & nEI & ": остаток = сумме движений" & IIf(nMig > 0, "; перенесённых (начало — в журнале) " & nMig, "") _
             & IIf(nNoHist > 0, "; начального реестра тестовой книги " & nNoHist, ""), "")
+    End If
+    ' 1.0: the transferred EIs are checked by WMS itself at the export (their start is in the journal and the registry of the
+    ' transfer, which the snapshot does not carry): the result of that check, when the snapshot has it
+    s = TbManifestValue(snap, "balance_bad")
+    If s <> "" Then
+        If Val(s) > 0 Then
+            AddRow("FAIL", "остатки по WMS (с перенесёнными)", "не сходятся у " & s & " ЕИ (первый — " & TbManifestValue(snap, "balance_first") & ")", _
+                "В WMS: лист «Сверка переноса», кнопка «Обновить» — там видно, откуда остаток и что двигалось после переноса")
+        Else
+            AddRow("OK", "остатки по WMS (с перенесёнными)", "ЕИ " & TbManifestValue(snap, "balance_eis") & ", из них перенесённых " _
+                & TbManifestValue(snap, "balance_legacy") & ": остаток = сумме движений", "")
+        End If
+    ElseIf nMig > 0 Then
+        AddRow("WARN", "остатки перенесённых ЕИ", "перенесённых ЕИ " & nMig & ": снимок не содержит проверки WMS (снимок WMS до 1.0)", _
+            "В WMS: «Самопроверка» (проверяет и перенесённые ЕИ) или новый «Экспорт для инструментов»")
     End If
     If nNoRcpt > 0 Then AddRow("FAIL", "ЕИ без прихода", "карточек без прихода и без переноса: " & nNoRcpt & " (первая — " & firstNoRcpt & ")", _
         "ЕИ появляется только приходом или переносом: разбор ответственным по журналу")

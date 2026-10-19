@@ -20,6 +20,7 @@ import uno  # noqa: F401  (LibreOffice Python-UNO)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from harness import OUT, Session, Results, new_wms, template  # noqa: E402
+from wmslo import script_macro  # noqa: E402
 from com.sun.star.sheet import TableFilterField  # noqa: E402
 from com.sun.star.sheet.FilterOperator import EQUAL  # noqa: E402
 
@@ -1211,7 +1212,7 @@ def r36_buttons_bound():
         for i in range(form.getCount()):
             ev = form.getScriptEvents(i)
             code = ev[0].ScriptCode if ev else ""
-            names[form.getByIndex(i).Label] = code.split("Standard.", 1)[1].split("?")[0] if "Standard." in code else code
+            names[form.getByIndex(i).Label] = script_macro(code)
         want = {"Проверить": "WmsOrdersUi.BtnRcvCheck", "Провести приход": "WmsOrdersUi.BtnRcvPost", "Ещё поступление": "WmsOrdersUi.BtnRcvMore",
                 "Исправить": "WmsOrdersUi.BtnRcvFix", "Удалить": "WmsOrdersUi.BtnRcvDelete", "Отменить заказ": "WmsOrdersUi.BtnOrdCancel",
                 "Отменить остаток": "WmsOrdersUi.BtnOrdCancelRest", "Обновить статусы": "WmsOrdersUi.BtnOrdRefresh", "Очистить": "WmsOrdersUi.BtnRcvClear"}

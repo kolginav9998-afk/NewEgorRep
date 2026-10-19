@@ -246,7 +246,10 @@ Function OpenVisits() As Variant
         k = WmsOrders.FindCarOpen("?*", n)
         If k < 1 Or k <= n Then Exit Do
         If k > last Then Exit Do
-        If i > UBound(out) Then ReDim Preserve out(2 * i + 1)
+        ' block form: after a one-line «If … Then ReDim …» LibreOffice Basic takes the next line into the If
+        If i > UBound(out) Then
+            ReDim Preserve out(2 * i + 1)
+        End If
         out(i) = k
         i = i + 1
         n = k

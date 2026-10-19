@@ -25,7 +25,7 @@ End Function
 
 ' kind: daily | manual | preupgrade | premigration
 Function BackupNow(kind As String) As String
-    Dim src As String, dst As String, d As Date, t0 As Long, stamp As String
+    Dim src As String, dst As String, d As Date, t0 As Long, stamp As String, nSrc As Double, nDst As Double, sClock As String
     On Error GoTo EH
     If Not gDoc.hasLocation() Then
         BackupNow = "резервная копия невозможна: книга не сохранена в файл"
@@ -35,29 +35,70 @@ Function BackupNow(kind As String) As String
     t0 = GetSystemTicks()
     d = Now()
     stamp = Format(d, "YYYY-MM-DD") & "_" & Format(d, "HHMMSS")
+    sClock = ClockProblem(stamp)
     src = gDoc.getURL()
     dst = gBDir & BookBaseName() & "_" & stamp & "_" & kind & ".ods"
     If gSfa.exists(dst) Then dst = gBDir & BookBaseName() & "_" & stamp & "_" & kind & "_" & NewId(4) & ".ods"
     gSfa.copy(src, dst)
-    Rotate(kind, KeepFor(kind))
-    BackupNow = "резервная копия " & kind & " (последнее сохранённое состояние): " & FileNameOf(dst) & ", " & (GetSystemTicks() - t0) & " мс"
+    ' 1.0: a copy cut short (the disk full, the folder on a network that dropped) is not a copy: it is removed, and the
+    ' older copies are kept — the rotation runs only after a complete one
+    nSrc = gSfa.getSize(src)
+    nDst = gSfa.getSize(dst)
+    If nDst <> nSrc Or nDst <= 0 Then
+        On Error Resume Next
+        gSfa.kill(dst)
+        BackupNow = "ОШИБКА резервной копии: копия получилась неполной (" & nDst & " из " & nSrc & " байт) и удалена; старые копии не тронуты. " _
+            & "Проверьте место на диске и папку " & ConvertFromURL(gBDir)
+        Exit Function
+    End If
+    Rotate(kind, KeepFor(kind), FileNameOf(dst))
+    BackupNow = "резервная копия " & kind & " (последнее сохранённое состояние): " & FileNameOf(dst) & ", " & (GetSystemTicks() - t0) & " мс" & sClock
     Exit Function
 EH:
     BackupNow = "ОШИБКА резервной копии: " & Error$
 End Function
 
-' one automatic copy per day, made by the lock owner at the first start of the day
+' the date and time in the name of a copy of this book («YYYY-MM-DD_HHMMSS»), "" — not a copy of this book
+Private Function StampOf(nm As String) As String
+    Dim sPrefix As String, t As String
+    sPrefix = BookBaseName() & "_"
+    If Left(nm, Len(sPrefix)) <> sPrefix Or LCase(Right(nm, 4)) <> ".ods" Then Exit Function
+    t = Mid(nm, Len(sPrefix) + 1, 17)
+    If Len(t) = 17 And Mid(t, 5, 1) = "-" And Mid(t, 8, 1) = "-" And Mid(t, 11, 1) = "_" And IsNumeric(Left(t, 4)) Then StampOf = t
+End Function
+
+' 1.0: the computer clock behind the newest copy (a dead clock battery, a wrong year): the copies are ordered by the date
+' in their names, so a wrong date is said aloud — the dates of the movements the WMS checks come from the same clock
+Private Function ClockProblem(stamp As String) As String
+    Dim files As Variant, i As Long, t As String, tMax As String
+    On Error GoTo EH
+    If Not gSfa.exists(gBDir) Then Exit Function
+    files = gSfa.getFolderContents(gBDir, False)
+    For i = 0 To UBound(files)
+        t = StampOf(FileNameOf(files(i)))
+        If t > tMax Then tMax = t
+    Next i
+    If tMax > stamp Then ClockProblem = "; ВНИМАНИЕ: часы компьютера показывают " & Format(Now(), "DD.MM.YYYY HH:MM") & ", а последняя копия сделана " _
+        & Mid(tMax, 9, 2) & "." & Mid(tMax, 6, 2) & "." & Left(tMax, 4) & " — проверьте дату и время на компьютере"
+    Exit Function
+EH:
+End Function
+
+' one automatic copy per day, made by the lock owner at the first start of the day. 1.0: only a copy of this book counts,
+' and only a whole one (an empty file left by a failed copy does not stop today's copy)
 Function DailyIfNeeded() As String
     Dim files As Variant, i As Long, today As String, nm As String
     On Error GoTo EH
-    today = "_" & Format(Now(), "YYYY-MM-DD") & "_"
+    today = Format(Now(), "YYYY-MM-DD")
     If gSfa.exists(gBDir) Then
         files = gSfa.getFolderContents(gBDir, False)
         For i = 0 To UBound(files)
             nm = FileNameOf(files(i))
-            If InStr(nm, today) > 0 And IsKind(nm, "daily") Then
-                DailyIfNeeded = "ежедневная копия за сегодня уже есть"
-                Exit Function
+            If Left(StampOf(nm), 10) = today And IsKind(nm, "daily") Then
+                If gSfa.getSize(files(i)) > 0 Then
+                    DailyIfNeeded = "ежедневная копия за сегодня уже есть"
+                    Exit Function
+                End If
             End If
         Next i
     End If
@@ -80,22 +121,26 @@ Private Function IsKind(nm As String, kind As String) As Boolean
     IsKind = (Right(nm, Len(kind) + 5) = "_" & kind & ".ods") Or (InStr(nm, "_" & kind & "_") > 0 And Right(nm, 4) = ".ods")
 End Function
 
-' keep the newest `keep` copies of this kind (names sort chronologically); other kinds are never touched
-Sub Rotate(kind As String, keep As Integer)
-    Dim files As Variant, names() As String, n As Long, i As Long, j As Long, t As String, nm As String
+' keep the newest `keep` copies of this kind (names sort chronologically); other kinds are never touched. sNew — the copy
+' just made: it is always kept (with the clock set back it would sort as the oldest and be removed at once)
+Sub Rotate(kind As String, keep As Integer, Optional sNew As Variant)
+    Dim files As Variant, names() As String, n As Long, i As Long, j As Long, t As String, nm As String, sKeep As String, nKeep As Integer
     On Error Resume Next
     If Not gSfa.exists(gBDir) Then Exit Sub
+    If Not IsMissing(sNew) Then sKeep = sNew
+    nKeep = keep
+    If sKeep <> "" Then nKeep = keep - 1
     files = gSfa.getFolderContents(gBDir, False)
     n = -1
     For i = 0 To UBound(files)
         nm = FileNameOf(files(i))
-        If Left(nm, Len(BookBaseName()) + 1) = BookBaseName() & "_" And IsKind(nm, kind) Then
+        If Left(nm, Len(BookBaseName()) + 1) = BookBaseName() & "_" And IsKind(nm, kind) And nm <> sKeep Then
             n = n + 1
             ReDim Preserve names(n)
             names(n) = nm
         End If
     Next i
-    If n + 1 <= keep Then Exit Sub
+    If n + 1 <= nKeep Then Exit Sub
     For i = 1 To n
         t = names(i)
         j = i - 1
@@ -106,7 +151,7 @@ Sub Rotate(kind As String, keep As Integer)
         Loop
         names(j + 1) = t
     Next i
-    For i = 0 To n - keep
+    For i = 0 To n - nKeep
         gSfa.kill(gBDir & names(i))
     Next i
 End Sub

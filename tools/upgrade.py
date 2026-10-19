@@ -24,7 +24,8 @@ BUILD    after a clean CHECK, into NEW_FOLDER (it must not exist or be empty): a
          failure: the new book and its journal are removed, the reports stay. Rehearsal (--rehearsal): the same, never promoted.
 PROMOTE  the new book unchanged since BUILD, the old book unchanged since BUILD (no operation was posted in it after the
          copy) and closed: WMS 0.8 opens the new book, it becomes the working file in its folder, self-check, saved, opened
-         again. The old book is never touched — it is the rollback.
+         again. The old book is never touched — it is the rollback; 1.0: a lock of WMS is put into its journal folder (the old
+         WMS opens blocked: «ЭТА КНИГА БОЛЬШЕ НЕ РАБОЧАЯ»; «Снять блокировку WMS» in it is the way back).
 Reports in NEW_FOLDER: UPGRADE_REPORT.md (everything), UPGRADE_SUMMARY.txt (without the data of the warehouse: counts,
 hashes, PASS/FAIL — it may be sent to the developer), UPGRADE_STATE.json (and the same as «key=value» lines in
 UPGRADE_STATE.txt for the wizard WMS_UPGRADE.ods), progress.txt (the step being done, written first).
@@ -180,6 +181,13 @@ def replace_modules(doc, test_book, done):
     old = list(lib.getElementNames())
     for m in old:
         lib.removeByName(m)
+    # PRIME 0.8: the pages and the additions in their own library (wmslo.PLUS_LIB) — created here, emptied if present
+    if doc.BasicLibraries.hasByName(B.PLUS_LIB):
+        doc.BasicLibraries.loadLibrary(B.PLUS_LIB)
+        plus = doc.BasicLibraries.getByName(B.PLUS_LIB)
+        for m in list(plus.getElementNames()):
+            plus.removeByName(m)
+            old.append(m)
     mods = B.MODULES + (B.TEST_MODULES if test_book else [])
     for m in mods:
         folder = B.TEST_SRC if m in B.TEST_MODULES else B.SRC
@@ -316,6 +324,7 @@ def step_08(doc, leg, from_text, done):
     B.view_events(sheets)
     B.status_colors(doc, sheets)
     B.where_buttons(doc, sheets)
+    B.layout_10(doc, sheets)
     B.rebuild_main(doc, sheets.getByName(B.MAIN))
     done.append(f"страницы «{B.DASH}», «{B.FIND}», «{B.MAP}» и лист «{B.TOPO}» (вставьте туда схему склада); «{B.MAIN}» этого выпуска (кнопки к страницам)")
     return [B.LEGREP, B.LEG, B.PACK, B.DASH, B.FIND, B.MAP]
@@ -536,7 +545,7 @@ def compare_books(old, new, leg_expected):
     if missing:
         P.append("в новой книге нет листов: " + ", ".join(missing))
     extra = [n for n in new_names if n not in old_names]
-    if sorted(extra) != sorted([B.LEG, B.LEGREP, B.PACK] + B.VIEW_SHEETS + [x for x in (B.CARS, B.CAR) if x in extra]):
+    if sorted(extra) != sorted([B.LEG, B.LEGREP, B.PACK] + B.VIEW_SHEETS + B.SHEETS_10 + [x for x in (B.CARS, B.CAR) if x in extra]):
         P.append("в новой книге лишние листы: " + ", ".join(extra))
     for name in old_names:
         if name not in new_names:
@@ -899,20 +908,43 @@ def cmd_promote(to, out=print):
             toolbox = tb_dst
         except OSError as e:
             toolbox = f"не скопированы ({e}) — скопируйте папку WMS_TOOLBOX выпуска рядом с книгой вручную"
-    state.d["promote"] = dict(ok=True, time=now(), book=target, report=lr, toolbox=toolbox)
+    locked = lock_old_book(src, target)
+    state.d["promote"] = dict(ok=True, time=now(), book=target, report=lr, toolbox=toolbox, old_locked=locked)
     state.save()
     with open(os.path.join(to, "ПЕРЕХОД_ВЫПОЛНЕН.txt"), "w", encoding="utf-8") as f:
         f.write(f"Переход выполнен {now()}.\n\nРабочая WMS теперь: {target}\nОткрывайте только её.\n\n"
                 f"Старая книга {src} не изменена — это откат. Для работы её больше не открывайте: операции в ней не попадут в новую WMS\n"
-                "(новая WMS при запуске предупредит, если в старой книге что-то провели).\n\n"
+                "(новая WMS при запуске предупредит, если в старой книге что-то провели).\n"
+                + (f"{locked[0].upper() + locked[1:]}.\n" if locked else "") + "\n"
                 f"Сверка переноса в новой книге: {lr}\n" + (f"\nИнструменты выпуска (WMS_TOOLBOX): {toolbox}\n" if toolbox else ""))
     with open(os.path.join(to, REPORT_NAME), "a", encoding="utf-8") as f:
         f.write(f"\n## СДЕЛАТЬ РАБОЧЕЙ\n\n- {now()}: новая книга зарегистрирована рабочей в своей папке, самопроверка без ошибок, сохранена и "
-                f"открыта снова.\n- Сверка переноса: {lr}\n")
+                f"открыта снова.\n- Сверка переноса: {lr}\n" + (f"- {locked}.\n" if locked else ""))
     with open(os.path.join(to, SUMMARY_NAME), "a", encoding="utf-8") as f:
         f.write(f"PROMOTE=OK {now()}\n")
-    out(f"Готово: рабочая WMS — {target}. Старая книга не изменена.")
+    out(f"Готово: рабочая WMS — {target}. Старая книга не изменена" + (f"; {locked}." if locked else "."))
     return 0
+
+
+def lock_old_book(src, target):
+    """1.0: after the transfer the old WMS is locked — a lock of WMS in its journal folder names the new working book, so the
+    old book opens blocked («WMS уже открыта (… ЭТА КНИГА БОЛЬШЕ НЕ РАБОЧАЯ …)») and nothing is posted in it by mistake. The
+    old book and its journal files are not touched; the rollback is «Снять блокировку WMS» in the old book. Returns the
+    text for the report ("" — not locked: no journal folder, or a lock is already there)"""
+    jdir = os.path.join(os.path.dirname(src), JOURNAL_DIR)
+    lock = os.path.join(jdir, LOCK_FILE)
+    if not os.path.isdir(jdir) or os.path.exists(lock):
+        return ""
+    where = os.path.basename(os.path.dirname(target)).replace(";", ",").replace("T", "Т")
+    stamp = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    text = (f"WMSLOCK1;session=MOVED-{os.getpid()};instance=;opened={stamp} — ЭТА КНИГА БОЛЬШЕ НЕ РАБОЧАЯ: WMS перенесена в папку «{where}»"
+            f";user=мастер обновления WMS;host=;\n")
+    try:
+        with open(lock, "w", encoding="utf-8") as f:
+            f.write(text)
+    except OSError as e:
+        return f"старая книга не заперта ({e}) — не открывайте её для работы"
+    return f"старая книга заперта: при открытии она покажет «ЭТА КНИГА БОЛЬШЕ НЕ РАБОЧАЯ» (откат — «Снять блокировку WMS» в ней)"
 
 
 def cmd_status(to, out=print):

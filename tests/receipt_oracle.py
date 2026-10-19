@@ -346,7 +346,13 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
             rec.update(qty=q, nodoc=nodoc, doc=f.get("DOC", ""), ddate=iso_serial(f.get("DOC_DATE")), rdate=iso_serial(f.get("DATE")),
                        docqty=f_num(f, "DOC_QTY"), price=f_num(f, "PRICE"), place=f.get("PLACE"))
             if f.get("PLACE") != f.get("OLD_PLACE"):
-                place[ei] = f.get("PLACE")          # the receipt's place was changed: it becomes the current place of the EI
+                # the receipt's place was changed: it becomes the current place of the EI — unless the EI was moved since
+                # (1.0: PLACE_KEPT names the place it keeps; that place must be the current one)
+                if "PLACE_KEPT" in f:
+                    if (place.get(ei) or "").strip().lower() != f["PLACE_KEPT"].strip().lower():
+                        bad(f"seq {sq} RECEIPT_FIX {ei}: PLACE_KEPT {f['PLACE_KEPT']!r} ≠ текущее место {place.get(ei)!r}")
+                else:
+                    place[ei] = f.get("PLACE")
             if abs(float(f["BAL_AFTER"]) - bal[ei]) > EPS:
                 bad(f"seq {sq} RECEIPT_FIX {ei}: BAL_AFTER {f['BAL_AFTER']} ≠ {bal[ei]}", 3)
             if abs(float(f["POS_RCV"]) - p["rcv"]) > EPS:
@@ -1219,8 +1225,9 @@ def replay_adjust(t, f, sq, bal, adjs, place, touched_place, bad):
             book, fact, diff = fnum("BOOK"), fnum("FACT"), fnum("DIFF")
             if book is None or abs(book - bal[ei]) > EPS:
                 bad(f"seq {sq} INV_ADJ № {n}: учётный остаток {f.get('BOOK')} ≠ остатку {ei} по движениям {bal[ei]}", "A")
-            if fact is None or fact < -EPS or diff is None or abs(diff - (fact - (book or 0))) > EPS or abs(diff) < EPS:
-                bad(f"seq {sq} INV_ADJ № {n}: факт {f.get('FACT')}, разница {f.get('DIFF')} не сходятся с учётным {f.get('BOOK')} или разница 0", "A")
+            # 1.0: a recount that matched the book is recorded with the difference 0
+            if fact is None or fact < -EPS or diff is None or abs(diff - (fact - (book or 0))) > EPS:
+                bad(f"seq {sq} INV_ADJ № {n}: факт {f.get('FACT')}, разница {f.get('DIFF')} не сходятся с учётным {f.get('BOOK')}", "A")
                 return
             bal[ei] += diff
             a.update(delta=diff, book=book, fact=fact)
@@ -1262,7 +1269,7 @@ def replay_adjust(t, f, sq, bal, adjs, place, touched_place, bad):
                     fact, diff = fnum("FACT"), fnum("DIFF")
                     if fnum("BOOK") is None or abs(fnum("BOOK") - a["book"]) > EPS or abs(fnum("OLD_DIFF") - a["delta"]) > EPS:
                         bad(f"seq {sq} INV_ADJ_FIX № {n}: BOOK/OLD_DIFF {f.get('BOOK')}/{f.get('OLD_DIFF')} ≠ {a['book']}/{a['delta']}", "A")
-                    if fact is None or diff is None or abs(diff - (fact - a["book"])) > EPS or abs(diff) < EPS:
+                    if fact is None or diff is None or abs(diff - (fact - a["book"])) > EPS:
                         bad(f"seq {sq} INV_ADJ_FIX № {n}: факт {f.get('FACT')}, разница {f.get('DIFF')} не сходятся", "A")
                         return
                     nd = diff

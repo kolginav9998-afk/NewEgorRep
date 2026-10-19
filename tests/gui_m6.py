@@ -22,7 +22,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools"))
 from harness import new_wms, PROFILES, unique  # noqa: E402
-from wmslo import Office, props  # noqa: E402
+from wmslo import Office, props, script_macro  # noqa: E402
 from gui_phase4 import step, state, run_dialog, run_msg, press_ok, entries, RESULTS  # noqa: E402
 
 CARS = "Приход авто"
@@ -41,7 +41,7 @@ def buttons(doc, sheet):
         form = m.getParent()
         idx = [form.getByIndex(k).Name for k in range(form.getCount())].index(m.Name)
         ev = form.getScriptEvents(idx)
-        macro = ev[0].ScriptCode.split("Standard.")[1].split("?")[0] if ev else ""
+        macro = script_macro(ev[0].ScriptCode) if ev else ""
         y = shp.getPosition().Y
         row = 0
         while sheet.getCellByPosition(0, row + 1).Position.Y <= y:

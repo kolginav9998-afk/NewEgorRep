@@ -571,7 +571,8 @@ Private Function CheckRow(r As Long, bNeedAll As Boolean, sJoin As String) As St
     mNameIn = Trim(CStr(d(XC_NAME)))
     mArt = Trim(CStr(d(XC_ART)))
     mUnit = Trim(CStr(d(XC_UNIT)))
-    mPlace = Trim(CStr(d(XC_PLACE)))
+    ' 1.0: the place as the cell shows it — «5.12.3» typed into a cell Calc took as a date reads «05.12.03», never «37960»
+    mPlace = Trim(SpecialSheet().getCellByPosition(XC_PLACE, r).getString())
     mCat = Trim(CStr(d(XC_CAT)))
     mWho = Trim(CStr(d(XC_WHO)))
     mDoc = Trim(CStr(d(XC_DOC)))
@@ -828,7 +829,7 @@ End Function
 ' the reason in R), ERR-SYS:<why> (a problem of WMS itself: a counter or the index of the parts is not safe, an internal
 ' error), BLOCKED:<why> or an ApplyOperation error (ERR-RB, ERR-CRITICAL).
 Function SpecialPostRow(r As Long, sJoin As String, bPlaceOk As Boolean) As String
-    Dim why As String, kind As String, nL As Long, n As Long, canon As String, res As String, evNum As Long, evId As String
+    Dim why As String, kind As String, nL As Long, n As Long, canon As String, res As String, evNum As Long, evId As String, sPl0 As String
     Dim newEvent As Boolean, dupKey As String, dup As String, bal2 As Double, status As String, ctl As String, aRow As Long
     WmsInit()
     If r < 1 Or r > MAX_SHEET_ROW Then
@@ -867,6 +868,18 @@ Function SpecialPostRow(r As Long, sJoin As String, bPlaceOk As Boolean) As Stri
     If why <> "" Then
         SetCtl(r, "Не проведено: " & why)
         SpecialPostRow = IIf(mSysProblem, "ERR-SYS:", "ERR:") & why
+        Exit Function
+    End If
+    ' 1.0: the place checked against the map and «Места»; a date in the future or a year back is asked about
+    sPl0 = mPlace
+    why = WmsMap.PlaceAsk(mPlace, "иной приход не проведён")
+    If why = "" And mPlace <> sPl0 And mMode = SR_ADD Then mPlaceMove = (LCase(Trim(mPlace)) <> LCase(Trim(mPlaceFrom)))
+    If why = "" And mHasDate Then
+        If WmsAsk.DateAsk(mDate, "поступления", "Провести", why) <> 0 Then why = "SKIP:иной приход не проведён — " & why
+    End If
+    If why <> "" Then
+        SetCtl(r, "Не проведено: " & Mid(why, InStr(why, "—") + 2))
+        SpecialPostRow = why
         Exit Function
     End If
     If mMode = SR_ADD And mPlaceMove And Not bPlaceOk Then

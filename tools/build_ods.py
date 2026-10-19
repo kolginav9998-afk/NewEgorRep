@@ -24,7 +24,7 @@ from com.sun.star.table import CellRangeAddress
 from com.sun.star.util import CellProtection
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from wmslo import Office, add_basic, bind_event, props  # noqa: E402
+from wmslo import Office, add_basic, bind_event, props, macro_url, PLUS_MODULES, PLUS_LIB  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "src", "basic")
@@ -37,10 +37,12 @@ SYS_KEYS = ["SCHEMA", "INSTANCE_ID", "MODE", "CORE_VERSION", "LAST_SEQ", "NEXT_E
             "NEXT_CAR", "UPGRADE_FROM"]                                               # WmsConfig.SysKeyNames() (WMS-SYS-5)
 SCHEMA = "WMS-SYS-5"                                                                  # WmsConfig.WMS_SYS_SCHEMA
 SK_SAVE_STAMP = SYS_KEYS.index("SAVE_STAMP")
-MODULES = ["WmsConfig", "WmsCore", "WmsJournal", "WmsLock", "WmsBackup", "WmsRecovery", "WmsDiagnostics", "WmsIssue", "WmsUi",
-           "WmsOrders", "WmsReceipt", "WmsOrdersUi", "WmsReturn", "WmsReturnUi", "WmsSpecial", "WmsSpecialUi", "WmsAdjust", "WmsAdjustUi",
-           "WmsCar", "WmsCarUi", "WmsExport", "WmsMigrate", "WmsStatus", "WmsLegacy", "WmsPrimeUi", "WmsView", "WmsPack", "WmsDash",
-           "WmsFind", "WmsMap"]
+# the core of the accounting — library «Standard» (the modules of 0.7.2); the pages and the additions — library «WmsPlus»
+# (wmslo.PLUS_MODULES: their names do not slow the lookups of the core down)
+CORE_MODULES = ["WmsConfig", "WmsCore", "WmsJournal", "WmsLock", "WmsBackup", "WmsRecovery", "WmsDiagnostics", "WmsIssue", "WmsUi",
+                "WmsOrders", "WmsReceipt", "WmsOrdersUi", "WmsReturn", "WmsReturnUi", "WmsSpecial", "WmsSpecialUi", "WmsAdjust", "WmsAdjustUi",
+                "WmsCar", "WmsCarUi", "WmsExport", "WmsMigrate", "WmsStatus"]
+MODULES = CORE_MODULES + PLUS_MODULES
 TEST_MODULES = ["WmsTestOps"]
 TEST_SHEET = "_TST"
 LAST_ROW = 1048575
@@ -131,6 +133,11 @@ FIND = "Поиск"
 MAP = "Карта склада"
 TOPO = "Топология"
 VIEW_SHEETS = [DASH, FIND, MAP, TOPO]
+# 1.0: the directory of the places outside the racks (WmsMap.SH_PLACES) — the storekeeper's own sheet, not protected
+PLACES = "Места"
+PLACES_HEADERS = ["Место", "Тип", "Зона", "Вместимость, ячеек", "Закрыто", "Примечание"]
+PLACE_KINDS = ["Стеллаж", "Пол", "Улица", "Офис", "Другое"]
+SHEETS_10 = [PLACES]
 LEGREP = "Сверка переноса"
 LEGREP_HEAD = 3                   # WmsConfig.LEGREP_HEAD
 LEGREP_HEADERS = ["ЕИ", "Наименование", "Ед.", "Откуда", "Приход при переносе", "Остаток при переносе", "Израсходовано до переноса",
@@ -255,7 +262,7 @@ def add_button(doc, sheet, name, label, macro, x, y, w, h, font=None, bold=False
     ev.EventMethod = "actionPerformed"
     ev.AddListenerParam = ""
     ev.ScriptType = "Script"
-    ev.ScriptCode = f"vnd.sun.star.script:Standard.{macro}?language=Basic&location=document"
+    ev.ScriptCode = macro_url(macro)
     form.registerScriptEvent(idx, ev)
 
 
@@ -717,17 +724,19 @@ def build_dash(doc, sh):
         text_cell(sh, c0, r, title, size=12, bold=True, color=INK, valign=3)
         underline(sh.getCellRangeByPosition(c0, r, c1, r), INK, 26)
 
-    def heads(r, cols):
+    def heads(r, cols, right=()):
+        # 1.0: the headers of the numbers stand over them (right-aligned, as the numbers are)
         for c, s in cols:
-            text_cell(sh, c, r, s, size=8, bold=True, color=MUTED, valign=3)
+            text_cell(sh, c, r, s, size=8, bold=True, color=MUTED, valign=3, halign=(3 if c in right else 1))
 
     section(7, 1, 6, "Ожидается: срок прошёл и ближайшие поставки")
     section(7, 7, 12, "Последние операции")
     heads(8, [(1, "Заказ"), (2, "Наименование"), (4, "Поставщик"), (5, "Ожидалось"), (6, "Срок"), (7, "Когда"), (8, "Операция"),
-              (10, "Что"), (12, "Кол-во")])
+              (10, "Что"), (12, "Кол-во")], right=(12,))
     section(22, 1, 6, "Чаще всего выдают — 30 дней")
     section(22, 7, 12, "Лежит без движения 90+ дней")
-    heads(23, [(1, "Наименование"), (4, "Выдач"), (5, "Количество"), (6, "Ед."), (7, "ЕИ"), (8, "Наименование"), (11, "Остаток"), (12, "Дней")])
+    heads(23, [(1, "Наименование"), (4, "Выдач"), (5, "Количество"), (6, "Ед."), (7, "ЕИ"), (8, "Наименование"), (11, "Остаток"), (12, "Дней")],
+          right=(4, 5, 11, 12))
     section(35, 1, 12, "Последние 14 дней: выдачи и приходы")
     heads(36, [(1, "День"), (2, "Выдач"), (8, "Приходов")])
     for r in range(9, 21):
@@ -747,6 +756,8 @@ def build_dash(doc, sh):
         lists.CharHeight = 9
         lists.CharColor = TEXT
         lists.VertJustify = 2
+    for c0, c1, r0, r1 in ((12, 12, 9, 20), (4, 5, 24, 33), (11, 12, 24, 33)):
+        sh.getCellRangeByPosition(c0, r0, c1, r1).HoriJustify = uno.Enum("com.sun.star.table.CellHoriJustify", "RIGHT")
     sh.getCellRangeByPosition(6, 9, 6, 20).CharHeight = 8
     add_cond(sh, sh.getCellRangeByPosition(6, 9, 6, 20), 'LEFT($G10;10)="просрочено"', "DB_StateBad", 6, 9)
     sh.getCellRangeByPosition(3, 37, 7, 50).CharColor = 0x3A7BD5
@@ -879,17 +890,73 @@ def status_colors(doc, sheets):
         for test, style in rules:
             add_cond(sh, rng, test.replace("X", f"${letter}{first + 1}"), style, c, first)
 
+    # 1.0: the preview of a row — «Ошибка: …» red, «Внимание: …» amber (it was without colour)
     posted = [('LEFT(X;9)="Проведено"', "ST_Done"), ('LEFT(X;7)="Удалено"', "ST_Gray"), ('LEFT(X;5)="КОПИЯ"', "ST_Bad"),
-              ('LEFT(X;12)="Не проведено"', "ST_Bad")]
+              ('LEFT(X;12)="Не проведено"', "ST_Bad"), ('LEFT(X;6)="Ошибка"', "ST_Bad"), ('LEFT(X;8)="Внимание"', "ST_Part")]
     col(ORDERS, 22, [('OR(LEFT(X;8)="Получено";X="Дополнительное поступление")', "ST_Done"), ('X="Ожидается"', "ST_Wait"), ('LEFT(X;8)="Частично"', "ST_Part"),
                      ('OR(X="Отменено";LEFT(X;19)="Поступление удалено")', "ST_Gray")])
-    col(ORDERS, 24, [('LEFT(X;5)="КОПИЯ"', "ST_Bad"), ('LEFT(X;12)="Не проведено"', "ST_Bad")])
+    col(ORDERS, 24, [('LEFT(X;5)="КОПИЯ"', "ST_Bad"), ('LEFT(X;12)="Не проведено"', "ST_Bad"), ('LEFT(X;6)="Ошибка"', "ST_Bad"),
+                     ('LEFT(X;8)="Внимание"', "ST_Part")])
     col(ISSUES, 17, posted)
     col(RETURNS, 13, posted)
     col(ADJUST, 16, posted)
     col(SPECIAL, 16, posted)
-    col(SPECIAL, 17, [('LEFT(X;5)="КОПИЯ"', "ST_Bad"), ('LEFT(X;12)="Не проведено"', "ST_Bad")])
+    col(SPECIAL, 17, [('LEFT(X;5)="КОПИЯ"', "ST_Bad"), ('LEFT(X;12)="Не проведено"', "ST_Bad"), ('LEFT(X;6)="Ошибка"', "ST_Bad"),
+                      ('LEFT(X;8)="Внимание"', "ST_Part")])
     col(STOCK, 7, [('X="Требует разбора"', "ST_Part"), ('LEFT(X;13)="Приход удалён"', "ST_Gray")])
+
+
+def fit_headers(sh, titles, height):
+    """the header row at least `height` high; each column at least as wide as the longest word of its header (bold 10 pt)"""
+    row = sh.getRows().getByIndex(0)
+    if row.Height < height:
+        row.Height = height
+    for c, t in enumerate(titles):
+        word = max((len(x) for x in t.replace("/", " ").split()), default=0)
+        need = 255 * word + 350
+        col = sh.getColumns().getByIndex(c)
+        if col.Width < need:
+            col.Width = need
+
+
+def build_places(doc, sh):
+    """«Места» (1.0, М2): the places outside the racks of the map — a floor, the yard, an office: WMS knows them (not «не на
+    карте»), «Куда положить?» does not propose a closed one. The storekeeper's own sheet: not protected, not journaled"""
+    header(sh, PLACES_HEADERS, [4200, 3000, 3000, 3600, 2600, 9000])
+    text = number_format(doc, "@", ("ru", "RU"))
+    sh.getCellRangeByPosition(0, 1, 0, LAST_ROW).NumberFormat = text
+    list_validation(sh.getCellRangeByPosition(1, 1, 1, 5000), ";".join(f'"{k}"' for k in PLACE_KINDS))
+    list_validation(sh.getCellRangeByPosition(4, 1, 4, 5000), '"да"')
+    hint = sh.getCellByPosition(7, 0)
+    hint.setString("Сюда — места вне стеллажей карты (пол, улица, офис, «у ворот»): одна строка — одно место. "
+                   "«Закрыто» = да — место не предлагается в «Куда положить?». Места стеллажей задаёт лист «Топология».")
+    hint.CharColor = MUTED
+    hint.IsTextWrapped = True
+    sh.getColumns().getByIndex(7).Width = 11000
+
+
+def layout_10(doc, sheets):
+    """1.0: what a new book and an upgraded one both get (the data are not touched, only formats): the place columns are text —
+    «5.12.3» typed there stays a place, Calc does not take it for a date (Заказы U, Возврат J, Иной приход I, Корректировки J);
+    the directory «Места» after «Топология»; the events of «Топология» and «Места» (the known places are read again)"""
+    text = number_format(doc, "@", ("ru", "RU"))
+    for sheet, c in ((ORDERS, 20), (RETURNS, 9), (SPECIAL, 8), (ADJUST, 9)):
+        sheets.getByName(sheet).getCellRangeByPosition(c, 1, c, LAST_ROW).NumberFormat = text
+    # the headers of the working sheets: the buttons never hide a line of a header and no word is cut in two
+    # («Количест-во», «измерени-я»): the header row is higher, a column is never narrower than the longest word of its header
+    for sheet, titles, height in ((ISSUES, ISSUE_HEADERS, 2500), (RETURNS, RETURN_HEADERS, 2500), (SPECIAL, SPECIAL_HEADERS, 2500),
+                                  (ADJUST, ADJUST_HEADERS, 2500), (ORDERS, ORDER_HEADERS, 3100)):
+        fit_headers(sheets.getByName(sheet), titles, height)
+    # the status W of «Заказы» is read whole («Частично получено / остаток отменён»)
+    w = sheets.getByName(ORDERS).getColumns().getByIndex(22)
+    if w.Width < 5600:
+        w.Width = 5600
+    if not sheets.hasByName(PLACES):
+        names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+        sheets.insertNewByName(PLACES, names.index(TOPO) + 1)
+        build_places(doc, sheets.getByName(PLACES))
+    bind_event(sheets.getByName(TOPO).Events, "OnChange", "WmsMap.OnTopoChange")
+    bind_event(sheets.getByName(PLACES).Events, "OnChange", "WmsMap.OnPlacesChange")
 
 
 def where_buttons(doc, sheets):
@@ -1315,6 +1382,7 @@ def build(office, out_path, test=False, instance_id=None):
     build_views(doc, sheets)
     status_colors(doc, sheets)
     where_buttons(doc, sheets)
+    layout_10(doc, sheets)
     build_service(doc, sheets)
     order = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
     autofilter(doc, order.index(ORDERS), "WMS_ORDERS", len(ORDER_HEADERS))

@@ -36,6 +36,10 @@ Private mPlace As String
 Private mDate As Double
 Private mReason As String
 Private mBatch As String
+' 1.0: the write-off was refused as more than the balance (QtyAsk may read it as parts); the text CheckRowInputs reads
+' instead of G when the storekeeper chose the parts
+Private mShort As Boolean
+Private mAltQty As String
 
 ' ================================================================ sheets and kinds
 
@@ -310,6 +314,7 @@ End Function
 Private Function CheckRowInputs(r As Long, bNeedAll As Boolean) As String
     Dim sh As Object, why As String, c As Object, msg As String, x As Double, info As String
     sh = AdjustSheet()
+    mShort = False
     mKind = KindCode(sh.getCellByPosition(AC_KIND, r).getString())
     If mKind = "" Then
         If IsBlank(sh.getCellByPosition(AC_KIND, r)) Then
@@ -351,14 +356,19 @@ Private Function CheckRowInputs(r As Long, bNeedAll As Boolean) As String
             Exit Function
         End If
         c = sh.getCellByPosition(AC_QTY, r)
-        If Not IsBlank(c) Or bNeedAll Then
+        If mAltQty <> "" Then
+            If Not WmsPack.QtyAsEI(Nothing, mAltQty, "количество списания (G)", mEi, mSbal, CStr(mSdata(SC_UNIT)), "OUT", 0, mQty, info, msg) Then
+                CheckRowInputs = msg
+                Exit Function
+            End If
+        ElseIf Not IsBlank(c) Or bNeedAll Then
             If Not WmsPack.QtyAsEI(c, Empty, "количество списания (G)", mEi, mSbal, CStr(mSdata(SC_UNIT)), "OUT", 0, mQty, info, msg) Then
                 CheckRowInputs = msg
                 Exit Function
             End If
             If mQty > mSbal + 0.0000001 Then
-                CheckRowInputs = "списать " & WmsIssue.QtyText(mQty) & " нельзя: остаток " & mCanon & " — " & WmsIssue.QtyText(mSbal) _
-                    & IIf(CStr(mSdata(SC_UNIT)) <> "", " " & mSdata(SC_UNIT), "")
+                mShort = True
+                CheckRowInputs = "списать " & WmsIssue.QtyText(mQty) & " нельзя: остаток " & mCanon & " — " & WmsPack.QtyWithParts(mEi, mSbal, CStr(mSdata(SC_UNIT)))
                 Exit Function
             End If
         End If
@@ -390,11 +400,9 @@ Private Function CheckRowInputs(r As Long, bNeedAll As Boolean) As String
                 CheckRowInputs = msg
                 Exit Function
             End If
+            ' 1.0: a recount that matches the book is recorded too (difference 0): the date of the last count of the EI is kept
             mDiff = WmsIssue.Round3(mFact - mBook)
-            If Abs(mDiff) < 0.0000001 Then
-                CheckRowInputs = "фактический остаток равен учётному (" & WmsIssue.QtyText(mBook) & ") — расхождения нет, корректировка не нужна"
-                Exit Function
-            End If
+            If Abs(mDiff) < 0.0000001 Then mDiff = 0
         End If
     End Select
     c = sh.getCellByPosition(AC_DATE, r)
@@ -421,11 +429,17 @@ Private Function Describe() As String
     Case "MOVE"
         Describe = mCanon & ": место «" & mSplace & "» → «" & mPlace & "», количество " & WmsIssue.QtyText(mSbal) & u & " не меняется"
     Case "WRITE_OFF"
-        Describe = mCanon & ": списать " & WmsIssue.QtyText(mQty) & u & ", остаток " & WmsIssue.QtyText(mSbal) & " → " _
-            & WmsIssue.QtyText(WmsIssue.Round3(mSbal - mQty))
+        ' 1.0: an EI with a packing — the quantities in its parts too («списать 0,25 шт (1 кан), остаток 1 шт (4 кан) → …»)
+        Describe = mCanon & ": списать " & WmsPack.QtyWithParts(mEi, mQty, CStr(mSdata(SC_UNIT))) & ", остаток " _
+            & WmsPack.QtyWithParts(mEi, mSbal, CStr(mSdata(SC_UNIT))) & " → " & WmsPack.QtyWithParts(mEi, WmsIssue.Round3(mSbal - mQty), CStr(mSdata(SC_UNIT)))
     Case "INV_ADJ"
-        Describe = mCanon & ": учётный " & WmsIssue.QtyText(mBook) & ", фактический " & WmsIssue.QtyText(mFact) & u & ", разница " _
-            & IIf(mDiff > 0, "+", "") & WmsIssue.QtyText(mDiff)
+        If mDiff = 0 Then
+            Describe = mCanon & ": пересчёт совпал с учётом (" & WmsPack.QtyWithParts(mEi, mBook, CStr(mSdata(SC_UNIT))) _
+                & ") — будет записан с разницей 0, остаток не меняется"
+        Else
+            Describe = mCanon & ": учётный " & WmsPack.QtyWithParts(mEi, mBook, CStr(mSdata(SC_UNIT))) & ", фактический " _
+                & WmsPack.QtyWithParts(mEi, mFact, CStr(mSdata(SC_UNIT))) & ", разница " & IIf(mDiff > 0, "+", "") & WmsIssue.QtyText(mDiff) & u
+        End If
     End Select
 End Function
 
@@ -459,6 +473,54 @@ Private Sub PlanAdjRow(n As Long, sState As String, r As Long, delta As Double, 
     End If
     PlanSetValue(SH_ADJ, n, AJ_DATE, mDate, False)
 End Sub
+
+' 1.0: the questions after CheckRowInputs (see WmsIssue.AskBeforePost): the readings of a quantity WMS never guesses
+' (WmsPack.QtyAsk) and an unusual date (WmsAsk.DateAsk). why — the refusal of CheckRowInputs. "" to post, SKIP:/ERR:…
+Private Function AskAdjust(why As String, r As Long) As String
+    Dim st As Integer, msg As String, info As String, u As String, nm As String
+    If why <> "" And Not mShort Then
+        AskAdjust = "ERR:" & why
+        Exit Function
+    End If
+    u = CStr(mSdata(SC_UNIT))
+    nm = CStr(mSdata(SC_NAME))
+    Select Case mKind
+    Case "MOVE"
+        ' 1.0: the new place checked against the map and «Места»
+        msg = WmsMap.PlaceAsk(mPlace, "перемещение не проведено")
+        If msg <> "" Then
+            AskAdjust = msg
+            Exit Function
+        End If
+    Case "WRITE_OFF"
+        If why <> "" Then
+            msg = why
+            st = WmsPack.QtyAsk(mEi, nm, u, "Списать", "OUT", mSbal, 0, False, mQty, info, msg)
+            If st = 0 Then
+                ' the parts chosen: the row is checked again with them (the date and the reason were not read yet)
+                mAltQty = WmsPack.PartsText(gPkParts, gPkUnit)
+                msg = CheckRowInputs(r, True)
+                mAltQty = ""
+                If msg <> "" Then st = 2
+            End If
+        Else
+            st = WmsPack.QtyAsk(mEi, nm, u, "Списать", "OUT", mSbal, 0, True, mQty, info, msg)
+        End If
+    Case "INV_ADJ"
+        st = WmsPack.QtyAsk(mEi, nm, u, "Факт", "FACT", mBook, 0, True, mFact, info, msg)
+        If st = 0 Then
+            mDiff = WmsIssue.Round3(mFact - mBook)
+            If Abs(mDiff) < 0.0000001 Then mDiff = 0
+        End If
+    End Select
+    If st = 1 Then
+        AskAdjust = "SKIP:" & msg
+    ElseIf st = 2 Then
+        AskAdjust = "ERR:" & msg
+    ElseIf WmsAsk.DateAsk(mDate, "корректировки", "Провести", msg) <> 0 Then
+        AskAdjust = "SKIP:" & msg
+    End If
+End Function
 
 ' the common journal fields of a correction
 Private Sub PlanCommonFields(n As Long, r As Long)
@@ -512,9 +574,11 @@ Function AdjustPostRow(r As Long) As String
         Exit Function
     End If
     why = CheckRowInputs(r, True)
+    ' 1.0: «3» of an EI with a packing (3 шт or 3 кан), a percent below 1, a date in the future or a year back — asked
+    why = AskAdjust(why, r)
     If why <> "" Then
-        SetCtl(r, "Не проведено: " & why)
-        AdjustPostRow = "ERR:" & why
+        SetCtl(r, "Не проведено: " & Mid(why, InStr(why, ":") + 1))
+        If Left(why, 5) = "SKIP:" Then AdjustPostRow = "SKIP:корректировка не проведена — " & Mid(why, 6) Else AdjustPostRow = why
         Exit Function
     End If
     n = CLng(SysNum(SK_NEXT_ADJ))
@@ -693,7 +757,7 @@ End Function
 Function AdjustFixRow(r As Long, vMain As Variant, vDate As Variant, vReason As Variant) As String
     Dim why As String, kind As String, n As Long, rd As Variant, msg As String, sh As Object, res As String
     Dim q1 As Double, d1 As Double, reason1 As String, to1 As String, from1 As String, delta1 As Double, delta2 As Double
-    Dim before As Double, b2 As Double, info As String
+    Dim before As Double, b2 As Double, info As String, st As Integer
     WmsInit()
     If r < 1 Or r > MAX_SHEET_ROW Then
         AdjustFixRow = "ERR:выберите строку корректировки (не заголовок)"
@@ -773,6 +837,20 @@ Function AdjustFixRow(r As Long, vMain As Variant, vDate As Variant, vReason As 
             AdjustFixRow = "ERR:" & msg
             Exit Function
         End If
+        ' 1.0: a new quantity «1» of an EI with a packing or a percent below 1 — asked as at the posting
+        If Abs(mQty - q1) > 0.0000001 Then
+            msg = "списать " & WmsIssue.QtyText(mQty) & " нельзя: остаток " & mCanon & " без этого списания — " _
+                & WmsPack.QtyWithParts(mEi, WmsIssue.Round3(mSbal + q1), CStr(mSdata(SC_UNIT)))
+            st = WmsPack.QtyAsk(mEi, CStr(mSdata(SC_NAME)), CStr(mSdata(SC_UNIT)), "Списать", "OUT", WmsIssue.Round3(mSbal + q1), 0, _
+                mQty <= WmsIssue.Round3(mSbal + q1) + 0.0000001, mQty, info, msg)
+            If st = 1 Then
+                AdjustFixRow = "SKIP:списание не исправлено — " & msg
+                Exit Function
+            ElseIf st = 2 Then
+                AdjustFixRow = "ERR:" & msg
+                Exit Function
+            End If
+        End If
         If mQty > WmsIssue.Round3(mSbal + q1) + 0.0000001 Then
             AdjustFixRow = "ERR:списать " & WmsIssue.QtyText(mQty) & " нельзя: остаток " & mCanon & " без этого списания — " _
                 & WmsIssue.QtyText(WmsIssue.Round3(mSbal + q1))
@@ -806,11 +884,21 @@ Function AdjustFixRow(r As Long, vMain As Variant, vDate As Variant, vReason As 
             AdjustFixRow = "ERR:" & msg
             Exit Function
         End If
-        delta2 = WmsIssue.Round3(mFact - mBook)
-        If Abs(delta2) < 0.0000001 Then
-            AdjustFixRow = "ERR:фактический остаток равен учётному (" & WmsIssue.QtyText(mBook) & ") — расхождения нет; чтобы отменить корректировку, нажмите «Удалить»"
-            Exit Function
+        If VarType(rd(AJ_FACT)) = 5 Then
+            If Abs(mFact - rd(AJ_FACT)) > 0.0000001 Then
+                st = WmsPack.QtyAsk(mEi, CStr(mSdata(SC_NAME)), CStr(mSdata(SC_UNIT)), "Факт", "FACT", mBook, 0, True, mFact, info, msg)
+                If st = 1 Then
+                    AdjustFixRow = "SKIP:инвентаризация не исправлена — " & msg
+                    Exit Function
+                ElseIf st = 2 Then
+                    AdjustFixRow = "ERR:" & msg
+                    Exit Function
+                End If
+            End If
         End If
+        ' 1.0: corrected to the book balance — the recount matched (difference 0); «Удалить» cancels the count itself
+        delta2 = WmsIssue.Round3(mFact - mBook)
+        If Abs(delta2) < 0.0000001 Then delta2 = 0
         before = WmsIssue.Round3(mSbal - delta1)
         b2 = WmsIssue.Round3(before + delta2)
         If b2 < -0.0000001 Then
@@ -1333,8 +1421,6 @@ Function AdjustCheck() As String
                         Bad(nBad, first, "перемещение № " & (r0 + i) & ": изменение остатка " & d(i)(AJ_QTY) & " (должно быть 0)")
                     ElseIf k = "WRITE_OFF" And d(i)(AJ_QTY) >= 0 Then
                         Bad(nBad, first, "списание № " & (r0 + i) & ": изменение остатка " & d(i)(AJ_QTY) & " (должно быть меньше 0)")
-                    ElseIf k = "INV_ADJ" And d(i)(AJ_QTY) = 0 Then
-                        Bad(nBad, first, "инвентаризация № " & (r0 + i) & ": нулевая разница")
                     End If
                     If st = RV_LIVE Then
                         nLive = nLive + 1

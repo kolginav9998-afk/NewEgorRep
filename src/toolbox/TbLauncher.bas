@@ -69,8 +69,8 @@ Function LnRefresh() As String
     Else
         why = TbVerifySnapshot(snap)
         created = TbManifestValue(snap, "created")
-        sh.getCellByPosition(1, 0).setString(Mid(snap, TbInStrRev(Left(snap, Len(snap) - 1), "/") + 1, 80) & " (" & Replace(created, "T", " ") & ", LAST_SEQ " _
-            & TbManifestValue(snap, "last_seq") & ")" & IIf(why <> "", " — НЕ ЦЕЛ: " & why, " — проверен (SHA-256)"))
+        sh.getCellByPosition(1, 0).setString(Mid(snap, TbInStrRev(Left(snap, Len(snap) - 1), "/") + 1, 80) & " (LAST_SEQ " _
+            & TbManifestValue(snap, "last_seq") & ") — " & TbSnapAge(snap) & IIf(why <> "", " — НЕ ЦЕЛ: " & why, " — проверен (SHA-256)"))
     End If
     bd = TbBatchDir()
     If sfa.exists(bd) Then

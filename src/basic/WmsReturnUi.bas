@@ -319,6 +319,7 @@ Sub BtnRetPost(Optional oEvent As Variant)
         res = WmsReturn.ReturnPostRow(r0)
         AfterOperation("«Провести» (возврат)", res)
         If Left(res, 13) = "ERR-CRITICAL:" Or Left(res, 5) = "BUSY:" Or Left(res, 8) = "ERR-SYS:" Then UiMessage(Payload(res))
+        WmsAsk.ShowRowResult("Возврат не проведён", res)
         gUiLastMsg = res
         Exit Sub
     End If

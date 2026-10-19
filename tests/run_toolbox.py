@@ -267,6 +267,43 @@ def k02_inventory():
         s.close()
 
 
+@case
+def k02b_inventory_places_parts():
+    """1.0: the place filter finds an EI on several places by any of them; a count in parts («3 кан») goes to the batch as
+    typed — WMS converts it with the packing of the EI (and records a count that matched)"""
+    c = "K02b"
+    d = place("k02b")
+    snap = os.path.join(d, "WMS_Export", "WMS_SNAPSHOT_FIXTURE")
+    p = os.path.join(snap, "stock.csv")
+    txt = open(p, encoding="utf-8").read()
+    old = "ЕИ-00000003;Лампа LED E27 10W;LED-E27-10;шт;40;C-03;"
+    assert old in txt
+    open(p, "w", encoding="utf-8").write(txt.replace(old, "ЕИ-00000003;Лампа LED E27 10W;LED-E27-10;шт;40;Z-9, B-07;"))
+    rehash(snap, "stock.csv")
+    t = Tool(d, "WMS_INVENTORY")
+    try:
+        t.sheet("Настройки").getCellByPosition(1, 5).setString("b")
+        res = t.B("InvRefresh", False, module="TbInventory")
+        rows = [r for r in t.rows("Пересчёт", 2, 9) if r[0]]
+        eis = [r[0] for r in rows]
+        R.add(c, "фильтр места «b»: ЕИ на нескольких местах («Z-9, B-07») находится по второму месту; ЕИ только на других местах — нет",
+              res.startswith("OK") and "ЕИ-00000003" in eis and "ЕИ-00000002" in eis and "ЕИ-00000001" not in eis, f"{res}; {eis}")
+        sh = t.sheet("Пересчёт")
+        pos = {r[0]: 2 + k for k, r in enumerate(rows)}
+        sh.getCellByPosition(7, pos["ЕИ-00000003"]).setString("3 кан")
+        sh.getCellByPosition(7, pos["ЕИ-00000002"]).setValue(240)
+        t.doc.calculateAll()
+        diff = sh.getCellByPosition(8, pos["ЕИ-00000003"]).getString()
+        ok = t.B("InvBatch", "26.09.2026", module="TbInventory")
+        files = glob.glob(os.path.join(d, "WMS_Batches", "INV-*.csv"))
+        lines = [ln for ln in open(files[0], encoding="utf-8").read().splitlines() if ln and not ln.startswith("#")] if files else []
+        R.add(c, "пересчёт «3 кан» — в пакет как введён (разницу посчитает WMS по фасовке), совпавший — не входит, в сообщении «совпало 1»",
+              ok.startswith("OK") and lines[1:] == ["Инвентаризация;ЕИ-00000003;3 кан;40;26.09.2026;Инвентаризация 26.09.2026;"]
+              and "совпало с учётом 1" in ok and "WMS" in diff, f"{ok[:200]}; {lines}; {diff}")
+    finally:
+        t.close()
+
+
 # ================================================================ K03 SEARCH
 
 @case

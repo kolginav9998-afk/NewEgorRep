@@ -15,8 +15,12 @@ Global gSession As String
 Global gState As String
 Global gBlock As String
 Global gBlockText As String
+' 1.0: the warning that operations were posted in the old book after the upgrade (WmsRecovery.OldBookNote), shown in colour
+Global gOldNote As String
 Global gReport As String
 Global gBusy As Boolean
+' D-101: WMS holds lockControllers (the screen is not repainted while it writes)
+Global gViewLocked As Boolean
 ' journal ownership: the file this session writes to and the size it expects (spec §20)
 Global gJFile As String
 Global gJSize As Double
@@ -68,7 +72,18 @@ Sub WmsInit()
     gReport = ""
     gJFile = ""
     gJSize = -1
+    LoadPlusLibrary()
     gInit = True
+End Sub
+
+' PRIME 0.8: the pages and the additions live in the library WmsPlus (a name in a library slows down every lookup of the
+' other names of that library, so the core keeps the size of 0.7.2). The core calls them (the parts of a packing, the
+' registry of the transfer, the pages) only after this; a book without WmsPlus (a test template, an old book) works without.
+Sub LoadPlusLibrary()
+    On Error Resume Next
+    If BasicLibraries.hasByName("WmsPlus") Then
+        If Not BasicLibraries.isLibraryLoaded("WmsPlus") Then BasicLibraries.loadLibrary("WmsPlus")
+    End If
 End Sub
 
 Function NewId(n As Integer) As String
@@ -313,7 +328,7 @@ Sub SetBlocked(code As String, txt As String)
         gBlock = code
         gBlockText = txt
     End If
-    AddNote("ЗАБЛОКИРОВАНО [" & code & "]: " & txt)
+    AddNote("ЗАБЛОКИРОВАНО: " & txt & " (код " & code & ")")
 End Sub
 
 Function StartupReport() As String
@@ -403,7 +418,7 @@ EH:
         gBlock = "STARTUP_ERROR"
         gBlockText = "ошибка запуска WMS: " & Error$ & " (строка " & Erl & ")"
     End If
-    AddNote("ЗАБЛОКИРОВАНО [STARTUP_ERROR]: " & Error$)
+    AddNote("ЗАБЛОКИРОВАНО: ошибка запуска WMS — " & Error$ & " (код STARTUP_ERROR)")
     WmsUi.UiAfterStartup()
     UndoEnd()
     WmsStartup = StateLine() & " | " & gReport
@@ -428,6 +443,8 @@ Sub OnDocSave(Optional oEvent As Variant)
     ' D-041: rows hidden by a filter are unhidden for the save (LibreOffice would open a file with many hidden rows
     ' very slowly, WmsUi.FiltersStash); the filter conditions stay and are applied again after the save
     WmsUi.FiltersStash()
+    ' 1.0: the file says «WMS не запущена» — opened with the macros off it must not show the last «Работа разрешена»
+    WmsUi.UiSavedState(True)
 End Sub
 
 ' "Save" finished or failed: the rows shown for it are filtered again
@@ -435,6 +452,7 @@ Sub OnDocSaveDone(Optional oEvent As Variant)
     On Error Resume Next
     WmsInit()
     WmsUi.FiltersRestore()
+    WmsUi.UiSavedState(False)
 End Sub
 
 ' ================================================================ explicit user actions (spec §21)
@@ -576,6 +594,7 @@ End Function
 Function ProtectWindowOpen() As String
     Dim a As Variant, i As Integer, sh As Object, nm As String
     gWinSheets = "|"
+    On Error GoTo EH
     a = Split(PlanUnlockSheets(), "|")
     For i = 0 To UBound(a)
         nm = a(i)
@@ -594,6 +613,11 @@ Function ProtectWindowOpen() As String
         End If
     Next i
     ProtectWindowOpen = ""
+    Exit Function
+EH:
+    nm = Error$
+    ProtectWindowClose()
+    ProtectWindowOpen = "защита листов не снята: " & nm
 End Function
 
 ' True when the WMS password lifted the protection of sh
@@ -848,12 +872,40 @@ End Sub
 Sub UndoEnd()
     Dim um As Object
     On Error Resume Next
+    ViewUnlock()
     um = gDoc.getUndoManager()
     If mUndoLocked Then
         um.unlock()
         mUndoLocked = False
     End If
     um.clear()
+End Sub
+
+' PRIME 1.0 (D-101): the screen is not repainted while WMS writes. Calc repaints the sheet in view after every cell
+' written anywhere in the book — on a sheet with colour rules («Заказы», «Дашборд», «Поиск») up to 1 ms a cell, ten
+' times the write itself; under lockControllers a write costs the same whatever sheet is shown and the screen is
+' repainted once at the end. Formulas still recalculate; the content-changed events are not fired by macro writes
+' either way. Taken by ApplyOperation only, inside its Undo bracket: UndoEnd releases it on every path. Calc also holds
+' back «modified» until the unlock — so it is never taken around code that clears «modified» (the startup, the pages).
+' A lock left by a macro that stopped on an unexpected error (or a Basic reset) is released here first: no WMS macro is
+' writing when the flag is down, so no other lock of the controllers is legitimate.
+Sub ViewLock()
+    Dim i As Integer
+    On Error Resume Next
+    If gViewLocked Then Exit Sub
+    Do While gDoc.hasControllersLocked() And i < 20
+        gDoc.unlockControllers()
+        i = i + 1
+    Loop
+    gDoc.lockControllers()
+    gViewLocked = True
+End Sub
+
+Sub ViewUnlock()
+    On Error Resume Next
+    If Not gViewLocked Then Exit Sub
+    gViewLocked = False
+    gDoc.unlockControllers()
 End Sub
 
 ' ================================================================ before-image (spec §19)
@@ -948,6 +1000,7 @@ Function ApplyOperation(mode As Integer, replaySeq As Long) As String
     gBusy = True
     gHardStop = False
     UndoBegin()
+    ViewLock()
     ' PRIME 0.8: the protection window — a sheet protected with a foreign password is refused before anything is written
     why = ProtectWindowOpen()
     If why <> "" Then
@@ -1012,6 +1065,7 @@ RB:
     em = Error$
     If gHardStop Then
         ' test seam: the book was stored mid-operation and the process is about to be killed
+        ViewUnlock()
         gBusy = False
         ApplyOperation = "CRASH-SIM"
         Exit Function
@@ -1094,10 +1148,10 @@ Private Function FinishAfterJournal(seq As Long, em As String) As String
     Exit Function
 EH:
     ' the next start rolls back by the marker and replays the journal entry
-    SetBlocked("COMMIT_FAILED", "операция seq " & seq & " записана в журнал, но не завершена в книге — перезапустите WMS")
+    SetBlocked("COMMIT_FAILED", "операция журнала № " & seq & " записана в журнал, но не завершена в книге — перезапустите WMS")
     UndoEnd()
     gBusy = False
-    FinishAfterJournal = "ERR-CRITICAL:операция seq " & seq & " в журнале, завершение не удалось: " & em
+    FinishAfterJournal = "ERR-CRITICAL:операция журнала № " & seq & " в журнале, завершение не удалось: " & em
 End Function
 
 ' COMMITTED is written before LAST_SEQ, so a completion interrupted part-way (error, save, crash) never leaves LAST_SEQ

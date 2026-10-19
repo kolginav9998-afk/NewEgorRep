@@ -1,7 +1,7 @@
 ' WmsRecovery — fail-closed startup analysis and the explicit recovery actions (spec §18, §21, D-027, D-028).
 ' Startup states: CLEAN, or BLOCKED with one of NO_FILE, READ_ONLY, NOT_ODS, SYS_CORRUPT, NOT_REGISTERED (copy or old
 ' backup opened directly), LOCKED (stale lock / second instance), MARKER_CORRUPT, JOURNAL_UNREADABLE, JOURNAL_FOREIGN,
-' JOURNAL_GAP, JOURNAL_BEHIND (journal mismatch), TAIL (unsaved journal tail), SAVED_WITHOUT_WMS, STARTUP_ERROR.
+' JOURNAL_GAP, JOURNAL_BEHIND (journal mismatch), JOURNAL_OTHER_COPY (1.0: book and journal of two copies), TAIL (unsaved journal tail), SAVED_WITHOUT_WMS, STARTUP_ERROR.
 ' Actions: «Восстановить» (Recover), «Отложить хвост журнала» (AbandonTail), «Снять блокировку WMS»
 ' (WmsLock.ForceRelease), «Сделать рабочим файлом» (RegisterHere).
 Option Explicit
@@ -9,6 +9,7 @@ Option Explicit
 Sub Analyze()
     Dim p As String, st As String, lastSeq As Long, bi As String, ec As Double
     gState = "BLOCKED"
+    gOldNote = ""
     ' 1. environment
     If Not gDoc.hasLocation() Then
         SetBlocked("NO_FILE", "книга не сохранена в файл")
@@ -58,7 +59,7 @@ Sub Analyze()
     p = ForeignProtectedSheets()
     st = SysStr(SK_TX_STATE)
     If p <> "" And st = TX_STARTED Then
-        SetBlocked("PROTECTION_FOREIGN", "листы " & p & " защищены не паролем WMS — незавершённую операцию seq " & SysStr(SK_TX_SEQ) _
+        SetBlocked("PROTECTION_FOREIGN", "листы " & p & " защищены не паролем WMS — незавершённую операцию журнала № " & SysStr(SK_TX_SEQ) _
             & " нельзя откатить, пока эта защита стоит. " & ForeignProtectionHint())
         Exit Sub
     End If
@@ -74,15 +75,15 @@ Sub Analyze()
         ' the operation in progress always follows the book's last one; anything else means LAST_SEQ moved without
         ' COMMITTED (rolling the cells back would then silently drop an operation the book counts as applied)
         If SysNum(SK_TX_SEQ) <> SysNum(SK_LAST_SEQ) + 1 Then
-            SetBlocked("MARKER_CORRUPT", "маркер незавершённой операции seq " & SysStr(SK_TX_SEQ) & " не согласован с LAST_SEQ " _
+            SetBlocked("MARKER_CORRUPT", "отметка незавершённой операции журнала № " & SysStr(SK_TX_SEQ) & " не согласована с номером последней операции книги " _
                 & SysStr(SK_LAST_SEQ) & ". Восстановите книгу из резервной копии и выполните «Восстановить»")
             Exit Sub
         End If
         If Not RestoreBeforeImage(bi) Then
-            SetBlocked("MARKER_CORRUPT", "не удалось откатить незавершённую операцию seq " & SysStr(SK_TX_SEQ))
+            SetBlocked("MARKER_CORRUPT", "не удалось откатить незавершённую операцию журнала № " & SysStr(SK_TX_SEQ))
             Exit Sub
         End If
-        AddNote("незавершённая операция seq " & SysStr(SK_TX_SEQ) & " (" & SysStr(SK_TX_TYPE) & ") отменена по снимку")
+        AddNote("незавершённая операция журнала № " & SysStr(SK_TX_SEQ) & " отменена по снимку «до» — книга такая, как до неё (код " & SysStr(SK_TX_TYPE) & ")")
         ProtectImageSheets(bi)
         ClearMarker()
     ElseIf st = TX_COMMITTED Or st = TX_NONE Then
@@ -117,15 +118,23 @@ Sub Analyze()
         Exit Sub
     End If
     If lastSeq > 0 And Not gJR_HasLast Then
-        SetBlocked("JOURNAL_BEHIND", "в книге последняя операция seq " & lastSeq & ", а в журнале " _
+        SetBlocked("JOURNAL_BEHIND", "в книге последняя операция журнала № " & lastSeq & ", а в журнале " _
             & IIf(gJR_MaxSeq > 0, "последняя запись seq " & gJR_MaxSeq, "записей нет") _
             & " — журнал неполный или от другой копии. Если WMS перенесена без журнала — «Сделать рабочим файлом» с новым журналом")
+        Exit Sub
+    End If
+    ' 1.0: the entry with the book's last seq is not the one the book wrote — the book and the journal come from two copies
+    ' of the WMS that went separate ways; replaying the tail would mix them
+    If lastSeq > 0 And WmsJournal.PosSeq() = lastSeq And WmsJournal.PosMark() <> "" And gJR_LastMark <> "" _
+        And gJR_LastMark <> WmsJournal.PosMark() Then
+        SetBlocked("JOURNAL_OTHER_COPY", "книга и журнал от разных копий WMS: в книге операция журнала № " & lastSeq & " записана " _
+            & MarkTime(WmsJournal.PosMark()) & ", а в журнале под этим номером другая запись (" & MarkTime(gJR_LastMark) & ")")
         Exit Sub
     End If
     If gJR_Damaged > 0 Then AddNote("повреждённых строк журнала: " & gJR_Damaged & " (непрерывность seq не нарушена)")
     If gJR_Torn Then AddNote("последняя строка журнала оборвана сбоем записи (эта операция не была зафиксирована)")
     If gJR_N > 0 Then
-        SetBlocked("TAIL", "в журнале " & gJR_N & " операций, которых нет в книге (seq " & gJR_Seq(0) & ".." & gJR_Seq(gJR_N - 1) _
+        SetBlocked("TAIL", "в журнале " & gJR_N & " операций, которых нет в книге (№ " & gJR_Seq(0) & "…" & gJR_Seq(gJR_N - 1) _
             & "): выполните «Восстановить» или «Отложить хвост журнала»")
         Exit Sub
     End If
@@ -144,7 +153,8 @@ Sub Analyze()
     ' written only when it changes: an unchanged book must not look modified after a start (LibreOffice would ask to save)
     If SysStr(SK_CORE_VERSION) <> WMS_CORE_VERSION Then SysPutStr(SK_CORE_VERSION, WMS_CORE_VERSION)
     ' PRIME 0.8: the book of 0.7 this one was upgraded from must not be worked in any more — its journal is only looked at
-    AddNote(OldBookNote())
+    gOldNote = OldBookNote()
+    AddNote(gOldNote)
     gState = "CLEAN"
 End Sub
 
@@ -182,9 +192,9 @@ Private Function TailProblem(lastSeq As Long) As String
     ElseIf gJR_Order <> "" Then
         TailProblem = "нарушена непрерывность журнала: " & gJR_Order
     ElseIf lastSeq > 0 And Not gJR_HasLast Then
-        TailProblem = "журнал не содержит последнюю операцию книги (seq " & lastSeq & ")"
+        TailProblem = "журнал не содержит последнюю операцию книги (№ " & lastSeq & ")"
     ElseIf gJR_N = 0 Then
-        TailProblem = "в журнале нет операций после seq " & lastSeq
+        TailProblem = "в журнале нет операций после № " & lastSeq
     Else
         TailProblem = ""
     End If
@@ -417,7 +427,7 @@ Function AbandonTail() As String
     CommitSeq(toSeq + 1)
     gState = ""
     WmsStartup()
-    AbandonTail = "отложено операций: " & (toSeq - fromSeq + 1) & " (seq " & fromSeq & ".." & toSeq & "), они остаются в журнале для ручной сверки: " & lst
+    AbandonTail = "отложено операций: " & (toSeq - fromSeq + 1) & " (№ " & fromSeq & "…" & toSeq & "), они остаются в журнале для ручной сверки: " & lst
 End Function
 
 ' largest EI, issue № and return № named by the fields of one journal entry (0 when none). A return names its issue
@@ -500,8 +510,17 @@ End Sub
 
 ' «Сделать рабочим файлом»: this file becomes the working WMS (after a deliberate move or restore).
 ' bStartNewJournal: only when the folder has no journal at all — a START record continues the numbering.
+' «2026-10-15T09:30:12/245» → «15.10.2026 09:30:12»
+Private Function MarkTime(sMark As String) As String
+    If Len(sMark) >= 19 Then
+        MarkTime = Mid(sMark, 9, 2) & "." & Mid(sMark, 6, 2) & "." & Left(sMark, 4) & " " & Mid(sMark, 12, 8)
+    Else
+        MarkTime = sMark
+    End If
+End Function
+
 Function RegisterHere(bStartNewJournal As Boolean) As String
-    Dim p As String, s As String, lastSeq As Long, sLine As String, why As String, rc As Integer
+    Dim p As String, s As String, lastSeq As Long, sLine As String, why As String, rc As Integer, bArch As Boolean, sWhy As String, sDir As String
     WmsInit()
     If Not gDoc.hasLocation() Then
         RegisterHere = "нельзя: книга не сохранена в файл"
@@ -520,7 +539,12 @@ Function RegisterHere(bStartNewJournal As Boolean) As String
     s = "рабочий файл WMS: " & ConvertFromURL(gDoc.getURL())
     If bStartNewJournal Then
         lastSeq = CLng(SysNum(SK_LAST_SEQ))
-        If UBound(WmsJournal.ListFiles()) >= 0 Then
+        ' 1.0: a journal that is behind the book (its last lines lost) or belongs to another copy is not a dead end: it is
+        ' moved aside (WmsJournal.ArchiveFiles) and a new one starts from the book — the book is what the storekeeper has
+        bArch = (gBlock = "JOURNAL_BEHIND" Or gBlock = "JOURNAL_OTHER_COPY")
+        sWhy = "новый журнал после переноса книги"
+        If bArch And UBound(WmsJournal.ListFiles()) >= 0 Then sWhy = IIf(gBlock = "JOURNAL_OTHER_COPY", "журнал от другой копии WMS", "журнал отставал от книги")
+        If UBound(WmsJournal.ListFiles()) >= 0 And Not bArch Then
             s = s & "; новый журнал НЕ начат: в папке уже есть журнал"
         Else
             p = WmsLock.Acquire()
@@ -530,9 +554,19 @@ Function RegisterHere(bStartNewJournal As Boolean) As String
                 WmsStartup()
                 Exit Function
             End If
+            If UBound(WmsJournal.ListFiles()) >= 0 Then
+                p = WmsJournal.ArchiveFiles(sDir)
+                If p <> "" Then
+                    RegisterHere = s & "; новый журнал не начат: " & p
+                    gState = ""
+                    WmsStartup()
+                    Exit Function
+                End If
+                s = s & "; прежний журнал перенесён в папку " & sDir
+            End If
             gJFile = WmsJournal.JournalFileName(Now())
             gJSize = 0
-            sLine = WmsJournal.BuildLine(lastSeq + 1, "START", Array("BASE=" & lastSeq, "REASON=" & Esc("новый журнал после переноса книги")))
+            sLine = WmsJournal.BuildLine(lastSeq + 1, "START", Array("BASE=" & lastSeq, "REASON=" & Esc(sWhy)))
             rc = WmsJournal.AppendLine(sLine, lastSeq + 1, why)
             If rc <> 1 Then
                 RegisterHere = s & "; ОШИБКА записи журнала: " & why
@@ -541,7 +575,12 @@ Function RegisterHere(bStartNewJournal As Boolean) As String
                 Exit Function
             End If
             CommitSeq(lastSeq + 1)
-            s = s & "; начат новый журнал с seq " & (lastSeq + 1)
+            s = s & "; начат новый журнал с операции № " & (lastSeq + 1)
+            ' the book is saved at once: a book left unsaved would open again without the start of its new journal
+            On Error Resume Next
+            gDoc.store()
+            If Err <> 0 Then s = s & "; сохраните книгу (Ctrl+S): " & Error$
+            On Error GoTo 0
         End If
     End If
     gState = ""

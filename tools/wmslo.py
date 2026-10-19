@@ -111,7 +111,7 @@ class Office:
 
     def basic(self, doc, module, func, *args):
         sp = doc.getScriptProvider()
-        script = sp.getScript(f"vnd.sun.star.script:Standard.{module}.{func}?language=Basic&location=document")
+        script = sp.getScript(f"vnd.sun.star.script:{lib_of(module)}.{module}.{func}?language=Basic&location=document")
         return script.invoke(tuple(args), (), ())[0]
 
     # ---------------------------------------------------------------- process
@@ -149,19 +149,49 @@ class Office:
             time.sleep(0.1)
 
 
-def add_basic(doc, module, code):
+# The Basic of a WMS book lives in two libraries (PRIME 0.8). LibreOffice Basic looks a name of another module up through
+# every module of the library: each module, constant and variable of the library makes every such lookup — the core reads
+# its constants (WmsConfig) that way all the time — slower (measured: 0.8 in one library posted an issue 28 % slower than
+# 0.7.2). The core of the accounting stays in «Standard» with the size of 0.7.2; the pages and every later addition live in
+# «WmsPlus»: their names do not slow the core down. A library sees the other one's procedures, constants and globals once
+# both are loaded (WmsCore.WmsInit loads WmsPlus).
+PLUS_LIB = "WmsPlus"
+PLUS_MODULES = ["WmsLegacy", "WmsPrimeUi", "WmsView", "WmsPack", "WmsDash", "WmsFind", "WmsMap", "WmsAsk"]
+
+
+def lib_of(module):
+    """the Basic library of a module of a WMS book"""
+    return PLUS_LIB if module in PLUS_MODULES else "Standard"
+
+
+def script_macro(code):
+    """«Module.Func» of a script URL of a document macro (any library), or the URL itself when it is not one"""
+    for lib in ("Standard", PLUS_LIB):
+        head = f"vnd.sun.star.script:{lib}."
+        if code.startswith(head):
+            return code[len(head):].split("?")[0]
+    return code
+
+
+def add_basic(doc, module, code, lib=None):
+    lib_name = lib or lib_of(module)
     libs = doc.BasicLibraries
-    if not libs.hasByName("Standard"):
-        libs.createLibrary("Standard")
-    libs.loadLibrary("Standard")
-    lib = libs.getByName("Standard")
+    if not libs.hasByName(lib_name):
+        libs.createLibrary(lib_name)
+    libs.loadLibrary(lib_name)
+    lib = libs.getByName(lib_name)
     if lib.hasByName(module):
         lib.replaceByName(module, code)
     else:
         lib.insertByName(module, code)
 
 
+def macro_url(script):
+    """the script URL of a document macro «Module.Func» in the library of its module"""
+    return f"vnd.sun.star.script:{lib_of(script.split('.')[0])}.{script}?language=Basic&location=document"
+
+
 def bind_event(events, name, script):
-    """Bind a document/sheet event to a Basic macro of the document's Standard library."""
-    url = f"vnd.sun.star.script:Standard.{script}?language=Basic&location=document"
+    """Bind a document/sheet event to a Basic macro of the document (the library of its module)."""
+    url = macro_url(script)
     uno.invoke(events, "replaceByName", (name, uno.Any("[]com.sun.star.beans.PropertyValue", props(EventType="Script", Script=url))))

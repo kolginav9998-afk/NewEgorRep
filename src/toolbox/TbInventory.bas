@@ -42,7 +42,7 @@ Function InvRefresh(bForce As Boolean) As String
     For i = 0 To n - 1
         st = CStr(d(i)(7))
         If CStr(d(i)(0)) <> "" And st <> "Приход удалён (сторно)" Then
-            If (fPlace = "" Or Left(LCase(CStr(d(i)(5))), Len(fPlace)) = fPlace) And (fCat = "" Or LCase(CStr(d(i)(6))) = fCat) Then
+            If (fPlace = "" Or PlaceStarts(CStr(d(i)(5)), fPlace)) And (fCat = "" Or LCase(CStr(d(i)(6))) = fCat) Then
                 out(k) = Array(d(i)(0), d(i)(1), d(i)(2), d(i)(3), d(i)(5), d(i)(6), d(i)(4))
                 k = k + 1
             End If
@@ -57,16 +57,47 @@ Function InvRefresh(bForce As Boolean) As String
         Next j
         sh.getCellRangeByPosition(0, FIRST_ROW, 6, FIRST_ROW + k - 1).setDataArray(rows)
         For j = 0 To k - 1
-            sh.getCellByPosition(8, FIRST_ROW + j).setFormula("=IF(H" & (FIRST_ROW + j + 1) & "="""";"""";H" & (FIRST_ROW + j + 1) & "-G" & (FIRST_ROW + j + 1) & ")")
+            ' 1.0: a count in parts («3 кан») is a text: the difference is counted by WMS with the packing of the EI
+            sh.getCellByPosition(8, FIRST_ROW + j).setFormula("=IF(H" & (FIRST_ROW + j + 1) & "="""";"""";IF(ISNUMBER(H" & (FIRST_ROW + j + 1) & ");H" _
+                & (FIRST_ROW + j + 1) & "-G" & (FIRST_ROW + j + 1) & ";""в частях — считает WMS""))")
         Next j
     End If
     sh.getCellByPosition(0, 0).setString("Снимок: " & Mid(snap, TbInStrRev(Left(snap, Len(snap) - 1), "/") + 1) & " (LAST_SEQ " _
-        & TbManifestValue(snap, "last_seq") & ", " & TbManifestValue(snap, "created") & ")")
+        & TbManifestValue(snap, "last_seq") & ") — " & TbSnapAge(snap))
     TbPutSetting(3, snap)
     InvRefresh = "OK:строк пересчёта " & k & " из снимка " & ConvertFromURL(snap)
     Exit Function
 EH:
     InvRefresh = "ERR:внутренняя ошибка инструмента: " & Error$ & " (код " & Err & ", строка " & Erl & ")"
+End Function
+
+' 1.0: one of the places of the EI starts with f («А-1, Б-2» is found by «б»): an EI on several places is not lost
+Private Function PlaceStarts(sPlace As String, f As String) As Boolean
+    Dim a As Variant, i As Integer
+    a = Split(Replace(sPlace, ";", ","), ",")
+    For i = 0 To UBound(a)
+        If Left(LCase(Trim(a(i))), Len(f)) = f Then
+            PlaceStarts = True
+            Exit Function
+        End If
+    Next i
+End Function
+
+' a count in the parts of the packing: a number and a word («3 кан», «1,5 м»); WMS reads it with the packing of the EI
+Private Function PartsCount(ByVal s As String) As Boolean
+    Dim i As Integer, ch As String, nDig As Integer, p As Integer
+    s = Trim(s)
+    For i = 1 To Len(s)
+        ch = Mid(s, i, 1)
+        If (ch >= "0" And ch <= "9") Or ch = "," Or ch = "." Then
+            If ch >= "0" And ch <= "9" Then nDig = nDig + 1
+        Else
+            p = i
+            Exit For
+        End If
+    Next i
+    If nDig = 0 Or p = 0 Then Exit Function
+    PartsCount = Len(Trim(Mid(s, p))) >= 1 And Len(Trim(Mid(s, p))) <= 12 And InStr(Mid(s, p), "=") = 0
 End Function
 
 Private Function CountFilled(sh As Object, col As Integer, r0 As Long, r1 As Long) As Long
@@ -84,7 +115,7 @@ End Sub
 
 Function InvBatch(sDate As String) As String
     Dim sh As Object, last As Long, d As Variant, i As Long, rows() As Variant, k As Long, bad As String, nBad As Long, id As String, path As String
-    Dim snap As String, dt As String, x As Double
+    Dim snap As String, dt As String, x As Double, nSame As Long, nParts As Long
     On Error GoTo EH
     sh = ThisComponent.Sheets.getByName(SH_COUNT)
     last = TbLastRow(sh)
@@ -98,9 +129,15 @@ Function InvBatch(sDate As String) As String
     ReDim rows(UBound(d))
     For i = 0 To UBound(d)
         If CStr(d(i)(7)) <> "" Then
-            If VarType(d(i)(7)) <> 5 Then
+            If VarType(d(i)(7)) <> 5 And PartsCount(CStr(d(i)(7))) Then
+                ' «3 кан»: the row goes to the batch as typed; WMS converts it with the packing (and records a count that matched)
+                rows(k) = Array("Инвентаризация", d(i)(0), Trim(CStr(d(i)(7))), NumText(d(i)(6)), dt, _
+                    "Инвентаризация " & dt & IIf(CStr(d(i)(9)) <> "", ": " & d(i)(9), ""), "")
+                k = k + 1
+                nParts = nParts + 1
+            ElseIf VarType(d(i)(7)) <> 5 Then
                 nBad = nBad + 1
-                If bad = "" Then bad = "строка " & (FIRST_ROW + i + 1) & ": фактический остаток «" & d(i)(7) & "» не число"
+                If bad = "" Then bad = "строка " & (FIRST_ROW + i + 1) & ": фактический остаток «" & d(i)(7) & "» не число (и не «3 кан»)"
             ElseIf d(i)(7) < 0 Then
                 nBad = nBad + 1
                 If bad = "" Then bad = "строка " & (FIRST_ROW + i + 1) & ": отрицательный фактический остаток"
@@ -108,6 +145,8 @@ Function InvBatch(sDate As String) As String
                 rows(k) = Array("Инвентаризация", d(i)(0), NumText(d(i)(7)), NumText(d(i)(6)), dt, _
                     "Инвентаризация " & dt & IIf(CStr(d(i)(9)) <> "", ": " & d(i)(9), ""), "")
                 k = k + 1
+            Else
+                nSame = nSame + 1
             End If
         End If
     Next i
@@ -116,7 +155,7 @@ Function InvBatch(sDate As String) As String
         Exit Function
     End If
     If k = 0 Then
-        InvBatch = "SKIP:расхождений нет — пакет не нужен"
+        InvBatch = "SKIP:расхождений нет — пакет не нужен (совпало с учётом: " & nSame & ")"
         Exit Function
     End If
     Dim outRows() As Variant
@@ -127,7 +166,8 @@ Function InvBatch(sDate As String) As String
     id = "INV-" & Format(Now(), "YYYYMMDD-HHMMSS")
     path = TbWriteBatch("Корректировки", id, "WMS_INVENTORY", Mid(snap, TbInStrRev(Left(snap, Len(snap) - 1), "/") + 1, Len(snap) - TbInStrRev(Left(snap, Len(snap) - 1), "/") - 1), _
         Array("kind", "ei", "fact", "book", "date", "reason", "note"), outRows, "")
-    InvBatch = "OK:пакет " & id & ": расхождений " & k & " — " & ConvertFromURL(path) & ". В WMS: «Главная» → «Загрузить пакет»"
+    InvBatch = "OK:пакет " & id & ": расхождений " & (k - nParts) & IIf(nParts > 0, ", пересчётов в частях " & nParts & " (разницу посчитает WMS)", "") _
+        & ", совпало с учётом " & nSame & " (в пакет не входят) — " & ConvertFromURL(path) & ". В WMS: «Главная» → «Загрузить пакет»"
     Exit Function
 EH:
     InvBatch = "ERR:внутренняя ошибка инструмента: " & Error$ & " (код " & Err & ", строка " & Erl & ")"

@@ -155,6 +155,7 @@ Sub BtnSpcPost(Optional oEvent As Variant)
         res = WmsSpecial.SpecialPostRow(r0, "", bOk)
         AfterOperation("«Провести» (иной приход)", res)
         If Left(res, 13) = "ERR-CRITICAL:" Or Left(res, 5) = "BUSY:" Or Left(res, 8) = "ERR-SYS:" Then UiMessage(Payload(res))
+        WmsAsk.ShowRowResult("Иной приход не проведён", res)
         gUiLastMsg = res
         Exit Sub
     End If
@@ -168,10 +169,10 @@ Sub BtnSpcPost(Optional oEvent As Variant)
         Exit Sub
     End If
     If n >= 2 Then
-        ans = UiAsk3("Провести выделенные строки (" & n & ") как одно поступление?" & Chr(10) & Chr(10) _
-            & "«Да» — один № поступления (OFF / PROD / DET / OLD / OTH) на все строки одного типа прихода" _
-            & IIf(nSrc > 1, " (в выделении разные типы — у каждого типа свой №)", "") & ";" & Chr(10) _
-            & "«Нет» — у каждой строки свой № поступления;" & Chr(10) & "«Отмена» — ничего не проводить.")
+        ans = WmsPrimeUi.UiAsk3b("Провести выделенные строки (" & n & ") как одно поступление?" & Chr(10) _
+            & "Одно поступление — один № (OFF / PROD / DET / OLD / OTH) на все строки одного типа прихода" _
+            & IIf(nSrc > 1, " (в выделении разные типы — у каждого типа свой №)", "") & ".", _
+            "Одно поступление на все выделенные строки", "Каждая строка — своё поступление", "Не проводить")
         If ans = 2 Then
             gUiLastMsg = "SKIP:проведение отменено"
             Exit Sub

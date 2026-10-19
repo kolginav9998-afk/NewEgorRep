@@ -13,6 +13,15 @@ Public Const MP_LEGEND_ROW = 5
 Public Const MP_MAX_PLACES = 20000
 ' the hidden sorted table of the texts of the places (MapKeys): text | number of the place (1-based)
 Public Const MP_KEY_COL = 1100
+' 1.0 (М2): the directory of the places outside the racks of the map (a floor, the yard, an office): known places, not
+' «не на карте»; A the place, B its kind, C the zone, D the capacity in cells, E «закрыто», F a note
+Public Const SH_PLACES = "Места"
+Public Const PD_PLACE = 0
+Public Const PD_KIND = 1
+Public Const PD_ZONE = 2
+Public Const PD_CAP = 3
+Public Const PD_CLOSED = 4
+Public Const PD_NOTE = 5
 
 Global gMpLayer As String
 Global gMpN As Long
@@ -96,7 +105,7 @@ Sub BtnMapOff(Optional oEvent As Variant)
             Select Case gMpOff(i)(1)
             Case 0: why = "место не указано"
             Case -3: why = "место без яруса — уточните «ряд-секция-ярус»"
-            Case Else: why = "такого места нет на карте"
+            Case Else: why = "такого места нет на карте и в «" & SH_PLACES & "» (место вне стеллажей запишите туда)"
             End Select
             rows(i) = Array(SH_STOCK, k + 1, CStr(st(SC_EI)), CStr(st(SC_NAME)), st(SC_QTY), CStr(st(SC_UNIT)), CStr(st(SC_PLACE)), why, "", SH_STOCK, k, CStr(st(SC_EI)))
         Next i
@@ -157,6 +166,7 @@ Function TopoLoad(url As String) As String
     Dim pos As Integer, sh As Object, ok As Boolean, d As Variant, r As Long, c As Long, cur As Object
     WmsInit()
     On Error GoTo EH
+    gTkValid = False
     args(0).Name = "Hidden"
     args(0).Value = True
     args(1).Name = "ReadOnly"
@@ -252,6 +262,21 @@ Global gMpNOff As Long
 Global gMpNoLvl As Long
 Global gMpKeyN As Long
 Global gMpPlaceOf As Variant
+' 1.0: the first place of the map with the key of place i (one address drawn in several cells shows the same everywhere)
+Global gMpFirst() As Long
+' 1.0 (М2): the EIs on the places of «Места» (outside the racks of the map)
+Global gMpNDir As Long
+' 1.0: the keys of «Топология» and of «Места» read once and kept until those sheets change (their events): the check of a
+' place typed at a posting needs no map. gTk: key → 1; gPd: key → the row of «Места»
+Global gTkValid As Boolean
+Global gTk As Object
+Global gTkN As Long
+Global gTkList() As String
+Global gPdValid As Boolean
+Global gPd As Object
+Global gPdN As Long
+Global gPdClosed() As Boolean
+Global gPdName() As String
 
 ' builds (or recolours) the map in the layer sLayer (OCC, ISS, STALE, ATT, FREE). OK:<counts> / ERR:<why>
 Function MapBuild(sLayer As String, Optional bForce As Variant) As String
@@ -294,13 +319,15 @@ Function MapBuild(sLayer As String, Optional bForce As Variant) As String
     End Select
     mp.getCellByPosition(0, MP_SUM_ROW).setString(lbl & "   ·   мест " & NumText(gMpN) & ", занято " & NumText(nOcc) & " (" _
         & CLng(nOcc / gMpN * 100) & "%), свободно " & NumText(nFree) & IIf(nAtt > 0, ", требуют внимания " & NumText(nAtt), "") _
+        & IIf(gMpNDir > 0, "   ·   вне стеллажей («" & SH_PLACES & "»): " & NumText(gMpNDir) & " ЕИ", "") _
         & "   ·   ЕИ не на карте: " & NumText(gMpNOff) & IIf(gMpNOff > 0, " — кнопка «Не на карте»", ""))
     mp.getCellByPosition(0, MP_INFO_ROW).setString("Щёлкните по месту — здесь появится, что на нём лежит.   Обновлено " & Format(Now(), "DD.MM.YYYY HH:MM") _
         & " за " & ViewMs() & " мс")
     Legend(mp, sLayer)
     ViewDone(mp)
     gMpBusy = False
-    MapBuild = "OK:мест " & gMpN & ", занято " & nOcc & ", свободно " & nFree & ", внимание " & nAtt & ", не на карте " & gMpNOff & ", " & ViewMs() & " мс"
+    MapBuild = "OK:мест " & gMpN & ", занято " & nOcc & ", свободно " & nFree & ", внимание " & nAtt & ", не на карте " & gMpNOff & ", вне стеллажей " _
+        & gMpNDir & ", " & ViewMs() & " мс"
     Exit Function
 EH:
     MapBuild = "ERR:карта не построена: " & Error$ & " (строка " & Erl & ")"
@@ -313,7 +340,7 @@ End Function
 Private Function MapLayout(mp As Object, force As Boolean) As String
     Dim topo As Object, cur As Object, r0 As Long, c0 As Long, r1 As Long, c1 As Long, d As Variant, r As Long, c As Long, pk As String
     Dim sig As String, nPl As Long, oldLast As Long, dest As New com.sun.star.table.CellAddress, srcA As New com.sun.star.table.CellRangeAddress
-    Dim nTx As Long, pkR() As Long, pkC() As Long, pkK() As String, i As Long
+    Dim nTx As Long, pkR() As Long, pkC() As Long, pkK() As String, i As Long, nDt As Long
     topo = TopoSheet()
     cur = topo.createCursor()
     cur.gotoStartOfUsedArea(False)
@@ -338,21 +365,36 @@ Private Function MapLayout(mp As Object, force As Boolean) As String
         Next c
     Next r
     sig = r0 & ":" & c0 & ":" & r1 & ":" & c1 & ":" & nTx & ":" & sig
+    ' 1.0: a layout written by a macro fires no event of the sheet — the keys of the check of places are read again too
+    If sig <> gMpSig Then gTkValid = False
     If Not force And sig = gMpSig And gMpN > 0 Then Exit Function
     ' the places: the key of each text read once
     ReDim pkR(nTx)
     ReDim pkC(nTx)
     ReDim pkK(nTx)
+    nDt = 0
     For r = 0 To UBound(d)
         For c = 0 To UBound(d(r))
+            pk = ""
             If VarType(d(r)(c)) = 8 Then
                 pk = PlaceTextKey(CStr(d(r)(c)))
-                If pk <> "" Then
-                    pkR(nPl) = r
-                    pkC(nPl) = c
-                    pkK(nPl) = pk
-                    nPl = nPl + 1
+            ElseIf VarType(d(r)(c)) = 5 Then
+                ' 1.0: «5.12.3» that Calc took for a date (05.12.2003) is the place 5-12-3
+                If d(r)(c) > 1 And d(r)(c) = Int(d(r)(c)) Then
+                    pk = DateCellPlace(topo.getCellByPosition(c0 + c, r0 + r))
+                    If pk <> "" Then nDt = nDt + 1
                 End If
+            End If
+            If pk <> "" Then
+                If nPl > UBound(pkK) Then
+                    ReDim Preserve pkR(2 * nPl)
+                    ReDim Preserve pkC(2 * nPl)
+                    ReDim Preserve pkK(2 * nPl)
+                End If
+                pkR(nPl) = r
+                pkC(nPl) = c
+                pkK(nPl) = pk
+                nPl = nPl + 1
             End If
         Next c
     Next r
@@ -386,6 +428,12 @@ Private Function MapLayout(mp As Object, force As Boolean) As String
     srcA.EndColumn = c1
     srcA.EndRow = r1
     mp.copyRange(dest, srcA)
+    ' the places Calc took for dates are shown on the map as places («5-12-3», not «05.12.03»)
+    If nDt > 0 Then
+        For i = 0 To nPl - 1
+            If VarType(d(pkR(i))(pkC(i))) = 5 Then mp.getCellByPosition(pkC(i), MP_TOP + pkR(i)).setString(pkK(i))
+        Next i
+    End If
     For c = c0 To c1
         mp.getColumns().getByIndex(c - c0).Width = topo.getColumns().getByIndex(c).Width
     Next c
@@ -412,12 +460,14 @@ Private Sub MapKeys(mp As Object, d As Variant)
     first = New Collection
     seen = New Collection
     ReDim keys(2 * gMpN)
+    ReDim gMpFirst(gMpN)
     For i = 0 To gMpN - 1
         j = CollGet(first, gMpKey(i))
         If j < 0 Then
             j = i
             CollPut(first, i, gMpKey(i))
         End If
+        gMpFirst(i) = j
         If CollPut(seen, 1, gMpKey(i)) Then
             keys(n) = Array(gMpKey(i), j + 1)
             n = n + 1
@@ -521,7 +571,7 @@ Private Sub MapStats()
     Dim pl As Variant, nPl As Long, a As Variant, nItems As Long, d As Variant, i As Long, n As Long, k As Long, v As String, pk As String, idx As Long
     Dim places As Object, cache As Object, recent() As Boolean, occ() As Long, iss() As Long, stale() As Double, att() As Integer, eis() As String
     Dim nOff As Long, off() As Variant, offRows() As Long, noLvl As Long, cE As Integer, cval() As String, nC As Long, ci As Long, code As String, j As Long
-    Dim b As Variant
+    Dim b As Variant, nDir As Long
     nextEI = CLng(SysNum(SK_NEXT_EI))
     today = Today0()
     ReDim occ(gMpN)
@@ -591,6 +641,8 @@ Private Sub MapStats()
                         If Not recent(k) Then stale(idx) = stale(idx) + 1
                         If Len(eis(idx)) < 4000 Then eis(idx) = eis(idx) & k & ","
                     Next j
+                ElseIf code = "-4" Then
+                    nDir = nDir + 1
                 Else
                     ' the EI and why (−2: no such place, −3: a place without its level, 0 — no place)
                     off(nOff) = Array(offRows(i), CLng(code))
@@ -635,6 +687,20 @@ Private Sub MapStats()
             Next i
         End If
     End If
+    ' 1.0: an address drawn in several cells of «Топология» (a long place, both sides of an aisle): every cell of it shows what
+    ' lies there — it was only the first one, the others looked free and «Куда положить?» proposed them
+    If UBound(gMpFirst) >= gMpN - 1 Then
+        For i = 0 To gMpN - 1
+            j = gMpFirst(i)
+            If j <> i Then
+                occ(i) = occ(j)
+                iss(i) = iss(j)
+                stale(i) = stale(j)
+                att(i) = att(j)
+                eis(i) = eis(j)
+            End If
+        Next i
+    End If
     gMpOcc = occ
     gMpIss = iss
     gMpStale = stale
@@ -642,6 +708,7 @@ Private Sub MapStats()
     gMpEIs = eis
     gMpOff = off
     gMpNOff = nOff
+    gMpNDir = nDir
     gMpNoLvl = noLvl
     If IsArray(pl) Then gMpPlaceOf = pl
     gMpStatSeq = SysNum(SK_LAST_SEQ)
@@ -668,9 +735,22 @@ Private Function PlacesOn(v As String, places As Object) As String
         PlacesOn = out
     ElseIf noLevel Then
         PlacesOn = "-3"
+    ElseIf PlacesAllDir(v) Then
+        ' 1.0 (М2): a place of the directory «Места» (a floor, the yard) is known — not «не на карте»
+        PlacesOn = "-4"
     Else
         PlacesOn = "-2"
     End If
+End Function
+
+' every part of place text v is a place of «Места»
+Private Function PlacesAllDir(v As String) As Boolean
+    Dim parts As Variant, i As Integer
+    parts = PlaceParts(v)
+    For i = 0 To UBound(parts)
+        If PlaceKnown(PlaceKeyAny(parts(i))) <> 2 Then Exit Function
+    Next i
+    PlacesAllDir = (UBound(parts) >= 0)
 End Function
 
 ' the column i (0 — the texts, 1 — the numbers of the places) of the table of MapKeys
@@ -821,11 +901,13 @@ EH:
     gUiLastMsg = "ERR:" & Error$ & " (строка " & Erl & ")"
 End Sub
 
-' the map is shown: built when it was never built in this session (the layer of the last time)
+' the map is shown: built when it was never built in this session, and (1.0) counted again when operations were posted since
+' it was counted — it showed the warehouse of the moment it was built (the layer of the last time)
 Sub OnMapFocus(Optional oEvent As Variant)
     On Error GoTo EH
     WmsInit()
-    If gMpN = 0 And Not gMpBusy Then MapBuild(IIf(gMpLayer <> "", gMpLayer, "OCC"))
+    If gMpBusy Then Exit Sub
+    If gMpN = 0 Or gMpStatSeq <> SysNum(SK_LAST_SEQ) Then MapBuild(IIf(gMpLayer <> "", gMpLayer, "OCC"))
 EH:
 End Sub
 
@@ -897,8 +979,8 @@ Function WherePut() As String
         cur = Trim(sh.getCellByPosition(cPlace, r).getString())
         If cur <> "" And InStr(", " & LCase(cur) & ",", ", " & LCase(pick) & ",") = 0 And LCase(cur) <> LCase(pick) Then
             ' D-100: the goods may take more than one cell — the place is added to the list or replaces it
-            ans = WmsUi.UiAsk3("В строке " & (r + 1) & " уже указано место «" & cur & "».  «Да» — добавить " & pick & " (товар займёт несколько мест: «" _
-                & cur & ", " & pick & "»),  «Нет» — заменить на " & pick & ",  «Отмена» — ничего не менять.")
+            ans = WmsPrimeUi.UiAsk3b("В строке " & (r + 1) & " уже указано место «" & cur & "»." & Chr(10) & "Товар может занимать несколько мест: «" _
+                & cur & ", " & pick & "».", "Добавить " & pick & " (будет «" & cur & ", " & pick & "»)", "Заменить на " & pick, "Ничего не менять")
             If ans = 2 Then
                 gUiLastMsg = "SKIP:место не изменено"
                 WherePut = gUiLastMsg
@@ -916,39 +998,46 @@ End Function
 Function WhereSuggest(nm As String, art As String) As String
     Dim nextEI As Long, r As Long, r1x As Long, i As Long, st As Variant, same As Object, sKeys() As String, sCnt() As Long, nS As Long, idx As Long
     Dim pk As String, out As String, nOut As Integer, j As Long, best As Long, bestD As Double, d As Double, a As Variant, b As Variant, used() As Boolean
-    Dim anchorKey As String, k As Integer, pls As Variant
+    Dim anchorKey As String, k As Integer, pls As Variant, desc As Object, found As Object, addrs As Variant, q As Long
     nextEI = CLng(SysNum(SK_NEXT_EI))
     same = New Collection
     ReDim sKeys(50)
     ReDim sCnt(50)
-    ' where the same goods lie now (EIs with a balance)
-    For r = 1 To nextEI - 1 Step CHECK_CHUNK_ROWS
-        r1x = r + CHECK_CHUNK_ROWS - 1
-        If r1x > nextEI - 1 Then r1x = nextEI - 1
-        st = WmsIssue.StockSheet().getCellRangeByPosition(0, r, SC_STATE, r1x).getDataArray()
-        For i = 0 To r1x - r
-            If VarType(st(i)(SC_QTY)) = 5 Then
-                If st(i)(SC_QTY) > 0.0000005 And CStr(st(i)(SC_STATE)) <> EI_ST_STORNO Then
-                    If (art <> "" And LCase(Trim(CStr(st(i)(SC_ART)))) = LCase(art)) Or (art = "" And LCase(Trim(CStr(st(i)(SC_NAME)))) = LCase(nm)) Then
-                        ' an EI on several places («1-2-3, 1-2-4») counts on each of them
-                        pls = PlaceList(Trim(CStr(st(i)(SC_PLACE))))
-                        If UBound(pls) < 0 And Trim(CStr(st(i)(SC_PLACE))) <> "" Then pls = Array(Trim(CStr(st(i)(SC_PLACE))))
-                        For j = 0 To UBound(pls)
-                            pk = pls(j)
-                            idx = CollGet(same, LCase(pk))
-                            If idx < 0 And nS <= 50 Then
-                                idx = nS
-                                CollPut(same, idx, LCase(pk))
-                                sKeys(idx) = pk
-                                nS = nS + 1
-                            End If
-                            If idx >= 0 Then sCnt(idx) = sCnt(idx) + 1
-                        Next j
+    ' where the same goods lie now (EIs with a balance). 1.0: the rows of the goods are found by the search of the Calc engine
+    ' (the whole cell of the article or the name, any case) and only they are read — it was a loop over all of «Наличие»
+    If nextEI > 1 Then
+        desc = WmsIssue.StockSheet().createSearchDescriptor()
+        desc.SearchString = "^" & WmsFind.EscRegex(IIf(art <> "", art, nm)) & "$"
+        desc.SearchRegularExpression = True
+        desc.SearchCaseSensitive = False
+        found = WmsIssue.StockSheet().getCellRangeByPosition(IIf(art <> "", SC_ART, SC_NAME), 1, IIf(art <> "", SC_ART, SC_NAME), nextEI - 1).findAll(desc)
+        If Not IsNull(found) Then
+            addrs = found.getRangeAddresses()
+            For q = 0 To UBound(addrs)
+                For r = addrs(q).StartRow To addrs(q).EndRow
+                    st = WmsIssue.StockSheet().getCellRangeByPosition(0, r, SC_STATE, r).getDataArray()(0)
+                    If VarType(st(SC_QTY)) = 5 Then
+                        If st(SC_QTY) > 0.0000005 And CStr(st(SC_STATE)) <> EI_ST_STORNO Then
+                            ' an EI on several places («1-2-3, 1-2-4») counts on each of them
+                            pls = PlaceList(Trim(CStr(st(SC_PLACE))))
+                            If UBound(pls) < 0 And Trim(CStr(st(SC_PLACE))) <> "" Then pls = Array(Trim(CStr(st(SC_PLACE))))
+                            For j = 0 To UBound(pls)
+                                pk = pls(j)
+                                idx = CollGet(same, LCase(pk))
+                                If idx < 0 And nS <= 50 Then
+                                    idx = nS
+                                    CollPut(same, idx, LCase(pk))
+                                    sKeys(idx) = pk
+                                    nS = nS + 1
+                                End If
+                                If idx >= 0 Then sCnt(idx) = sCnt(idx) + 1
+                            Next j
+                        End If
                     End If
-                End If
-            End If
-        Next i
-    Next r
+                Next r
+            Next q
+        End If
+    End If
     For i = 0 To nS - 1
         If nOut < 3 Then
             out = out & IIf(out <> "", Chr(10), "") & sKeys(i) & "|" & sKeys(i) & " — уже лежит этот товар (" & sCnt(i) & " " & Plural(sCnt(i), "ЕИ", "ЕИ", "ЕИ") & ")"
@@ -964,7 +1053,7 @@ Function WhereSuggest(nm As String, art As String) As String
             best = -1
             bestD = 1E+30
             For j = 0 To gMpN - 1
-                If gMpOcc(j) = 0 And Not used(j) Then
+                If gMpOcc(j) = 0 And Not used(j) And gMpFirst(j) = j And Not PlaceClosed(gMpKey(j)) Then
                     d = PlaceDistance(anchorKey, gMpKey(j), j)
                     If d < bestD Then
                         bestD = d
@@ -1002,6 +1091,264 @@ Private Function PlaceDistance(sFrom As String, sTo As String, j As Long) As Dou
     If IsNumeric(a(2)) And IsNumeric(b(2)) Then PlaceDistance = PlaceDistance + Abs(CDbl(a(2)) - CDbl(b(2)))
 End Function
 
+' ================================================================ 1.0: the known places (М2, the check of a typed place)
+
+' «Топология» or «Места» changed: their keys are read again at the next use
+Sub OnTopoChange(Optional oEvent As Variant)
+    gTkValid = False
+End Sub
+
+Sub OnPlacesChange(Optional oEvent As Variant)
+    gPdValid = False
+End Sub
+
+' the key of a place as the directory and the checks compare it: the key of «ряд-секция-ярус» (PlaceKey) or, for a named
+' place without numbers («Улица», «Офис»), its text in upper case
+Function PlaceKeyAny(ByVal s As String) As String
+    s = Trim(s)
+    PlaceKeyAny = PlaceKey(s)
+    If PlaceKeyAny = "" Then PlaceKeyAny = UCase(s)
+End Function
+
+' the keys of the places of «Топология»: the texts that are places, and the cells Calc took for a date when «5.12.3» was typed
+' (read back as 5-12-3)
+Private Sub TopoKeysLoad()
+    Dim topo As Object, cur As Object, d As Variant, r As Long, c As Long, pk As String, vals As Object, addrs As Variant, k As Long, cell As Object
+    Dim ft As Long, x As Double, rr As Long, cc As Long
+    gTk = New Collection
+    gTkN = 0
+    ReDim gTkList(0)
+    gTkValid = True
+    If Not gDoc.Sheets.hasByName(SH_TOPO) Then Exit Sub
+    topo = TopoSheet()
+    cur = topo.createCursor()
+    cur.gotoEndOfUsedArea(False)
+    If cur.getRangeAddress().EndRow > 2000 Or cur.getRangeAddress().EndColumn > 400 Then Exit Sub
+    d = topo.getCellRangeByPosition(0, 0, cur.getRangeAddress().EndColumn, cur.getRangeAddress().EndRow).getDataArray()
+    ReDim gTkList(1000)
+    For r = 0 To UBound(d)
+        For c = 0 To UBound(d(r))
+            If VarType(d(r)(c)) = 8 Then
+                pk = PlaceTextKey(CStr(d(r)(c)))
+                If pk <> "" Then TkAdd(pk)
+            End If
+        Next c
+    Next r
+    vals = topo.getCellRangeByPosition(0, 0, cur.getRangeAddress().EndColumn, cur.getRangeAddress().EndRow).queryContentCells(com.sun.star.sheet.CellFlags.DATETIME)
+    addrs = vals.getRangeAddresses()
+    For k = 0 To UBound(addrs)
+        For rr = addrs(k).StartRow To addrs(k).EndRow
+            For cc = addrs(k).StartColumn To addrs(k).EndColumn
+                pk = DateCellPlace(topo.getCellByPosition(cc, rr))
+                If pk <> "" Then TkAdd(pk)
+            Next cc
+        Next rr
+    Next k
+End Sub
+
+Private Sub TkAdd(pk As String)
+    If CollPut(gTk, 1, pk) Then
+        ' block form: after a one-line «If … Then ReDim …» LibreOffice Basic takes the next line into the If
+        If gTkN > UBound(gTkList) Then
+            ReDim Preserve gTkList(2 * gTkN + 10)
+        End If
+        gTkList(gTkN) = pk
+        gTkN = gTkN + 1
+    End If
+End Sub
+
+' a cell Calc made a date of «5.12.3» (05.12.2003): the place 5-12-3; "" for any other cell
+Function DateCellPlace(cell As Object) As String
+    Dim ft As Long, x As Double, dt As Date
+    If cell.getType() <> com.sun.star.table.CellContentType.VALUE Then Exit Function
+    ft = gDoc.getNumberFormats().getByKey(cell.NumberFormat).Type
+    If (ft And com.sun.star.util.NumberFormat.DATE) = 0 Then Exit Function
+    x = cell.getValue()
+    If x < 1 Or x <> Int(x) Then Exit Function
+    dt = CDate(x)
+    DateCellPlace = Day(dt) & "-" & Month(dt) & "-" & (Year(dt) Mod 100)
+End Function
+
+Private Sub PlacesDirLoad()
+    Dim sh As Object, last As Long, d As Variant, i As Long, k As String
+    gPd = New Collection
+    gPdN = 0
+    ReDim gPdClosed(0)
+    ReDim gPdName(0)
+    gPdValid = True
+    If Not gDoc.Sheets.hasByName(SH_PLACES) Then Exit Sub
+    sh = gDoc.Sheets.getByName(SH_PLACES)
+    last = WmsOrders.LastRow(sh)
+    If last < 1 Then Exit Sub
+    If last > 20000 Then last = 20000
+    d = sh.getCellRangeByPosition(0, 1, PD_NOTE, last).getDataArray()
+    ReDim gPdClosed(last)
+    ReDim gPdName(last)
+    For i = 0 To UBound(d)
+        If Trim(CStr(d(i)(PD_PLACE))) <> "" Then
+            k = PlaceKeyAny(CStr(d(i)(PD_PLACE)))
+            If CollPut(gPd, gPdN, k) Then
+                gPdName(gPdN) = Trim(CStr(d(i)(PD_PLACE)))
+                gPdClosed(gPdN) = (LCase(Left(Trim(CStr(d(i)(PD_CLOSED))), 2)) = "да" Or LCase(Trim(CStr(d(i)(PD_CLOSED)))) = "закрыто")
+                gPdN = gPdN + 1
+            End If
+        End If
+    Next i
+End Sub
+
+' where place key k is known: 1 — on the map («Топология»), 2 — in «Места», 0 — nowhere
+Function PlaceKnown(k As String) As Integer
+    If Not gTkValid Then TopoKeysLoad()
+    If Not gPdValid Then PlacesDirLoad()
+    If CollGet(gTk, k) >= 0 Then
+        PlaceKnown = 1
+    ElseIf CollGet(gPd, k) >= 0 Then
+        PlaceKnown = 2
+    End If
+End Function
+
+' the place is in «Места» and marked «закрыто»
+Function PlaceClosed(k As String) As Boolean
+    Dim i As Long
+    If Not gPdValid Then PlacesDirLoad()
+    i = CollGet(gPd, k)
+    If i >= 0 Then PlaceClosed = gPdClosed(i)
+End Function
+
+' 1.0: a place typed at a posting checked against the map and «Места» (there was no check: «1-24» instead of «1-2-4» went
+' into the books). Nothing is asked when the book has neither a map nor a directory. A place nowhere known or closed:
+' «Записать как есть», the nearest places of the map, «Не проводить». sPlace — in: as typed, out: as chosen. sNot —
+' «приход не проведён». "" to post, SKIP:… otherwise
+Function PlaceAsk(ByRef sPlace As String, sNot As String) As String
+    Dim parts As Variant, i As Integer, k As String, bad As String, nBad As Integer, badKey As String, closed As String, sText As String
+    Dim aNear() As String, nLike As Integer, j As Long, labels() As String, codes() As Integer, n As Integer, c As Integer, sep As String
+    On Error GoTo EH
+    If Trim(sPlace) = "" Then Exit Function
+    If Not gTkValid Then TopoKeysLoad()
+    If Not gPdValid Then PlacesDirLoad()
+    If gTkN = 0 And gPdN = 0 Then Exit Function
+    parts = PlaceParts(sPlace)
+    For i = 0 To UBound(parts)
+        k = PlaceKeyAny(parts(i))
+        If PlaceKnown(k) = 0 Then
+            bad = bad & IIf(bad <> "", ", ", "") & "«" & Trim(parts(i)) & "»"
+            nBad = nBad + 1
+            badKey = k
+        ElseIf PlaceClosed(k) Then
+            closed = closed & IIf(closed <> "", ", ", "") & "«" & Trim(parts(i)) & "»"
+        End If
+    Next i
+    If nBad = 0 And closed = "" Then Exit Function
+    If nBad > 0 Then
+        sText = IIf(nBad = 1, "Места " & bad & " нет", "Мест " & bad & " нет") & " на карте склада (лист «" & SH_TOPO & "») и в справочнике «" & SH_PLACES & "»."
+        If nBad = 1 Then
+            ReDim aNear(2)
+            For j = 0 To gTkN - 1
+                If nLike > 2 Then Exit For
+                If KeyNear(badKey, gTkList(j)) Then
+                    aNear(nLike) = gTkList(j)
+                    nLike = nLike + 1
+                End If
+            Next j
+            If nLike > 0 Then
+                ReDim Preserve aNear(nLike - 1)
+                sText = sText & Chr(10) & "Похожие места карты: " & Join(aNear, ", ") & "."
+            End If
+        End If
+        sText = sText & Chr(10) & "Место вне стеллажей (пол, улица, офис) можно один раз записать на лист «" & SH_PLACES & "» — тогда WMS будет его знать."
+    End If
+    If closed <> "" Then sText = sText & IIf(sText <> "", Chr(10), "") & "Место " & closed & " в справочнике «" & SH_PLACES & "» отмечено «закрыто»."
+    n = nLike + 2
+    ReDim labels(n - 1)
+    ReDim codes(n - 1)
+    labels(0) = "Записать «" & Trim(sPlace) & "» как есть"
+    codes(0) = 0
+    For c = 0 To nLike - 1
+        labels(c + 1) = "Записать " & aNear(c)
+        codes(c + 1) = 10 + c
+    Next c
+    labels(n - 1) = "Не проводить — исправлю место"
+    codes(n - 1) = 1
+    c = WmsPrimeUi.UiButtons("WMS — место хранения", sText, labels, codes)
+    If c >= 10 Then
+        ' the unknown part replaced by the chosen place, the other parts as typed
+        sep = ""
+        k = ""
+        For i = 0 To UBound(parts)
+            If PlaceKnown(PlaceKeyAny(parts(i))) = 0 Then k = k & sep & aNear(c - 10) Else k = k & sep & Trim(parts(i))
+            sep = ", "
+        Next i
+        sPlace = k
+    ElseIf c <> 0 Then
+        PlaceAsk = "SKIP:" & sNot & " — проверьте место «" & Trim(sPlace) & "»"
+    End If
+    Exit Function
+EH:
+    ' the check never stops a posting by itself
+End Function
+
+' the parts of a place text as people write a list («1-2-3, 1-2-4; Улица»); one part when it is one place («5,12,3»)
+Function PlaceParts(ByVal s As String) As Variant
+    Dim a As Variant, i As Integer, out() As String, n As Integer
+    s = Trim(s)
+    If PlaceKey(s) <> "" Or (InStr(s, ",") = 0 And InStr(s, ";") = 0 And InStr(s, "+") = 0) Then
+        PlaceParts = Array(s)
+        Exit Function
+    End If
+    a = Split(Replace(Replace(s, ";", ","), "+", ","), ",")
+    ReDim out(UBound(a))
+    For i = 0 To UBound(a)
+        If Trim(a(i)) <> "" Then
+            out(n) = Trim(a(i))
+            n = n + 1
+        End If
+    Next i
+    If n = 0 Then
+        PlaceParts = Array(s)
+        Exit Function
+    End If
+    ReDim Preserve out(n - 1)
+    PlaceParts = out
+End Function
+
+' two keys one typing slip apart: one character more, less or other, or a lost / doubled separator («1-24» ~ «1-2-4»)
+Private Function KeyNear(a As String, b As String) As Boolean
+    If a = b Then Exit Function
+    If Replace(a, "-", "") = Replace(b, "-", "") Then
+        KeyNear = True
+        Exit Function
+    End If
+    If Abs(Len(a) - Len(b)) > 1 Then Exit Function
+    KeyNear = (KeyDist1(a, b) <= 1)
+End Function
+
+Private Function KeyDist1(a As String, b As String) As Integer
+    Dim i As Integer, j As Integer, d As Integer
+    i = 1
+    j = 1
+    Do While i <= Len(a) And j <= Len(b)
+        If Mid(a, i, 1) <> Mid(b, j, 1) Then
+            d = d + 1
+            If d > 1 Then
+                KeyDist1 = d
+                Exit Function
+            End If
+            If Len(a) > Len(b) Then
+                i = i + 1
+            ElseIf Len(b) > Len(a) Then
+                j = j + 1
+            Else
+                i = i + 1
+                j = j + 1
+            End If
+        Else
+            i = i + 1
+            j = j + 1
+        End If
+    Loop
+    KeyDist1 = d + (Len(a) - i + 1) + (Len(b) - j + 1)
+End Function
+
 ' ================================================================ test seams
 
 Function TestMapClick(r As Long, c As Long) As String
@@ -1031,4 +1378,23 @@ Function TestMapEIs(sKey As String) As String
             Exit Function
         End If
     Next i
+End Function
+
+' every cell of place sKey on the map: «i|EIs;i|EIs» (an address drawn twice shows the same)
+Function TestMapEIsAll(sKey As String) As String
+    Dim i As Long, r As String
+    For i = 0 To gMpN - 1
+        If gMpKey(i) = sKey Then r = r & IIf(r <> "", ";", "") & i & "|" & gMpEIs(i)
+    Next i
+    TestMapEIsAll = r
+End Function
+
+' the known places near key k (the suggestions of PlaceAsk) and how many keys the map has: «n|k1,k2»
+Function TestPlaceNear(k As String) As String
+    Dim j As Long, r As String
+    If Not gTkValid Then TopoKeysLoad()
+    For j = 0 To gTkN - 1
+        If KeyNear(k, gTkList(j)) Then r = r & IIf(r <> "", ",", "") & gTkList(j)
+    Next j
+    TestPlaceNear = gTkN & "|" & r
 End Function

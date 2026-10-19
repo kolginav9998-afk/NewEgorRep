@@ -168,7 +168,6 @@ def y02_refusals():
             ("w", "1", dict(qty="-1"), "отрицательное"),
             ("w", "1", dict(qty="1/2"), "дробь"),
             ("w", "1", dict(qty="1", place="B-1"), "только G"),
-            ("i", "4", dict(fact="12"), "расхождения нет"),
             ("i", "4", dict(fact="abc"), "недопустимый символ"),
             ("Прочее", "1", dict(qty="1"), "неизвестен"),
             ("w", "999", dict(qty="1"), "не найден"),
@@ -183,8 +182,17 @@ def y02_refusals():
             if not (res.startswith("ERR") and want in res and s.adj(i)[0] == "" and ("Не проведено" in ctl(s, i))):
                 fails.append(f"{k}/{e}/{kw}: {res[:90]} | {ctl(s, i)[:60]}")
         R.add(c, f"отказы ({len(cases)} случаев: то же место, пустое место, количество у перемещения, списание больше остатка / 0 / минус / дробь, "
-                 "лишнее поле, инвентаризация без расхождения / не число, неизвестный вид, нет ЕИ, нет причины, неверная дата) — ничего не проведено, "
+                 "лишнее поле, инвентаризация не число, неизвестный вид, нет ЕИ, нет причины, неверная дата) — ничего не проведено, "
                  "причина в «Контроль»", not fails and s.sysv("NEXT_ADJ") == n0 and njournal(s) == j0, "; ".join(fails[:3]))
+        # 1.0: a recount that matches the book is recorded (difference 0, the balance as it was)
+        b4 = s.stock_row(4)[4]
+        row(s, 30, "i", "4", fact="12")
+        before = ctl(s, 30)
+        res0 = post(s, 30)
+        n0 = int(s.adj(30)[0] or 0)
+        R.add(c, "инвентаризация без расхождения (пересчёт совпал) записывается: «Контроль» — «пересчёт совпал … разница 0», № корректировки, "
+                 "разница 0 в _ADJ, остаток не изменился", res0.startswith("OK") and "пересчёт совпал" in before and n0 > 0
+              and s.adjrec(n0)[3] == 0.0 and s.stock_row(4)[4] == b4 == 12.0, f"{before[:120]}; {res0}; {s.adjrec(n0) if n0 else ''}; {b4}")
         # an EI whose receipt was cancelled has nothing to correct
         order(s, 20, f="5")
         rc = s.click_ord("BtnRcvPost", 20)
@@ -760,6 +768,17 @@ def y20_snapshot():
         res2 = s.EX("ExportSnapshot")
         snap2 = s.EX("TestLastSnapshot")
         R.add(c, "повторный экспорт в ту же секунду — отдельная папка (снимки неизменяемы)", res2.startswith("OK:") and snap2 != snap, f"{snap2}")
+        # 1.0: old snapshots are removed (the newest 10 kept; the one just made — always, even when the clock is behind)
+        edir = os.path.dirname(snap.rstrip("/"))
+        for k in range(12):
+            os.makedirs(os.path.join(edir, f"WMS_SNAPSHOT_20200101-0000{k:02d}_seq1"))
+        os.makedirs(os.path.join(edir, "WMS_SNAPSHOT_20990101-000000_seq1"))
+        res4 = s.EX("ExportSnapshot")
+        snap4 = s.EX("TestLastSnapshot").rstrip("/")
+        left = sorted(os.path.basename(x) for x in glob.glob(os.path.join(edir, "WMS_SNAPSHOT_*")))
+        R.add(c, "старые снимки удаляются: хранятся последние 10 (новый — всегда, даже если часы компьютера отстают); в сообщении — сколько удалено",
+              res4.startswith("OK:") and len(left) == 10 and os.path.basename(snap4) in left and "WMS_SNAPSHOT_20990101-000000_seq1" in left
+              and "старых снимков удалено" in res4 and "WMS_SNAPSHOT_20200101-000000_seq1" not in left, f"{res4[-120:]}; {left}")
         # a blocked WMS does not export
         s.set_sys("SCHEMA", "WMS-SYS-2")
         s.B("WmsStartup")

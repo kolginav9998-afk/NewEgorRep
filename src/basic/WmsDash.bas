@@ -15,6 +15,8 @@ Public Const DB_LIST1_N = 12
 Public Const DB_LIST2_HEAD = 22
 Public Const DB_LIST2 = 24
 Public Const DB_LIST2_N = 10
+' 1.0: the stale EIs whose last movement is looked up (in groups of 50) to show the ten lying longest (the full list is a page)
+Public Const DB_STALE_CAND = 100
 Public Const DB_DAYS_HEAD = 35
 Public Const DB_DAYS = 37
 Public Const DB_DAYS_N = 14
@@ -26,6 +28,8 @@ Public Const DB_STALE_DAYS = 90
 Public Const DB_AUTO_MAX_MS = 5000
 
 Global gDbBusy As Boolean
+' 1.0: the state line of the page while a save writes the file (DashSavedState)
+Global gDbStateLine As String
 
 Private Sub PutRow(sh As Object, r As Long, c0 As Integer, v As Variant)
     sh.getCellRangeByPosition(c0, r, c0 + UBound(v), r).setDataArray(Array(v))
@@ -70,9 +74,9 @@ Function DashRefresh() As String
     Dim rcvToday As Long, splToday As Long, issToday As Long, retToday As Long, adjToday As Long, carsIn As Long, carsArr As Long, carsDep As Long
     Dim who As Object, nWho As Long, dayIss(13) As Long, dayRcv(13) As Long, dt As Double, key As Double, r As Long
     Dim top As Object, tName() As String, tCnt() As Double, tQty() As Double, tUnit() As String, nTop As Long, j As Long, nm As String
-    Dim unposted As Long, attention As Long, recent() As Boolean, nSt As Long, stN(DB_LIST2_N - 1) As Long, nStShown As Long, stDay As Variant
+    Dim unposted As Long, attention As Long, recent() As Boolean, nSt As Long, stN(DB_STALE_CAND - 1) As Long, nStShown As Long, stDay As Variant
     Dim osh As Object, rows(), mx As Double, ord As Variant, tIdx() As Long, d As Variant, cond As String, dq As String, rg As String, rd As String
-    Dim row As Variant, cD As Integer, cW As Integer, cN As Integer, cU As Integer, cQ As Integer, nList As Long
+    Dim row As Variant, cD As Integer, cW As Integer, cN As Integer, cU As Integer, cQ As Integer, nList As Long, stKey() As Double, stOrd() As Long
     If gDbBusy Then Exit Function
     gDbBusy = True
     On Error GoTo EH
@@ -220,7 +224,7 @@ Function DashRefresh() As String
         rg = ColRng(SH_STOCK, SC_QTY, 1, last)
         a = EngList("TEXTJOIN("";"";1;IF(ISNUMBER(" & rg & ")*(" & rg & ">0.0000005)*(" & ColRng(SH_STOCK, SC_STATE, 1, last) & "<>""" & EI_ST_STORNO _
             & """);ROW(" & rg & ")-1;""""))", nItems)
-        nList = DB_LIST2_N
+        nList = DB_STALE_CAND
         For i = 0 To nItems - 1
             n = CLng(a(i))
             If Not recent(n) Then
@@ -245,7 +249,7 @@ Function DashRefresh() As String
     sh.getCellRangeByPosition(1, DB_TILE_VAL, 12, DB_TILE_SUB).clearContents(1 + 2 + 4)
     sh.getCellByPosition(1, DB_TITLE_ROW).setString("Склад сегодня · " & Format(Now(), "DD.MM.YYYY"))
     If gState = "CLEAN" Then
-        s = "●  Работа разрешена"
+        s = "●  Работа разрешена" & IIf(gOldNote <> "", " · ВНИМАНИЕ: в старой книге проводились операции — см. «" & SH_MAIN & "»", "")
     ElseIf gState = "" Then
         s = "●  WMS не запущена — откройте книгу с макросами"
     Else
@@ -297,14 +301,26 @@ Function DashRefresh() As String
         sh.getCellByPosition(1, DB_LIST2).setString("за 30 дней выдач нет")
     End If
     ' list 4: what lies without movement (the oldest EIs first; the days since their last movement on the sheets)
-    stDay = LastMoveDays(stN, nStShown)
+    ' 1.0: the ten lying longest — by the day of their last movement (none at all first); it was the ten lowest EI numbers,
+    ' after an upgrade always the transferred EIs, whatever they were
+    stDay = StaleDays(stN, nStShown)
+    ReDim stKey(IIf(nStShown > 0, nStShown - 1, 0))
+    ReDim stOrd(IIf(nStShown > 0, nStShown - 1, 0))
     For i = 0 To nStShown - 1
-        n = stN(i)
+        stKey(i) = stDay(i) + stN(i) * 0.000001
+        stOrd(i) = i
+    Next i
+    SortIdx(stKey, stOrd, nStShown, False)
+    For i = 0 To nStShown - 1
+        If i >= DB_LIST2_N Then Exit For
+        j = stOrd(i)
+        n = stN(j)
         d = WmsIssue.StockSheet().getCellRangeByPosition(0, n, SC_QTY, n).getDataArray()(0)
-        PutRow(sh, DB_LIST2 + i, 7, Array(CStr(d(SC_EI)), CStr(d(SC_NAME)), "", "", d(SC_QTY), IIf(stDay(i) > 0, CLng(today - stDay(i)), "нет движений")))
+        PutRow(sh, DB_LIST2 + i, 7, Array(CStr(d(SC_EI)), CStr(d(SC_NAME)), "", "", d(SC_QTY), IIf(stDay(j) > 0, CLng(today - stDay(j)), "нет движений")))
     Next i
     If nSt = 0 Then sh.getCellByPosition(8, DB_LIST2).setString("ЕИ без движения " & DB_STALE_DAYS & "+ дней нет")
-    sh.getCellByPosition(7, DB_LIST2_HEAD).setString("Лежит без движения " & DB_STALE_DAYS & "+ дней" & IIf(nSt > 0, " — ЕИ: " & NumText(nSt) & ", старые первыми", ""))
+    sh.getCellByPosition(7, DB_LIST2_HEAD).setString("Лежит без движения " & DB_STALE_DAYS & "+ дней" & IIf(nSt > 0, " — ЕИ: " & NumText(nSt) _
+        & ", дольше всех лежащие первыми" & IIf(nSt > DB_STALE_CAND, " (из первых " & DB_STALE_CAND & ")", ""), ""))
     ' the last 14 days: today first
     mx = 1
     For k = 0 To 13
@@ -340,6 +356,25 @@ Private Sub PutTile(sh As Object, t As Integer, v As Double, sSub As String)
 End Sub
 
 ' the last operations (the end of the newest journal file): time, operation, what, quantity
+' the day of the last movement of each of n EIs (0 — none), looked up 50 at a time (LastMoveDays builds one formula of them)
+Private Function StaleDays(eis() As Long, n As Long) As Variant
+    Dim out() As Double, part() As Long, i As Long, j As Long, k As Long, m As Long, dd As Variant
+    ReDim out(IIf(n > 0, n - 1, 0))
+    For i = 0 To n - 1 Step 50
+        m = n - i
+        If m > 50 Then m = 50
+        ReDim part(m - 1)
+        For j = 0 To m - 1
+            part(j) = eis(i + j)
+        Next j
+        dd = LastMoveDays(part, m)
+        For k = 0 To m - 1
+            out(i + k) = dd(k)
+        Next k
+    Next i
+    StaleDays = out
+End Function
+
 Private Sub LastOps(sh As Object)
     Dim files As Variant, url As String, txt As String, a As Variant, i As Long, k As Integer, seq As Long, ts As String, inst As String
     Dim sType As String, fields As Variant, what As String, q As String, f As Integer, sz As Double, off As Double, xs As Object, tis As Object
@@ -367,9 +402,20 @@ Private Sub LastOps(sh As Object)
                     If what = "" And JField(fields, "ORDER") <> "" Then what = "заказ " & JField(fields, "ORDER")
                     If JField(fields, "NAME") <> "" Then what = what & IIf(what <> "", " · ", "") & JField(fields, "NAME")
                     If JField(fields, "WHO") <> "" Then what = what & " → " & JField(fields, "WHO")
+                    ' 1.0: the quantity as people write it — the decimal comma («0,25», the journal keeps «0.25»), the parts
+                    ' it was given in («1 кан = 0,25 шт»); a packing — «в 1 шт — 4 кан»
                     q = JField(fields, "QTY")
                     If q = "" Then q = JField(fields, "DIFF")
+                    If q <> "" Then q = IIf(Left(q, 1) = "-", "−", "") & WmsIssue.QtyText(Abs(Val(q)))
                     If q <> "" And JField(fields, "UNIT") <> "" Then q = q & " " & JField(fields, "UNIT")
+                    If JField(fields, "PARTS") <> "" Then q = WmsIssue.QtyText(Val(JField(fields, "PARTS"))) & " " & JField(fields, "PART_UNIT") & " = " & q
+                    If sType = "EI_PACK" Then
+                        If JField(fields, "N") <> "" And Val(JField(fields, "N")) > 0 Then
+                            q = "в 1 " & JField(fields, "DOC_UNIT") & " — " & WmsIssue.QtyText(Val(JField(fields, "N"))) & " " & JField(fields, "UNIT")
+                        Else
+                            q = "фасовка снята"
+                        End If
+                    End If
                     sh.getCellRangeByPosition(7, DB_LIST1 + k, 12, DB_LIST1 + k).setDataArray(Array(Array( _
                         Mid(ts, 9, 2) & "." & Mid(ts, 6, 2) & " " & Mid(ts, 12, 5), OpName(sType), "", what, "", q)))
                     k = k + 1
@@ -382,4 +428,23 @@ Private Sub LastOps(sh As Object)
     Exit Sub
 EH:
     sh.getCellByPosition(8, DB_LIST1).setString("журнал не прочитан: " & Error$)
+End Sub
+
+' 1.0: the state line of the page in the saved file — «WMS не запущена» for someone who opens it with the macros off;
+' after the save the line of this session again (WmsUi.UiSavedState)
+Sub DashSavedState(bSaving As Boolean)
+    Dim sh As Object, c As Object
+    On Error GoTo EH
+    If Not gDoc.Sheets.hasByName(SH_DASH) Then Exit Sub
+    sh = gDoc.Sheets.getByName(SH_DASH)
+    c = sh.getCellByPosition(8, DB_TITLE_ROW)
+    If bSaving Then
+        gDbStateLine = c.getString()
+        c.setString("●  WMS не запущена — откройте книгу с включёнными макросами (см. «" & SH_MAIN & "»)")
+    ElseIf gDbStateLine <> "" Then
+        c.setString(gDbStateLine)
+        gDbStateLine = ""
+    End If
+    Exit Sub
+EH:
 End Sub

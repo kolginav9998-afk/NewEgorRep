@@ -11,6 +11,9 @@ Global gPrChoice As Integer
 Global gPrFormSet As Boolean
 Global gPrFormIn(11) As String
 Global gPrShown As String
+' UiButtons: the window being shown and the button pressed (Global: the button listener is a call of its own)
+Global gWmsBtnDlg As Object
+Global gWmsBtnPick As Integer
 
 Public Const FORM_KEEP = "<как предложено>"
 
@@ -75,6 +78,90 @@ Function UiChoose(sTitle As String, sPrompt As String, opts As Variant) As Integ
         UiChoose = lst.getSelectedItemPos()
     End If
     dlg.dispose()
+End Function
+
+' 1.0: a question whose buttons name what they do («Выдать 1 шт (это 4 кан)», «Выдать 1 кан», «Не проводить») instead of
+' «Да / Нет / Отмена» where «Нет» did something too. codes(i) — what button i means; the result is the code of the button
+' pressed, -1 when the window was closed. Test seam: a preset choice (TestPrimeChoice: the index of the button), otherwise
+' gUiAuto 1 → the first button, 2 → the second.
+
+Function UiButtons(sTitle As String, sText As String, labels As Variant, codes As Variant) As Integer
+    Dim dm As Object, dlg As Object, m As Object, i As Integer, n As Integer, lines As Integer, a As Variant, h As Integer, lis As Object
+    gUiLastMsg = sText
+    gUiConfirms = gUiConfirms + 1
+    gPrShown = sTitle & Chr(10) & sText & Chr(10) & Join(labels, Chr(10))
+    n = UBound(labels) + 1
+    UiButtons = -1
+    If gUiAuto <> 0 Then
+        If gPrChoiceSet Then
+            If gPrChoice >= 0 And gPrChoice < n Then UiButtons = codes(gPrChoice)
+            gPrChoiceSet = False
+        ElseIf gUiAuto = 1 Then
+            UiButtons = codes(0)
+        ElseIf gUiAuto = 2 And n > 1 Then
+            UiButtons = codes(1)
+        End If
+        Exit Function
+    End If
+    a = Split(sText, Chr(10))
+    lines = 0
+    For i = 0 To UBound(a)
+        lines = lines + 1 + Len(a(i)) \ 62
+    Next i
+    h = 10 * lines + 4
+    dm = CreateUnoService("com.sun.star.awt.UnoControlDialogModel")
+    dm.Title = sTitle
+    dm.Width = 300
+    dm.Height = 16 + h + n * 20 + 4
+    m = dm.createInstance("com.sun.star.awt.UnoControlFixedTextModel")
+    m.PositionX = 10
+    m.PositionY = 8
+    m.Width = 280
+    m.Height = h
+    m.MultiLine = True
+    m.Label = sText
+    dm.insertByName("lText", m)
+    For i = 0 To n - 1
+        m = dm.createInstance("com.sun.star.awt.UnoControlButtonModel")
+        m.PositionX = 10
+        m.PositionY = 12 + h + i * 20
+        m.Width = 280
+        m.Height = 16
+        m.Label = labels(i)
+        m.PushButtonType = 0
+        If i = 0 Then m.DefaultButton = True
+        dm.insertByName("b" & i, m)
+    Next i
+    dlg = CreateUnoService("com.sun.star.awt.UnoControlDialog")
+    dlg.setModel(dm)
+    dlg.createPeer(CreateUnoService("com.sun.star.awt.Toolkit"), Null)
+    lis = CreateUnoListener("WmsBtn_", "com.sun.star.awt.XActionListener")
+    For i = 0 To n - 1
+        dlg.getControl("b" & i).setActionCommand(CStr(i))
+        dlg.getControl("b" & i).addActionListener(lis)
+    Next i
+    gWmsBtnDlg = dlg
+    gWmsBtnPick = -1
+    dlg.execute()
+    If gWmsBtnPick >= 0 And gWmsBtnPick < n Then UiButtons = codes(gWmsBtnPick)
+    gWmsBtnDlg = Nothing
+    dlg.dispose()
+End Function
+
+Sub WmsBtn_actionPerformed(oEv As Object)
+    gWmsBtnPick = CInt(oEv.ActionCommand)
+    If Not IsNull(gWmsBtnDlg) Then gWmsBtnDlg.endExecute()
+End Sub
+
+Sub WmsBtn_disposing(oEv As Object)
+End Sub
+
+' the same with the answers of UiAsk3 (6, 7, 2): sYes, sNo — the two actions, sCancel — not doing it (the window closed too)
+Function UiAsk3b(s As String, sYes As String, sNo As String, sCancel As String) As Integer
+    Dim k As Integer
+    k = UiButtons("WMS", s, Array(sYes, sNo, sCancel), Array(6, 7, 2))
+    If k = -1 Then k = 2
+    UiAsk3b = k
 End Function
 
 ' a form of labelled fields: v() — the values proposed (in) and entered (out); lists(i) — "" for a text field or the choices

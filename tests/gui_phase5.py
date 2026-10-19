@@ -5,9 +5,9 @@
 1. The AutoFilter dropdown of the protected «Иной приход» opens on «Тип прихода», a type can be unticked, OK filters the
    rows; the save keeps the filter (D-041) and the reopen shows it again.
 2. The real windows (in the headless tests they are replaced by preset answers): the question «Провести выделенные строки
-   как одно поступление?» for a selected block — «Отмена» posts nothing, «Нет» gives a № per row («Да» of this Basic
-   message box has no id for the UI test and does not take a key press — the answer «Да» is checked by
-   tests/run_phase5.py X02, X07, X25); the confirmation of a part's move to another place — «Нет» posts nothing;
+   как одно поступление?» for a selected block (1.0: a window with named buttons, pressed through its accessibility
+   tree) — «Не проводить» posts nothing, «Каждая строка — своё поступление» gives a № per row (the shared answer is
+   checked by tests/run_phase5.py X02, X07, X25); the confirmation of a part's move to another place — «Нет» posts nothing;
    «Удалить» of a line whose EI has a live issue — the refusal is the first window (only «OK»), no confirmation; an
    allowed storno asks «Удалить строку прихода № …?» — «Нет» cancels nothing; the window «Исправить» proposes the posted
    values («OK» without changes — «ничего не изменилось», «Отмена» — nothing); the window «Разобрать» with the list of
@@ -42,19 +42,40 @@ def spc_row(sh, r, typ, name, qty, place, art=None, unit="шт"):
     sh.getCellByPosition(7, r).setValue(D1)
 
 
+def dialog_buttons(o, title):
+    """The push buttons of the open window titled title (a WMS dialog with named buttons, WmsPrimeUi.UiButtons) —
+    {label: accessible context}, through the accessibility tree (UITest names no control of a Basic dialog)"""
+    role = uno.getConstantByName("com.sun.star.accessibility.AccessibleRole.PUSH_BUTTON")
+    tk = o.smgr.createInstanceWithContext("com.sun.star.awt.Toolkit", o.ctx)
+    for k in range(tk.getTopWindowCount()):
+        ctx = tk.getTopWindow(k).getAccessibleContext()
+        if ctx is None or ctx.getAccessibleName() != title:
+            continue
+        found, todo = {}, [ctx]
+        while todo:
+            c = todo.pop()
+            if c.getAccessibleRole() == role:
+                found[c.getAccessibleName()] = c
+            todo += [c.getAccessibleChild(i).getAccessibleContext() for i in range(c.getAccessibleChildCount())]
+        if found:
+            return found
+    return {}
+
+
 def run_ask3(o, ut, doc, answer):
-    """«Провести» for the selection: waits for the question with three answers and answers it — «Отмена» (its id is «yes»)
-    or «Нет» (id «close»); returns (the buttons seen, the macro's result)"""
+    """«Провести» for the selection: waits for the question with three named answers and presses the one whose label
+    starts with answer; returns (the labels seen, the macro's result)"""
     th = threading.Thread(target=lambda: o.basic(doc, "WmsSpecialUi", "BtnSpcPost"), daemon=True)
     th.start()
     kids = None
     for _ in range(80):
         time.sleep(0.25)
         try:
-            w = ut.getTopFocusWindow()
-            if str(state(w).get("Text", "")) == "WMS":
-                kids = [k for k in w.getChildren() if k in ("ok", "yes", "no", "close", "cancel")]
-                w.getChild({"Отмена": "yes", "Нет": "close"}[answer]).executeAction("CLICK", ())
+            btn = dialog_buttons(o, "WMS")
+            if len(btn) >= 3:
+                kids = sorted(btn)
+                pick = [b for lbl, b in btn.items() if lbl.startswith(answer)][0]
+                pick.doAccessibleAction(0)
                 break
         except Exception:
             pass
@@ -162,14 +183,17 @@ def main():
         o.basic(doc, "WmsUi", "TestUiAuto", 0)
         k0 = o.basic(doc, "WmsUi", "TestUiConfirmCount")
         goto(o, doc, "$A$6:$S$7")
-        kids, msg = run_ask3(o, ut, doc, "Отмена")
-        step("выделены две строки → «Провести»: вопрос «Провести как одно поступление?» (Да / Нет / Отмена); «Отмена» — ничего не проведено",
-             msg.startswith("SKIP:проведение отменено") and "close" in kids and "yes" in kids and sh.getCellByPosition(0, 5).getString() == ""
+        kids, msg = run_ask3(o, ut, doc, "Не проводить")
+        step("выделены две строки → «Провести»: вопрос «Провести как одно поступление?» (одно поступление / каждая строка своё / не проводить); "
+             "«Не проводить» — ничего не проведено",
+             msg.startswith("SKIP:проведение отменено") and kids == ["Каждая строка — своё поступление", "Не проводить",
+                                                                     "Одно поступление на все выделенные строки"]
+             and sh.getCellByPosition(0, 5).getString() == ""
              and o.basic(doc, "WmsUi", "TestUiConfirmCount") == k0 + 1, f"кнопки {kids}; {msg}")
         goto(o, doc, "$A$6:$S$7")
-        kids, msg = run_ask3(o, ut, doc, "Нет")
+        kids, msg = run_ask3(o, ut, doc, "Каждая строка")
         evs = [sh.getCellByPosition(2, r).getString() for r in (5, 6)]
-        step("«Нет»: обе строки проведены, у каждой свой № поступления и свой ЕИ", msg.startswith("OK=2;ERR=0") and evs == ["OFF-00000003", "OFF-00000004"]
+        step("«Каждая строка — своё поступление»: обе строки проведены, у каждой свой № поступления и свой ЕИ", msg.startswith("OK=2;ERR=0") and evs == ["OFF-00000003", "OFF-00000004"]
              and [sh.getCellByPosition(13, r).getString() for r in (5, 6)] == ["ЕИ-00000205", "ЕИ-00000206"], f"{msg.splitlines()[0]}; {evs}")
         o.basic(doc, "WmsUi", "TestUiAuto", 1)
         doc.store()

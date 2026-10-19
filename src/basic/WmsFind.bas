@@ -24,6 +24,8 @@ Global gFdQuery As String
 Global gFdSpecial As Boolean
 ' the EI of the card shown on the page (0 — no card)
 Global gFdCardEI As Long
+' 1.0: the regular expression of the place being searched ("" — a plain text search)
+Global gFdPlaceRx As String
 
 Private Function FindSheet() As Object
     FindSheet = gDoc.Sheets.getByName(SH_FIND)
@@ -200,7 +202,7 @@ End Function
 Function HandsShow(sWho As String) As String
     Dim sh As Object, ish As Object, last As Long, d As Variant, i As Long, r0 As Long, r1 As Long, ret As Object, retQ() As Double, nR As Long
     Dim rows() As Variant, nOut As Long, k As Long, idx As Long, issued As Double, back As Double, nIss As Long, nHand As Long, desc As Object, found As Object
-    Dim addrs As Variant, r As Long, q As Double, key() As Double, ord() As Long, tmp() As Variant
+    Dim addrs As Variant, r As Long, q As Double, key() As Double, ord() As Long, tmp() As Variant, onHand As Boolean, k2 As Long
     gFdBusy = True
     On Error GoTo EH
     sh = ViewOpen(SH_FIND)
@@ -225,14 +227,15 @@ Function HandsShow(sWho As String) As String
             End If
         Next i
     Next r0
-    ' the issues to sWho (the whole cell of «Кому», any case)
+    ' the issues to sWho: the whole cell of «Кому», any case; 1.0 — spaces, dots and «ё» do not part one person in two
+    ' («Петров  И.И.» = «Петров И. И.»)
     ish = WmsIssue.IssuesSheet()
     last = WmsOrders.LastRow(ish)
     ReDim rows(FD_CARD_MAX)
     ReDim key(FD_CARD_MAX)
     If last >= 1 Then
         desc = ish.createSearchDescriptor()
-        desc.SearchString = "^" & EscRegex(sWho) & "$"
+        desc.SearchString = WhoRegex(sWho)
         desc.SearchRegularExpression = True
         desc.SearchCaseSensitive = False
         found = ish.getCellRangeByPosition(IC_WHO, 1, IC_WHO, last).findAll(desc)
@@ -241,19 +244,30 @@ Function HandsShow(sWho As String) As String
             For k = 0 To UBound(addrs)
                 For r = addrs(k).StartRow To addrs(k).EndRow
                     d = ish.getCellRangeByPosition(0, r, IC_LAST, r).getDataArray()(0)
-                    If FindPosted(d(IC_CTL)) And VarType(d(IC_NO)) = 5 And VarType(d(IC_QTY)) = 5 And nOut <= FD_CARD_MAX Then
+                    If FindPosted(d(IC_CTL)) And VarType(d(IC_NO)) = 5 And VarType(d(IC_QTY)) = 5 Then
                         idx = CollGet(ret, CStr(d(IC_NO)))
                         q = 0
                         If idx >= 0 Then q = retQ(idx)
+                        ' 1.0: every issue is counted; the list keeps up to FD_CARD_MAX, and what is still on the hands is never
+                        ' pushed out by what came back (a returned row gives its place to one on the hands)
                         nIss = nIss + 1
                         issued = issued + d(IC_QTY)
                         back = back + q
-                        If d(IC_QTY) - q > 0.0000005 Then nHand = nHand + 1
-                        rows(nOut) = Array(ViewDay(DateOf(d(IC_DATE))), "Выдача № " & d(IC_NO), CStr(d(IC_EI)), CStr(d(IC_NAME)), d(IC_QTY), IIf(q > 0, q, ""), _
-                            WmsIssue.Round3(d(IC_QTY) - q), CStr(d(IC_UNIT)), "", SH_ISSUES, r, CStr(d(IC_EI)))
-                        ' on the hands first, the newest first
-                        key(nOut) = IIf(d(IC_QTY) - q > 0.0000005, 0, 100000) - DateOf(d(IC_DATE)) + r * 0.0000001
-                        nOut = nOut + 1
+                        onHand = (d(IC_QTY) - q > 0.0000005)
+                        If onHand Then nHand = nHand + 1
+                        k2 = -1
+                        If nOut <= FD_CARD_MAX Then
+                            k2 = nOut
+                            nOut = nOut + 1
+                        ElseIf onHand Then
+                            k2 = HandsReturnedSlot(key, nOut)
+                        End If
+                        If k2 >= 0 Then
+                            rows(k2) = Array(ViewDay(DateOf(d(IC_DATE))), "Выдача № " & d(IC_NO), CStr(d(IC_EI)), CStr(d(IC_NAME)), d(IC_QTY), IIf(q > 0, q, ""), _
+                                WmsIssue.Round3(d(IC_QTY) - q), CStr(d(IC_UNIT)), "", SH_ISSUES, r, CStr(d(IC_EI)))
+                            ' on the hands first, the newest first
+                            key(k2) = IIf(onHand, 0, 100000) - DateOf(d(IC_DATE)) + r * 0.0000001
+                        End If
                     End If
                 Next r
             Next k
@@ -268,7 +282,8 @@ Function HandsShow(sWho As String) As String
     TableMode(sh, True)
     sh.getCellByPosition(1, FD_HEAD).setString("На руках у «" & sWho & "»: " & NumText(nHand) & " " & Plural(nHand, "выдача", "выдачи", "выдач") & " не возвращены")
     sh.getCellByPosition(1, FD_INFO).setString("Всего выдач " & NumText(nIss) & " · выдано " & WmsIssue.QtyText(issued) & " · возвращено " & WmsIssue.QtyText(back) _
-        & " (количества разных единиц складываются только для счёта)")
+        & " (количества разных единиц складываются только для счёта)" & IIf(nIss > nOut, " · в списке " & NumText(nOut) & " из " & NumText(nIss) _
+        & ": всё, что на руках, и последние возвращённые", ""))
     sh.getCellByPosition(1, FD_INFO + 1).setString("Сначала — что ещё на руках, новые выше; затем возвращённое (серым). Двойной щелчок — карточка ЕИ. " _
         & "Искать «" & gFdQuery & "» как текст по всем листам — допишите звёздочку: «" & gFdQuery & "*».")
     sh.getCellRangeByPosition(1, FD_TABLE_HEAD, 8, FD_TABLE_HEAD).setDataArray(Array(Array("Дата", "Выдача", "ЕИ", "Наименование", "Выдано", "Возвращено", _
@@ -294,8 +309,52 @@ EH:
     gFdBusy = False
 End Function
 
+' 1.0: the regular expression of a recipient in «Кому»: the words of the name in that order, any spaces, dots or commas
+' between and around them, «е» or «ё» («Петров И.И.» finds «петров  и. и.»)
+Function WhoRegex(sWho As String) As String
+    Dim w As Variant, i As Integer, r As String, x As String
+    w = Split(WmsAsk.WhoKey(sWho), " ")
+    For i = 0 To UBound(w)
+        x = EscRegex(CStr(w(i)))
+        x = Replace(x, "е", "[её]")
+        r = r & IIf(r <> "", "[\s.,]+", "") & x
+    Next i
+    WhoRegex = "^[\s.,]*" & r & "[\s.,]*$"
+End Function
+
+' 1.0: the regular expression of place key k (5-12-3): its parts as people write them — any separator, leading zeros, «Р5»,
+' «C12» in Latin — and nothing glued to it («15-12-3», «5-12-31» are other places)
+Function PlaceRegex(k As String) As String
+    Dim a As Variant, i As Integer, r As String, x As String
+    a = Split(k, "-")
+    For i = 0 To UBound(a)
+        If IsNumeric(a(i)) Then
+            x = "0*" & a(i)
+            If i = 0 Then x = "(?:[РRP]\s*)?" & x
+            If i = 1 Then x = "(?:[СSC]\s*)?" & x
+            If i = 2 Then x = "(?:[ЯL]\s*)?" & x
+        Else
+            x = EscRegex(CStr(a(i)))
+        End If
+        r = r & IIf(r <> "", "\s*[-./,:_\\ ]\s*", "") & x
+    Next i
+    PlaceRegex = "(?:^|[^0-9])" & r & "(?:[^0-9]|$)"
+End Function
+
+' a returned row of the list of «на руках» (key ≥ 100000 − day) whose place a row still on the hands takes; -1 when none
+Private Function HandsReturnedSlot(key() As Double, n As Long) As Long
+    Dim i As Long
+    HandsReturnedSlot = -1
+    For i = n - 1 To 0 Step -1
+        If key(i) > 50000 Then
+            HandsReturnedSlot = i
+            Exit Function
+        End If
+    Next i
+End Function
+
 ' a text for a regular expression of the search (its special characters escaped)
-Private Function EscRegex(s As String) As String
+Function EscRegex(s As String) As String
     Dim i As Integer, ch As String, o As String
     For i = 1 To Len(s)
         ch = Mid(s, i, 1)
@@ -315,6 +374,9 @@ Function FindList(sQuery As String) As String
     ' sheet | first row | last column
     specs = Array(Array(SH_STOCK, 1, SC_LAST), Array(SH_ORDERS, 1, OC_LAST), Array(SH_ISSUES, 1, IC_LAST), Array(SH_RETURNS, 1, RC_LAST), _
         Array(SH_SPECIAL, 1, XC_LAST), Array(SH_ADJUST, 1, AC_LAST), Array(SH_CARS, CAR_FIRST, CC_LAST), Array(SH_RCPT, 1, 1))
+    ' 1.0: a place («1-2-3», «Р1-С2-3», «1.2.3») is found as a whole place: «1-2-3» does not find «11-2-3» or «1-2-31»
+    gFdPlaceRx = ""
+    If PlaceTextKey(sQuery) <> "" Then gFdPlaceRx = PlaceRegex(PlaceTextKey(sQuery))
     For i = 0 To UBound(specs)
         If gDoc.Sheets.hasByName(specs(i)(0)) Then
             SearchSheet(specs(i)(0), specs(i)(1), specs(i)(2), sQuery, out, nOut, nAll, totals)
@@ -354,26 +416,36 @@ End Function
 ' the rows of one sheet with sQuery in a cell (native search, values as shown) → out (at most FD_MAX in all)
 Private Sub SearchSheet(sName As String, r0 As Long, cLast As Integer, sQuery As String, out() As Variant, nOut As Long, nAll As Long, _
     totals As String)
-    Dim sh As Object, last As Long, desc As Object, found As Object, addrs As Variant, k As Long, r As Long, seen As String, d As Variant
-    Dim sum As Double, nSum As Long, unit As String, sameUnit As Boolean
+    Dim sh As Object, last As Long, desc As Object, found As Object, addrs As Variant, k As Long, r As Long, seen() As Boolean, d As Variant
+    Dim sum As Double, nSum As Long, unit As String, sameUnit As Boolean, nRead As Long
     sh = gDoc.Sheets.getByName(sName)
     last = WmsOrders.LastRow(sh)
     If last < r0 Then Exit Sub
     desc = sh.createSearchDescriptor()
-    desc.SearchString = sQuery
+    If gFdPlaceRx <> "" Then
+        desc.SearchString = gFdPlaceRx
+        desc.SearchRegularExpression = True
+    Else
+        desc.SearchString = sQuery
+        desc.SearchRegularExpression = False
+    End If
     desc.SearchCaseSensitive = False
-    desc.SearchRegularExpression = False
     desc.SearchWords = False
     desc.setPropertyValue("SearchType", 1)
     found = sh.getCellRangeByPosition(0, r0, cLast, last).findAll(desc)
     If IsNull(found) Then Exit Sub
     addrs = found.getRangeAddresses()
-    seen = "|"
+    ' 1.0: a row found in several cells counts once — an array of the rows (a text of the rows seen grew with every row
+    ' and stopped the count after ~28 000 rows: a frequent word was slow and «найдено» too small)
+    ReDim seen(last)
     For k = 0 To UBound(addrs)
         For r = addrs(k).StartRow To addrs(k).EndRow
-            If InStr(seen, "|" & r & "|") = 0 Then
-                seen = seen & r & "|"
+            If Not seen(r) Then
+                seen(r) = True
                 nAll = nAll + 1
+                ' every row is counted; only the rows shown (and of «Наличие» up to 5000 — the sum) are read
+                If nOut >= FD_MAX And (sName <> SH_STOCK Or nRead >= 5000) Then GoTo NEXT_ROW
+                nRead = nRead + 1
                 d = sh.getCellRangeByPosition(0, r, cLast, r).getDataArray()(0)
                 ' (no short circuit in Basic: the columns of «Наличие» are read only for its rows)
                 If sName = SH_STOCK Then
@@ -394,14 +466,14 @@ Private Sub SearchSheet(sName As String, r0 As Long, cLast As Integer, sQuery As
                     out(nOut) = RowView(sName, r, d, addrs(k).StartColumn, sh)
                     nOut = nOut + 1
                 End If
-                If Len(seen) > 200000 Then Exit Sub
             End If
+NEXT_ROW:
         Next r
     Next k
     ' the balance of the found EIs when they have one unit (otherwise the units differ and a sum means nothing)
     If nSum > 0 Then
         If sameUnit Then
-            totals = "ЕИ " & NumText(nSum) & ", остаток " & WmsIssue.QtyText(sum) & " " & unit
+            totals = "ЕИ " & NumText(nSum) & ", остаток " & WmsIssue.QtyText(sum) & " " & unit & IIf(nRead >= 5000, " (по первым 5000 найденным строкам)", "")
         Else
             totals = "ЕИ " & NumText(nSum) & " (единицы разные — общей суммы нет)"
         End If

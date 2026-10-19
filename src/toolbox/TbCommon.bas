@@ -17,6 +17,60 @@ Global gTbSnap As String
 Global gTbAuto As Boolean
 Global gTbLastMsg As String
 
+'================================================================ quantities by unit (1.0)
+' Quantities of different units are never added together: 5 шт and 2 м are not «7». A sum is kept per unit and shown as
+' «5 шт · 2 м»; a single unit stays a number (TbUnitOne).
+
+Sub TbUnitAdd(units() As String, sums() As Double, ByRef n As Integer, ByVal u As String, q As Double)
+    Dim i As Integer
+    u = Trim(u)
+    For i = 0 To n - 1
+        If units(i) = u Then
+            sums(i) = sums(i) + q
+            Exit Sub
+        End If
+    Next i
+    If n > UBound(units) Then
+        ReDim Preserve units(2 * n + 1)
+        ReDim Preserve sums(2 * n + 1)
+    End If
+    units(n) = u
+    sums(n) = q
+    n = n + 1
+End Sub
+
+' a number as the storekeeper writes it: «10,5», «1 250», at most 3 decimals
+Function TbNumText(x As Double) As String
+    Dim s As String
+    s = Format(Round(x, 3), "#,##0.###")
+    If Right(s, 1) = "." Or Right(s, 1) = "," Then s = Left(s, Len(s) - 1)
+    TbNumText = s
+End Function
+
+' «10,5 шт · 4 м» (the units in the order met; a unit left empty — «(без ед.)»)
+Function TbUnitText(units() As String, sums() As Double, n As Integer) As String
+    Dim i As Integer, s As String
+    If n = 0 Then
+        TbUnitText = "0"
+        Exit Function
+    End If
+    For i = 0 To n - 1
+        s = s & IIf(i > 0, " · ", "") & TbNumText(sums(i)) & " " & IIf(units(i) <> "", units(i), "(без ед.)")
+    Next i
+    TbUnitText = s
+End Function
+
+' writes the sums into a cell: one unit (or none) — the number, more — the text «… · …»; the unit of one is returned
+Function TbUnitCell(oCell As Object, units() As String, sums() As Double, n As Integer) As String
+    If n <= 1 Then
+        oCell.setValue(IIf(n = 1, sums(0), 0))
+        If n = 1 Then TbUnitCell = units(0)
+    Else
+        oCell.setString(TbUnitText(units, sums, n))
+        TbUnitCell = "разные"
+    End If
+End Function
+
 ' ================================================================ folders
 
 ' the position of the last sFind in s (0 — none): InStrRev of LibreOffice Basic exists only in the VBA mode
@@ -270,6 +324,30 @@ Function TbSnapDay(snap As String) As Double
     Else
         TbSnapDay = Int(CDbl(Now()))
     End If
+End Function
+
+'1.0: when the snapshot was made and how old it is — every tool shows it next to the name: the figures of a tool are those
+' of that moment. Older than a day — said aloud with the way to a fresh one
+Function TbSnapAge(snap As String) As String
+    Dim c As String, t As Double, h As Double, s As String
+    c = TbManifestValue(snap, "created")
+    If Len(c) < 19 Or Mid(c, 5, 1) <> "-" Or Mid(c, 11, 1) <> "T" Then
+        TbSnapAge = "дата снимка неизвестна"
+        Exit Function
+    End If
+    t = CDbl(DateSerial(CInt(Left(c, 4)), CInt(Mid(c, 6, 2)), CInt(Mid(c, 9, 2)))) + CDbl(TimeSerial(CInt(Mid(c, 12, 2)), CInt(Mid(c, 15, 2)), 0))
+    h = (CDbl(Now()) - t) * 24
+    s = "снимок от " & Mid(c, 9, 2) & "." & Mid(c, 6, 2) & "." & Left(c, 4) & " " & Mid(c, 12, 5)
+    If h < 0 Then
+        s = s & " (дата снимка позже часов этого компьютера — проверьте дату)"
+    ElseIf h < 1 Then
+        s = s & " (меньше часа назад)"
+    ElseIf h < 24 Then
+        s = s & " (" & Int(h) & " ч назад)"
+    Else
+        s = s & " (" & Int(h / 24) & " дн. назад — СТАРЫЙ: цифры на тот день; свежий — в WMS «Главная» → «Экспорт для инструментов»)"
+    End If
+    TbSnapAge = s
 End Function
 
 ' loads table sFile of snapshot snap into sheet sDest of this book (the sheet is replaced; hidden when bHide); the number of

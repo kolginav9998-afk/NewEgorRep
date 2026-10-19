@@ -65,6 +65,8 @@ End Function
 Function EiNo(ByVal s As String, nextEI As Long) As Long
     Dim t As String, i As Integer, ch As String, x As Double
     s = UCase(Trim(s))
+    ' 1.0: «EI-427» typed with the Latin letters is the same EI
+    If Left(s, 2) = "EI" Or Left(s, 2) = "ЕI" Or Left(s, 2) = "EИ" Then s = "ЕИ" & Mid(s, 3)
     If Left(s, 3) = "ЕИ-" Or Left(s, 3) = "ЕИ " Then
         s = Trim(Mid(s, 4))
     ElseIf Left(s, 2) = "ЕИ" Then
@@ -89,8 +91,10 @@ Function PlaceList(ByVal s As String) As Variant
         PlaceList = Array(k)
         Exit Function
     End If
-    ' a list: the parts that are places (a note in the list — «1-2-3, у стены» — is left out)
-    For Each sep In Array(";", "+", ",")
+    ' a list: the parts that are places (a note in the list — «1-2-3, у стены» — is left out). 1.0: the separators may be
+    ' mixed («1-2-3, 1-2-4; 1-2-5» — three places, it was one)
+    s = Replace(Replace(s, ";", ","), "+", ",")
+    For Each sep In Array(",")
         If InStr(s, sep) > 0 Then
             parts = Split(s, sep)
             ReDim out(UBound(parts))
@@ -164,12 +168,28 @@ Private Function PlacePart(ByVal t As String) As String
     lead = Left(t, k - 1)
     num = Mid(t, k)
     If num <> "" And IsAllDigits(num) Then
-        If lead = "" Or lead = "Р" Or lead = "С" Or lead = "Я" Or lead = "R" Or lead = "S" Or lead = "L" Then
+        ' 1.0: the Latin letters that look like the Russian ones (P, C) mean the same ряд, секция
+        If lead = "" Or lead = "Р" Or lead = "С" Or lead = "Я" Or lead = "R" Or lead = "S" Or lead = "L" Or lead = "P" Or lead = "C" Then
             PlacePart = CStr(CLng(Right(num, 9)))
             Exit Function
         End If
     End If
-    PlacePart = t
+    PlacePart = PlLookAlike(t)
+End Function
+
+' 1.0: a letter part of a place in Russian letters: the Latin letters that look the same (A, B, C, E, H, K, M, O, P, T, X, Y)
+' become the Russian ones, so «A-1-2» typed in Latin is the place «А-1-2» of the map
+Private Function PlLookAlike(t As String) As String
+    Dim i As Integer, ch As String, k As Integer, r As String
+    Const LAT = "ABCEHKMOPTXY"
+    Const CYR = "АВСЕНКМОРТХУ"
+    For i = 1 To Len(t)
+        ch = Mid(t, i, 1)
+        k = InStr(LAT, ch)
+        If k > 0 Then ch = Mid(CYR, k, 1)
+        r = r & ch
+    Next i
+    PlLookAlike = r
 End Function
 
 Private Function IsAllDigits(t As String) As Boolean
@@ -281,11 +301,16 @@ Function OpName(sType As String) As String
     Case "SP_FIX": OpName = "Исправлен иной приход"
     Case "SP_DEL": OpName = "Иной приход удалён"
     Case "SP_IDENTIFY": OpName = "Разобран иной приход"
+    Case "SP_REFILL": OpName = "Пополнение ЕИ (иной приход)"
+    Case "EI_PACK": OpName = "Фасовка ЕИ"
+    Case "ABANDON": OpName = "Хвост журнала отложен"
+    Case "START": OpName = "Начало журнала"
     Case Else
         If Left(sType, 3) = "SP_" Then
             OpName = "Иной приход"
         Else
-            OpName = sType
+            ' 1.0: an operation of a later release is named, never shown as its code alone
+            OpName = "Операция " & LCase(Replace(sType, "_", " "))
         End If
     End Select
 End Function
