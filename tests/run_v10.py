@@ -1478,6 +1478,99 @@ def v24_reports():
         s.close()
 
 
+@case
+def v25_kits():
+    """Ф8 и сборка: «Комплекты» — состав; «Выдать комплект…» заполняет строки «Выдач» нужными ЕИ (старые первыми) — их проводят
+    обычным «Провести»; «Собрать комплект…» — одна операция KIT_BUILD: позиции снимаются строками «Сборка», комплект — новый ЕИ
+    «компл» с ценой из позиций; не хватает — отказ; сборка не исправляется; «Удалить» её строки разбирает комплект (KIT_DEL),
+    пока у него нет движений"""
+    c = "V25"
+    s = ready(Session(new_wms("v25")))
+    try:
+        order(s, 1, "1", "Кабель ВВГ 3х2,5", qty="8", unit="м", art="К-3", J=50.0)
+        receive(s, 1, "8", place="7-1-1", k=-30)
+        order(s, 2, "2", "Кабель ВВГ 3х2,5", qty="20", unit="м", art="К-3", J=50.0)
+        receive(s, 2, "20", place="7-1-2", k=-10)
+        order(s, 3, "3", "Розетка", qty="5", art="Р-1", J=100.0)
+        receive(s, 3, "5", place="7-2-1")
+        order(s, 4, "4", "Изолента", qty="3", J=30.0)
+        receive(s, 4, "3", place="7-2-2")
+        a1, a2, b, w = [ords(s, r)[21] for r in (1, 2, 3, 4)]
+        kt = s.doc.Sheets.getByName("Комплекты")
+        rows = [("Набор электрика", "Кабель ВВГ", "К-3", 10.0, "м"), ("", "Розетка", "Р-1", 2.0, "шт"), ("", "Изолента", "", 1.0, "шт"),
+                ("Набор розеток", "Розетка", "Р-1", 1.0, "шт")]
+        for i, row in enumerate(rows, start=1):
+            for j, v in enumerate(row):
+                cell = kt.getCellByPosition(j, i)
+                cell.setValue(v) if isinstance(v, float) else cell.setString(v)
+        names = s.B("KitNames", module="WmsKit")
+        R.add(c, "«Комплекты»: лист открыт (не защищён), кнопки «Собрать комплект…» и «Выдать комплект…»; комплекты по порядку",
+              not kt.isProtected() and {"btnKitBuild", "btnKitIssue"} <= set(form_buttons(kt)) and list(names) == ["Набор электрика", "Набор розеток"]
+              and {"btnKitIssue"} <= set(form_buttons(s.doc.Sheets.getByName("Выдачи"))), f"{names}; {sorted(form_buttons(kt))}")
+        # Ф8: the rows of an issue
+        res = s.B("KitIssueFill", "Набор электрика", 1.0, "ива", serial(), module="WmsKit")
+        iss = s.doc.Sheets.getByName("Выдачи")
+        got = [(iss.getCellByPosition(11, r).getString(), iss.getCellByPosition(4, r).getString(), iss.getCellByPosition(1, r).getString()) for r in range(1, 6)]
+        R.add(c, "Ф8: «Выдать комплект» — 4 строки: кабель 8 м со старого ЕИ и 2 м со следующего, розетка 2, изолента 1; документ «Комплект «Набор электрика»»; не проведены",
+              res.startswith("OK:заполнено строк выдачи: 4") and got[:4] == [(a1, "8", "Комплект «Набор электрика»"), (a2, "2", "Комплект «Набор электрика»"),
+              (b, "2", "Комплект «Набор электрика»"), (w, "1", "Комплект «Набор электрика»")] and got[4][0] == "" and iss.getCellByPosition(0, 1).getString() == "",
+              f"{res}; {got}")
+        p = [s.I("IssuePostRow", r) for r in (1, 2, 3, 4)]
+        R.add(c, "строки комплекта проводятся обычными выдачами: кабель 0 и 18, розетка 3, изолента 2", all(x.startswith("OK") for x in p)
+              and [s.stock(int(x[3:])) for x in (a1, a2, b, w)] == [0.0, 18.0, 3.0, 2.0], f"{p}")
+        # the build
+        nxt = int(s.sysv("NEXT_EI"))
+        k = f"ЕИ-{nxt:08d}"
+        short = s.B("KitBuild", "Набор электрика", 2.0, "8-1-1", serial(), "к монтажу", module="WmsKit")
+        R.add(c, "сборка 2 комплектов — отказ: кабеля нужно 20 м, есть 18; ничего не изменено",
+              short.startswith("ERR:") and "нужно 20 м, есть 18" in short and int(s.sysv("NEXT_EI")) == nxt and s.stock(int(a2[3:])) == 18.0, short)
+        nadj = int(s.sysv("NEXT_ADJ"))
+        res = s.B("KitBuild", "Набор электрика", 1.0, "8-1-1", serial(), "к монтажу", module="WmsKit")
+        adj = s.doc.Sheets.getByName("Корректировки")
+        arows = [list(adj.getCellRangeByPosition(0, r, 17, r).getDataArray()[0]) for r in range(1, 5)]
+        stk = s.doc.Sheets.getByName("Наличие")
+        krow = list(stk.getCellRangeByPosition(0, nxt, 9, nxt).getDataArray()[0])
+        ent = [e for e in s.journal()[0] if e["type"] == "KIT_BUILD"]
+        R.add(c, "сборка 1 комплекта — одна операция KIT_BUILD: строки «Сборка» кабель −10, розетка −2, изолента −1 («в комплект …») и комплект +1 "
+                 "(«комплект из 3 поз.»), новый ЕИ «Набор электрика», 1 компл, место 8-1-1, категория «Комплект»",
+              res.startswith("OK:" + k) and [r[1] for r in arows] == ["Сборка"] * 4 and [r[2] for r in arows] == [a2, b, w, k]
+              and [r[15] for r in arows] == [-10.0, -2.0, -1.0, 1.0] and arows[0][16] == f"Проведено · в комплект {k}"
+              and arows[3][16] == "Проведено · комплект из 3 поз." and arows[3][9] == "8-1-1" and [r[0] for r in arows] == [float(nadj + i) for i in range(4)]
+              and krow[:8] == [k, "Набор электрика", "", "компл", 1.0, "8-1-1", "Комплект", "Активен"] and len(ent) == 1
+              and [s.stock(int(x[3:])) for x in (a2, b, w)] == [8.0, 1.0, 1.0] and int(s.sysv("NEXT_ADJ")) == nadj + 4, f"{res}; {arows}; {krow}")
+        price = s.B("EiPrice", nxt, module="WmsPrint")
+        card = s.B("CardShow", nxt, module="WmsFind")
+        info = s.doc.Sheets.getByName("Поиск").getCellByPosition(1, 8).getString()
+        bc = s.B("BalanceCheck", module="WmsLegacy")
+        R.add(c, "цена комплекта — из позиций: 10 × 50 + 2 × 100 + 1 × 30 = 730; карточка: «Сборка», остаток сходится; «остаток = движения» — без расхождений",
+              abs(price - 730.0) < 1e-6 and "= «Наличие»" in card and "цена 730,00" in info and bc == "", f"{price}; {card}; {info}; {bc!r}")
+        fx = s.B("AdjustFixRow", 4, "2", serial(), "x", module="WmsAdjust")
+        put(s, "Корректировки", 6, B="Сборка", C=b, G="1", K=serial(), L="вручную")
+        man = s.A("AdjustPostRow", 6)
+        s.B("AdjustClearRow", 6, module="WmsAdjust")
+        R.add(c, "сборка не исправляется; строка «Сборка», вписанная вручную, не проводится", fx.startswith("ERR:") and "не исправляется" in fx
+              and man.startswith("ERR:") and "Собрать комплект" in man, f"{fx}; {man}")
+        # the storno: refused while the kit moved, done after the storno of that issue
+        put(s, "Выдачи", 5, L=k, E="1", H=serial(), I="лев")
+        i5 = s.I("IssuePostRow", 5)
+        d1 = s.A("AdjustDeleteRow", 2)
+        s.I("IssueDeleteRow", 5)
+        s.U("TestOpReason", "передумали")
+        d2 = s.A("AdjustDeleteRow", 2)
+        arows = [list(adj.getCellRangeByPosition(0, r, 18, r).getDataArray()[0]) for r in range(1, 5)]
+        ent = [e for e in s.journal()[0] if e["type"] == "KIT_DEL"]
+        R.add(c, "разборка: пока комплект выдан — отказ; после сторно выдачи «Удалить» строки розетки разбирает весь комплект (KIT_DEL): позиции вернулись "
+                 "(кабель 18, розетка 3, изолента 2), ЕИ комплекта 0 и закрыт, все 4 строки «Удалено (сторно)»",
+              i5.startswith("OK") and d1.startswith("ERR:") and "движения" in d1 and d2.startswith("OK") and [s.stock(int(x[3:])) for x in (a2, b, w)] == [18.0, 3.0, 2.0]
+              and s.stock(nxt) == 0.0 and stk.getCellByPosition(7, nxt).getString() == "Приход удалён (сторно)" and [r[16] for r in arows] == ["Удалено (сторно)"] * 4
+              and len(ent) == 1, f"{i5}; {d1[:150]}; {d2}; {[r[16] for r in arows]}")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:300])
+        oracle(c, s, "сборка и разборка комплекта, выдача комплекта")
+    finally:
+        s.close()
+
+
 # ================================================================ runner
 
 def main():

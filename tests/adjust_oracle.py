@@ -17,7 +17,8 @@ import special_oracle
 
 EPS = 1e-6
 ST_POSTED, ST_FIXED, ST_DELETED = "Проведено", "Проведено (исправлено)", "Удалено (сторно)"
-KIND_NAME = {"MOVE": "Перемещение", "WRITE_OFF": "Списание", "INV_ADJ": "Инвентаризация", "SPLIT": "Разделение", "SUP_RET": "Возврат поставщику"}
+KIND_NAME = {"MOVE": "Перемещение", "WRITE_OFF": "Списание", "INV_ADJ": "Инвентаризация", "SPLIT": "Разделение", "SUP_RET": "Возврат поставщику",
+             "KIT": "Сборка"}
 
 
 def check(doc, jdir, initial, expect_tail=0, today=None, base=None, legacy_mn_empty=True):
@@ -55,6 +56,8 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, legacy_mn_em
             bad(f"инвентаризация № {n}: _ADJ учётный/факт {row[8]!r}/{row[9]!r} ≠ {a['book']}/{a['fact']}")
         if row[10] != float(ro.iso_serial(a["date"])):
             bad(f"корректировка № {n}: _ADJ дата {row[10]!r} ≠ {a['date']}")
+        if a["kind"] == "KIT" and row[11] != a["new"]:
+            bad(f"сборка № {n}: _ADJ ЕИ комплекта {row[11]!r} ≠ {a['new']!r}")
         if a["kind"] == "SPLIT" and (row[11], row[6], row[7]) != (a["new"], a["frm"] or "", a["to"] or ""):
             bad(f"разделение № {n}: _ADJ новый ЕИ / места {(row[11], row[6], row[7])} ≠ {(a['new'], a['frm'], a['to'])}")
     for n in book:
@@ -92,6 +95,8 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, legacy_mn_em
         want_st = ST_DELETED if a["state"] == "STORNO" else (ST_FIXED if a["fixes"] else ST_POSTED)
         if a["kind"] == "SPLIT" and a["state"] != "STORNO":
             want_st = f"{ST_POSTED} · новый {a['new']}"
+        if a["kind"] == "KIT" and a["state"] != "STORNO":
+            want_st = f"{ST_POSTED} · комплект из {a['parts']} поз." if a.get("kitrow") else f"{ST_POSTED} · в комплект {a['new']}"
         if a["kind"] == "SUP_RET" and a["state"] != "STORNO" and not a["fixes"] and a.get("supplier"):
             want_st = f"{ST_POSTED} · поставщику {a['supplier']}"
         if ctl != want_st:
@@ -105,6 +110,11 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, legacy_mn_em
         if a["kind"] == "MOVE":
             if (row[9], row[12]) != (a["to"], a["frm"] or ""):
                 bad(f"перемещение № {n}: J/M {(row[9], row[12])} ≠ {(a['to'], a['frm'])}")
+        elif a["kind"] == "KIT":
+            if not isinstance(row[6], float) or abs(row[6] - abs(a["delta"])) > EPS or not isinstance(row[15], float) or abs(row[15] - a["delta"]) > EPS:
+                bad(f"сборка № {n}: G/P {(row[6], row[15])} ≠ {(abs(a['delta']), a['delta'])}")
+            if a.get("kitrow") and row[9] != (a["to"] or ""):
+                bad(f"сборка № {n}: J «{row[9]}» ≠ месту комплекта «{a['to']}»")
         elif a["kind"] in ("WRITE_OFF", "SPLIT", "SUP_RET"):
             if not isinstance(row[6], float) or abs(row[6] + a["delta"]) > EPS or not isinstance(row[15], float) or abs(row[15] - a["delta"]) > EPS:
                 bad(f"{KIND_NAME[a['kind']]} № {n}: G/P {(row[6], row[15])} ≠ {(-a['delta'], a['delta'])}")
@@ -148,5 +158,5 @@ def _abandon_floor(jdir, sysv, v):
         if e["type"] == "ABANDON" and f.get("NEXT_ADJ", "").isdigit():
             mx = max(mx, int(f["NEXT_ADJ"]))
         if e["type"] in ro.ADJUST_TYPES and f.get("ADJ", "").isdigit():
-            mx = max(mx, int(f["ADJ"]) + 1)
+            mx = max(mx, int(f.get("ADJ_KIT") or f["ADJ"]) + 1)
     return v == mx

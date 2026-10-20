@@ -179,7 +179,10 @@ REPORT_GROUPS = [
     ]),
 ]
 PRINT_WIDTHS = [900, 2600, 6300, 2300, 1500, 2000, 2400]        # A..G = 18 cm: an A4 page with margins of 1,5 cm
-SHEETS_10 = [PLACES, SUPPLIERS, GOODS, SUPPLY, PRINT, REPORTS, CLOSE]
+# 1.0 (Ф8): «Комплекты» — the storekeeper's own directory of the kits (WmsKit SH_KITS, KT_*): not protected, not journaled
+KITS = "Комплекты"
+KITS_HEADERS = ["Комплект", "Позиция (наименование)", "Артикул", "Количество на 1 комплект", "Ед.", "Примечание"]
+SHEETS_10 = [PLACES, SUPPLIERS, GOODS, SUPPLY, PRINT, REPORTS, CLOSE, KITS]
 LEGREP = "Сверка переноса"
 LEGREP_HEAD = 3                   # WmsConfig.LEGREP_HEAD
 LEGREP_HEADERS = ["ЕИ", "Наименование", "Ед.", "Откуда", "Приход при переносе", "Остаток при переносе", "Израсходовано до переноса",
@@ -1167,6 +1170,36 @@ def dash_10(doc, sheets):
             add_button(doc, sh, name, "Все…", macro, x, y, 1800, 520, back=0xDDEBF7)
 
 
+def build_kits(doc, sh):
+    """«Комплекты» (WmsKit): a kit — its rows (the name in A of the first row is enough, an empty A continues the kit above);
+    the buttons over the header; the sheet stays open for the storekeeper"""
+    header(sh, KITS_HEADERS, [5200, 6500, 3000, 3200, 1800, 6000], height=1700)
+    text = number_format(doc, "@", ("ru", "RU"))
+    for c in (0, 1, 2, 4, 5):
+        sh.getCellRangeByPosition(c, 1, c, LAST_ROW).NumberFormat = text
+    hint = sh.getCellByPosition(7, 0)
+    hint.setString("Одна строка — одна позиция комплекта: комплект, наименование (или артикул), количество на 1 комплект, единица. "
+                   "«Собрать комплект…» — позиции снимаются с их ЕИ, готовые комплекты становятся новым ЕИ (единица «компл»). "
+                   "«Выдать комплект…» — WMS заполняет строки «Выдач» нужными ЕИ, их проводят обычным «Провести».")
+    hint.IsTextWrapped = True
+    hint.VertJustify = 1
+    hint.CharHeight = 9
+    hint.CharColor = MUTED
+    sh.getColumns().getByIndex(6).Width = 400
+    sh.getColumns().getByIndex(7).Width = 12000
+    add_button(doc, sh, "btnKitBuild", "Собрать комплект…", "WmsKit.BtnKitBuild", 150, 120, 4400, 650, bold=True, back=0xC6E0B4)
+    add_button(doc, sh, "btnKitIssue", "Выдать комплект…", "WmsKit.BtnKitIssue", 4700, 120, 4400, 650, back=0xC6E0B4)
+
+
+def kits_10(doc, sheets):
+    """1.0 (Ф8): the directory «Комплекты» for a new book and an upgraded one"""
+    if not sheets.hasByName(KITS):
+        names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+        at = names.index(GOODS) + 1 if GOODS in names else (names.index(RCPT) + 1 if RCPT in names else len(names))
+        sheets.insertNewByName(KITS, at)
+        build_kits(doc, sheets.getByName(KITS))
+
+
 def ledger_10(doc, sheets):
     """1.0 (этап G): what a new book and an upgraded one both get — the hidden _CLOSE (the closed months) and the page «Отчёты»"""
     if not sheets.hasByName(CLOSE):
@@ -1289,7 +1322,7 @@ FREEZE_COLS_10 = {ISSUES: 3, ORDERS: 2, RETURNS: 4, ADJUST: 4, SPECIAL: 4, STOCK
 # 1.0 (В9): the colour of the sheet tabs by group — pages, the sheets the storekeeper works in, the registers and directories,
 # the service sheets
 TAB_COLORS_10 = [((DASH, MAIN, FIND, MAP, SUPPLY, REPORTS, PRINT), 0x5B9BD5), ((ORDERS, SPECIAL, CARS, ISSUES, RETURNS, ADJUST), 0x70AD47),
-                 ((STOCK, RCPT, TOPO, PLACES, SUPPLIERS, GOODS), 0xED7D31), ((LEGREP, HELP), 0xA5A5A5)]
+                 ((STOCK, RCPT, TOPO, PLACES, SUPPLIERS, GOODS, KITS), 0xED7D31), ((LEGREP, HELP), 0xA5A5A5)]
 # 1.0 (В1): what the storekeeper fills in is white, what WMS writes is grey (data rows), the headers likewise
 INPUT_HEAD_10 = 0xFFF2CC
 WMS_HEAD_10 = 0xE7E6E6
@@ -1487,6 +1520,9 @@ BUTTONS_10 = [
     (ADJUST, "btnInvList", "Опись…", "WmsPrint.BtnInventoryList", 150 + 4050, 880, 2750, 650, 0xDDEBF7),
     (ADJUST, "btnInvCompare", "Сличительная ведомость…", "WmsPrint.BtnInventoryCompare", 150 + 4050 + 2900, 880, 4900, 650, 0xDDEBF7),
     (ADJUST, "btnWriteOffAct", "Акт списания", "WmsPrint.BtnWriteOffAct", 150 + 4050 + 2900 + 5050, 880, 3000, 650, 0xDDEBF7),
+    # 1.0 (этап I): the kits
+    (ISSUES, "btnKitIssue", "Выдать комплект…", "WmsKit.BtnKitIssue", 150 + 6 * 2900, 880, 3600, 650, 0xC6E0B4),
+    (ADJUST, "btnKitBuild", "Собрать комплект…", "WmsKit.BtnKitBuild", 150 + 4050 + 2900 + 5050 + 3150, 880, 3900, 650, 0xC6E0B4),
 ]
 
 
@@ -1952,6 +1988,7 @@ def build(office, out_path, test=False, instance_id=None):
     supply_10(doc, sheets)
     print_10(doc, sheets)
     ledger_10(doc, sheets)
+    kits_10(doc, sheets)
     buttons_10(doc, sheets)
     colors_10(doc, sheets)
     hints_10(doc, sheets)

@@ -52,6 +52,7 @@ RETURN_TYPES = ("RETURN", "RETURN_FIX", "RETURN_DEL")
 SPECIAL_TYPES = ("SP_RECEIPT", "SP_REFILL", "SP_FIX", "SP_DEL", "SP_IDENTIFY")
 ADJUST_TYPES = ("MOVE", "MOVE_FIX", "MOVE_DEL", "WRITE_OFF", "WRITE_OFF_FIX", "WRITE_OFF_DEL", "INV_ADJ", "INV_ADJ_FIX", "INV_ADJ_DEL",
                 "SPLIT", "SPLIT_DEL",       # 1.0 (М1): the split of an EI and its storno (a split is never corrected)
+                "KIT_BUILD", "KIT_DEL",     # 1.0 (Ф8): the build of a kit (several corrections in one operation) and its storno
                 "SUP_RET", "SUP_RET_FIX", "SUP_RET_DEL")    # 1.0 (З1): the return to the supplier — as a write-off, never below 0
 MIGRATE_TYPES = ("MIGRATE", "MIGRATE_FIX")
 MIGRATE_STYPES = ("Поставщик", "Офис", "Производство", "Детали", "Старый склад", "Иной приход")
@@ -1183,9 +1184,75 @@ def replay_special(t, f, sq, bal, sp, place, issues, returns, created, receipts,
         L.update(name=f.get("NAME", ""), art=f.get("ART", ""), cat=f.get("CAT", ""), ident=typ)
 
 
+def replay_kit(t, f, sq, bal, adjs, place, touched_place, bad, created=None):
+    """1.0 (Ф8): KIT_BUILD — the components (COMPS «EI:quantity:balance before;…») leave their EIs as corrections № ADJ,
+    ADJ+1, …, the kits become a new EI (NEW_EI, N kits on PLACE) as correction № ADJ_KIT = ADJ + the number of components;
+    KIT_DEL — every correction of that build cancelled while the kit EI still holds exactly its N kits. Reported as "A"."""
+    new, n0 = f.get("NEW_EI", ""), int(f.get("ADJ", "0") or 0)
+    try:
+        nk, nkit = int(f.get("ADJ_KIT", "0")), float(f.get("N", "nan"))
+        comps = [(c.split(":")[0], float(c.split(":")[1]), float(c.split(":")[2])) for c in f.get("COMPS", "").split(";") if c]
+    except (ValueError, IndexError):
+        bad(f"seq {sq} {t}: поля сборки не читаются ({f.get('COMPS')!r}, {f.get('N')!r})", "A")
+        return
+    if t == "KIT_BUILD":
+        if not comps or nk != n0 + len(comps) or not nkit > 0 or nkit != int(nkit):
+            bad(f"seq {sq} KIT_BUILD: позиций {len(comps)}, № {n0}…{nk}, комплектов {nkit} — не сходится", "A")
+            return
+        if any(n in adjs for n in range(n0, nk + 1)) or (adjs and n0 <= max(adjs)):
+            bad(f"seq {sq} KIT_BUILD: № {n0}…{nk} не новые", "A")
+            return
+        if not new or new in bal or (created is not None and new in created):
+            bad(f"seq {sq} KIT_BUILD: ЕИ комплекта «{new}» уже существует", "A")
+            return
+        if not f.get("REASON"):
+            bad(f"seq {sq} KIT_BUILD: нет основания", "A")
+        common = dict(kind="KIT", state="LIVE", to=None, book=None, fact=None, date=f.get("DATE"), reason=f.get("REASON"), batch=f.get("BATCH", ""),
+                      fixes=0, row=0, new=new)
+        for i, (ei, q, before) in enumerate(comps):
+            if ei not in bal:
+                bad(f"seq {sq} KIT_BUILD: позиция {ei} не существует", "A")
+                return
+            if abs(before - bal[ei]) > EPS:
+                bad(f"seq {sq} KIT_BUILD: у {ei} остаток до {before} ≠ {bal[ei]}", 3)
+            if q <= 0 or q > bal[ei] + EPS:
+                bad(f"seq {sq} KIT_BUILD: с {ei} снято {q} при остатке {bal[ei]}", 6)
+            bal[ei] -= q
+            adjs[n0 + i] = dict(common, ei=ei, delta=-q, frm=place.get(ei), kitrow=False)
+        bal[new] = nkit
+        place[new] = f.get("PLACE", "")
+        touched_place.add(new)
+        if created is not None:
+            created.append(new)
+        adjs[nk] = dict(common, ei=new, delta=nkit, frm="", to=f.get("PLACE", ""), kitrow=True, parts=len(comps))
+        return
+    group = sorted(n for n, a in adjs.items() if a["kind"] == "KIT" and a.get("new") == new and a["state"] == "LIVE")
+    kit = [n for n in group if adjs[n].get("kitrow")]
+    if not kit or len(group) < 2 or group[0] != n0 or kit[0] != nk:
+        bad(f"seq {sq} KIT_DEL {new}: нет действующей сборки № {n0}…{nk} ({group})", "A")
+        return
+    a_k = adjs[nk]
+    if abs(bal.get(new, 0.0) - a_k["delta"]) > EPS or abs(nkit - a_k["delta"]) > EPS:
+        bad(f"seq {sq} KIT_DEL {new}: остаток комплекта {bal.get(new)} ≠ собранному {a_k['delta']}", "A")
+    want = [(adjs[n]["ei"], -adjs[n]["delta"]) for n in group if n != nk]
+    if [(c[0], c[1]) for c in comps] != want:
+        bad(f"seq {sq} KIT_DEL {new}: COMPS {comps} ≠ позициям сборки {want}", "A")
+    for n in group:
+        a = adjs[n]
+        if n == nk:
+            bal[new] = 0.0
+        else:
+            bal[a["ei"]] -= a["delta"]
+        a["state"] = "STORNO"
+
+
 def replay_adjust(t, f, sq, bal, adjs, place, touched_place, bad, created=None):
     """one correction of the journal (Final Core), checked against the rules of the task written independently of the
     Basic code; the invariants of the corrections are reported as "A"."""
+    if t in ("KIT_BUILD", "KIT_DEL"):
+        replay_kit(t, f, sq, bal, adjs, place, touched_place, bad, created)
+        return
+
     def fnum(k):
         v = f.get(k, "")
         return float(v) if v != "" else None

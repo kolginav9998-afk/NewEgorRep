@@ -32,6 +32,8 @@ Public Const LK_INV = 6
 Public Const LK_SUP = 7
 Public Const LK_SPLIT = 8
 Public Const LK_LEG = 9
+' 1.0 (Ф8): a kit build — the components out (−), the kit in (+)
+Public Const LK_KIT = 10
 
 ' the movements read by LedgerRead: EI number, date, kind, quantity (+ in, − out), operation, document, counterparty
 Global gLdN As Long
@@ -261,6 +263,8 @@ Private Sub LdSheet(sName As String)
                         k = LK_SPLIT
                     ElseIf kind = "Возврат поставщику" Then
                         k = LK_SUP
+                    ElseIf kind = "Сборка" Then
+                        k = LK_KIT
                     End If
                     If k > 0 And Abs(ch) > 0.0000005 Then
                         n = WmsView.EiNo(CStr(a(i)(AC_EI)), gLdMax + 1)
@@ -276,12 +280,31 @@ End Sub
 
 ' the new EI of a live split starts with what was split off (its price — that of the source)
 Private Sub LdSplits()
-    Dim sh As Object, last As Long, a As Variant, i As Long, m As Long, src As Long
+    Dim sh As Object, last As Long, a As Variant, i As Long, m As Long, src As Long, kitSum() As Double, kitBad() As Boolean, e As Long
     If Not gDoc.Sheets.hasByName(SH_ADJ) Then Exit Sub
     sh = gDoc.Sheets.getByName(SH_ADJ)
     last = WmsOrders.LastRow(sh)
     If last < 1 Then Exit Sub
     a = sh.getCellRangeByPosition(0, 1, AJ_LAST, last).getDataArray()
+    ReDim kitSum(gLdMax)
+    ReDim kitBad(gLdMax)
+    ' 1.0 (Ф8): the price of a kit — the money of its components ÷ the kits (the rows of a build come before its kit row, a
+    ' kit built of kits finds their prices already known)
+    For i = 0 To last - 1
+        If CStr(a(i)(AJ_KIND)) = "KIT" And CStr(a(i)(AJ_STATE)) = RV_LIVE And VarType(a(i)(AJ_QTY)) = 5 Then
+            m = WmsView.EiNo(CStr(a(i)(AJ_NEW)), gLdMax + 1)
+            e = WmsView.EiNo(CStr(a(i)(AJ_EI)), gLdMax + 1)
+            If m >= 1 And e >= 1 Then
+                If e = m Then
+                    If Not kitBad(m) And a(i)(AJ_QTY) > 0 Then gLdPrice(m) = kitSum(m) / a(i)(AJ_QTY)
+                ElseIf gLdPrice(e) < 0 Then
+                    kitBad(m) = True
+                Else
+                    kitSum(m) = kitSum(m) - a(i)(AJ_QTY) * gLdPrice(e)
+                End If
+            End If
+        End If
+    Next i
     For i = 0 To last - 1
         If CStr(a(i)(AJ_KIND)) = "SPLIT" And CStr(a(i)(AJ_STATE)) = RV_LIVE And CStr(a(i)(AJ_NEW)) <> "" And VarType(a(i)(AJ_QTY)) = 5 Then
             m = WmsView.EiNo(CStr(a(i)(AJ_NEW)), gLdMax + 1)
@@ -583,7 +606,7 @@ Private Function LdTurnoverData(d0 As Double, d1 As Double) As Variant
                 bk(e, 2) = bk(e, 2) + q
             Case LK_WOFF, LK_SUP
                 bk(e, 3) = bk(e, 3) - q
-            Case LK_INV
+            Case LK_INV, LK_KIT
                 If q > 0 Then bk(e, 0) = bk(e, 0) + q Else bk(e, 3) = bk(e, 3) - q
             End Select
         End If
@@ -695,7 +718,8 @@ Private Function LdTurnoverOut(res As Variant, d0 As Double, d1 As Double, bFile
     sh = WmsPrint.PrintBegin("ОБОРОТНАЯ ВЕДОМОСТЬ за " & Format(d0, "DD.MM.YYYY") & " — " & Format(d1, "DD.MM.YYYY"), sName)
     WmsPrint.PrintLine(sh, "Товаров: " & ng & " · ЕИ: " & res(8) & IIf(nNoPrice > 0, " · без цены: " & nNoPrice & " ЕИ (в рублях не учтены)", "") _
         & ". Начало + приход − выдано + возвращено − списано = конец.", True)
-    WmsPrint.PrintLine(sh, "Приход — с излишками пересчёта; списано — с возвратами поставщику и недостачами пересчёта.")
+    WmsPrint.PrintLine(sh, "Приход — с излишками пересчёта и собранными комплектами; списано — с возвратами поставщику, недостачами пересчёта и " _
+        & "позициями, ушедшими в комплекты.")
     WmsPrint.PrintTable(sh, Array("Товар, ед.", heads(0), heads(1), heads(2), heads(3), heads(4), heads(5)), rows, shown, "1,2,3,4,5,6")
     If shown < ng Then WmsPrint.PrintLine(sh, "Показаны первые " & shown & " товаров из " & ng & " — полностью: «Оборотная ведомость» → «в файл CSV».", True)
     WmsPrint.PrintLine(sh, "В рублях:", True)
@@ -1397,7 +1421,9 @@ Function StockMoney() As Variant
         ash = gDoc.Sheets.getByName(SH_ADJ)
         last = WmsOrders.LastRow(ash)
         If last >= 1 Then
-            items = WmsView.EngList("TEXTJOIN("";"";1;IF((" & WmsView.ColRng(SH_ADJ, AJ_KIND, 1, last) & "=""SPLIT"")*(" & WmsView.ColRng(SH_ADJ, AJ_STATE, 1, last) _
+            ' the split EIs and (1.0, Ф8) the kits — their own build row (AJ_EI = AJ_NEW)
+            items = WmsView.EngList("TEXTJOIN("";"";1;IF(((" & WmsView.ColRng(SH_ADJ, AJ_KIND, 1, last) & "=""SPLIT"")+(" & WmsView.ColRng(SH_ADJ, AJ_KIND, 1, last) _
+                & "=""KIT"")*(" & WmsView.ColRng(SH_ADJ, AJ_EI, 1, last) & "=" & WmsView.ColRng(SH_ADJ, AJ_NEW, 1, last) & "))*(" & WmsView.ColRng(SH_ADJ, AJ_STATE, 1, last) _
                 & "=""" & RV_LIVE & """);ROW(" & WmsView.ColRng(SH_ADJ, AJ_KIND, 1, last) & ")-1;""""))", nItems)
             st = WmsIssue.StockSheet()
             nextEI = CLng(SysNum(SK_NEXT_EI))
@@ -1462,7 +1488,7 @@ End Sub
 ' «Отчёт руководителю» for [d0, d1] on «Печать»: the operations and their money, the stock at the end, the recipients, the
 ' losses by reason, the suppliers, the vehicles. OK:… / ERR:…
 Function ManagerReport(d0 As Double, d1 As Double) As String
-    Dim k As Long, n As Long, q As Double, p As Double, cnt(9) As Long, mon(9) As Double, noP(9) As Long, sh As Object, rows() As Variant, i As Long
+    Dim k As Long, n As Long, q As Double, p As Double, cnt(10) As Long, mon(10) As Double, noP(10) As Long, sh As Object, rows() As Variant, i As Long
     Dim aft() As Double, b As Double, nStock As Long, sumStock As Double, names As Variant, kk As Integer, g As Variant, ng As Long, csh As Object
     Dim last As Long, cd As Variant, nCar As Long, nGone As Long, durSum As Double, nCancel As Long, plus As Double, minus As Double, s As String
     On Error GoTo EH
@@ -1480,8 +1506,11 @@ Function ManagerReport(d0 As Double, d1 As Double) As String
             kk = gLdKind(k)
             q = gLdQty(k)
             p = gLdPrice(n)
-            cnt(kk) = cnt(kk) + 1
-            If p >= 0 Then mon(kk) = mon(kk) + Abs(q) * p Else noP(kk) = noP(kk) + 1
+            ' a kit build counts its kits (the rows of the components are inside them)
+            If kk <> LK_KIT Or q > 0 Then
+                cnt(kk) = cnt(kk) + 1
+                If p >= 0 Then mon(kk) = mon(kk) + Abs(q) * p Else noP(kk) = noP(kk) + 1
+            End If
             If kk = LK_INV And p >= 0 Then
                 If q > 0 Then plus = plus + q * p Else minus = minus - q * p
             End If
@@ -1495,10 +1524,10 @@ Function ManagerReport(d0 As Double, d1 As Double) As String
         End If
     Next n
     names = Array("", "Приход по заказам", "Иной приход", "Выдачи", "Возвраты на склад", "Списания", "Пересчёты", "Возвраты поставщику", "Разделения ЕИ", _
-        "Израсходовано до переноса")
-    ReDim rows(9)
+        "Израсходовано до переноса", "Собрано комплектов (ЕИ)")
+    ReDim rows(10)
     i = 0
-    For kk = 1 To 9
+    For kk = 1 To 10
         If cnt(kk) > 0 And kk <> LK_SPLIT Then
             rows(i) = Array(names(kk), cnt(kk), IIf(kk = LK_INV, "излишки " & WmsPrint.Money(plus) & " · недостачи " & WmsPrint.Money(minus), WmsPrint.Money(mon(kk))), _
                 IIf(noP(kk) > 0, "без цены: " & noP(kk), ""))

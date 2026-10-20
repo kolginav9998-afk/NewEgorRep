@@ -414,6 +414,13 @@ Sub ExpectedBalances(ByRef ex() As Double, ByRef mv() As Double, ByRef src() As 
                         mv(n) = mv(n) + d(i)(AJ_QTY)
                     End If
                 End If
+                ' 1.0 (Ф8): a kit EI has its source in its own build row (its AJ_EI is its AJ_NEW)
+                If CStr(d(i)(AJ_KIND)) = "KIT" And CStr(d(i)(AJ_EI)) = CStr(d(i)(AJ_NEW)) Then
+                    n = EiNum(CStr(d(i)(AJ_NEW)), nextEI)
+                    If n > 0 Then
+                        If src(n) = 0 Then src(n) = 5
+                    End If
+                End If
                 ' 1.0 (М1): the new EI of a split starts with what was taken from the source
                 If CStr(d(i)(AJ_KIND)) = "SPLIT" Then
                     n = EiNum(CStr(d(i)(AJ_NEW)), nextEI)

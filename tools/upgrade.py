@@ -329,6 +329,7 @@ def step_08(doc, leg, from_text, done):
     B.supply_10(doc, sheets)
     B.print_10(doc, sheets)
     B.ledger_10(doc, sheets)
+    B.kits_10(doc, sheets)
     B.buttons_10(doc, sheets)
     B.colors_10(doc, sheets)
     B.hints_10(doc, sheets)
@@ -337,6 +338,7 @@ def step_08(doc, leg, from_text, done):
     B.rebuild_main(doc, sheets.getByName(B.MAIN))
     done.append(f"страницы «{B.DASH}», «{B.FIND}», «{B.MAP}» и лист «{B.TOPO}» (вставьте туда схему склада); «{B.MAIN}» этого выпуска (кнопки к страницам)")
     done.append(f"1.0: справочники «{B.SUPPLIERS}» и «{B.GOODS}» (пополняются кнопками из «{B.ORDERS}» и «{B.STOCK}»), страницы «{B.SUPPLY}» и «{B.PRINT}»")
+    done.append(f"1.0: справочник «{B.KITS}» (состав комплектов: «Собрать комплект…», «Выдать комплект…»)")
     done.append(f"1.0: страница «{B.REPORTS}» (остаток на дату, оборотная ведомость, выгрузка, сверка с 1С, закрытие месяца) и служебный {B.CLOSE}")
     return [B.LEGREP, B.LEG, B.PACK, B.DASH, B.FIND, B.MAP, B.SUPPLY, B.PRINT, B.CLOSE, B.REPORTS]
 

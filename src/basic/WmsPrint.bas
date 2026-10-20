@@ -365,7 +365,11 @@ Function EiPrice(ByVal n As Long) As Double
             Exit Function
         End If
         m = WmsSupply.SplitSourceOf(canon)
-        If m < 1 Then Exit Function
+        If m < 1 Then
+            ' 1.0 (Ф8): a kit — the money of its components ÷ the number of kits
+            EiPrice = WmsKit.KitPrice(canon)
+            Exit Function
+        End If
         n = m
     Next k
 EH:

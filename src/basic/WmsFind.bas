@@ -981,6 +981,11 @@ Private Function SplitOrigin(canon As String, mKey() As Double, mRow() As Varian
     a = found.getRangeAddresses()
     r = a(0).StartRow
     d = sh.getCellRangeByPosition(0, r, AJ_LAST, r).getDataArray()(0)
+    ' 1.0 (Ф8): a kit starts with its own row «Сборка» on «Корректировки» (the sheet gives that movement)
+    If CStr(d(AJ_KIND)) = "KIT" Then
+        SplitOrigin = True
+        Exit Function
+    End If
     If CStr(d(AJ_KIND)) <> "SPLIT" Then Exit Function
     live = (CStr(d(AJ_STATE)) = RV_LIVE)
     AddMove(mKey, mRow, nM, DateOf(d(AJ_DATE)), 1, "", "Отделён от " & d(AJ_EI) & " (корректировка № " & d(AJ_NO) & ")", "", "", _
@@ -999,6 +1004,9 @@ Private Sub AdjMove(d As Variant, live As Boolean, dt As Double, sName As String
         note = "учётный " & d(AC_BOOK) & ", фактический " & d(AC_FACT)
     ElseIf kind = "Разделение" Then
         note = Mid(CStr(d(AC_CTL)), InStr(CStr(d(AC_CTL)), "·") + 2) & " · место «" & d(AC_PLACE) & "»"
+    ElseIf kind = "Сборка" Then
+        ' 1.0 (Ф8): «в комплект ЕИ-…» / «комплект из N поз.»
+        If InStr(CStr(d(AC_CTL)), "·") > 0 Then note = Mid(CStr(d(AC_CTL)), InStr(CStr(d(AC_CTL)), "·") + 2)
     ElseIf kind = "Возврат поставщику" Then
         ' 1.0 (З1): to whom, by which document
         If InStr(CStr(d(AC_CTL)), "·") > 0 Then note = Mid(CStr(d(AC_CTL)), InStr(CStr(d(AC_CTL)), "·") + 2)

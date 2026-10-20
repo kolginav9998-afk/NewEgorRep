@@ -330,6 +330,11 @@ Private Function CheckRowInputs(r As Long, bNeedAll As Boolean) As String
         End If
         Exit Function
     End If
+    ' 1.0 (Ф8): the rows «Сборка» are written by «Собрать комплект…» as one operation, never typed
+    If mKind = "KIT" Then
+        CheckRowInputs = "строки «Сборка» пишет кнопка «Собрать комплект…» (лист «Комплекты») — одной операцией для всех позиций; вручную не проводятся"
+        Exit Function
+    End If
     If IsBlank(sh.getCellByPosition(AC_EI, r)) Then
         CheckRowInputs = "не указан ЕИ (C)"
         Exit Function
@@ -516,7 +521,7 @@ Private Function Describe() As String
 End Function
 
 ' "" when correction № n may be issued now: the dense _ADJ is behind the counter and no row of the sheet holds n
-Private Function NewAdjProblem(n As Long) As String
+Function NewAdjProblem(n As Long) As String
     If n < 1 Or n >= MAX_SHEET_ROW Then
         NewAdjProblem = "номера корректировок исчерпаны (NEXT_ADJ " & n & ")"
     ElseIf WmsOrders.LastRow(AdjSheet()) >= n Then
@@ -882,7 +887,7 @@ Private Function LoadPosted(r As Long, rd As Variant) As String
         Exit Function
     End If
     mKind = CStr(rd(AJ_KIND))
-    If mKind <> "MOVE" And mKind <> "WRITE_OFF" And mKind <> "INV_ADJ" And mKind <> "SPLIT" And mKind <> "SUP_RET" Then
+    If mKind <> "MOVE" And mKind <> "WRITE_OFF" And mKind <> "INV_ADJ" And mKind <> "SPLIT" And mKind <> "SUP_RET" And mKind <> "KIT" Then
         LoadPosted = "ERR-SYS:в " & SH_ADJ & " у корректировки № " & gAjN & " неизвестный вид «" & mKind & "»"
         Exit Function
     End If
@@ -938,6 +943,12 @@ Function AdjustFixRow(r As Long, vMain As Variant, vDate As Variant, vReason As 
     why = LoadPosted(r, rd)
     If why <> "" Then
         AdjustFixRow = why
+        Exit Function
+    End If
+    ' 1.0 (Ф8): a kit build is not corrected either — it is taken apart («Удалить») and built again
+    If mKind = "KIT" Then
+        AdjustFixRow = "ERR:сборка комплекта " & rd(AJ_NEW) & " не исправляется — удалите её («Удалить» разберёт комплект целиком, пока у него не было " _
+            & "движений) и соберите заново"
         Exit Function
     End If
     ' 1.0 (М1): a split is not corrected — its new EI has its own card and label; cancel it and split again
@@ -1161,6 +1172,11 @@ Function AdjustDeleteRow(r As Long) As String
         AdjustDeleteRow = why
         Exit Function
     End If
+    ' 1.0 (Ф8): a kit is taken apart whole — every row of its build in one operation
+    If mKind = "KIT" Then
+        AdjustDeleteRow = WmsKit.KitDelete(rd)
+        Exit Function
+    End If
     delta1 = rd(AJ_QTY)
     from1 = CStr(rd(AJ_FROM))
     to1 = CStr(rd(AJ_TO))
@@ -1226,6 +1242,9 @@ Function DeleteProblem(r As Long, rd As Variant) As String
     Select Case mKind
     Case "SPLIT"
         DeleteProblem = SplitDeleteProblem(rd)
+        Exit Function
+    Case "KIT"
+        DeleteProblem = WmsKit.KitDeleteProblem(rd)
         Exit Function
     Case "MOVE"
         If LCase(Trim(mSplace)) <> LCase(Trim(CStr(rd(AJ_TO)))) Then
@@ -1620,7 +1639,7 @@ End Function
 Function AdjustCheck() As String
     Dim ad As Object, sh As Object, last As Long, r0 As Long, r1 As Long, i As Long, d As Variant, t0 As Long, nextAdj As Long
     Dim n As Long, nBad As Long, first As String, nStale As Long, nLive As Long, nStorno As Long, maxN As Long, x As Double, lastR As Long
-    Dim colA As Variant, colA0 As Long, k As String, st As String, ei As Long, nKind(4) As Long
+    Dim colA As Variant, colA0 As Long, k As String, st As String, ei As Long, nKind(5) As Long
     On Error GoTo EH
     t0 = GetSystemTicks()
     ad = AdjSheet()
@@ -1652,6 +1671,13 @@ Function AdjustCheck() As String
                         nKind(2) = nKind(2) + 1
                     ElseIf k = "SUP_RET" Then
                         nKind(4) = nKind(4) + 1
+                    ElseIf k = "KIT" Then
+                        nKind(5) = nKind(5) + 1
+                        If Not WmsOrders.StrictEI(CStr(d(i)(AJ_NEW)), ei) Then
+                            Bad(nBad, first, "сборка № " & (r0 + i) & ": неверный ЕИ комплекта «" & d(i)(AJ_NEW) & "»")
+                        ElseIf ei >= SysNum(SK_NEXT_EI) Then
+                            Bad(nBad, first, "сборка № " & (r0 + i) & ": ЕИ комплекта " & d(i)(AJ_NEW) & " не выдавался")
+                        End If
                     ElseIf k = "SPLIT" Then
                         nKind(3) = nKind(3) + 1
                         If Not WmsOrders.StrictEI(CStr(d(i)(AJ_NEW)), ei) Then
@@ -1671,6 +1697,8 @@ Function AdjustCheck() As String
                         Bad(nBad, first, "корректировка № " & (r0 + i) & ": изменение остатка не число")
                     ElseIf k = "MOVE" And d(i)(AJ_QTY) <> 0 Then
                         Bad(nBad, first, "перемещение № " & (r0 + i) & ": изменение остатка " & d(i)(AJ_QTY) & " (должно быть 0)")
+                    ElseIf k = "KIT" And d(i)(AJ_QTY) = 0 Then
+                        Bad(nBad, first, "сборка № " & (r0 + i) & ": изменение остатка 0")
                     ElseIf (k = "WRITE_OFF" Or k = "SPLIT" Or k = "SUP_RET") And d(i)(AJ_QTY) >= 0 Then
                         Bad(nBad, first, KindName(k) & " № " & (r0 + i) & ": изменение остатка " & d(i)(AJ_QTY) & " (должно быть меньше 0)")
                     End If
@@ -1704,7 +1732,7 @@ Function AdjustCheck() As String
     If nBad > 0 Then
         AdjustCheck = "ОШИБКА: расхождений " & nBad & " (" & first & ")"
     Else
-        AdjustCheck = "корректировок " & n & " (перемещений " & nKind(0) & ", списаний " & nKind(1) & ", инвентаризаций " & nKind(2) & IIf(nKind(3) > 0, ", разделений " & nKind(3), "") & IIf(nKind(4) > 0, ", возвратов поставщику " & nKind(4), "") & "; из них сторно " _
+        AdjustCheck = "корректировок " & n & " (перемещений " & nKind(0) & ", списаний " & nKind(1) & ", инвентаризаций " & nKind(2) & IIf(nKind(3) > 0, ", разделений " & nKind(3), "") & IIf(nKind(4) > 0, ", возвратов поставщику " & nKind(4), "") & IIf(nKind(5) > 0, ", строк сборки " & nKind(5), "") & "; из них сторно " _
             & nStorno & "), расхождений нет, NEXT_ADJ " & nextAdj & " выше всех №" _
             & IIf(nStale > 0, ", устаревших подсказок строк " & nStale & " (исправятся при следующей операции)", "") & ", " & (GetSystemTicks() - t0) & " мс"
     End If
