@@ -443,7 +443,11 @@ Function StartupNotes() As String
         ' Н5: the check of the day (at its first start); С3, С4: the growth of the book and its advice
         ' П2: «Что нового» once a version, to a person (after the start)
         WmsHelp.WhatsNewAtStart()
-        If Left(StGet("DAILY"), 10) <> Format(Now(), "YYYY-MM-DD") Then
+        If Left(StGet("DAILY"), 10) = Format(Now(), "YYYY-MM-DD") Then
+            ' Т8: LibreOffice updated since the check of the day — its formulas checked now
+            x = CalcAtStart()
+            If x <> "" Then s = s & IIf(s <> "", " | ", "") & x
+        Else
             DailyCheck(False)
             s = s & IIf(s <> "", " | ", "") & DailyLine()
             WmsCare.GrowthMark()
@@ -1088,7 +1092,7 @@ Function DailyCheck(bForce As Boolean) As String
     End If
     On Error GoTo EH
     t0 = GetSystemTicks()
-    WmsView.ProgressStart("Проверка дня: остаток = движения, фасовка, ключи, журнал", 1)
+    WmsView.ProgressStart("Проверка дня: остаток = движения, фасовка, ключи, журнал, формулы Calc", 1)
     p = WmsLegacy.BalanceCheck()
     If p <> "" Then probs = "остаток не равен движениям: " & p
     p = WmsPack.PackProblems()
@@ -1098,8 +1102,15 @@ Function DailyCheck(bForce As Boolean) As String
     p = ChainCheck(n)
     If p <> "" And Left(p, 20) <> "контрольная цепочка " Then probs = probs & IIf(probs <> "", " · ", "") & "журнал: " & p
     If gJMirrorErr <> "" Then probs = probs & IIf(probs <> "", " · ", "") & "зеркало журнала: " & gJMirrorErr
+    ' Т8: Calc counts as WMS expects
+    p = CalcCheck()
+    If p <> "" Then
+        probs = probs & IIf(probs <> "", " · ", "") & p
+    Else
+        StSet("LOVER", WmsStatus.LoVersion())
+    End If
     res = today & "|" & IIf(probs = "", "OK", "FAIL") & "|" & IIf(probs = "", "остаток = движения, фасовка, ключи листов, цепочка журнала (" & n _
-        & " новых строк) — без замечаний", probs) & "|" & (GetSystemTicks() - t0)
+        & " новых строк), формулы Calc — без замечаний", probs) & "|" & (GetSystemTicks() - t0)
     StSet("DAILY", res)
     DailyCheck = res
     WmsView.ProgressEnd()
@@ -1125,6 +1136,213 @@ Sub BtnDailyCheck(Optional oEvent As Variant)
     s = DailyCheck(True)
     WmsUi.UiMessage(DailyLine())
 End Sub
+
+' ================================================================ Т8 the check of Calc, Т7 the restore drill, Т6 the health
+
+' Т8: formulas with a known answer, through the same engine the pages and the reports count with (an array formula on _IDX):
+' the sum of products, the search in a list, the rounding, the text, the error caught, the dates, the remainder, the maximum
+Private Const SF_CALC_BODY = "TEXTJOIN(""|"";0;SUMPRODUCT({1;2;3}*{4;5;6});MATCH(""b"";{""a"";""b"";""c""};0);ROUND(2.5;0);LEFT(""ЕИ-427"";2);LEN(""ЕИ-427"");IFERROR(1/0;""x"");INDEX({5;6;7};2);DATE(2026;10;20)-DATE(2026;1;1);MOD(7;3);SUMPRODUCT(ISNUMBER({1;""a"";3})*1);MAX({4;9;2});ROUND((0.1+0.2)*10;0))"
+Private Const SF_CALC_WANT = "32|2|3|ЕИ|6|x|6|292|1|2|9|3"
+Public Const DRILL_DAYS = 31
+' test seam (TestCalcWant): the answer the check of Calc expects, replaced
+Global gSfCalcWant As String
+
+' "" — Calc counts as WMS expects; otherwise what is wrong (the posting does not depend on it: only the pages and the reports)
+Function CalcCheck() As String
+    Dim s As String, ok As Boolean, want As String
+    On Error GoTo EH
+    want = SF_CALC_WANT
+    If gSfCalcWant <> "" Then want = gSfCalcWant
+    s = WmsOrders.ScratchEval(SF_CALC_BODY, ok)
+    If Not ok Then
+        CalcCheck = "формулы Calc не вычисляются (LibreOffice " & WmsStatus.LoVersion() & ") — страницы и отчёты не построятся; проведение не затронуто"
+    ElseIf s <> want Then
+        CalcCheck = "Calc (LibreOffice " & WmsStatus.LoVersion() & ") считает не так, как ждёт WMS: «" & s & "» вместо «" & want _
+            & "» — страницы и отчёты могут ошибаться; проведение не затронуто. Верните прежнюю версию LibreOffice"
+    End If
+    Exit Function
+EH:
+    CalcCheck = "формулы Calc не проверены: " & Error$
+End Function
+
+' at a start: a new version of LibreOffice checked at once (not at the next day); "" — nothing to say
+Function CalcAtStart() As String
+    Dim v As String
+    v = WmsStatus.LoVersion()
+    If StGet("LOVER") = v Then Exit Function
+    CalcAtStart = CalcCheck()
+    If CalcAtStart = "" Then StSet("LOVER", v)
+End Function
+
+Sub BtnRestoreDrill(Optional oEvent As Variant)
+    Dim s As String
+    WmsInit()
+    If gUiAuto = 0 Then
+        If WmsPrimeUi.UiButtons("Учебное восстановление", "Самая свежая копия книги откроется отдельно (рабочая книга не меняется), WMS проверит, " _
+            & "что она читается, и что журнал от неё до последней операции непрерывен: при беде «Вернуться к копии» вернёт всё." & Chr(10) _
+            & "Большая книга — до минуты.", Array("Проверить", "Отмена"), Array(1, 0)) <> 1 Then Exit Sub
+    End If
+    s = RestoreDrill()
+    WmsUi.UiMessage(Mid(s, InStr(s, ":") + 1))
+    ServiceRefresh()
+End Sub
+
+' Т7: the newest copy of the book is unpacked apart (WMS_State/drill, opened hidden, read-only, its macros off) and read: its
+' last operation, its EIs; the journal from it to the last operation of the book read in full: continuous, of this book, not
+' damaged. «OK:…» — a return to this copy would bring back every operation; «ERR:…» — what stands in the way
+Function RestoreDrill() As String
+    Dim lst As Variant, src As String, dst As String, ddir As String, oDoc As Object, props(2) As New com.sun.star.beans.PropertyValue
+    Dim cSeq As Long, cSchema As String, cEI As Double, last As Long, t0 As Long, s As String, sh As Object, c As Object, res As String
+    WmsInit()
+    t0 = GetSystemTicks()
+    On Error GoTo EH
+    lst = CopyList()
+    If UBound(lst) < 0 Then
+        res = "ERR:в «" & BACKUP_DIR & "» нет ни одной копии книги — сохраните книгу (копия делается при сохранении) или «Копия на флешку…»"
+        GoTo DONE
+    End If
+    WmsView.ProgressStart("Учебное восстановление: копия " & CopyLabel(lst(0)), 3)
+    src = gBDir & lst(0)(0)
+    ddir = SafeDir() & "drill/"
+    If gSfa.exists(ddir) Then gSfa.kill(ddir)
+    gSfa.createFolder(ddir)
+    dst = ddir & "drill.ods"
+    gSfa.copy(src, dst)
+    If gSfa.getSize(dst) <> gSfa.getSize(src) Then
+        res = "ERR:копия «" & lst(0)(0) & "» не скопировалась целиком (мало места на диске?)"
+        GoTo DONE
+    End If
+    WmsView.ProgressSet(1)
+    props(0).Name = "Hidden"
+    props(0).Value = True
+    props(1).Name = "ReadOnly"
+    props(1).Value = True
+    props(2).Name = "MacroExecutionMode"
+    props(2).Value = com.sun.star.document.MacroExecMode.NEVER_EXECUTE
+    oDoc = StarDesktop.loadComponentFromURL(dst, "_blank", 0, props())
+    If IsNull(oDoc) Then
+        res = "ERR:копия «" & lst(0)(0) & "» не открывается — она повреждена; возьмите более раннюю («Вернуться к копии…»)"
+        GoTo DONE
+    End If
+    If Not oDoc.Sheets.hasByName(SYS_SHEET) Or Not oDoc.Sheets.hasByName(SH_STOCK) Then
+        res = "ERR:в копии «" & lst(0)(0) & "» нет служебного листа или «" & SH_STOCK & "» — это не книга WMS"
+        GoTo DONE
+    End If
+    sh = oDoc.Sheets.getByName(SYS_SHEET)
+    cSchema = sh.getCellByPosition(1, SK_SCHEMA).getString()
+    c = sh.getCellByPosition(1, SK_LAST_SEQ)
+    If c.getType() <> com.sun.star.table.CellContentType.VALUE Then
+        res = "ERR:в копии «" & lst(0)(0) & "» не читается номер последней операции"
+        GoTo DONE
+    End If
+    cSeq = c.getValue()
+    c = sh.getCellByPosition(1, SK_NEXT_EI)
+    If c.getType() = com.sun.star.table.CellContentType.VALUE Then cEI = c.getValue() - 1
+    If sh.getCellByPosition(1, SK_INSTANCE).getString() <> SysStr(SK_INSTANCE) Then
+        res = "ERR:копия «" & lst(0)(0) & "» — от другой книги WMS"
+        GoTo DONE
+    End If
+    oDoc.close(True)
+    oDoc = Nothing
+    WmsView.ProgressSet(2)
+    last = SysNum(SK_LAST_SEQ)
+    If cSeq > last Then
+        res = "ERR:в копии операций больше (" & cSeq & "), чем в книге (" & last & ") — книга старше своей копии, проверьте «Проверка перед работой»"
+        GoTo DONE
+    End If
+    WmsJournal.ReadJournal(cSeq, True, False)
+    If gJR_Error <> "" Then
+        s = gJR_Error
+    ElseIf gJR_Order <> "" Then
+        s = gJR_Order
+    ElseIf WmsJournal.StartProblem(cSeq) <> "" Then
+        s = WmsJournal.StartProblem(cSeq)
+    ElseIf cSeq > 0 And Not gJR_HasLast Then
+        s = "в журнале нет операции " & cSeq & ", на которой сделана копия"
+    ElseIf gJR_N <> last - cSeq Or (gJR_N > 0 And gJR_MaxSeq <> last) Then
+        s = "в журнале после копии " & gJR_N & " операций, а нужно " & (last - cSeq) & " (до " & last & ")"
+    ElseIf gJR_Damaged > 0 Then
+        s = "повреждённых строк журнала: " & gJR_Damaged & " — «Журнал из зеркала»"
+    End If
+    If s <> "" Then
+        res = "ERR:от копии «" & lst(0)(0) & "» восстановить всё нельзя: " & s
+    Else
+        res = "OK:восстанавливается. Копия " & CopyLabel(lst(0)) & " открывается и читается (ЕИ: " & NumStr(cEI) _
+            & IIf(cSchema = SysStr(SK_SCHEMA), "", ", схема " & cSchema) & "); журнал после неё непрерывен: операций " & NumStr(gJR_N) _
+            & ", до последней № " & NumStr(last) & ", без разрывов и чужих строк. При беде «Вернуться к копии…» вернёт книгу к ней и доведёт по журналу."
+    End If
+DONE:
+    On Error Resume Next
+    If Not IsNull(oDoc) And Not IsEmpty(oDoc) Then oDoc.close(True)
+    If ddir <> "" Then
+        If gSfa.exists(ddir) Then gSfa.kill(ddir)
+    End If
+    WmsView.ProgressEnd()
+    StSet("DRILL", Format(Now(), "YYYY-MM-DD HH:MM") & "|" & Left(res, InStr(res, ":") - 1) & "|" & Mid(res, InStr(res, ":") + 1) & "|" & (GetSystemTicks() - t0))
+    RestoreDrill = res
+    Exit Function
+EH:
+    res = "ERR:учебное восстановление не выполнено: " & Error$
+    Resume DONE
+End Function
+
+' the line of the last drill: «20.10.2026: ✓ восстанавливается…» / «✗ …» / "" — never made
+Function DrillLine() As String
+    Dim a As Variant
+    a = Split(StGet("DRILL"), "|")
+    If UBound(a) < 2 Then Exit Function
+    DrillLine = IIf(a(1) = "OK", "✓ ", "✗ ") & Mid(a(0), 9, 2) & "." & Mid(a(0), 6, 2) & "." & Left(a(0), 4) & ": " & a(2)
+End Function
+
+' the days since the last drill (999 — never)
+Function DrillAge() As Double
+    Dim s As String
+    s = StGet("DRILL")
+    DrillAge = 999
+    If Len(s) < 10 Then Exit Function
+    DrillAge = CDbl(Now()) - CDbl(DateSerial(Val(Left(s, 4)), Val(Mid(s, 6, 2)), Val(Mid(s, 9, 2))))
+End Function
+
+' Т6: one light for the whole WMS — 0 green, 1 yellow (do it soon), 2 red (do it now); sText — what and what to do
+Function Health(ByRef sText As String) As Integer
+    Dim red As String, yel As String, a As Variant, x As String, free As Double
+    On Error GoTo EH
+    If gState <> "CLEAN" Then red = "работа остановлена (" & gState & IIf(gBlock <> "", " " & gBlock, "") & ") — «Проверка перед работой», затем «Восстановить»"
+    a = Split(StGet("DAILY"), "|")
+    If UBound(a) < 2 Then
+        yel = "проверка дня не выполнялась — «Проверить сейчас»"
+    ElseIf a(1) <> "OK" Then
+        red = red & IIf(red <> "", " · ", "") & "проверка дня: " & a(2) & " — «Проверить сейчас», затем «Проверка перед работой»"
+    ElseIf Left(a(0), 10) <> Format(Now(), "YYYY-MM-DD") Then
+        yel = "проверка дня сегодня не выполнялась — «Проверить сейчас»"
+    End If
+    free = DiskFreeMb(gBaseDir)
+    If free >= 0 And free < DISK_WARN_MB Then red = red & IIf(red <> "", " · ", "") & "на диске свободно " & Format(free, "0") & " МБ — освободите место"
+    If gJMirror <> "" And gJMirrorErr <> "" Then red = red & IIf(red <> "", " · ", "") & "зеркало журнала не пишется: " & gJMirrorErr
+    x = FlashNote()
+    If x <> "" Then yel = yel & IIf(yel <> "", " · ", "") & x
+    If UBound(CopyList()) < 0 Then yel = yel & IIf(yel <> "", " · ", "") & "копий книги в «" & BACKUP_DIR & "» нет — сохраните книгу"
+    If DrillAge() >= DRILL_DAYS Then
+        yel = yel & IIf(yel <> "", " · ", "") & "учебное восстановление " & IIf(DrillAge() >= 999, "ещё не делалось", "было " & Int(DrillAge()) & " дн. назад") _
+            & " — раз в месяц: «Учебное восстановление»"
+    ElseIf Left(StGet("DRILL"), 1) <> "" And InStr(StGet("DRILL"), "|OK|") = 0 Then
+        red = red & IIf(red <> "", " · ", "") & "учебное восстановление не прошло — " & Mid(DrillLine(), InStr(DrillLine(), ":") + 2)
+    End If
+    If gMpN > 0 And gMpNOff > 0 Then
+        yel = yel & IIf(yel <> "", " · ", "") & "ЕИ с остатком не на карте: " & gMpNOff & " — «Карта склада» → «Не на карте»"
+    End If
+EH:
+    If red <> "" Then
+        Health = 2
+        sText = "✗ Нужно сейчас: " & red & IIf(yel <> "", " · Скоро: " & yel, "")
+    ElseIf yel <> "" Then
+        Health = 1
+        sText = "! Скоро: " & yel
+    Else
+        Health = 0
+        sText = "✓ Всё в порядке: проверки, копии, журнал, диск"
+    End If
+End Function
 
 ' ================================================================ Н7 the operations put aside («Отложить хвост»)
 
@@ -1361,6 +1579,15 @@ Function ServiceRefresh() As String
     For i = 0 To 8
         sh.getCellByPosition(2, SV_STATE_ROW + i).setString(v(i))
     Next i
+    ' Т6: the light of the whole WMS above the lines; Т7: the last drill
+    Health(s)
+    sh.getCellByPosition(1, SV_STATE_ROW - 1).setString("Здоровье WMS")
+    sh.getCellByPosition(2, SV_STATE_ROW - 1).setString(s)
+    s = DrillLine()
+    If s = "" Then s = "✗ ещё не делалось — «Учебное восстановление» (раз в месяц)"
+    If DrillAge() >= DRILL_DAYS And Left(s, 1) = "✓" Then s = "✗" & Mid(s, 2) & " (" & Int(DrillAge()) & " дн. назад — пора снова)"
+    sh.getCellByPosition(1, SV_STATE_ROW + 9).setString("Учебное восстановление")
+    sh.getCellByPosition(2, SV_STATE_ROW + 9).setString(s)
     WmsView.ViewDone(sh)
     ServiceRefresh = "OK"
     Exit Function
@@ -1436,4 +1663,15 @@ Function TestSafeAttention() As Variant
     Dim rows As Variant
     SafeAttention(rows)
     TestSafeAttention = rows
+End Function
+
+' Т8: the answer the check of Calc expects replaced ("" — the real one), to see a Calc that counts otherwise
+Function TestCalcWant(s As String) As String
+    WmsInit()
+    If SysStr(SK_MODE) <> "TEST" Then
+        TestCalcWant = "REFUSED:не тестовая книга"
+        Exit Function
+    End If
+    gSfCalcWant = s
+    TestCalcWant = "OK"
 End Function

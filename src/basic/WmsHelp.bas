@@ -167,20 +167,27 @@ End Sub
 
 ' the steps one after another: the sheet opened, its button lit (yellow) while the step is read; «Закончить» stops. The steps shown
 Function Tour() As Integer
-    Dim steps As Variant, i As Integer, a As Variant, k As Integer, shp As Object, oldColor As Long
+    Dim steps As Variant, i As Integer, a As Variant, k As Integer, shp As Object, oldColor As Long, lit As Boolean, n As Integer
     steps = TourSteps()
-    For i = 0 To UBound(steps)
+    n = UBound(steps) + 1
+    For i = 0 To n - 1
         a = Split(steps(i), "|")
         If gDoc.Sheets.hasByName(CStr(a(0))) Then WmsView.GoCell(CStr(a(0)), 0, 0)
-        shp = Nothing
-        If a(1) <> "" Then shp = ButtonModel(CStr(a(0)), CStr(a(1)))
-        If Not IsNull(shp) And Not IsEmpty(shp) Then
-            oldColor = shp.BackgroundColor
-            shp.BackgroundColor = RGB(255, 230, 0)
+        lit = False
+        If a(1) <> "" Then
+            shp = ButtonModel(CStr(a(0)), CStr(a(1)))
+            If Not IsNull(shp) Then
+                oldColor = shp.BackgroundColor
+                shp.BackgroundColor = RGB(255, 230, 0)
+                lit = True
+            End If
         End If
-        k = WmsPrimeUi.UiButtons("Первый день — шаг " & (i + 1) & " из " & (UBound(steps) + 1), a(2), IIf(i < UBound(steps), Array("Дальше", "Закончить"), _
-            Array("Готово", "Закончить")), Array(1, 0))
-        If Not IsNull(shp) And Not IsEmpty(shp) Then shp.BackgroundColor = oldColor
+        If i < n - 1 Then
+            k = WmsPrimeUi.UiButtons("Первый день — шаг " & (i + 1) & " из " & n, CStr(a(2)), Array("Дальше", "Закончить"), Array(1, 0))
+        Else
+            k = WmsPrimeUi.UiButtons("Первый день — шаг " & (i + 1) & " из " & n, CStr(a(2)), Array("Готово", "Закончить"), Array(1, 0))
+        End If
+        If lit Then shp.BackgroundColor = oldColor
         Tour = i + 1
         If k <> 1 Then Exit Function
     Next i
@@ -312,7 +319,11 @@ Function IfCases() As Variant
             & WmsSafe.SH_SERVICE, _
         "Всё стало медленно|«Обслуживание»: «Советы LibreOffice», «Лишние ячейки», «Замер скорости ПК». Книга больше 200 000 движений — нужно " _
             & "«Закрытие года».|" & WmsSafe.SH_SERVICE, _
-        "Забыл сохранить, был сбой|Откройте книгу: WMS увидит операции журнала, которых нет в книге, — нажмите «Восстановить». Ничего не пропадёт.|" & SH_MAIN)
+        "Забыл сохранить, был сбой|Откройте книгу: WMS увидит операции журнала, которых нет в книге, — нажмите «Восстановить». Ничего не пропадёт.|" & SH_MAIN, _
+        "Дата не принимается|Набирайте дату полностью: 20.10.2026. Короткое «20.10» Calc понимает как число 20,1 (19.01.1900), и WMS его не примет.|" _
+            & SH_ISSUES, _
+        "«Здоровье WMS» жёлтое или красное|В строке написано, что сделать и какой кнопкой: красное — сейчас (проверка дня, диск, журнал), жёлтое — " _
+            & "в ближайшие дни (копия на флешку, учебное восстановление раз в месяц).|" & WmsSafe.SH_SERVICE)
 End Function
 
 Sub BtnWhatIf(Optional oEvent As Variant)
@@ -576,4 +587,12 @@ Private Function AnonValue(maps As Variant, cnt As Variant, nm As Variant, kind 
         n = n + 1
     End If
     AnonValue = nm(kind) & " " & x
+End Function
+
+' test seam: the folder of the desktop of «Ярлык на рабочий стол» ("" — the real one)
+Function TestHelpDesktop(sPath As String) As String
+    WmsInit()
+    If SysStr(SK_MODE) <> "TEST" Then Exit Function
+    gHpDesktopTest = sPath
+    TestHelpDesktop = "OK"
 End Function

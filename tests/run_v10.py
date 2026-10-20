@@ -2089,6 +2089,348 @@ def v28_speed():
         s.close()
 
 
+@case
+def v29_help():
+    """П1 проверка ПК, П2 «Что нового», П3 тур «Первый день», П6 «?» — раздел «Справки» каждого листа, П7 шпаргалка, П8 «Что делать,
+    если…», П10 ярлык, П4 учебная WMS (своя папка, свой журнал, рабочая книга не меняется), П12 обезличенная копия"""
+    c = "V29"
+    p = new_wms("v29")
+    s = ready(Session(p))
+    try:
+        pc = s.B("PcCheck", module="WmsHelp")
+        R.add(c, "П1: «Проверить этот ПК» — LibreOffice, макросы, запись, место, Python — с «что сделать»",
+              pc.startswith("Проверка этого ПК") and "LibreOffice" in pc and "запись в папку WMS" in pc and "место на диске" in pc and "Python" in pc, pc[:300])
+        choose(s, 2)
+        wn = s.B("WhatsNew", module="WmsHelp")
+        act = s.doc.getCurrentController().getActiveSheet().getName()
+        R.add(c, "П2: «Что нового в 1.0» — 6 карточек, «Показать» открывает лист карточки", len(s.B("WhatsNewCards", module="WmsHelp")) == 6 and wn == 2
+              and act == "Поиск", f"{wn}; {act}")
+        col0 = s.B("ButtonModel", "Заказы", "btnReceiveWin", module="WmsHelp").BackgroundColor
+        tr = s.B("Tour", module="WmsHelp")
+        col1 = s.B("ButtonModel", "Заказы", "btnReceiveWin", module="WmsHelp").BackgroundColor
+        R.add(c, "П3: тур «Первый день» — 7 шагов по листам с подсветкой кнопки, цвет кнопки возвращён", tr == 7 and col0 == col1, f"{tr}; {col0} {col1}")
+        bad = []
+        for name in ("Главная", "Заказы", "Иной приход", "Приход авто", "Выдачи", "Возврат", "Корректировки", "Поиск", "Карта склада", "Наличие",
+                     "Снабжение", "Комплекты", "Отчёты", "Обслуживание"):
+            hg = s.B("HelpGo", name, module="WmsHelp")
+            row = int(hg[3:]) if hg.startswith("OK:") else -1
+            txt = s.doc.Sheets.getByName("Справка").getCellByPosition(0, row).getString() if row >= 0 else ""
+            if not txt.startswith(s.B("HelpTopic", name, module="WmsHelp")) or row <= 0:
+                bad.append((name, hg, txt[:30]))
+        marks = [n for n in ("Заказы", "Выдачи", "Наличие", "Поиск", "Обслуживание") if "btnHelpHere" in form_buttons(s.doc.Sheets.getByName(n))]
+        R.add(c, "П6: «?» на листах — «Справка» открывается на разделе своего листа (новое руководство 1.0 с разделами и словарём)",
+              not bad and len(marks) == 5 and "13. Словарь" in [s.doc.Sheets.getByName("Справка").getCellByPosition(0, r).getString() for r in range(0, 400)],
+              f"{bad}; {marks}")
+        cs = s.B("CheatSheet", module="WmsHelp")
+        pr = [s.doc.Sheets.getByName("Печать").getCellByPosition(0, r).getString() for r in range(0, 40)]
+        R.add(c, "П7: шпаргалка A4 на «Печати»; П8: «Что делать, если…» — 9 ситуаций с ответом и переходом",
+              cs.startswith("OK") and "Начало дня" in pr and "Если красное" in pr and len(s.B("IfCases", module="WmsHelp")) == 11, str(pr[:8]))
+        desk = os.path.join(OUT, "cases", "v29_desktop")
+        shutil.rmtree(desk, ignore_errors=True)
+        s.B("TestHelpDesktop", desk, module="WmsHelp")
+        sc = s.B("Shortcut", module="WmsHelp")
+        f = os.path.join(desk, "WMS склад.desktop")
+        R.add(c, "П10: ярлык «WMS склад» открывает эту книгу", sc.startswith("OK:") and os.path.exists(f) and p in open(f, encoding="utf-8").read(), sc[:160])
+        issue(s, 1, "ЕИ-00000001", "2", "ива")
+        s.doc.store()
+        h0 = {g: hashlib.sha256(open(g, "rb").read()).hexdigest() for g in glob.glob(os.path.join(s.jdir, "*.csv"))}
+        mt = s.B("MakeCopy", "TRAINING", False, module="WmsHelp")
+        ma = s.B("MakeCopy", "ANON", False, module="WmsHelp")
+        q1 = s.stock(1)
+    finally:
+        s.close()
+    tp = re.search(r"(/[^\n]*?\.ods)", mt).group(1) if mt.startswith("OK:") else ""
+    ap = re.search(r"(/[^\n]*?\.ods)", ma).group(1) if ma.startswith("OK:") else ""
+    t = ready(Session(tp)) if tp else None
+    try:
+        st = t.state() if t else {}
+        title = t.doc.Sheets.getByName("Дашборд").getCellByPosition(8, 0).getString() if t else ""
+        t.B("DashRefresh", module="WmsDash") if t else None
+        title = t.doc.Sheets.getByName("Дашборд").getCellByPosition(8, 0).getString() if t else ""
+        ti = issue(t, 2, "ЕИ-00000001", "5", "ива") if t else ""
+        tj = os.listdir(os.path.join(os.path.dirname(tp), "WMS_Journal")) if tp else []
+        R.add(c, "П4: учебная WMS — папка «…_УЧЕБНАЯ», «работа разрешена», «УЧЕБНАЯ WMS» на «Дашборде», свой журнал; проводка в ней не трогает "
+                 "журнал рабочей книги", mt.startswith("OK:") and st.get("STATE") == "CLEAN" and "УЧЕБНАЯ" in title and ti.startswith("OK") and tj
+              and h0 == {g: hashlib.sha256(open(g, "rb").read()).hexdigest() for g in glob.glob(os.path.join(os.path.dirname(p), "WMS_Journal", "*.csv"))},
+              f"{mt[:120]}; {st}; {title[:60]}; {ti[:40]}; {tj}")
+    finally:
+        if t:
+            t.close()
+    a = ready(Session(ap)) if ap else None
+    try:
+        st = a.state() if a else {}
+        nm = [a.doc.Sheets.getByName("Наличие").getCellByPosition(1, r).getString() for r in range(1, 6)] if a else []
+        rc = [a.doc.Sheets.getByName("Получатели").getCellByPosition(1, r).getString() for r in range(1, 4)] if a else []
+        sc2 = a.B("ActionSelfCheck") if a else ""
+        R.add(c, "П12: обезличенная копия — наименования «Товар N», получатели «Получатель N», количества как в книге, «работа разрешена», "
+                 "самопроверка без ошибок", ma.startswith("OK:") and st.get("STATE") == "CLEAN" and all(x.startswith("Товар ") for x in nm)
+              and all(x.startswith("Получатель ") for x in rc) and a.stock(1) == q1 and sc2.startswith("САМОПРОВЕРКА WMS: ошибок 0"),
+              f"{ma[:120]}; {st}; {nm}; {rc}; {sc2[:120]}")
+    finally:
+        if a:
+            a.close()
+
+
+@case
+def v30_upgrade_zoo():
+    """Т4: рабочая книга 0.7.2 (собрана исходниками 0.7.2, перенос старой таблицы и рабочий день) в папке с пробелами и кириллицей
+    обновляется до 1.0: проверка, сборка (сверка каждой ячейки), «сделать рабочей»; каждый ЕИ и его остаток те же, старая книга и журнал
+    не тронуты, новые листы 1.0 на месте, проверка дня и цепочка журнала в порядке"""
+    import run_prime
+    c = "V30"
+    book, facts = run_prime.warehouse()
+    d = os.path.join(OUT, "cases", "v30 Склад 2026")
+    shutil.rmtree(d, ignore_errors=True)
+    old = os.path.join(d, "Рабочая папка WMS")
+    shutil.copytree(os.path.dirname(book), old, ignore=shutil.ignore_patterns("WMS_TOOLBOX", "backup", "WMS_Backups"))
+    p = os.path.join(old, os.path.basename(book))
+    s = Session(p)
+    try:
+        if "REG=other" in s.B("StateDump"):
+            s.B("ActionRegisterHere", False)
+        st0 = s.B("StateDump")
+        stk = s.doc.Sheets.getByName("Наличие")
+        n_ei = int(s.sysv("NEXT_EI")) - 1
+        before = [tuple(r[:6]) for r in stk.getCellRangeByPosition(0, 1, 7, n_ei).getDataArray()]
+    finally:
+        s.close(save=True)
+    h0 = run_prime.sha(p)
+    j0 = {f: run_prime.sha(f) for f in glob.glob(os.path.join(old, "WMS_Journal", "*.csv"))}
+    rc0, o0 = run_prime.upgrade("check", p)
+    new = os.path.join(d, "Новая WMS 1.0")
+    rc1, o1 = run_prime.upgrade("build", p, "--to", new)
+    rc2, o2 = run_prime.upgrade("promote", "--to", new)
+    rep = open(os.path.join(new, "UPGRADE_REPORT.md"), encoding="utf-8").read() if os.path.exists(os.path.join(new, "UPGRADE_REPORT.md")) else ""
+    R.add(c, "Т4: папки с пробелами и кириллицей — проверка, сборка (0 расхождений ячеек, самопроверка, «остаток = движения»), «сделать рабочей»; "
+             "старая книга и журнал побайтно те же", "STATE=CLEAN" in st0 and rc0 == 0 and rc1 == 0 and rc2 == 0 and "расхождений: 0" in rep
+          and run_prime.sha(p) == h0 and {f: run_prime.sha(f) for f in glob.glob(os.path.join(old, "WMS_Journal", "*.csv"))} == j0,
+          f"{st0[:80]}; {o0[-150:]}; {o1[-200:]}; {o2[-150:]}")
+    nb = os.path.join(new, os.path.basename(p))
+    s = ready(Session(nb))
+    try:
+        stk = s.doc.Sheets.getByName("Наличие")
+        after = [tuple(r[:6]) for r in stk.getCellRangeByPosition(0, 1, 7, n_ei).getDataArray()]
+        diff = [(a, b) for a, b in zip(before, after) if a != b]
+        sheets = [n for n in ("Обслуживание", "Резервы", "_PROP", "Комплекты", "Номенклатура", "Отчёты", "Печать") if s.doc.Sheets.hasByName(n)]
+        dc = s.B("DailyCheck", True, module="WmsSafe")
+        ei1 = [r[0] for r in before if isinstance(r[4], float) and r[4] >= 1][0]
+        rc = s.doc.Sheets.getByName("Получатели")
+        rr = 1
+        while rc.getCellByPosition(1, rr).getString():
+            rr += 1
+        rc.getCellByPosition(1, rr).setString("Петров")
+        s.I("OnRecipientsChange")
+        i1 = issue(s, 400, ei1, "1", "Петров")
+        n_ch, probs = chain_problems(os.path.join(new, "WMS_Journal"))
+        R.add(c, f"Т4: в книге 1.0 каждый из {n_ei} ЕИ — тот же номер, наименование, артикул, единица, остаток и место; новые листы 1.0; "
+                 "«работа разрешена», проверка дня без замечаний; новая операция пишется с контрольной цепочкой",
+              s.state().get("STATE") == "CLEAN" and n_ei > 10 and not diff and len(sheets) == 7 and dc.split("|")[1] == "OK" and i1.startswith("OK")
+              and n_ch >= 1 and not probs, f"{i1[:120]}; {n_ch} {probs}; {s.state().get('STATE')}; {diff[:3]}; {sheets}; {dc[:160]}")
+        P, inf, _ = s.adjcheck(0, initial={}, legacy_mn_empty=False)
+        R.add(c, "оракул (журнал воспроизведён независимо): книга 0.7.2, обновлённая до 1.0", not P, f"{inf.get('ops')} операций; {P[:4]}")
+    finally:
+        s.close()
+
+
+def reopen_after_crash(p, s):
+    s.kill()
+    for f in glob.glob(os.path.join(os.path.dirname(p), ".~lock.*#")):
+        os.remove(f)
+    s = ready(Session(p))
+    s.B("ActionForceUnlock")
+    return s
+
+
+@case
+def v31_crash_new_ops():
+    """Т2: сбой посреди новых операций 1.0 — разделение ЕИ (SPLIT), возврат поставщику (SUP_RET), сборка комплекта (KIT_BUILD), свойства
+    ЕИ (EI_PROP): до журнала — операции нет (откат), после журнала — «Восстановить» доводит её; остатки, номера и оракул сходятся"""
+    c = "V31"
+    out = []
+    for op in ("SPLIT", "SUP_RET", "KIT_BUILD", "EI_PROP"):
+        for point in (2, 3):
+            p = new_wms(f"v31_{op}_{point}")
+            s = ready(Session(p))
+            order(s, 1, "1", "Кабель ВВГ", qty="10", unit="м", art="К-3", J=50.0)
+            receive(s, 1, "10", place="7-1-1")
+            a = ords(s, 1)[21]
+            na = int(a[3:])
+            if op == "KIT_BUILD":
+                kt = s.doc.Sheets.getByName("Комплекты")
+                for j, v in enumerate(("Набор", "Кабель ВВГ", "К-3", 2.0, "м")):
+                    cell = kt.getCellByPosition(j, 1)
+                    cell.setValue(v) if isinstance(v, float) else cell.setString(v)
+            s.doc.store()
+            nxt = int(s.sysv("NEXT_EI"))
+            s.B("TestSetFault", point, 2)
+            if op == "SPLIT":
+                r = s.B("SplitPost", a, "3", "7-1-2", "часть", module="WmsDaily")
+            elif op == "SUP_RET":
+                r = s.B("SupReturnPost", a, "2", "брак", "ВП-1", False, module="WmsSupply")
+            elif op == "KIT_BUILD":
+                r = s.B("KitBuild", "Набор", 2.0, "8-1-1", serial(), "к монтажу", module="WmsKit")
+            else:
+                r = s.B("PropSet", a, "SN-1", "", "", module="WmsItem")
+            s = reopen_after_crash(p, s)
+            st1 = (s.state().get("STATE"), s.state().get("BLOCK"))
+            if st1[1] == "TAIL":
+                s.B("ActionRecover")
+            P, inf, _ = s.adjcheck(0)
+            bal = s.stock(na)
+            if point == 3:
+                ok = {"SPLIT": bal == 7.0 and s.stock(nxt) == 3.0, "SUP_RET": bal == 8.0, "KIT_BUILD": bal == 6.0 and s.stock(nxt) == 2.0,
+                      "EI_PROP": s.doc.Sheets.getByName("_PROP").getCellByPosition(1, na).getString() == "SN-1"}[op]
+            else:
+                ok = {"SPLIT": bal == 10.0 and int(s.sysv("NEXT_EI")) == nxt, "SUP_RET": bal == 10.0, "KIT_BUILD": bal == 10.0 and int(s.sysv("NEXT_EI")) == nxt,
+                      "EI_PROP": s.doc.Sheets.getByName("_PROP").getCellByPosition(1, na).getString() == ""}[op]
+            out.append((op, point, r[:12], st1, s.state().get("STATE"), ok, bal, not P, P[:2]))
+            s.close()
+    R.add(c, "сбой до журнала — операции нет; после журнала — «Восстановить» доводит; «работа разрешена», оракул без расхождений",
+          all(x[2] == "CRASH-SIM" and x[4] == "CLEAN" and x[5] and x[7] for x in out), str(out))
+
+
+@case
+def v32_random_input():
+    """Т11: тысячи случайных строк в разбор количества и места — ни одной внутренней ошибки; сотня случайных выдач, возвратов и
+    списаний частями, процентами и числом — остаток никогда не уходит в минус, отказ — понятный, оракул (вместе с проверкой частей
+    и процентов, Т5) без расхождений"""
+    import random
+    c = "V32"
+    rnd = random.Random(20261020)
+    alphabet = list("0123456789 ,.-/%кансмшт;:+") + ["1,5", "кан", "25%", "мм", "1/2", "5.12.3", "Р5", "С12", "ЯЗ", "\t", "ё", "0", "-1", "1e5"]
+    s = ready(Session(new_wms("v32")))
+    try:
+        samples = ["".join(rnd.choice(alphabet) for _ in range(rnd.randint(0, 9))) for _ in range(1500)]
+        res = s.B("TestFuzzParse", tuple(samples), module="WmsItem")
+        R.add(c, "1500 случайных строк в разбор количества, частей и места — без внутренней ошибки", res.startswith("OK:1500"), res[:300])
+        order(s, 1, "1", "Незамерзайка (4 канистры)", qty="5")
+        receive(s, 1, "5", place="1-1-1")
+        a = ords(s, 1)[21]
+        na = int(a[3:])
+        s.B("PackSet", a, "4", "кан", "", module="WmsPack")
+        qs = ["1 кан", "2 канистры", "0,25", "1", "25%", "10%", "3 кан", "0,5", "кан", "1,5 кан", "7", "-1", "abc", "100%", "0"]
+        neg, internal, posted, r = [], [], 0, 1
+        for k in range(60):
+            q = rnd.choice(qs)
+            kind = rnd.choice(("ISSUE", "ISSUE", "WRITE_OFF"))
+            if kind == "ISSUE":
+                put(s, "Выдачи", r, L=a, E=q, H=serial(), I="ива")
+                x = s.I("IssuePostRow", r)
+            else:
+                put(s, "Корректировки", r, B="Списание", C=a, G=q, K=serial(), L="проверка")
+                x = s.B("AdjustPostRow", r, module="WmsAdjust")
+            r += 1
+            if x.startswith("OK"):
+                posted += 1
+            elif x.startswith("ERR-SYS") or "внутрен" in x.lower() or "строка " in x and "ошибка" in x.lower() and "Basic" in x:
+                internal.append(x[:100])
+            if s.stock(na) < -0.0000005:
+                neg.append((k, q, s.stock(na)))
+        P, inf, _ = s.adjcheck(0)
+        R.add(c, "60 случайных выдач и списаний частями, процентами, числом: остаток не уходит в минус, внутренних ошибок нет, оракул и проверка "
+                 "частей/процентов без расхождений", not neg and not internal and posted > 5 and not P and s.stock(na) >= 0
+              and inf.get("parts_ops", 0) + inf.get("pct_ops", 0) > 0,
+              f"проведено {posted}; {neg[:3]}; {internal[:3]}; {P[:3]}; остаток {s.stock(na)}; частями {inf.get('parts_ops')}, процентом {inf.get('pct_ops')}")
+    finally:
+        s.close()
+
+
+@case
+def v33_health():
+    """Т5 сверка частей и процентов по журналу ловит неверное количество; Т8 проверка формул Calc (в проверке дня и при новой
+    версии LibreOffice; Calc, считающий иначе, — замечание); Т7 учебное восстановление: свежая копия открывается отдельно, журнал
+    после неё непрерывен — «восстанавливается», разрыв журнала — понятный отказ, рабочая книга не меняется; Т6 светофор
+    «Здоровье WMS» на «Обслуживании»"""
+    import adjust_oracle
+    c = "V33"
+    # ---------------------------------------------------------------- Т5: the oracle itself on crafted lines
+    tmp = os.path.join(OUT, "v33_parts")
+    shutil.rmtree(tmp, ignore_errors=True)
+    os.makedirs(tmp)
+
+    def jl(seq, body):
+        b = f"J1;{seq};2026-10-20 10:00:00;INSTX;{body}"
+        return f"{b};END;{len(b)}"
+    lines = [jl(1, "ISSUE;EI=ЕИ-00000001;QTY=0.25;PARTS=1;PART_UNIT=кан;PART_N=4"),
+             jl(2, "ISSUE;EI=ЕИ-00000001;QTY=0.3;PARTS=1;PART_UNIT=кан;PART_N=4"),
+             jl(3, "WRITE_OFF;EI=ЕИ-00000001;QTY=1.25;PCT=25;PCT_BASE=5"),
+             jl(4, "WRITE_OFF;EI=ЕИ-00000001;QTY=1.5;PCT=25;PCT_BASE=5"),
+             jl(5, "ISSUE;EI=ЕИ-00000001;QTY=3;HOW=ALL")]
+    open(os.path.join(tmp, "WMS_journal_2026-10.csv"), "w", encoding="utf-8", newline="\n").write("\n".join(lines) + "\n")
+    probs = []
+    np_, nc_ = adjust_oracle._parts_check(tmp, {"INSTANCE_ID": "INSTX"}, probs.append)
+    R.add(c, "Т5: сверка по журналу — количество = части ÷ фасовка, процент × приход; неверные строки (seq 2, 4) пойманы, верные и «весь остаток» — нет",
+          np_ == 2 and nc_ == 2 and len(probs) == 2 and "seq 2" in probs[0] and "seq 4" in probs[1], f"{np_} {nc_} {probs}")
+    s = ready(Session(new_wms("v33")))
+    try:
+        # ---------------------------------------------------------------- Т8
+        cc = s.B("CalcCheck", module="WmsSafe")
+        dc = s.B("DailyCheck", True, module="WmsSafe")
+        s.B("TestSetLoVersion", "99.1.0", module="WmsStatus")
+        st0 = s.B("StGet", "LOVER", module="WmsSafe")
+        at = s.B("CalcAtStart", module="WmsSafe")
+        st1 = s.B("StGet", "LOVER", module="WmsSafe")
+        s.B("TestCalcWant", "1|2|3", module="WmsSafe")
+        bad = s.B("CalcCheck", module="WmsSafe")
+        dc2 = s.B("DailyCheck", True, module="WmsSafe")
+        s.B("TestCalcWant", "", module="WmsSafe")
+        s.B("TestSetLoVersion", "", module="WmsStatus")
+        R.add(c, "Т8: формулы с известным ответом сходятся; проверка дня включает их; новая версия LibreOffice проверяется при запуске; Calc, "
+                 "считающий иначе, — замечание проверки дня (проведение не затронуто)",
+              cc == "" and "|OK|" in dc and "формулы Calc" in dc and at == "" and st1 == "99.1.0" and st0 != "99.1.0"
+              and "считает не так" in bad and "|FAIL|" in dc2 and "проведение не затронуто" in dc2,
+              f"{cc!r}; {dc[:160]}; {st0!r}->{st1!r} {at!r}; {bad[:160]}; {dc2[:200]}")
+        s.B("DailyCheck", True, module="WmsSafe")
+        # ---------------------------------------------------------------- Т7
+        order(s, 1, "1", "Кабель ВВГ", qty="10", unit="м", art="К-3", J=50.0)
+        receive(s, 1, "10", place="7-1-1")
+        a = ords(s, 1)[21]
+        s.doc.store()
+        s.B("BackupNow", "manual", module="WmsBackup")
+        for r in (1, 2):
+            issue(s, r, a, "1", "ива")
+        s.doc.store()
+        book = s.doc.getURL()
+        h0 = hashlib.sha256(open(uno_path(book), "rb").read()).hexdigest()
+        seq = s.sysv("LAST_SEQ")
+        dr = s.B("RestoreDrill", module="WmsSafe")
+        drill_dir = os.path.join(os.path.dirname(uno_path(book)), "WMS_State", "drill")
+        h1 = hashlib.sha256(open(uno_path(book), "rb").read()).hexdigest()
+        s.B("ServiceRefresh", module="WmsSafe")
+        sv = s.doc.Sheets.getByName("Обслуживание")
+        line_ok = sv.getCellByPosition(2, 12).getString()
+        light_ok = sv.getCellByPosition(2, 2).getString()
+        R.add(c, "Т7: учебное восстановление — свежая копия открывается отдельно, журнал после неё (2 операции) непрерывен: «восстанавливается»; "
+                 "папка учения убрана, рабочая книга та же; строка на «Обслуживании»",
+              dr.startswith("OK:восстанавливается") and "операций 2, до последней № 3" in dr
+              and not os.path.exists(drill_dir) and h0 == h1 and s.sysv("LAST_SEQ") == seq and s.state().get("STATE") == "CLEAN"
+              and line_ok.startswith("✓") and "восстанавливается" in line_ok,
+              f"{dr[:300]}; {os.path.exists(drill_dir)}; {h0 == h1}; {line_ok[:120]}")
+        # a gap in the journal after the copy: the drill says so (the file put back after)
+        jf = sorted(glob.glob(os.path.join(s.jdir, "WMS_journal_*.csv")))[-1]
+        raw = open(jf, "rb").read()
+        ls = raw.split(b"\n")
+        k = next(i for i, x in enumerate(ls) if x.startswith(f"J1;{int(seq) - 1};".encode()))
+        open(jf, "wb").write(b"\n".join(ls[:k] + ls[k + 1:]))
+        try:
+            gap = s.B("RestoreDrill", module="WmsSafe")
+        finally:
+            open(jf, "wb").write(raw)
+        s.B("ServiceRefresh", module="WmsSafe")
+        light_bad = sv.getCellByPosition(2, 2).getString()
+        dr2 = s.B("RestoreDrill", module="WmsSafe")
+        s.B("ServiceRefresh", module="WmsSafe")
+        light_back = sv.getCellByPosition(2, 2).getString()
+        R.add(c, "Т7: разрыв журнала после копии — «восстановить всё нельзя» с причиной; Т6: светофор «Здоровье WMS» — красный с тем, что "
+                 "сделать; после исправления — снова не красный",
+              gap.startswith("ERR:") and "восстановить всё нельзя" in gap and light_bad.startswith("✗") and "учебное восстановление" in light_bad
+              and dr2.startswith("OK:") and light_back[:1] in ("✓", "!") and light_ok[:1] in ("✓", "!") and s.state().get("STATE") == "CLEAN",
+              f"{gap[:200]}; {light_bad[:200]}; {light_ok[:200]}; {light_back[:200]}")
+        oracle(c, s, "после учений")
+    finally:
+        s.close()
+
+
 # ================================================================ runner
 
 def main():

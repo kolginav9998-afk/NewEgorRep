@@ -140,6 +140,9 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, legacy_mn_em
         bad(f"NEXT_ADJ {v!r}: не выше выданных № корректировок ({top})")
     elif base is None and v != top + 1 and not _abandon_floor(jdir, sysv, v):
         bad(f"NEXT_ADJ {v}: ожидалось {top + 1}")
+    # ------------------------------------------------------------ Т5: the parts and the percents against the quantity
+    parts_n, pct_n = _parts_check(jdir, sysv, bad)
+    info.update(dict(parts_ops=parts_n, pct_ops=pct_n))
     info.update(dict(adjust_ops=sum(1 for e in st["ops"] if e["type"] in ro.ADJUST_TYPES), adjustments=len(adjs),
                      adjust_live=sum(1 for a in adjs.values() if a["state"] == "LIVE"), adjust_copies=copies, adjust_open_rows=open_rows))
     return P, info, hist
@@ -160,3 +163,44 @@ def _abandon_floor(jdir, sysv, v):
         if e["type"] in ro.ADJUST_TYPES and f.get("ADJ", "").isdigit():
             mx = max(mx, int(f.get("ADJ_KIT") or f["ADJ"]) + 1)
     return v == mx
+
+
+def _parts_check(jdir, sysv, bad):
+    """Т5: an independent check of the quantities given in parts or in percents, by the journal alone: the quantity of the
+    operation (the new balance for a count) = the parts ÷ the parts in 1 unit of the document (within the rounding of the
+    quantity to 0,001 and of the parts to 0,01; a return in parts that closes the issue exactly may take the issued quantity),
+    and = the percent × what came in ÷ 100. «Весь остаток» (HOW=ALL) is not a number typed and is not checked."""
+    import journal_oracle
+    entries, _ = journal_oracle.read_journal(jdir)
+    inst = sysv.get("INSTANCE_ID")
+    n_parts = n_pct = 0
+
+    def num(f, k):
+        try:
+            return float(f[k])
+        except (KeyError, ValueError):
+            return None
+
+    for e in entries:
+        if e["inst"] != inst:
+            continue
+        f = e["fields"]
+        if f.get("HOW") == "ALL":
+            continue
+        q = num(f, "FACT") if "FACT" in f else num(f, "QTY")
+        if q is None:
+            continue
+        q = abs(q)
+        parts, pn = num(f, "PARTS"), num(f, "PART_N")
+        if parts is not None and pn:
+            n_parts += 1
+            want = parts / pn
+            if abs(q - want) > 0.0015 + 0.006 / pn:
+                bad(f"seq {e['seq']} {e['type']}: количество {q} ≠ {f['PARTS']} {f.get('PART_UNIT', '')} ÷ {f['PART_N']} = {want:.6g}")
+        pct, pb = num(f, "PCT"), num(f, "PCT_BASE")
+        if pct is not None and pb is not None:
+            n_pct += 1
+            want = pct * pb / 100
+            if abs(q - want) > 0.0006:
+                bad(f"seq {e['seq']} {e['type']}: количество {q} ≠ {f['PCT']} % от {f['PCT_BASE']} = {want:.6g}")
+    return n_parts, n_pct

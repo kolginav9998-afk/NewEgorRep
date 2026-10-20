@@ -863,6 +863,9 @@ Function ParseDateTextAs(ByVal s As String, sField As String, ByRef d As Double,
     s = Trim(s)
     a = Split(s, ".")
     msg = sField & ": «" & s & "» не является датой (формат дд.мм.гггг)"
+    If UBound(a) = 1 Then
+        If IsDigits(CStr(a(0))) And IsDigits(CStr(a(1))) Then msg = sField & ": «" & s & "» — дата без года; наберите её полностью, например 25.09.2026"
+    End If
     If UBound(a) <> 2 Then Exit Function
     If Not IsDigits(CStr(a(0))) Or Not IsDigits(CStr(a(1))) Or Not IsDigits(CStr(a(2))) Then Exit Function
     If Len(a(0)) > 2 Or Len(a(1)) > 2 Or Len(a(2)) <> 4 Then Exit Function
@@ -885,6 +888,9 @@ End Function
 Private Function DateOk(x As Double, sField As String, ByRef d As Double, ByRef msg As String) As Boolean
     If x < CDbl(DateSerial(2000, 1, 1)) Or x > CDbl(DateSerial(2099, 12, 31)) Then
         msg = sField & " вне допустимого диапазона 2000–2099"
+        ' 1.0 (Т1): «20.10» typed without the year — Calc of the Russian locale reads it as the number 20,1 (19.01.1900)
+        If x >= 1 And x < 400 Then msg = sField & ": «" & Format(CDate(x), "DD.MM.YYYY") & "» — так Calc понял дату, набранную без года " _
+            & "(«20.10»); наберите её полностью, например 25.09.2026"
         Exit Function
     End If
     d = x

@@ -1,29 +1,30 @@
 """Upgrade of a working WMS book to this release with all its data and its journal.
 
-PRIME 0.8 — a book of 0.7.0 … 0.7.2 (schema WMS-SYS-4): «Обновление из текущей WMS» (D-091). The book of 0.7 is only read;
-the book of 0.8 is made in a new empty folder; nothing becomes the working WMS until PROMOTE; the rollback is the old book.
+1.0 (as PRIME 0.8 before it) — a book of 0.7.0 … 0.7.2 (schema WMS-SYS-4): «Обновление из текущей WMS» (D-091). The book of 0.7
+is only read; the book of this release is made in a new empty folder; nothing becomes the working WMS until PROMOTE; the rollback is the old book.
 
     python3 tools/upgrade.py check BOOK                          # the checks only, nothing is written anywhere
     python3 tools/upgrade.py build BOOK --to NEW_FOLDER [--rehearsal]
     python3 tools/upgrade.py promote --to NEW_FOLDER             # «СДЕЛАТЬ РАБОЧЕЙ»
     python3 tools/upgrade.py status --to NEW_FOLDER
 
-CHECK    the book closed (no WMS_Journal/wms.lock, no lock file of LibreOffice), schema WMS-SYS-4, no unfinished operation
+CHECK    the book closed (no WMS_Journal/wms.lock, no lock file of LibreOffice), schema WMS-SYS-4 (a book of PRIME 0.8 — WMS-SYS-5 with the core 0.8.0-prime —
+         is refused with an explanation, nothing changed), no unfinished operation
          (the marker, the before-image), the journal holds no operation beyond LAST_SEQ (a tail), no sheet protected with a
          password other than the WMS one, enough free space; SHA-256 of the book and of every journal file.
 BUILD    after a clean CHECK, into NEW_FOLDER (it must not exist or be empty): a byte copy of the book and of the journal
-         (without the lock; SHA-256 equal to the originals); on the copy, with macros disabled, the changes of 0.8 — the Basic
+         (without the lock; SHA-256 equal to the originals); on the copy, with macros disabled, the changes of this release — the Basic
          modules, _SYS (schema WMS-SYS-5, UPGRADE_FROM), the registry of the transfer _LEG filled from the journal, the sheet
-         «Сверка переноса», the buttons of «Наличие», «Главная» and «Справка» of 0.8, every protection as before. Then VERIFY:
+         «Сверка переноса», the buttons of «Наличие», «Главная» and «Справка» of this release, the pages and sheets of 1.0, every protection as before. Then VERIFY:
          every cell of every sheet of the old book against the new one (only the cells of the upgrade may differ: the schema,
-         the save stamp, UPGRADE_FROM; «Главная» and «Справка» — pages without data — are those of 0.8; the pages «Дашборд»,
+         the save stamp, UPGRADE_FROM; «Главная» and «Справка» — pages without data — are those of this release; the pages «Дашборд»,
          «Поиск», «Карта склада», «Топология» are new), the protections and the visibility of the sheets, the journal byte for
-         byte, _LEG against the journal; a working copy of the new book opened by WMS 0.8 («работа разрешена», self-check
+         byte, _LEG against the journal; a working copy of the new book opened by the new WMS («работа разрешена», self-check
          without errors, «остаток = сумма движений», the independent oracle replaying the journal — a discrepancy the old book
          already had is named, a new one stops); the old book and its journal are hashed again (they must be unchanged). Any
          failure: the new book and its journal are removed, the reports stay. Rehearsal (--rehearsal): the same, never promoted.
 PROMOTE  the new book unchanged since BUILD, the old book unchanged since BUILD (no operation was posted in it after the
-         copy) and closed: WMS 0.8 opens the new book, it becomes the working file in its folder, self-check, saved, opened
+         copy) and closed: the new WMS opens the new book, it becomes the working file in its folder, self-check, saved, opened
          again. The old book is never touched — it is the rollback; 1.0: a lock of WMS is put into its journal folder (the old
          WMS opens blocked: «ЭТА КНИГА БОЛЬШЕ НЕ РАБОЧАЯ»; «Снять блокировку WMS» in it is the way back).
 Reports in NEW_FOLDER: UPGRADE_REPORT.md (everything), UPGRADE_SUMMARY.txt (without the data of the warehouse: counts,
@@ -338,12 +339,16 @@ def step_08(doc, leg, from_text, done):
     B.stock_view_10(doc, sheets)
     B.hotkeys_10(doc)
     B.rebuild_main(doc, sheets.getByName(B.MAIN))
+    # «Главная» of this release is built anew above: its «?» (П6) is put back
+    B.help_buttons_10(doc, sheets)
     done.append(f"страницы «{B.DASH}», «{B.FIND}», «{B.MAP}» и лист «{B.TOPO}» (вставьте туда схему склада); «{B.MAIN}» этого выпуска (кнопки к страницам)")
     done.append(f"1.0: справочники «{B.SUPPLIERS}» и «{B.GOODS}» (пополняются кнопками из «{B.ORDERS}» и «{B.STOCK}»), страницы «{B.SUPPLY}» и «{B.PRINT}»")
     done.append(f"1.0: справочник «{B.KITS}» (состав комплектов: «Собрать комплект…», «Выдать комплект…»)")
     done.append(f"1.0: лист «{B.RESERVES}» (резерв ЕИ под получателя или объект), служебный {B.PROP} (серийный номер, «годен до») и колонка Q "
                 f"«{B.GOODS_RET_HEADER}» в «{B.GOODS}»; этикетки ЕИ со штрихкодом, фото позиции из папки «WMS_Фото»")
     done.append(f"1.0: страница «{B.REPORTS}» (остаток на дату, оборотная ведомость, выгрузка, сверка с 1С, закрытие месяца) и служебный {B.CLOSE}")
+    done.append(f"1.0: страница «{B.SERVICE}» (здоровье WMS, копия на флешку, зеркало журнала, возврат к копии, проверка дня, учебное "
+                "восстановление, скорость и обслуживание книги)")
     return [B.LEGREP, B.LEG, B.PACK, B.DASH, B.FIND, B.MAP, B.SUPPLY, B.PRINT, B.CLOSE, B.REPORTS, B.PROP, B.SERVICE]
 
 
@@ -453,6 +458,19 @@ def copy_journal(src_dir, dst_dir):
 
 # ================================================================ 0.7 → 0.8: CHECK
 
+def same_schema_stop(core, names):
+    """the reason to stop for a book of the schema of this release: this release itself, or the intermediate PRIME 0.8 (the same
+    schema, an older core) — the master carries a book of 0.7 over, not a book of 0.8. The core is written at the first start;
+    a book never started has none, so a book of this release is also told by a page only it has («Обслуживание»)"""
+    v = B.core_versions()
+    if core == v["WMS_CORE_VERSION"] or (not core and B.SERVICE in names):
+        return f"книга уже версии {v['WMS_PRODUCT_VERSION']} (схема {B.SCHEMA}) — обновлять нечего"
+    return (f"книга версии {core or 'неизвестной'} (промежуточный выпуск PRIME 0.8, схема {B.SCHEMA}) — мастер переносит в "
+            f"{v['WMS_PRODUCT_VERSION']} книгу 0.7 (0.7.0 … 0.7.2). Ничего не изменено. Обновите исходную книгу 0.7.2 (переход на 0.8 её не "
+            "менял); если в 0.8 уже проводились операции, не переносите их вручную — сообщите разработчику, перенос — отдельной проверенной "
+            "процедурой")
+
+
 def check_source(o, book):
     """(stops, warnings, facts) of a book of 0.7; nothing is written (the book is opened read-only, macros disabled)"""
     stops, warns, facts = [], [], {}
@@ -486,7 +504,7 @@ def check_source(o, book):
         facts.update(schema=sv.get("SCHEMA"), instance=sv.get("INSTANCE_ID"), mode=sv.get("MODE"), last_seq=int(sv.get("LAST_SEQ") or 0),
                      tx=sv.get("TX_STATE"), bi=sv.get("TX_BEFORE_IMAGE"), core=sv.get("CORE_VERSION"), next_ei=int(sv.get("NEXT_EI") or 0))
         if facts["schema"] == B.SCHEMA:
-            stops.append(f"книга уже версии {B.core_versions()['WMS_PRODUCT_VERSION']} (схема {B.SCHEMA}) — обновлять нечего")
+            stops.append(same_schema_stop(facts["core"], [doc.Sheets.getByIndex(i).Name for i in range(doc.Sheets.getCount())]))
         elif facts["schema"] == SCHEMA_06:
             stops.append(f"книга версии 0.6 (схема {SCHEMA_06}) — она обновляется на месте: upgrade.py КНИГА")
         elif facts["schema"] != SCHEMA_07:
@@ -800,7 +818,7 @@ def cmd_build(book, to, rehearsal=False, out=print):
         rep += ["## 2. Копия", "", f"- `{target}` — SHA-256 совпадает с исходной книгой", f"- `{jdst}` — {len(facts['journal_hashes'])} файлов, "
                 "SHA-256 каждого совпадает", ""]
         # 3. the changes of 0.8 on the copy
-        progress(to, "3/5 изменения версии 0.8 в копии")
+        progress(to, f"3/5 изменения версии {B.core_versions()['WMS_PRODUCT_VERSION']} в копии")
         leg = legacy_rows(jdst, facts["instance"], facts["last_seq"])
         from_text = "|".join([os.path.dirname(book), str(facts["last_seq"]), facts["book_hash"], now(), str(facts["journal_size"])])
         doc = o.load(target, macros=0, hidden=True)
@@ -827,7 +845,7 @@ def cmd_build(book, to, rehearsal=False, out=print):
         if P:
             raise RuntimeError("сверка старой и новой книги: " + "; ".join(P[:3]))
         test_fault("before_wms")
-        progress(to, "5/5 сверка: WMS 0.8 открывает новую книгу (рабочая копия проверки)")
+        progress(to, f"5/5 сверка: WMS {B.core_versions()['WMS_PRODUCT_VERSION']} открывает новую книгу (рабочая копия проверки)")
         vdir = os.path.join(to, ".verify")
         os.makedirs(vdir)
         vbook = os.path.join(vdir, os.path.basename(book))
@@ -835,7 +853,7 @@ def cmd_build(book, to, rehearsal=False, out=print):
         copy_journal(jdst, os.path.join(vdir, JOURNAL_DIR))
         doc, stl = open_wms(o, vbook)
         if doc is None or "STATE=CLEAN" not in stl:
-            raise RuntimeError(f"WMS 0.8 не открыла новую книгу в рабочем состоянии: {stl[:300]}")
+            raise RuntimeError(f"WMS {B.core_versions()['WMS_PRODUCT_VERSION']} не открыла новую книгу в рабочем состоянии: {stl[:300]}")
         try:
             sc = o.basic(doc, "WmsCore", "ActionSelfCheck") or ""
             bc = o.basic(doc, "WmsLegacy", "BalanceCheck") or ""
@@ -845,14 +863,14 @@ def cmd_build(book, to, rehearsal=False, out=print):
             close_doc(o, doc, save=False)
         shutil.rmtree(vdir, ignore_errors=True)
         new_oracle = [x for x in P1 if x not in P0]
-        rep += ["## 5. WMS 0.8 на новой книге", "", f"- запуск: работа разрешена", f"- самопроверка: {sc.splitlines()[0] if sc else '—'}",
+        rep += [f"## 5. WMS {B.core_versions()['WMS_PRODUCT_VERSION']} на новой книге", "", f"- запуск: работа разрешена", f"- самопроверка: {sc.splitlines()[0] if sc else '—'}",
                 f"- «остаток = сумма движений»: {'все ЕИ сходятся' if not bc else bc}", f"- сверка переноса: {lr}",
                 f"- независимый оракул журнала: в старой книге расхождений {len(P0)}, в новой {len(P1)}, новых {len(new_oracle)} "
                 f"(операций {inf1.get('ops', '—')})"] + [f"  - уже было в старой книге: {x}" for x in P0[:10]] + [""]
         summary += [f"wms08 selfcheck={'OK' if sc.startswith(SELF_CHECK_OK) else 'FAIL'} balance={'OK' if not bc else 'DIFF'} "
                     f"oracle_old={len(P0)} oracle_new={len(P1)} oracle_added={len(new_oracle)}", f"legacy_report={lr[:120]}"]
         if not sc.startswith(SELF_CHECK_OK):
-            raise RuntimeError("самопроверка WMS 0.8 на новой книге: " + sc.splitlines()[0])
+            raise RuntimeError(f"самопроверка WMS {B.core_versions()['WMS_PRODUCT_VERSION']} на новой книге: " + sc.splitlines()[0])
         if new_oracle:
             raise RuntimeError("оракул журнала нашёл в новой книге расхождения, которых нет в старой: " + "; ".join(new_oracle[:3]))
         # the old book and its journal were only read
@@ -1113,9 +1131,9 @@ def checks(o, book):
             return ["это не книга WMS (нет служебного листа _SYS)"], facts
         sv = sys_values(doc)
         facts = dict(schema=sv.get("SCHEMA"), instance=sv.get("INSTANCE_ID"), mode=sv.get("MODE"), last_seq=int(sv.get("LAST_SEQ") or 0),
-                     tx=sv.get("TX_STATE"), bi=sv.get("TX_BEFORE_IMAGE"), reg=sv.get("REGISTERED_URL"))
+                     tx=sv.get("TX_STATE"), bi=sv.get("TX_BEFORE_IMAGE"), reg=sv.get("REGISTERED_URL"), core=sv.get("CORE_VERSION"))
         if facts["schema"] == B.SCHEMA:
-            stops.append(f"книга уже версии {B.core_versions()['WMS_PRODUCT_VERSION']} (схема {B.SCHEMA}) — обновлять нечего")
+            stops.append(same_schema_stop(facts["core"], [doc.Sheets.getByIndex(i).Name for i in range(doc.Sheets.getCount())]))
         elif facts["schema"] == SCHEMA_07:
             stops.append(f"книга версии 0.7 (схема {SCHEMA_07}) обновляется в новую папку: upgrade.py build КНИГА --to НОВАЯ_ПАПКА "
                          "(или мастер WMS_UPGRADE.ods)")

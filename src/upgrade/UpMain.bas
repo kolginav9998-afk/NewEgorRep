@@ -1,7 +1,7 @@
-' UpMain — книга WMS_UPGRADE.ods: мастер «Обновление из текущей WMS» (PRIME 0.8, D-091). Пользователь выбирает свою
+' UpMain — книга WMS_UPGRADE.ods: мастер «Обновление из текущей WMS» (PRIME 0.8, 1.0; D-091). Пользователь выбирает свою
 ' рабочую книгу WMS 0.7 и новую папку и нажимает кнопки шагов; вся работа — в программе tools/upgrade.py папки выпуска
-' (запускается отсюда, её ход показывается на странице). Рабочая книга только читается: новая книга 0.8 собирается в
-' новой папке из побайтной копии, сверяется ячейка в ячейку и открывается WMS 0.8; рабочей она становится только по
+' (запускается отсюда, её ход показывается на странице). Рабочая книга только читается: новая книга 1.0 собирается в
+' новой папке из побайтной копии, сверяется ячейка в ячейку и открывается WMS 1.0; рабочей она становится только по
 ' кнопке «4. СДЕЛАТЬ РАБОЧЕЙ». Откат — старая книга, она не меняется никогда. Эта книга не часть WMS: её данные — пути и
 ' результаты шагов (файлы UPGRADE_* новой папки).
 Option Explicit
@@ -118,14 +118,14 @@ Function UpFolderFree(url As String) As Boolean
     End If
 End Function
 
-' a free folder for the new WMS: «WMS_WORK» next to this book (the folder of the release 0.8, as the transfer of 0.7 made it),
-' or «<папка книги>_PRIME_0.8» next to the folder of the book when that is the same folder; with _2, _3 … when taken
+' a free folder for the new WMS: «WMS_WORK» next to this book (the folder of the release, as the transfer of 0.7 made it),
+' or «<папка книги>_WMS_1.0» next to the folder of the book when that is the same folder; with _2, _3 … when taken
 Function UpProposeFolder(bookUrl As String) As String
     Dim sBase As String, cand As String, k As Integer
     If UpUrl(ConvertFromURL(UpFolder()) & "WMS_WORK", True) <> UpParent(bookUrl) Then
         sBase = ConvertFromURL(UpFolder()) & "WMS_WORK"
     Else
-        sBase = ConvertFromURL(UpParent(UpParent(bookUrl))) & UpBaseName(UpParent(bookUrl)) & "_PRIME_0.8"
+        sBase = ConvertFromURL(UpParent(UpParent(bookUrl))) & UpBaseName(UpParent(bookUrl)) & "_WMS_1.0"
     End If
     cand = UpUrl(sBase, True)
     k = 1
@@ -210,7 +210,7 @@ Function UpRunEngine(sName As String, sArgs As String, progressUrl As String) As
     eng = UpFolder() & "tools/upgrade.py"
     gUpLog = ""
     If Not sfa.exists(eng) Then
-        gUpLog = "нет программы обновления " & ConvertFromURL(eng) & " — книга должна лежать в папке выпуска WMS 0.8 (рядом с папкой tools)"
+        gUpLog = "нет программы обновления " & ConvertFromURL(eng) & " — книга должна лежать в папке выпуска WMS 1.0 (рядом с папкой tools)"
         UpRunEngine = -1
         Exit Function
     End If
@@ -429,7 +429,7 @@ Sub BtnUpPickFolder(Optional oEvent As Variant)
     Dim fp As Object, u As String
     On Error GoTo EH
     fp = CreateUnoService("com.sun.star.ui.dialogs.FolderPicker")
-    fp.setTitle("Новая пустая папка для WMS 0.8")
+    fp.setTitle("Новая пустая папка для WMS 1.0")
     If UpCell(UM_TO) <> "" Then fp.setDisplayDirectory(UpParent(UpUrl(UpCell(UM_TO), True)))
     If fp.execute() <> 1 Then Exit Sub
     u = fp.getDirectory()
@@ -512,7 +512,7 @@ Sub BtnUpRehearsal(Optional oEvent As Variant)
     gUpBusy = False
     UpSetState(IIf(rc = 0, "✓ Репетиция прошла: ", "✗ Репетиция не прошла: ") & Replace(UpLogText(3), Chr(10), "  •  "))
     If rc = 0 Then
-        UpMsg("OK:Репетиция прошла: новая книга собрана, сверена ячейка в ячейку и открыта WMS 0.8 без ошибок." & Chr(10) & Chr(10) _
+        UpMsg("OK:Репетиция прошла: новая книга собрана, сверена ячейка в ячейку и открыта WMS 1.0 без ошибок." & Chr(10) & Chr(10) _
             & "Папка репетиции: " & ConvertFromURL(toU) & Chr(10) & "Рабочей она не становится; её можно удалить." & Chr(10) _
             & "Ваша книга не изменена. Отчёт — на листе «" & UP_REPORT & "».")
     Else
@@ -550,7 +550,7 @@ Sub BtnUpBuild(Optional oEvent As Variant)
         t = UpStateOf(toU)
         If UpStateValue(t, "promote_ok") = "1" Then
             gUpBusy = False
-            UpMsg("ERR:в папке " & ConvertFromURL(toU) & " уже рабочая WMS 0.8 (переход " & UpWhen(UpStateValue(t, "promote_time")) _
+            UpMsg("ERR:в папке " & ConvertFromURL(toU) & " уже рабочая WMS 1.0 (переход " & UpWhen(UpStateValue(t, "promote_time")) _
                 & "). Повторно собирать не нужно — работайте в ней.")
             Exit Sub
         End If
@@ -577,8 +577,8 @@ Sub BtnUpBuild(Optional oEvent As Variant)
     gUpBusy = False
     UpSetState(IIf(rc = 0, "✓ ", "✗ ") & Replace(UpLogText(3), Chr(10), "  •  "))
     If rc = 0 Then
-        UpMsg("OK:Новая книга WMS 0.8 собрана и сверена:" & Chr(10) & "• каждая ячейка каждого листа совпадает со старой книгой;" & Chr(10) _
-            & "• журнал скопирован побайтно;" & Chr(10) & "• WMS 0.8 открыла её: «работа разрешена», самопроверка без ошибок, остатки = движения;" _
+        UpMsg("OK:Новая книга WMS 1.0 собрана и сверена:" & Chr(10) & "• каждая ячейка каждого листа совпадает со старой книгой;" & Chr(10) _
+            & "• журнал скопирован побайтно;" & Chr(10) & "• WMS 1.0 открыла её: «работа разрешена», самопроверка без ошибок, остатки = движения;" _
             & Chr(10) & "• ваша книга не изменена." & Chr(10) & Chr(10) & "До перехода работайте в старой книге как обычно. В конце дня закройте её " _
             & "и нажмите «4. СДЕЛАТЬ РАБОЧЕЙ». Если до этого проведёте операции в старой книге — мастер попросит собрать заново (это быстро и " _
             & "безопасно).")

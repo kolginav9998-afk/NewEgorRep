@@ -746,3 +746,44 @@ EH:
     PhotoOpen = "ERR:фото не открыто: " & Error$
     gUiLastMsg = PhotoOpen
 End Function
+
+' ================================================================ test seams (TEST books only)
+
+' Т11: each string through the parsers of a quantity, of a quantity of an EI (issue, return, count) and of a place; the strings
+' parsed without an internal error and without a negative quantity counted («OK:n»), the first one that broke a parser named
+' (more than the balance is not the parser's to refuse: the posting refuses it)
+Function TestFuzzParse(samples As Variant) As String
+    Dim i As Long, n As Long, sBad As String, sWhy As String
+    WmsInit()
+    If SysStr(SK_MODE) <> "TEST" Then
+        TestFuzzParse = "REFUSED:не тестовая книга"
+        Exit Function
+    End If
+    For i = LBound(samples) To UBound(samples)
+        sWhy = ""
+        If ItFuzzOne(CStr(samples(i)), sWhy) Then
+            n = n + 1
+        ElseIf sBad = "" Then
+            sBad = " FIRST «" & samples(i) & "»: " & sWhy
+        End If
+    Next i
+    TestFuzzParse = "OK:" & n & sBad
+End Function
+
+Private Function ItFuzzOne(s As String, ByRef sWhy As String) As Boolean
+    Dim v As Double, q As Double, info As String, msg As String, k As Integer, mode As Variant
+    On Error GoTo EH
+    k = WmsCore.ParseQtyText(s, v, msg)
+    For Each mode In Array("OUT", "IN", "FACT")
+        k = WmsPack.QtyEIText(s, 0, 5, "шт", CStr(mode), 2, q, info, msg)
+        If k = 0 And q < 0 Then
+            sWhy = CStr(mode) & " дал " & q
+            Exit Function
+        End If
+    Next mode
+    msg = WmsMap.PlaceTextKey(s)
+    ItFuzzOne = True
+    Exit Function
+EH:
+    sWhy = Error$
+End Function

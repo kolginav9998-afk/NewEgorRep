@@ -20,8 +20,10 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from harness import OUT, ROOT, Results, Session, new_wms  # noqa: E402
+from harness import OUT, ROOT, Results, Session, new_wms, wms_versions  # noqa: E402
 import journal_oracle as jo  # noqa: E402
+
+VERS = wms_versions()
 
 R = Results()
 CASES = []
@@ -646,8 +648,8 @@ def pr11_upgrade_072():
     s = ready(Session(nb))
     try:
         rep = s.report()
-        R.add(c, "WMS 0.8 в новой папке: «работа разрешена», ядро 0.8.0-prime, предупреждений о старой книге нет",
-              state(s) == ("CLEAN", "") and "ядро 0.8.0-prime" in rep and "старой книге" not in rep, rep[:200])
+        R.add(c, f"WMS {VERS['WMS_PRODUCT_VERSION']} в новой папке: «работа разрешена», ядро {VERS['WMS_CORE_VERSION']}, предупреждений о старой книге нет",
+              state(s) == ("CLEAN", "") and f"ядро {VERS['WMS_CORE_VERSION']}" in rep and "старой книге" not in rep, rep[:200])
         pw = [ln.split("\t") for ln in s.B("PreWorkCheck", module="WmsStatus").split("\n")]
         prot = [f for f in pw if len(f) >= 3 and f[1] == "защиты"]
         R.add(c, "«Проверка перед работой» обновлённой книги: защиты без замечаний («Топология» и «Получатели» — листы ввода, не защищаются; "
@@ -662,7 +664,7 @@ def pr11_upgrade_072():
         fd = s.B("FindRun", "427", module="WmsFind")
         card = page(s, "Поиск", 9, 9)[0][1]
         main_btn = s.doc.Sheets.getByName("Главная").getDrawPage().getCount()
-        R.add(c, "обновлённая книга — с новыми страницами: «Дашборд» первым, «Поиск», «Карта склада», «Топология»; «Главная» 1.0 (21 кнопка над строками состояния, с «Справкой»); "
+        R.add(c, "обновлённая книга — с новыми страницами: «Дашборд» первым, «Поиск», «Карта склада», «Топология»; «Главная» 1.0 (25 кнопок над строками состояния, с «Справкой» и «?»); "
                  "дашборд считается; карточка ЕИ-00000427 — остаток сходится с движениями переноса и 0.7.2",
               names[:2] == ["Дашборд", "Главная"] and "Поиск" in names and "Карта склада" in names and "Топология" in names and main_btn == 25
               and db.startswith("OK") and fd.startswith("OK:ЕИ-00000427") and card.startswith("✓"), f"{names}; {main_btn}; {db}; {fd}; {card}")
@@ -771,12 +773,26 @@ def pr12_upgrade_stops():
     outs["plain"] = upgrade("check", plain)
     outs["nofile"] = upgrade("check", os.path.join(d, "нет.ods"))
     outs["new08"] = upgrade("check", new_wms("pr12_08"))
+    # a book of the intermediate PRIME 0.8: the same schema, the core 0.8.0-prime (written at its first start)
+    real08 = new_wms("pr12_real08")
+    s = Session(real08, macros=0)
+    try:
+        sy = s.doc.Sheets.getByName("_SYS")
+        sy.unprotect("wms")
+        sy.getCellByPosition(1, 3).setString("0.8.0-prime")
+        s.doc.store()
+    finally:
+        s.close()
+    h08 = sha(real08)
+    outs["real08"] = upgrade("check", real08)
     want = {"lock": "WMS открыта", "lolock": "открыта в LibreOffice", "foreign": "«Иной приход» защищены не паролем WMS", "tail": "которых нет в книге",
-            "marker": "незавершённая операция", "foreign_journal": "другой WMS", "plain": "не книга WMS", "nofile": "нет файла", "new08": "уже версии 0.8"}
+            "marker": "незавершённая операция", "foreign_journal": "другой WMS", "plain": "не книга WMS", "nofile": "нет файла", "new08": f"уже версии {VERS['WMS_PRODUCT_VERSION']}",
+            "real08": "промежуточный выпуск PRIME 0.8"}
     bad = {k: v[1][-160:] for k, v in outs.items() if v[0] != 1 or want[k] not in v[1]}
     R.add(c, "стоп-проверки с понятной причиной: WMS открыта; книга открыта в LibreOffice; лист с чужим паролем; хвост журнала; незавершённая "
-             "операция; строки другой WMS в журнале; не книга WMS; нет файла; книга уже 0.8 — код 1, книга не изменена",
-          not bad and sha(p) == h0, str(bad)[:900])
+             "операция; строки другой WMS в журнале; не книга WMS; нет файла; книга уже этой версии; книга промежуточной 0.8 — «мастер переносит "
+             "книгу 0.7, ничего не изменено» — код 1, книги не изменены",
+          not bad and sha(p) == h0 and sha(real08) == h08 and "Ничего не изменено" in outs["real08"][1], str(bad)[:900])
     # the folders
     os.makedirs(os.path.join(d, "BUSY"))
     open(os.path.join(d, "BUSY", "x.txt"), "w").write("x")
@@ -928,7 +944,7 @@ def pr14_wizard():
     shutil.rmtree(d, ignore_errors=True)
     old = old_copy_at(os.path.join(d, "WMS_RELEASE_0.7.2", "WMS_WORK"))
     h0 = sha(old)
-    w = Wizard(os.path.join(d, "WMS_RELEASE_0.8.0"))
+    w = Wizard(os.path.join(d, f"WMS_RELEASE_{VERS['WMS_PRODUCT_VERSION']}"))
     try:
         new_dir = os.path.join(w.folder, "WMS_WORK")
         R.add(c, "мастер при открытии сам находит рабочую книгу 0.7 в папке прежнего выпуска и предлагает новую папку WMS_WORK своего выпуска",
@@ -973,7 +989,7 @@ def pr14_wizard():
               and os.path.join(new_dir, "WMS_PROD.ods") in opened and sha(old) == h0, f"{m5[:200]}; {w.cell(11)}; {opened}")
         w.B("BtnUpBuild")
         m6 = w.msg()
-        R.add(c, "повторная сборка в папку, где уже рабочая WMS 0.8 — отказ «работайте в ней»", m6.startswith("ERR:") and "уже рабочая WMS 0.8" in m6, m6)
+        R.add(c, "повторная сборка в папку, где уже рабочая WMS 1.0 — отказ «работайте в ней»", m6.startswith("ERR:") and "уже рабочая WMS 1.0" in m6, m6)
         shutil.move(os.path.join(w.folder, "docs"), os.path.join(w.folder, "docs.away"))
         w.doc.Sheets.getByName("ОБНОВЛЕНИЕ").getCellByPosition(2, 4).setString(old)
         w.B("BtnUpCheck")
@@ -993,7 +1009,7 @@ def pr14_wizard():
         w.close()
     s = ready(Session(os.path.join(new_dir, "WMS_PROD.ods")))
     try:
-        R.add(c, "новая WMS после мастера: «работа разрешена», ядро 0.8, самопроверка без ошибок", state(s) == ("CLEAN", "")
+        R.add(c, f"новая WMS после мастера: «работа разрешена», ядро {VERS['WMS_CORE_VERSION']}, самопроверка без ошибок", state(s) == ("CLEAN", "")
               and s.B("ActionSelfCheck").startswith("САМОПРОВЕРКА WMS: ошибок 0"), s.report()[:200])
     finally:
         s.close()

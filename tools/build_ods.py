@@ -195,7 +195,7 @@ GOODS_RET_HEADER = "Вернуть через, дней (инструмент)"
 # the page is opened), the buttons with what they do below
 SERVICE = "Обслуживание"
 SERVICE_STATE = ["Копия на флешке", "Зеркало журнала", "Проверка дня", "Копии книги", "Свободно на диске", "Книга и журнал", "Рост книги",
-                 "Скорость", "Этот компьютер"]
+                 "Скорость", "Этот компьютер", "Учебное восстановление"]
 SERVICE_STATE_ROW = 3            # WmsSafe.SV_STATE_ROW
 SERVICE_GROUPS = [
     ("Сохранность данных", [
@@ -215,6 +215,8 @@ SERVICE_GROUPS = [
          "То же, что WMS делает при первом запуске дня: остаток = движения, фасовка, ключи листов, цепочка журнала, зеркало."),
         ("btnPreWork", "Проверка перед работой", "WmsStatus.BtnPreWorkCheck",
          "LibreOffice, макросы, запись в папки, копии, свободное место, защита листов."),
+        ("btnDrill", "Учебное восстановление", "WmsSafe.BtnRestoreDrill",
+         "Раз в месяц: самая свежая копия открывается отдельно, журнал от неё проверяется до последней операции — «восстанавливается»."),
     ]),
     ("Книга и скорость", [
         ("btnSpeedTest", "Замер скорости ПК", "WmsCare.BtnSpeedTest",
@@ -733,6 +735,7 @@ def view_styles(doc):
             cell_style(doc, f"MAP_{layer}_{k}", CellBackColor=bg, CharColor=ink)
     cell_style(doc, "DB_Good", CellBackColor=0xE3F4E6, CharColor=0x1E6B34)
     cell_style(doc, "DB_Alert", CellBackColor=0xFDE2DD, CharColor=0xB3261E)
+    cell_style(doc, "DB_Warn", CellBackColor=0xFFF2CC, CharColor=0x7F5F00)
     cell_style(doc, "DB_StateOk", CharColor=0x1E6B34)
     cell_style(doc, "DB_StateBad", CharColor=0xB3261E)
 
@@ -1225,6 +1228,14 @@ def build_service_page(doc, sh):
     merge(sh, 1, 1, 2, 1)
     text_cell(sh, 1, 1, "Сохранность данных и здоровье книги. Состояние обновляется при каждом открытии страницы; ничего здесь не проводит операций, "
                         "кроме возврата к копии.", size=9, color=MUTED, wrap=True, valign=1)
+    # Т6: one light for the whole WMS (WmsSafe.Health): ✓ green, ! yellow (soon), ✗ red (now)
+    sh.getRows().getByIndex(SERVICE_STATE_ROW - 1).Height = 1000
+    text_cell(sh, 1, SERVICE_STATE_ROW - 1, "Здоровье WMS", size=12, bold=True, color=INK, valign=2)
+    text_cell(sh, 2, SERVICE_STATE_ROW - 1, "", size=11, bold=True, color=TEXT, wrap=True, valign=2)
+    hc = sh.getCellRangeByPosition(2, SERVICE_STATE_ROW - 1, 2, SERVICE_STATE_ROW - 1)
+    add_cond(sh, hc, 'LEFT($C' + str(SERVICE_STATE_ROW) + ';1)="✓"', "DB_Good", 2, SERVICE_STATE_ROW - 1)
+    add_cond(sh, hc, 'LEFT($C' + str(SERVICE_STATE_ROW) + ';1)="✗"', "DB_Alert", 2, SERVICE_STATE_ROW - 1)
+    add_cond(sh, hc, 'LEFT($C' + str(SERVICE_STATE_ROW) + ';1)="!"', "DB_Warn", 2, SERVICE_STATE_ROW - 1)
     r = SERVICE_STATE_ROW
     for label in SERVICE_STATE:
         sh.getRows().getByIndex(r).Height = 560
