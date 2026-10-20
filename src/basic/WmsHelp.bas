@@ -127,22 +127,13 @@ Function WhatsNew() As Integer
     WmsSafe.StSet("WHATSNEW", WMS_PRODUCT_VERSION)
 End Function
 
-' at the start: the cards once a version, to a person (never in a test book), after the start finished
+' at the end of the start (WmsCore.WmsStartup, the pages already drawn): the cards once a version, to a person (never in a
+' test book). Shown at once, inside the start: a window put off to an asynchronous call would come while a program (the
+' upgrade, the tests) already drives the book through UNO
 Sub WhatsNewAtStart()
     On Error Resume Next
     If SysStr(SK_MODE) = "TEST" Or gUiAuto <> 0 Then Exit Sub
     If WmsSafe.StGet("WHATSNEW") = WMS_PRODUCT_VERSION Then Exit Sub
-    HpLater()
-End Sub
-
-Private Sub HpLater()
-    gHpCb = CreateUnoListener("HpCb_", "com.sun.star.awt.XCallback")
-    CreateUnoService("com.sun.star.awt.AsyncCallback").addCallback(gHpCb, Array())
-End Sub
-
-Global gHpCb As Object
-
-Sub HpCb_notify(aData As Variant)
     WhatsNew()
 End Sub
 
