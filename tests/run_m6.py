@@ -1080,9 +1080,9 @@ def u01_upgrade_060():
         up = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "upgrade.py"), p], capture_output=True, text=True, timeout=900)
         again = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "upgrade.py"), p, "--check"], capture_output=True, text=True, timeout=600)
         backups = [f for f in os.listdir(os.path.join(d, "WMS_Backups")) if f.endswith("_preupgrade.ods")]
-        R.add(c, "tools/upgrade.py: --check без изменений; обновление с резервной копией *_preupgrade.ods; повторная проверка — «уже версии 0.8»",
+        R.add(c, "tools/upgrade.py: --check без изменений; обновление с резервной копией *_preupgrade.ods; повторная проверка — «уже версии» этого выпуска",
               chk.returncode == 0 and up.returncode == 0 and "Книга обновлена" in up.stdout and len(backups) == 1 and again.returncode == 1
-              and "уже версии 0.8" in again.stdout, f"{chk.returncode}/{up.returncode}/{again.returncode}; {up.stdout[-300:]}")
+              and f"уже версии {wms_versions()['WMS_PRODUCT_VERSION']}" in again.stdout, f"{chk.returncode}/{up.returncode}/{again.returncode}; {up.stdout[-300:]}")
         s = ready(Session(p))
         rep = s.B("StartupReport")
         sc = s.B("ActionSelfCheck")

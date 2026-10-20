@@ -1176,8 +1176,10 @@ def w34_buttons_bound():
         want = {"Найти выдачу": "WmsReturnUi.BtnRetFind", "Проверить": "WmsReturnUi.BtnRetCheck", "Провести": "WmsReturnUi.BtnRetPost",
                 "Исправить": "WmsReturnUi.BtnRetFix", "Удалить": "WmsReturnUi.BtnRetDelete", "Очистить": "WmsReturnUi.BtnRetClear",
                 # 1.0 (В6)
-                "Почему?": "WmsDaily.BtnWhy"}
-        R.add(c, "6 кнопок листа «Возврат» привязаны к макросам (запуск через меню не нужен) и «Почему?» 1.0", names == want, str(names))
+                "Почему?": "WmsDaily.BtnWhy",
+                # 1.0 (П6): the section of «Справка» of the sheet
+                "?": "WmsHelp.BtnHelpHere"}
+        R.add(c, "6 кнопок листа «Возврат» привязаны к макросам (запуск через меню не нужен), «Почему?» и «?» 1.0", names == want, str(names))
     finally:
         s.close()
 

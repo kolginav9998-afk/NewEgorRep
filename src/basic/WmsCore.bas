@@ -424,6 +424,8 @@ Function WmsStartup() As String
     If gState = "CLEAN" Then WmsCare.TimingSet("OPEN", GetSystemTicks() - t0)
     gStarts = gStarts + 1
     WmsStartup = StateLine() & " | " & gReport
+    ' 1.0 (П2): «Что нового» once a version, after the start (an asynchronous call: the window comes over the panel just drawn)
+    If gState = "CLEAN" Then WmsHelp.WhatsNewAtStart()
     Exit Function
 EH:
     ' unexpected error anywhere in startup: posting stays forbidden (D-028)

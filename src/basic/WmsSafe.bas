@@ -441,8 +441,7 @@ Function StartupNotes() As String
         x = FlashNote()
         If x <> "" Then s = s & IIf(s <> "", " | ", "") & x
         ' Н5: the check of the day (at its first start); С3, С4: the growth of the book and its advice
-        ' П2: «Что нового» once a version, to a person (after the start)
-        WmsHelp.WhatsNewAtStart()
+        ' (П2 «Что нового» is shown by WmsCore.WmsStartup after the pages: a window opened here would wait over the old panel)
         If Left(StGet("DAILY"), 10) = Format(Now(), "YYYY-MM-DD") Then
             ' Т8: LibreOffice updated since the check of the day — its formulas checked now
             x = CalcAtStart()
