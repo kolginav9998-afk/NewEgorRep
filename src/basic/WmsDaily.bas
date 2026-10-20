@@ -468,6 +468,7 @@ Function ReceiveWindow() As String
         If Left(res, 3) = "OK:" Then
             ReceiveWindow = res
             If gRcvNote <> "" Then WmsUi.UiMessage(gRcvNote)
+            WmsItem.LabelAfterReceipt(sh.getCellByPosition(OC_EI, r).getString())
             Exit Do
         End If
         For i = 0 To 5

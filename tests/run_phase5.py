@@ -1088,8 +1088,10 @@ def x26_protection_buttons_panel():
                 # PRIME 0.8: the place for the goods by the map of the warehouse (no posting, no data)
                 "Куда положить?": "WmsMap.BtnWherePut",
                 # 1.0 (В6): the whole «Контроль» of the row and what to do
-                "Почему?": "WmsDaily.BtnWhy"}
-        R.add(c, "6 кнопок листа «Иной приход» привязаны к макросам (и кнопки «Куда положить?» 0.8, «Почему?» 1.0)", names == want, str(names))
+                "Почему?": "WmsDaily.BtnWhy",
+                # 1.0 (Ф1): the label of the EI of the row
+                "Этикетка": "WmsItem.BtnLabel"}
+        R.add(c, "6 кнопок листа «Иной приход» привязаны к макросам (и кнопки «Куда положить?» 0.8, «Почему?» и «Этикетка» 1.0)", names == want, str(names))
         line(s, 1, "Офис", "Стол", "2")
         post(s, 1)
         before = s.spc(1)

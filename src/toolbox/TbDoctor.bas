@@ -146,7 +146,7 @@ Private Sub CheckProtections(snap As String)
         If UBound(f) >= 3 Then
             If f(0) = "sheet" Then
                 n = n + 1
-                If f(2) <> "1" And f(1) <> "Получатели" And f(1) <> "Топология" And f(1) <> "Места" And f(1) <> "Поставщики" And f(1) <> "Номенклатура" And f(1) <> "Комплекты" Then p = p & IIf(p <> "", "; ", "") & "лист «" & f(1) & "» не защищён"
+                If f(2) <> "1" And f(1) <> "Получатели" And f(1) <> "Топология" And f(1) <> "Места" And f(1) <> "Поставщики" And f(1) <> "Номенклатура" And f(1) <> "Комплекты" And f(1) <> "Резервы" Then p = p & IIf(p <> "", "; ", "") & "лист «" & f(1) & "» не защищён"
                 If InStr(svc, "|" & f(1) & "|") > 0 And f(3) = "1" Then p = p & IIf(p <> "", "; ", "") & "служебный лист «" & f(1) & "» не скрыт"
             End If
         End If

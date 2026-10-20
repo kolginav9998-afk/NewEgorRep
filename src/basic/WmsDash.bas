@@ -97,7 +97,7 @@ End Function
 Function DashRefresh() As String
     Dim sh As Object, today As Double, nextEI As Long, last As Long, i As Long, k As Long, n As Long, s As String, a As Variant, nItems As Long
     Dim nEI As Long, nPos As Long, nReview As Long, nWait As Long, nLate As Long, nToday As Long, nNoDate As Long, wKey(DB_LIST1_N - 1) As Double, nW As Long
-    Dim nNeed As Long, rest As Double
+    Dim nNeed As Long, rest As Double, nToolLate As Long, nExp As Long, nSafe As Long, safeRows As Variant
     Dim rcvToday As Long, splToday As Long, issToday As Long, retToday As Long, adjToday As Long, carsIn As Long, carsArr As Long, carsDep As Long
     Dim who As Object, nWho As Long, dayIss(13) As Long, dayRcv(13) As Long, dt As Double, key As Double, r As Long
     Dim top As Object, tName() As String, tCnt() As Double, tQty() As Double, tUnit() As String, nTop As Long, j As Long, nm As String
@@ -268,7 +268,12 @@ Function DashRefresh() As String
     tails = TailEIs(nTails)
     ' ---------------------------------------------------------------- attention: unposted rows, «Требует разбора»
     unposted = WmsIssue.UnpostedCount()
-    attention = unposted + nReview
+    ' 1.0 (Ф4, Ф5): the tools not returned in time, the EIs past «годен до» or close to it
+    nToolLate = WmsItem.ToolsLate()
+    WmsItem.ExpiryEIs(nExp)
+    ' 1.0 (этап J): the check of the day, the copy on a medium, the mirror of the journal
+    nSafe = WmsSafe.SafeAttention(safeRows)
+    attention = unposted + nReview + nToolLate + nExp + nSafe
     If gVwEngFail <> "" Then
         DashRefresh = "ERR:дашборд не обновлён: " & gVwEngFail
         ViewDone(sh)
@@ -279,7 +284,9 @@ Function DashRefresh() As String
     sh.getCellRangeByPosition(1, DB_TILE_VAL, 12, DB_TILE_SUB).clearContents(1 + 2 + 4)
     sh.getCellByPosition(1, DB_TITLE_ROW).setString("Склад сегодня · " & Format(Now(), "DD.MM.YYYY"))
     If gState = "CLEAN" Then
-        s = "●  Работа разрешена" & IIf(gOldNote <> "", " · ВНИМАНИЕ: в старой книге проводились операции — см. «" & SH_MAIN & "»", "")
+        s = IIf(WmsHelp.BookRole() = WmsHelp.ROLE_TRAINING, "УЧЕБНАЯ WMS · ", "") & "●  Работа разрешена" & IIf(gOldNote <> "", " · ВНИМАНИЕ: в старой книге проводились операции — см. «" & SH_MAIN & "»", "") _
+            & IIf(Left(WmsSafe.StGet("DAILY"), 10) = Format(Now(), "YYYY-MM-DD"), IIf(Mid(WmsSafe.StGet("DAILY"), 12, 2) = "OK", " · проверка дня ✓", _
+            " · проверка дня ✗ — см. «Внимание»"), "")
     ElseIf gState = "" Then
         s = "●  WMS не запущена — откройте книгу с макросами"
     Else
@@ -300,10 +307,12 @@ Function DashRefresh() As String
     PutTile(sh, 1, nWait, "просрочено " & NumText(nLate) & " · сегодня " & NumText(nToday) & " · без даты " & NumText(nNoDate) _
         & IIf(nNeed > 0, " · заказать " & NumText(nNeed), ""))
     PutTile(sh, 2, rcvToday + splToday, "по заказам " & NumText(rcvToday) & " · иной приход " & NumText(splToday))
-    PutTile(sh, 3, issToday, "получателей " & NumText(nWho) & " · возвратов " & NumText(retToday) & " · корректировок " & NumText(adjToday))
+    PutTile(sh, 3, issToday, "получателей " & NumText(nWho) & " · возвратов " & NumText(retToday) & " · корректировок " & NumText(adjToday) _
+        & IIf(nToolLate > 0, " · не вернули вовремя " & NumText(nToolLate), ""))
     PutTile(sh, 4, carsIn, "приехало сегодня " & NumText(carsArr) & " · уехало " & NumText(carsDep))
     PutTile(sh, 5, attention, IIf(attention = 0, "всё в порядке", "непроведённых " & NumText(unposted) & " · требует разбора " & NumText(nReview) _
-        & " · двойной щелчок — список"))
+        & IIf(nToolLate > 0, " · не вернули " & NumText(nToolLate), "") & IIf(nExp > 0, " · срок годности " & NumText(nExp), "") _
+        & IIf(nSafe > 0, " · сохранность " & NumText(nSafe), "") & " · двойной щелчок — список"))
     ' list 1: the positions by the expected date (the earliest first); 1.0 (З3): what is still expected of each, «и ещё N», the
     ' row of «Заказы» (the hidden column) for a double click
     sh.getCellRangeByPosition(1, DB_LIST1, 6, DB_LIST1 + DB_LIST1_N - 1).clearContents(1 + 2 + 4)
@@ -668,7 +677,7 @@ End Sub
 ' possible duplicates of the receipts. OK:<rows>
 Function AttentionShow() As String
     Dim rows() As Variant, n As Long, today As Double, sh As Object, last As Long, d As Variant, i As Long, items As Variant, nItems As Long, r As Long
-    Dim nCar As Long, nOpen As Long, nRev As Long, nDup As Long, k As Long
+    Dim nCar As Long, nOpen As Long, nRev As Long, nDup As Long, k As Long, tl As Variant, tr As Long, nLate As Long, nExp As Long, pp As Variant, sr As Variant
     WmsInit()
     On Error GoTo EH
     today = Today0()
@@ -719,9 +728,30 @@ Function AttentionShow() As String
             nDup = nDup + 1
         Next i
     End If
+    ' 1.0 (Ф4): the tools not returned in time; (Ф5) the EIs with a balance past «годен до» or close to it
+    tr = WmsItem.ToolsOnHands(tl, nLate)
+    For i = 0 To tr - 1
+        If tl(i)(6) > 0 Then AtAdd(rows, n, Array("Не вернули вовремя", SH_ISSUES & ", строка " & (tl(i)(7) + 1), ViewDay(tl(i)(4)), tl(i)(1), tl(i)(2), _
+            tl(i)(0) & ": " & tl(i)(3) & ", вернуть до " & ViewDay(tl(i)(5)) & ", просрочено дней " & tl(i)(6), "", "", "", SH_ISSUES, tl(i)(7), ""))
+    Next i
+    items = WmsItem.ExpiryEIs(nItems)
+    For i = 0 To nItems - 1
+        r = CLng(items(i))
+        d = WmsIssue.StockSheet().getCellRangeByPosition(0, r, SC_LAST, r).getDataArray()(0)
+        pp = WmsItem.PropOf(r)
+        AtAdd(rows, n, Array(IIf(pp(1) < today, "Срок годности прошёл", "Срок годности истекает"), SH_STOCK & ", строка " & (r + 1), ViewDay(pp(1)), _
+            CStr(d(SC_EI)), CStr(d(SC_NAME)), "остаток " & WmsIssue.QtyText(d(SC_QTY)) & " " & d(SC_UNIT) & " — годен до " & ViewDay(pp(1)), "", "", "", SH_STOCK, _
+            r, CStr(d(SC_EI))))
+        nExp = nExp + 1
+    Next i
+    ' 1.0 (этап J): the safety of the data
+    k = WmsSafe.SafeAttention(sr)
+    For i = 0 To k - 1
+        AtAdd(rows, n, Array(sr(i)(0), WmsSafe.SH_SERVICE, "", "", "", sr(i)(1), "", "", "", WmsSafe.SH_SERVICE, 0, ""))
+    Next i
     AttentionShow = WmsFind.ShowTable("Внимание: что требует действия", IIf(n = 0, "Всё в порядке: ничего не ждёт.", "Двойной щелчок по строке — перейти к ней " _
         & "(у ЕИ — карточка)."), "машины с прошлых дней " & nCar & " · не проведено строк " & nOpen & " · требует разбора " & nRev & " · возможных дублей " & nDup _
-        & IIf(n > DB_AT_MAX, " · показаны первые " & DB_AT_MAX, ""), Array("Что", "Где", "Дата", "ЕИ / машина", "Наименование / поставщик", "Подробно", "", ""), rows, _
+        & IIf(nLate > 0, " · не вернули вовремя " & nLate, "") & IIf(nExp > 0, " · срок годности " & nExp, "") & IIf(n > DB_AT_MAX, " · показаны первые " & DB_AT_MAX, ""), Array("Что", "Где", "Дата", "ЕИ / машина", "Наименование / поставщик", "Подробно", "", ""), rows, _
         IIf(n > DB_AT_MAX, DB_AT_MAX, n), False)
     If Left(AttentionShow, 3) = "OK:" Then AttentionShow = "OK:" & n
     gUiLastMsg = AttentionShow

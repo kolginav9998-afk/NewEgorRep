@@ -143,7 +143,7 @@ SUPPLIERS = "Поставщики"
 SUPPLIER_HEADERS = ["Поставщик", "Телефон", "Контакт", "Обычный срок поставки, дней", "Примечание"]
 GOODS = "Номенклатура"
 GOODS_HEADERS = ["Код", "Наименование", "Артикул", "Ед.", "Категория", "Фасовка: частей в 1 ед.", "Часть (как называть)", "Минимум",
-                 "Заказывать по", "Поставщик", "Фото (файл в папке «Фото»)", "Примечание", "Остаток (все ЕИ)", "ЕИ с остатком", "В пути",
+                 "Заказывать по", "Поставщик", "Фото (файл в папке «WMS_Фото»)", "Примечание", "Остаток (все ЕИ)", "ЕИ с остатком", "В пути",
                  "Обновлено"]
 GOODS_WMS_COLS = 4          # the last columns M..P: written by «Обновить» (WmsSupply), not by the storekeeper
 SUPPLY = "Снабжение"
@@ -182,7 +182,64 @@ PRINT_WIDTHS = [900, 2600, 6300, 2300, 1500, 2000, 2400]        # A..G = 18 cm: 
 # 1.0 (Ф8): «Комплекты» — the storekeeper's own directory of the kits (WmsKit SH_KITS, KT_*): not protected, not journaled
 KITS = "Комплекты"
 KITS_HEADERS = ["Комплект", "Позиция (наименование)", "Артикул", "Количество на 1 комплект", "Ед.", "Примечание"]
-SHEETS_10 = [PLACES, SUPPLIERS, GOODS, SUPPLY, PRINT, REPORTS, CLOSE, KITS]
+# 1.0 (Ф5): _PROP — the properties of the EIs, one row per EI (row = EI number; WmsItem SH_PROP, PR_*), written only by EI_PROP
+PROP = "_PROP"
+PROP_HEADERS = ["ЕИ", "Серийный / инв. №", "Годен до", "Примечание"]
+# 1.0 (Ф7): «Резервы» — the storekeeper's own sheet of the reserves (WmsItem SH_RESERVES, RS_*): not protected, not journaled
+RESERVES = "Резервы"
+RESERVE_HEADERS = ["ЕИ", "Количество", "Для кого / объект", "До (дата)", "Примечание"]
+# 1.0 (Ф4): «Номенклатура» Q — the days a returnable thing (a tool) may stay on the hands (WmsItem GD_RETDAYS)
+GOODS_RET_COL = 16
+GOODS_RET_HEADER = "Вернуть через, дней (инструмент)"
+# 1.0 (этапы J, K): «Обслуживание» (WmsSafe) — the safety of the data and the care of the book: the state on top (refreshed when
+# the page is opened), the buttons with what they do below
+SERVICE = "Обслуживание"
+SERVICE_STATE = ["Копия на флешке", "Зеркало журнала", "Проверка дня", "Копии книги", "Свободно на диске", "Книга и журнал", "Рост книги",
+                 "Скорость", "Этот компьютер"]
+SERVICE_STATE_ROW = 3            # WmsSafe.SV_STATE_ROW
+SERVICE_GROUPS = [
+    ("Сохранность данных", [
+        ("btnFlashCopy", "Копия на флешку…", "WmsSafe.BtnFlashCopy",
+         "Книга и журнал — на флешку или другой диск, каждый файл проверяется. Раз в неделю: при поломке компьютера данные останутся."),
+        ("btnReturnCopy", "Вернуться к копии…", "WmsSafe.BtnReturnToCopy",
+         "Копии книги с датой и числом операций. Книга вернётся к выбранной, операции после неё WMS доведёт по журналу и проверит."),
+        ("btnMirror", "Зеркало журнала…", "WmsSafe.BtnMirror",
+         "Вторая копия журнала на другом диске или флешке: каждая проведённая операция пишется и туда."),
+        ("btnMirrorRestore", "Журнал из зеркала", "WmsSafe.BtnMirrorRestore",
+         "Журнал испорчен или потерял конец — целые файлы берутся из зеркала, прежние откладываются в «WMS_Backups»."),
+        ("btnAbandoned", "Отложенные операции", "WmsSafe.BtnAbandoned",
+         "Что ушло в «Отложить хвост журнала» и не попало в книгу; выдачи возвращаются в «Выдачи» одной кнопкой."),
+    ]),
+    ("Проверки", [
+        ("btnDailyCheck", "Проверить сейчас", "WmsSafe.BtnDailyCheck",
+         "То же, что WMS делает при первом запуске дня: остаток = движения, фасовка, ключи листов, цепочка журнала, зеркало."),
+        ("btnPreWork", "Проверка перед работой", "WmsStatus.BtnPreWorkCheck",
+         "LibreOffice, макросы, запись в папки, копии, свободное место, защита листов."),
+    ]),
+    ("Книга и скорость", [
+        ("btnSpeedTest", "Замер скорости ПК", "WmsCare.BtnSpeedTest",
+         "Несколько секунд: вычисления, формулы, диск — и сколько движений этот компьютер держит комфортно."),
+        ("btnLoTips", "Советы LibreOffice", "WmsCare.BtnLoTips",
+         "Настройки LibreOffice для большой книги: резервная копия при сохранении, восстановление, пересчёт при загрузке."),
+        ("btnExtraCells", "Лишние ячейки", "WmsCare.BtnExtraCells",
+         "Листы, у которых занятая область тянется далеко ниже данных (файл больше и медленнее). Ничего не меняет."),
+        ("btnPruneSnap", "Удалить старые снимки", "WmsCare.BtnPruneSnapshots",
+         "Снимки «Экспорт для инструментов», кроме двух последних, удаляются; книга и журнал не затрагиваются."),
+        ("btnLiteSnap", "Снимок для этикеток", "WmsCare.BtnLiteSnapshot",
+         "Лёгкий снимок для набора «Этикетки»: только «Наличие», «Заказы», «Иной приход», без журнала — секунды."),
+    ]),
+    ("Этот компьютер и обучение", [
+        ("btnPcCheck", "Проверить этот ПК", "WmsHelp.BtnPcCheck",
+         "За секунды, без интернета: LibreOffice, макросы и доверенная папка, запись в папку WMS, место на диске, Python."),
+        ("btnShortcut", "Ярлык на рабочий стол", "WmsHelp.BtnShortcut",
+         "Ярлык «WMS склад» открывает именно эту книгу — по привычке не откроется старая."),
+        ("btnTraining", "Учебная WMS…", "WmsHelp.BtnTraining",
+         "Отдельная копия с пометкой «УЧЕБНАЯ» и своим журналом: пробовать «1 кан», «Исправить», «Удалить» без риска."),
+        ("btnAnonCopy", "Обезличенная копия…", "WmsHelp.BtnAnonCopy",
+         "Для разработчика: наименования, люди, поставщики заменены на «Товар 1»… — ошибку можно повторить без ваших данных."),
+    ]),
+]
+SHEETS_10 = [PLACES, SUPPLIERS, GOODS, SUPPLY, PRINT, REPORTS, CLOSE, KITS, PROP, RESERVES, SERVICE]
 LEGREP = "Сверка переноса"
 LEGREP_HEAD = 3                   # WmsConfig.LEGREP_HEAD
 LEGREP_HEADERS = ["ЕИ", "Наименование", "Ед.", "Откуда", "Приход при переносе", "Остаток при переносе", "Израсходовано до переноса",
@@ -1157,6 +1214,54 @@ def build_reports(doc, sh):
     # protected with the other pages at the end of the build
 
 
+def build_service_page(doc, sh):
+    """«Обслуживание» (WmsSafe): the state of the safety of the data (filled when the page is opened) and the buttons"""
+    for c, w in enumerate([400, 6600, 17000, 400]):
+        sh.getColumns().getByIndex(c).Width = w
+    sh.getRows().getByIndex(0).Height = 1100
+    sh.getRows().getByIndex(1).Height = 700
+    merge(sh, 1, 0, 2, 0)
+    text_cell(sh, 1, 0, "Обслуживание", size=20, bold=True, color=INK, valign=2)
+    merge(sh, 1, 1, 2, 1)
+    text_cell(sh, 1, 1, "Сохранность данных и здоровье книги. Состояние обновляется при каждом открытии страницы; ничего здесь не проводит операций, "
+                        "кроме возврата к копии.", size=9, color=MUTED, wrap=True, valign=1)
+    r = SERVICE_STATE_ROW
+    for label in SERVICE_STATE:
+        sh.getRows().getByIndex(r).Height = 560
+        text_cell(sh, 1, r, label, size=10, bold=True, color=INK, valign=2)
+        text_cell(sh, 2, r, "", size=10, color=TEXT, wrap=False, valign=2)
+        r += 1
+    add_cond(sh, sh.getCellRangeByPosition(2, SERVICE_STATE_ROW, 2, r - 1), 'LEFT($C' + str(SERVICE_STATE_ROW + 1) + ';1)="✓"', "DB_Good", 2,
+             SERVICE_STATE_ROW)
+    add_cond(sh, sh.getCellRangeByPosition(2, SERVICE_STATE_ROW, 2, r - 1), 'LEFT($C' + str(SERVICE_STATE_ROW + 1) + ';1)="✗"', "DB_Alert", 2,
+             SERVICE_STATE_ROW)
+    r += 1
+    for caption, items in SERVICE_GROUPS:
+        sh.getRows().getByIndex(r).Height = 700
+        text_cell(sh, 1, r, caption, size=12, bold=True, color=INK, valign=3)
+        r += 1
+        for name, label, macro, desc in items:
+            sh.getRows().getByIndex(r).Height = 900
+            text_cell(sh, 2, r, desc, size=10, color=TEXT, wrap=True, valign=2)
+            y = sh.getCellByPosition(1, r).Position.Y
+            x = sh.getCellByPosition(1, r).Position.X
+            add_button(doc, sh, name, label, macro, x, y + 80, 6400, 740, bold=name in ("btnFlashCopy", "btnDailyCheck"),
+                       back=0xC6E0B4 if name in ("btnFlashCopy", "btnDailyCheck") else 0xDDEBF7)
+            r += 1
+        r += 1
+    add_button(doc, sh, "btnSvMain", "Главная", "WmsUi.NavMain", sh.getCellByPosition(2, 0).Position.X + 13200, 160, 3700, 760, back=0xDDEBF7)
+    sh.getCellRangeByPosition(0, 0, 12, 200).CellProtection = protection(True)
+
+
+def service_10(doc, sheets):
+    """1.0 (этап J): the page «Обслуживание» for a new book and an upgraded one; its state is refreshed when it is opened"""
+    if not sheets.hasByName(SERVICE):
+        names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+        sheets.insertNewByName(SERVICE, names.index(PRINT) if PRINT in names else names.index(FIND) + 1)
+        build_service_page(doc, sheets.getByName(SERVICE))
+    bind_event(sheets.getByName(SERVICE).Events, "OnFocus", "WmsSafe.OnServiceFocus")
+
+
 def dash_10(doc, sheets):
     """1.0 (А6): «Все…» over the four lists of «Дашборд» and the hidden column of the references of its right lists (a double
     click on a row opens its order, its EI card or the goods on «Поиск»)"""
@@ -1198,6 +1303,60 @@ def kits_10(doc, sheets):
         at = names.index(GOODS) + 1 if GOODS in names else (names.index(RCPT) + 1 if RCPT in names else len(names))
         sheets.insertNewByName(KITS, at)
         build_kits(doc, sheets.getByName(KITS))
+
+
+def build_reserves(doc, sh):
+    """«Резервы» (WmsItem, Ф7): a row — a quantity of an EI kept for a recipient or an object until a date; «Выдачи» asks before
+    giving the others more than is free of it. The storekeeper's own sheet: not protected, not journaled"""
+    header(sh, RESERVE_HEADERS, [3200, 2600, 7000, 2800, 7000], height=2000)
+    text = number_format(doc, "@", ("ru", "RU"))
+    for c in (0, 2, 4):
+        sh.getCellRangeByPosition(c, 1, c, LAST_ROW).NumberFormat = text
+    sh.getCellRangeByPosition(3, 1, 3, LAST_ROW).NumberFormat = number_format(doc, "DD.MM.YYYY")
+    hint = sh.getCellByPosition(6, 0)
+    hint.setString("Резерв — часть ЕИ, отложенная для получателя или объекта: ЕИ (427 или ЕИ-00000427), сколько, для кого, до какой даты "
+                   "(пусто — пока не уберёте строку). Выдавая другому больше свободного, WMS спросит. Выдача тому, для кого резерв, "
+                   "не спрашивает; прошедшая дата «До» резерв снимает. Выдали по резерву — уменьшите количество или удалите строку.")
+    hint.IsTextWrapped = True
+    hint.VertJustify = 1
+    hint.CharHeight = 9
+    hint.CharColor = MUTED
+    sh.getColumns().getByIndex(5).Width = 400
+    sh.getColumns().getByIndex(6).Width = 16000
+
+
+def items_10(doc, sheets):
+    """1.0 (Ф4, Ф5, Ф7): what a new book and an upgraded one both get — the hidden _PROP, the sheet «Резервы» and the column Q
+    «Вернуть через, дней» of «Номенклатура»"""
+    if not sheets.hasByName(PROP):
+        names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+        sheets.insertNewByName(PROP, names.index("_SYS") if "_SYS" in names else sheets.getCount())
+        sh = sheets.getByName(PROP)
+        for c, h in enumerate(PROP_HEADERS):
+            sh.getCellByPosition(c, 0).setString(h)
+        text = number_format(doc, "@", ("ru", "RU"))
+        for c in (0, 1, 3):
+            sh.getCellRangeByPosition(c, 1, c, LAST_ROW).NumberFormat = text
+        sh.getCellRangeByPosition(2, 1, 2, LAST_ROW).NumberFormat = number_format(doc, "DD.MM.YYYY")
+        sh.IsVisible = False
+    if not sheets.hasByName(RESERVES):
+        names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+        at = names.index(KITS) + 1 if KITS in names else (names.index(GOODS) + 1 if GOODS in names else len(names))
+        sheets.insertNewByName(RESERVES, at)
+        build_reserves(doc, sheets.getByName(RESERVES))
+    gs = sheets.getByName(GOODS)
+    h = gs.getCellByPosition(GOODS_RET_COL, 0)
+    if h.getString().strip() == "":
+        h.setString(GOODS_RET_HEADER)
+        ref = gs.getCellByPosition(GOODS_RET_COL - 5, 0)
+        h.CharWeight = 150
+        h.IsTextWrapped = True
+        h.VertJustify = ref.VertJustify
+        h.HoriJustify = ref.HoriJustify
+        h.CharHeight = ref.CharHeight
+        h.CellBackColor = INPUT_HEAD_10
+        gs.getColumns().getByIndex(GOODS_RET_COL).Width = 3000
+        gs.getCellRangeByPosition(GOODS_RET_COL, 1, GOODS_RET_COL, LAST_ROW).CharColor = gs.getCellByPosition(GOODS_RET_COL - 5, 1).CharColor
 
 
 def ledger_10(doc, sheets):
@@ -1321,8 +1480,8 @@ def layout_10(doc, sheets):
 FREEZE_COLS_10 = {ISSUES: 3, ORDERS: 2, RETURNS: 4, ADJUST: 4, SPECIAL: 4, STOCK: 2}
 # 1.0 (В9): the colour of the sheet tabs by group — pages, the sheets the storekeeper works in, the registers and directories,
 # the service sheets
-TAB_COLORS_10 = [((DASH, MAIN, FIND, MAP, SUPPLY, REPORTS, PRINT), 0x5B9BD5), ((ORDERS, SPECIAL, CARS, ISSUES, RETURNS, ADJUST), 0x70AD47),
-                 ((STOCK, RCPT, TOPO, PLACES, SUPPLIERS, GOODS, KITS), 0xED7D31), ((LEGREP, HELP), 0xA5A5A5)]
+TAB_COLORS_10 = [((DASH, MAIN, FIND, MAP, SUPPLY, REPORTS, SERVICE, PRINT), 0x5B9BD5), ((ORDERS, SPECIAL, CARS, ISSUES, RETURNS, ADJUST), 0x70AD47),
+                 ((STOCK, RCPT, TOPO, PLACES, SUPPLIERS, GOODS, KITS, RESERVES), 0xED7D31), ((LEGREP, HELP), 0xA5A5A5)]
 # 1.0 (В1): what the storekeeper fills in is white, what WMS writes is grey (data rows), the headers likewise
 INPUT_HEAD_10 = 0xFFF2CC
 WMS_HEAD_10 = 0xE7E6E6
@@ -1523,12 +1682,28 @@ BUTTONS_10 = [
     # 1.0 (этап I): the kits
     (ISSUES, "btnKitIssue", "Выдать комплект…", "WmsKit.BtnKitIssue", 150 + 6 * 2900, 880, 3600, 650, 0xC6E0B4),
     (ADJUST, "btnKitBuild", "Собрать комплект…", "WmsKit.BtnKitBuild", 150 + 4050 + 2900 + 5050 + 3150, 880, 3900, 650, 0xC6E0B4),
+    # 1.0 (этап I): the label, the properties, the photo, the tools on the hands, the reserves («Наличие» and «Поиск» — a second row)
+    (STOCK, "btnLabel", "Этикетка", "WmsItem.BtnLabel", 150, 880, 2600, 650, 0xC6E0B4),
+    (STOCK, "btnProps", "Свойства ЕИ…", "WmsItem.BtnProps", 2900, 880, 3400, 650, 0xDDEBF7),
+    (STOCK, "btnPhoto", "Фото", "WmsItem.BtnPhoto", 6450, 880, 2000, 650, 0xDDEBF7),
+    (STOCK, "btnTools", "Где инструмент", "WmsItem.BtnTools", 8600, 880, 3600, 650, 0xDDEBF7),
+    (STOCK, "btnReserves", "Резервы", "WmsItem.NavReserves", 12350, 880, 2600, 650, 0xDDEBF7),
+    (ORDERS, "btnLabel", "Этикетка", "WmsItem.BtnLabel", 150 + 8 * 3050, 120, 2900, 650, 0xC6E0B4),
+    (SPECIAL, "btnLabel", "Этикетка", "WmsItem.BtnLabel", 150 + 8 * 2900, 120, 2750, 650, 0xC6E0B4),
+    (ISSUES, "btnTools", "Где инструмент", "WmsItem.BtnTools", 150 + 6 * 2900 + 3750, 880, 3600, 650, 0xDDEBF7),
+    (FIND, "btnLabel", "Этикетка", "WmsItem.BtnLabel", None, None, 2400, 640, 0xC6E0B4),
+    (FIND, "btnProps", "Свойства ЕИ…", "WmsItem.BtnProps", None, None, 3900, 640, 0xDDEBF7),
+    (FIND, "btnPhoto", "Фото", "WmsItem.BtnPhoto", None, None, 1900, 640, 0xDDEBF7),
+    (FIND, "btnTools", "Где инструмент", "WmsItem.BtnTools", None, None, 3900, 640, 0xDDEBF7),
+    # 1.0 (С7): the search over the whole history (by default 12 months)
+    (FIND, "btnFindAll", "Вся история", "WmsFind.BtnFindAll", None, None, 2800, 720, 0xDDEBF7),
 ]
 
 
 def buttons_10(doc, sheets):
     fit_headers(sheets.getByName(ISSUES), ISSUE_HEADERS, 3100)
     fit_headers(sheets.getByName(ADJUST), ADJUST_HEADERS, 2700)
+    fit_headers(sheets.getByName(STOCK), STOCK_HEADERS, 2700)
     for sheet, name, label, macro, x, y, w, h, back in BUTTONS_10:
         sh = sheets.getByName(sheet)
         if x is None and sheet == CARS:
@@ -1541,6 +1716,10 @@ def buttons_10(doc, sheets):
             # over the hint right of the table
             x = sh.getCellByPosition(len(GOODS_HEADERS) + 1, 0).Position.X + {"btnGoodsRefresh": 0, "btnGoodsFill": 2700}[name]
             y = 120
+        elif x is None and name in ("btnLabel", "btnProps", "btnPhoto", "btnTools", "btnFindAll"):
+            # «Поиск»: the second row, under «Выдать» … (right of the hint of row 5)
+            y = sh.getCellByPosition(0, 4).Position.Y + 70
+            x = sh.getCellByPosition(6, 3).Position.X + {"btnLabel": 13100, "btnProps": 15580, "btnPhoto": 19560, "btnTools": 21540, "btnFindAll": 25540}[name]
         elif x is None:
             # «Поиск»: the row of its buttons (build_find), after «Фасовка ЕИ»
             y = sh.getCellByPosition(0, 3).Position.Y + 90
@@ -1548,6 +1727,80 @@ def buttons_10(doc, sheets):
                                                          "btnHistory": 23540, "btnCardPrint": 27640}[name]
         if not has_button(sh, name):
             add_button(doc, sh, name, label, macro, x, y, w, h, back=back)
+    find_layout_10(sheets)
+    help_buttons_10(doc, sheets)
+
+
+# 1.0 (П6): «?» — the section of «Справка» of the sheet, right of the first row of its buttons
+HELP_MARK_SHEETS = (ORDERS, SPECIAL, CARS, ISSUES, RETURNS, ADJUST, STOCK, FIND, MAP, DASH, SUPPLY, REPORTS, SERVICE, KITS, RESERVES, GOODS,
+                    SUPPLIERS, PLACES, MAIN)
+
+
+def help_buttons_10(doc, sheets):
+    """1.0 (П2, П3, П6, П7, П8): the buttons of «Справка» over its text and «?» on the working sheets and the pages"""
+    hs = sheets.getByName(HELP)
+    for r in range(HELP_TOP):
+        hs.getRows().getByIndex(r).Height = 520
+    x = 150
+    for name, label, macro in HELP_BUTTONS:
+        w = 3600 if len(label) > 11 else 2800
+        if not has_button(hs, name):
+            add_button(doc, hs, name, label, macro, x, 60, w, 900, bold=name == "btnWhatIf", back=0xC6E0B4 if name == "btnWhatIf" else 0xDDEBF7)
+        x += w + 100
+    for name in HELP_MARK_SHEETS:
+        if not sheets.hasByName(name):
+            continue
+        sh = sheets.getByName(name)
+        if has_button(sh, "btnHelpHere"):
+            continue
+        dp = sh.getDrawPage()
+        right, top, hgt = 150, None, 650
+        for i in range(dp.getCount()):
+            shp = dp.getByIndex(i)
+            if not shp.supportsService("com.sun.star.drawing.ControlShape"):
+                continue
+            p, z = shp.getPosition(), shp.getSize()
+            if top is None or p.Y < top - 100:
+                top, right, hgt = p.Y, p.X + z.Width, z.Height
+            elif abs(p.Y - top) <= 100:
+                right = max(right, p.X + z.Width)
+        add_button(doc, sh, "btnHelpHere", "?", "WmsHelp.BtnHelpHere", right + 100, top if top is not None else 120, 700, hgt, bold=True, back=0xFFF2CC)
+
+
+# 1.0: «Поиск» — its buttons in two rows that fit a screen of 1920 points (row 4: find and act, row 5: the card of the EI)
+FIND_ROWS = (
+    (3, 90, 720, (("btnFind", 2600), ("btnFindCard", 3300), ("btnFindGo", 3800), ("btnIssueFrom", 2400), ("btnReturnHands", 3900),
+                  ("btnShowOnMap", 3900), ("btnFindAll", 2800))),
+    (4, 80, 640, (("btnFindPack", 3000), ("btnHistory", 4000), ("btnCardPrint", 3900), ("btnLabel", 2400), ("btnProps", 3400),
+                  ("btnPhoto", 1900), ("btnTools", 3600))),
+)
+
+
+def find_layout_10(sheets):
+    """1.0: the buttons of «Поиск» placed in the two rows of FIND_ROWS (a new book and an upgraded one); the hint of row 5
+    narrowed to B:F (two lines) so that the second row of buttons stands right of it"""
+    sh = sheets.getByName(FIND)
+    sh.getCellRangeByPosition(1, 4, 8, 4).merge(False)
+    hint = sh.getCellRangeByPosition(1, 4, 5, 4)
+    hint.merge(True)
+    hint.IsTextWrapped = True
+    hint.VertJustify = 1
+    sh.getRows().getByIndex(4).Height = 900
+    dp = sh.getDrawPage()
+    shapes = {}
+    for i in range(dp.getCount()):
+        shp = dp.getByIndex(i)
+        if shp.supportsService("com.sun.star.drawing.ControlShape"):
+            shapes[shp.getControl().Name] = shp
+    x0 = sh.getCellByPosition(6, 3).Position.X + 80
+    for row, dy, h, items in FIND_ROWS:
+        y = sh.getCellByPosition(0, row).Position.Y + dy
+        x = x0
+        for name, w in items:
+            if name in shapes:
+                shapes[name].setPosition(Point(x, y))
+                shapes[name].setSize(Size(w, h))
+            x += w + 80
 
 
 def where_buttons(doc, sheets):
@@ -1741,10 +1994,13 @@ def main_nav_views(doc, sh):
     sh.getRows().getByIndex(2).Height = 1000
     y = sh.getCellByPosition(0, 2).Position.Y
     # 1.0: «Снабжение» (этап F) and «Отчёты» (этап G) among them
-    for i, (name, label, macro) in enumerate((("navDash", "Дашборд", "WmsUi.NavDash"), ("navFind", "Поиск, карточка ЕИ", "WmsUi.NavFind"),
+    # 1.0 (этап J): «Обслуживание» — seven buttons, as wide as those of the strip above
+    w = 3200
+    for i, (name, label, macro) in enumerate((("navDash", "Дашборд", "WmsUi.NavDash"), ("navFind", "Поиск", "WmsUi.NavFind"),
                                               ("navMap", "Карта склада", "WmsUi.NavMap"), ("navSupply", "Снабжение", "WmsSupply.NavSupply"),
-                                              ("navReports", "Отчёты", "WmsLedger.NavReports"), ("navHelp", "Справка", "WmsDaily.NavHelp"))):
-        add_button(doc, sh, name, label, macro, MAIN_LEFT + 100 + i * 3800, y + 80, 3740, 840, bold=True, back=0xC6E0B4)
+                                              ("navReports", "Отчёты", "WmsLedger.NavReports"), ("navService", "Обслуживание", "WmsSafe.NavService"),
+                                              ("navHelp", "Справка", "WmsDaily.NavHelp"))):
+        add_button(doc, sh, name, label, macro, MAIN_LEFT + 100 + i * (w + 60), y + 80, w, 840, bold=True, back=0xC6E0B4)
 
 
 def version_text():
@@ -1855,10 +2111,16 @@ def md_plain(s):
     return re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", s)
 
 
+HELP_TOP = 2                       # 1.0 (П2, П3, П7, П8): the buttons of «Справка» stand in rows 1–2, the text begins under them
+HELP_BUTTONS = [("btnWhatsNew", "Что нового", "WmsHelp.BtnWhatsNew"), ("btnTour", "Первый день", "WmsHelp.BtnTour"),
+                ("btnWhatIf", "Что делать, если…", "WmsHelp.BtnWhatIf"), ("btnCheat", "Шпаргалка A4", "WmsHelp.BtnCheatSheet"),
+                ("btnHelpMain", "Главная", "WmsUi.NavMain")]
+
+
 def build_help(sh):
     """«Справка»: docs/OPERATOR_GUIDE.md, RELEASE_NOTES.md and BACKUP_RECOVERY.md as text (headings bold, a table row per line)"""
     sh.getColumns().getByIndex(0).Width = 26000
-    r = 0
+    r = HELP_TOP
     for name in HELP_DOCS:
         for raw in open(os.path.join(ROOT, "docs", name), encoding="utf-8").read().splitlines():
             line = raw.rstrip()
@@ -1989,6 +2251,8 @@ def build(office, out_path, test=False, instance_id=None):
     print_10(doc, sheets)
     ledger_10(doc, sheets)
     kits_10(doc, sheets)
+    items_10(doc, sheets)
+    service_10(doc, sheets)
     buttons_10(doc, sheets)
     colors_10(doc, sheets)
     hints_10(doc, sheets)
@@ -2035,7 +2299,7 @@ def build(office, out_path, test=False, instance_id=None):
     for name in (ORD, RCV, SPR, ART, RET, ISS, ADJ, CAR, LEG, PACK, IDX, "_SYS"):
         sheets.getByName(name).IsVisible = False
     for name in (MAIN, ORDERS, SPECIAL, CARS, ISSUES, RETURNS, ADJUST, STOCK, LEGREP, HELP, ORD, RCV, SPR, ART, RET, ISS, ADJ, CAR, LEG, PACK, IDX,
-                 "_SYS", DASH, FIND, MAP, SUPPLY, PRINT, CLOSE, REPORTS):
+                 "_SYS", DASH, FIND, MAP, SUPPLY, PRINT, CLOSE, REPORTS, PROP, SERVICE):
         sheets.getByName(name).protect(PWD)
     doc.protect(PWD)
     if os.path.exists(out_path):

@@ -152,12 +152,15 @@ Private Function PV(sName As String, v As Variant) As com.sun.star.beans.Propert
 End Function
 
 ' Writes the snapshot. OK:<folder> — <tables and rows>; <ms>, ERR:<why>, BUSY:… Nothing in the book changes.
-Function ExportSnapshot() As String
+' 1.0 (С8): bLite — the light snapshot for the labels (WMS_STOCK_…): «Наличие», «Заказы», «Иной приход», no journal — seconds
+Function ExportSnapshot(Optional bLite As Variant) As String
     Dim sfa As Object, sBase As String, sName As String, tmp As String, fin As String, specs As Variant, i As Integer, t0 As Long
     Dim files() As String, rows() As Long, nf As Integer, man As String, h As String, nb As Double, k As Integer, jf As Variant
     Dim summary As String, td As Object, sh As Object, loc As New com.sun.star.lang.Locale, nfs As Object, kGen As Long, kDate As Long
     Dim keys As Variant, dates As Variant, j As Integer, last As Long, lastCol As Long, stage() As String, cur As Object, kDT As Long, kMin As Long
+    Dim lite As Boolean, allSpecs As Variant
     WmsInit()
+    If Not IsMissing(bLite) Then lite = bLite
     If gBusy Then
         ExportSnapshot = "BUSY:операция уже выполняется"
         Exit Function
@@ -172,7 +175,7 @@ Function ExportSnapshot() As String
     sfa = CreateUnoService("com.sun.star.ucb.SimpleFileAccess")
     sBase = gBaseDir & EXPORT_DIR & "/"
     If Not sfa.exists(sBase) Then sfa.createFolder(sBase)
-    sName = "WMS_SNAPSHOT_" & Format(Now(), "YYYYMMDD-HHMMSS") & "_seq" & CLng(SysNum(SK_LAST_SEQ))
+    sName = IIf(lite, "WMS_STOCK_", "WMS_SNAPSHOT_") & Format(Now(), "YYYYMMDD-HHMMSS") & "_seq" & CLng(SysNum(SK_LAST_SEQ))
     fin = sBase & sName & "/"
     k = 1
     Do While sfa.exists(fin)
@@ -184,9 +187,16 @@ Function ExportSnapshot() As String
     If sfa.exists(tmp) Then sfa.kill(tmp)
     sfa.createFolder(tmp)
     sfa.createFolder(tmp & "service/")
-    sfa.createFolder(tmp & "journal/")
+    If Not lite Then sfa.createFolder(tmp & "journal/")
     specs = TableSpecs()
-    jf = WmsJournal.ListFiles()
+    If lite Then
+        allSpecs = specs
+        specs = Array(allSpecs(0), allSpecs(1), allSpecs(2))
+        jf = Array()
+    Else
+        jf = WmsJournal.ListFiles()
+    End If
+    WmsView.ProgressStart(IIf(lite, "Лёгкий снимок для этикеток", "Экспорт для инструментов"), UBound(specs) + 3)
     ReDim files(UBound(specs) + UBound(jf) + 2)
     ReDim rows(UBound(specs) + UBound(jf) + 2)
     ReDim stage(UBound(specs))
@@ -203,6 +213,7 @@ Function ExportSnapshot() As String
     kMin = nfs.queryKey("[M]", loc, False)
     If kMin < 0 Then kMin = nfs.addNew("[M]", loc)
     For i = 0 To UBound(specs)
+        WmsView.ProgressSet(i + 1)
         td.Sheets.importSheet(gDoc, specs(i)(0), td.Sheets.getCount())
         sh = td.Sheets.getByIndex(td.Sheets.getCount() - 1)
         If sh.isProtected() Then sh.unprotect(PROTECT_PWD)
@@ -274,9 +285,9 @@ Function ExportSnapshot() As String
         & "last_seq;" & SysStr(SK_LAST_SEQ) & Chr(10) & "journal_pos;" & CsvField(SysStr(SK_JPOS), False) & Chr(10) _
         & "next_ei;" & SysStr(SK_NEXT_EI) & Chr(10) & "next_issue;" & SysStr(SK_NEXT_NO) & Chr(10) & "next_return;" & SysStr(SK_NEXT_RET) & Chr(10) _
         & "next_line;" & SysStr(SK_NEXT_SPL) & Chr(10) & "next_adj;" & SysStr(SK_NEXT_ADJ) & Chr(10) & "next_car;" & SysStr(SK_NEXT_CAR) & Chr(10) _
-        & "contract;" & CONTRACT_VERSION & Chr(10) & "book_modified;" & IIf(gDoc.isModified(), "1", "0") & Chr(10)
+        & "contract;" & CONTRACT_VERSION & Chr(10) & "book_modified;" & IIf(gDoc.isModified(), "1", "0") & Chr(10) & IIf(lite, "kind;lite" & Chr(10), "")
     ' 1.0: «остаток = сумма движений» of every EI, transferred ones included (the tools cannot check those themselves)
-    If gDoc.Sheets.hasByName(SH_PACK) Then man = man & WmsLegacy.BalanceManifest()
+    If gDoc.Sheets.hasByName(SH_PACK) And Not lite Then man = man & WmsLegacy.BalanceManifest()
     ' the protections of the book (WMS_DOCTOR): every sheet — protected, visible; the structure of the book
     For i = 0 To gDoc.Sheets.getCount() - 1
         sh = gDoc.Sheets.getByIndex(i)
@@ -296,12 +307,14 @@ Function ExportSnapshot() As String
     sfa.move(tmp, fin)
     gLastSnapshot = fin
     gBusy = False
+    WmsView.ProgressEnd()
     ExportSnapshot = "OK:" & ConvertFromURL(fin) & " — " & summary & "; " & (GetSystemTicks() - t0) & " мс" & PruneSnapshots(sBase, fin)
     Exit Function
 EH:
     ExportSnapshot = "ERR:снимок не создан: " & Error$ & " (код " & Err & ", строка " & Erl & ")"
 FAIL:
     On Error Resume Next
+    WmsView.ProgressEnd()
     If Not IsNull(td) And Not IsEmpty(td) Then td.close(True)
     If tmp <> "" Then
         If sfa.exists(tmp) Then sfa.kill(tmp)
@@ -314,16 +327,19 @@ End Function
 ' name their snapshot only for the record). The one just made is never removed. The text for the result ("" — nothing)
 Private Function PruneSnapshots(sBase As String, fin As String) As String
     Dim sfa As Object, lst As Variant, names() As String, n As Long, i As Long, j As Long, t As String, nm As String, sNew As String, nDel As Long
+    Dim pre As String
     On Error GoTo EH
     sfa = CreateUnoService("com.sun.star.ucb.SimpleFileAccess")
     sNew = FileNameOf(Left(fin, Len(fin) - 1))
+    ' the light snapshots (С8) are kept apart from the full ones
+    pre = IIf(Left(sNew, 10) = "WMS_STOCK_", "WMS_STOCK_", "WMS_SNAPSHOT_")
     lst = sfa.getFolderContents(sBase, True)
     n = -1
     For i = 0 To UBound(lst)
         nm = lst(i)
         If Right(nm, 1) = "/" Then nm = Left(nm, Len(nm) - 1)
         nm = FileNameOf(nm)
-        If Left(nm, 13) = "WMS_SNAPSHOT_" And nm <> sNew And sfa.isFolder(lst(i)) Then
+        If Left(nm, Len(pre)) = pre And nm <> sNew And sfa.isFolder(lst(i)) Then
             n = n + 1
             ReDim Preserve names(n)
             names(n) = nm

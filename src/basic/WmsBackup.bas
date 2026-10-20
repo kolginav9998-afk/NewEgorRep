@@ -3,6 +3,10 @@
 ' working book, "Восстановить" replays the journal tail on top of it.
 Option Explicit
 
+' 1.0 (Н6): the mark of the next copy («перед загрузкой топологии»), set by WmsSafe.RestorePoint
+Global gBkLabel As String
+Public Const BACKUP_KEEP_POINT = 10
+
 Function BookBaseName() As String
     Dim fn As String
     fn = FileNameOf(gDoc.getURL())
@@ -18,6 +22,8 @@ Function KeepFor(kind As String) As Integer
         KeepFor = BACKUP_KEEP_UPGRADE
     Case "premigration"
         KeepFor = BACKUP_KEEP_MIGRATION
+    Case "point"
+        KeepFor = BACKUP_KEEP_POINT
     Case Else
         KeepFor = BACKUP_KEEP_MANUAL
     End Select
@@ -29,19 +35,26 @@ Private Function KindName(kind As String) As String
     Case "daily": KindName = "ежедневная"
     Case "preupgrade": KindName = "перед обновлением"
     Case "premigration": KindName = "перед переносом"
+    Case "point": KindName = "точка восстановления" & IIf(gBkLabel <> "", " " & gBkLabel, "")
     Case Else: KindName = "ручная"
     End Select
 End Function
 
-' kind: daily | manual | preupgrade | premigration
+' kind: daily | manual | preupgrade | premigration | point (1.0, Н6)
 Function BackupNow(kind As String) As String
-    Dim src As String, dst As String, d As Date, t0 As Long, stamp As String, nSrc As Double, nDst As Double, sClock As String
+    Dim src As String, dst As String, d As Date, t0 As Long, stamp As String, nSrc As Double, nDst As Double, sClock As String, why As String
     On Error GoTo EH
     If Not gDoc.hasLocation() Then
         BackupNow = "резервная копия невозможна: книга не сохранена в файл"
         Exit Function
     End If
     If Not gSfa.exists(gBDir) Then gSfa.createFolder(gBDir)
+    ' 1.0 (Н9): not enough free space — no copy (a copy cut short is worse than none; the older ones stay)
+    why = WmsSafe.DiskRefuse(gBDir, gSfa.getSize(gDoc.getURL()) / 1048576)
+    If why <> "" Then
+        BackupNow = "ОШИБКА резервной копии: копия не сделана — " & why
+        Exit Function
+    End If
     t0 = GetSystemTicks()
     d = Now()
     stamp = Format(d, "YYYY-MM-DD") & "_" & Format(d, "HHMMSS")
@@ -62,6 +75,8 @@ Function BackupNow(kind As String) As String
         Exit Function
     End If
     Rotate(kind, KeepFor(kind), FileNameOf(dst))
+    ' 1.0 (Н2): the list of the copies a return can be made to (with the number of the operations in the copy)
+    WmsSafe.CopyIndexAdd(FileNameOf(dst), kind, gBkLabel)
     BackupNow = "резервная копия «" & KindName(kind) & "» (последнее сохранённое состояние): " & FileNameOf(dst) & ", " & (GetSystemTicks() - t0) & " мс" & sClock
     Exit Function
 EH:

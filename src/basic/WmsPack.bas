@@ -992,20 +992,28 @@ End Function
 Function ProductPackAsk(sName As String, sArt As String, sUnit As String, ByRef pn As Double, ByRef pu As String, ByRef sFrom As String) As String
     Dim sh As Object, cur As Object, last As Long, f As String, s As String, a As Variant, n As Long, k As Integer, x As String
     sFrom = ""
+    If Trim(sArt) = "" And Trim(sName) = "" Then Exit Function
     sh = PackSheet()
-    If IsNull(sh) Or (Trim(sArt) = "" And Trim(sName) = "") Then Exit Function
-    cur = sh.createCursor()
-    cur.gotoEndOfUsedArea(False)
-    last = cur.getRangeAddress().EndRow
-    If last < 1 Then Exit Function
-    If Trim(sArt) <> "" Then
-        f = "(" & WmsView.ColRng(SH_STOCK, SC_ART, 1, last) & "=""" & Replace(Trim(sArt), """", """""") & """)"
-    Else
-        f = "(" & WmsView.ColRng(SH_STOCK, SC_NAME, 1, last) & "=""" & Replace(Trim(sName), """", """""") & """)"
+    If Not IsNull(sh) Then
+        cur = sh.createCursor()
+        cur.gotoEndOfUsedArea(False)
+        last = cur.getRangeAddress().EndRow
     End If
-    s = WmsView.Eng("TEXTJOIN("";"";1;IF(ISNUMBER(" & WmsView.ColRng(SH_PACK, PK_N, 1, last) & ")*(" & WmsView.ColRng(SH_PACK, PK_N, 1, last) & ">0)*" & f _
-        & "*(" & WmsView.ColRng(SH_STOCK, SC_UNIT, 1, last) & "=""" & Replace(Trim(sUnit), """", """""") & """);ROW(" & WmsView.ColRng(SH_PACK, PK_N, 1, last) & ")-1;""""))")
-    If s = "" Then Exit Function
+    If last >= 1 Then
+        If Trim(sArt) <> "" Then
+            f = "(" & WmsView.ColRng(SH_STOCK, SC_ART, 1, last) & "=""" & Replace(Trim(sArt), """", """""") & """)"
+        Else
+            f = "(" & WmsView.ColRng(SH_STOCK, SC_NAME, 1, last) & "=""" & Replace(Trim(sName), """", """""") & """)"
+        End If
+        s = WmsView.Eng("TEXTJOIN("";"";1;IF(ISNUMBER(" & WmsView.ColRng(SH_PACK, PK_N, 1, last) & ")*(" & WmsView.ColRng(SH_PACK, PK_N, 1, last) & ">0)*" & f _
+            & "*(" & WmsView.ColRng(SH_STOCK, SC_UNIT, 1, last) & "=""" & Replace(Trim(sUnit), """", """""") & """);ROW(" & WmsView.ColRng(SH_PACK, PK_N, 1, last) _
+            & ")-1;""""))")
+    End If
+    ' 1.0 (Ф3): no earlier EI of the product has a packing — the packing written for the goods in «Номенклатура»
+    If s = "" Then
+        ProductPackAsk = PkGoodsAsk(sName, sArt, sUnit, pn, pu, sFrom)
+        Exit Function
+    End If
     a = Split(s, ";")
     n = CLng(Val(a(UBound(a))))
     If Not PackOf(n, pu, pn) Then
@@ -1022,6 +1030,52 @@ Function ProductPackAsk(sName As String, sArt As String, sUnit As String, ByRef 
         Exit Function
     End If
     sFrom = WmsIssue.EiCanon(n)
+End Function
+
+' 1.0 (Ф3): the packing of «Номенклатура» (F parts in 1 unit, G the part) of the same article — or of the same name when one of
+' them has no article — and of the same unit (or no unit there) offered to the new EI; sFrom = «Номенклатуре» when taken
+Private Function PkGoodsAsk(sName As String, sArt As String, sUnit As String, ByRef pn As Double, ByRef pu As String, ByRef sFrom As String) As String
+    Dim gs As Object, last As Long, a As Variant, nItems As Long, i As Integer, d As Variant, r As Long, x As String, k As Integer, cond As String
+    Dim F As String, G As String, A0 As String, N0 As String, sA As String, sN As String
+    If Not gDoc.Sheets.hasByName(WmsSupply.SH_GOODS) Then Exit Function
+    gs = gDoc.Sheets.getByName(WmsSupply.SH_GOODS)
+    last = WmsOrders.LastRow(gs)
+    If last < 1 Then Exit Function
+    F = WmsView.ColRng(WmsSupply.SH_GOODS, GD_PACKN, 1, last)
+    G = WmsView.ColRng(WmsSupply.SH_GOODS, GD_PACKU, 1, last)
+    A0 = "LOWER(TRIM(" & WmsView.ColRng(WmsSupply.SH_GOODS, GD_ART, 1, last) & "))"
+    N0 = "LOWER(TRIM(" & WmsView.ColRng(WmsSupply.SH_GOODS, GD_NAME, 1, last) & "))"
+    sA = """" & Replace(LCase(Trim(sArt)), """", """""") & """"
+    sN = """" & Replace(LCase(Trim(sName)), """", """""") & """"
+    If Trim(sArt) <> "" Then
+        cond = "((" & A0 & "=" & sA & ")+(" & A0 & "="""")*(" & N0 & "=" & sN & ")>0)"
+    Else
+        cond = "(" & N0 & "=" & sN & ")"
+    End If
+    a = WmsView.EngList("TEXTJOIN("";"";1;IF(ISNUMBER(" & F & ")*(" & F & ">0)*(TRIM(" & G & ")<>"""")*" & cond & ";ROW(" & F & ")-1;""""))", nItems)
+    For i = 0 To nItems - 1
+        r = CLng(a(i))
+        d = gs.getCellRangeByPosition(0, r, GD_PACKU, r).getDataArray()(0)
+        If Trim(CStr(d(GD_UNIT))) = "" Or UnitMatch(CStr(d(GD_UNIT)), sUnit) Then
+            pn = d(GD_PACKN)
+            pu = Trim(CStr(d(GD_PACKU)))
+            Exit For
+        End If
+    Next i
+    If pn <= 0 Or pu = "" Then
+        pn = 0
+        pu = ""
+        Exit Function
+    End If
+    x = "в 1 " & IIf(Trim(sUnit) <> "", Trim(sUnit), "шт") & " — " & PartsText(pn, pu)
+    k = WmsPrimeUi.UiButtons("WMS — фасовка нового ЕИ", "«" & sName & "»: в «" & WmsSupply.SH_GOODS & "» у этого товара фасовка «" & x & "»." & Chr(10) _
+        & "Задать её новому ЕИ — чтобы выдавать по 1 " & pu & " сразу?", Array("Да, фасовка «" & x & "»", "Без фасовки"), Array(1, 0))
+    If k <> 1 Then
+        pn = 0
+        pu = ""
+        Exit Function
+    End If
+    sFrom = "«Номенклатуре»"
 End Function
 
 ' 1.0 (Ч8): a unit of weight in kilograms (1 for кг, 1000 for т, 0,001 for г); 0 — not a weight

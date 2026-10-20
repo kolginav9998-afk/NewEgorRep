@@ -24,6 +24,7 @@ Function PrintBegin(sTitle As String, sFile As String) As Object
     gPrFrom = gDoc.getCurrentController().getActiveSheet().getName()
     If gPrFrom = SH_PRINT Then gPrFrom = ""
     sh = WmsView.ViewOpen(SH_PRINT)
+    WmsItem.LabelClear(sh)
     rng = sh.getCellRangeByPosition(0, 0, PR_COLS - 1, PR_MAX)
     rng.clearContents(1 + 2 + 4 + 16 + 32)
     rng.CharHeight = 10

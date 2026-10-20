@@ -26,6 +26,9 @@ Global gFdSpecial As Boolean
 Global gFdCardEI As Long
 ' 1.0: the regular expression of the place being searched ("" — a plain text search)
 Global gFdPlaceRx As String
+' 1.0 (С7): the search looks 12 months back by default; «Вся история» — the whole book once
+Global gFdAllHist As Boolean
+Global gFdOld As Long
 ' 1.0: the number of EIs with a balance that «Подобрать ЕИ» found (it shows at most 15)
 Global gPickAll As Long
 
@@ -160,6 +163,12 @@ Function FindRun(sQuery As String) As String
             FindRun = CardShow(n)
             Exit Function
         End If
+    End If
+    ' 1.0: the serial or the inventory number of an EI (its properties)
+    n = WmsItem.SerialEI(sQuery)
+    If n > 0 Then
+        FindRun = CardShow(n)
+        Exit Function
     End If
     ' a recipient (the short or the full name of «Получатели», or a name of «Кому» of «Выдачи»): what is on his hands
     If RecipientName(sQuery) <> "" Then
@@ -450,21 +459,27 @@ Function FindList(sQuery As String) As String
     sh = ViewOpen(SH_FIND)
     ClearPage(sh)
     ReDim out(FD_MAX)
-    ' sheet | first row | last column
-    specs = Array(Array(SH_STOCK, 1, SC_LAST), Array(SH_ORDERS, 1, OC_LAST), Array(SH_ISSUES, 1, IC_LAST), Array(SH_RETURNS, 1, RC_LAST), _
-        Array(SH_SPECIAL, 1, XC_LAST), Array(SH_ADJUST, 1, AC_LAST), Array(SH_CARS, CAR_FIRST, CC_LAST), Array(SH_RCPT, 1, 1))
+    ' sheet | first row | last column | the column of the date (1.0, С7: rows older than 12 months only with «Вся история»; -1 — none)
+    specs = Array(Array(SH_STOCK, 1, SC_LAST, -1), Array(SH_ORDERS, 1, OC_LAST, OC_RDATE), Array(SH_ISSUES, 1, IC_LAST, IC_DATE), _
+        Array(SH_RETURNS, 1, RC_LAST, RC_DATE), Array(SH_SPECIAL, 1, XC_LAST, XC_DATE), Array(SH_ADJUST, 1, AC_LAST, AC_DATE), _
+        Array(SH_CARS, CAR_FIRST, CC_LAST, CC_DATE), Array(SH_RCPT, 1, 1, -1))
+    gFdOld = 0
+    ProgressStart("Поиск «" & sQuery & "»", UBound(specs) + 1)
     ' 1.0: a place («1-2-3», «Р1-С2-3», «1.2.3») is found as a whole place: «1-2-3» does not find «11-2-3» or «1-2-31»
     gFdPlaceRx = ""
     If PlaceTextKey(sQuery) <> "" Then gFdPlaceRx = PlaceRegex(PlaceTextKey(sQuery))
     For i = 0 To UBound(specs)
+        ProgressSet(i)
         If gDoc.Sheets.hasByName(specs(i)(0)) Then
-            SearchSheet(specs(i)(0), specs(i)(1), specs(i)(2), sQuery, out, nOut, nAll, totals)
+            SearchSheet(specs(i)(0), specs(i)(1), specs(i)(2), sQuery, out, nOut, nAll, totals, specs(i)(3))
         End If
     Next i
+    ProgressEnd()
     gFdMode = "LIST"
     TableMode(sh, False)
     sh.getCellByPosition(1, FD_HEAD).setString(IIf(nAll = 0, "Ничего не найдено: «" & sQuery & "»", "Найдено «" & sQuery & "»: " & NumText(nAll) _
-        & " " & Plural(nAll, "строка", "строки", "строк") & IIf(nAll > nOut, " (показаны первые " & nOut & ")", "")))
+        & " " & Plural(nAll, "строка", "строки", "строк") & IIf(nAll > nOut, " (показаны первые " & nOut & " — уточните запрос)", "")) _
+        & IIf(gFdAllHist, " · вся история", IIf(gFdOld > 0, " · за 12 месяцев; старше — ещё " & NumText(gFdOld) & ": «Вся история»", "")))
     sh.getCellByPosition(1, FD_INFO).setString(IIf(totals <> "", "В «" & SH_STOCK & "» по найденному: " & totals, ""))
     ' 1.0 (М6, М12): a place — what lies on it now; the rows below are its history (receipts, issues, moves through it)
     If gFdPlaceRx <> "" Then
@@ -499,9 +514,9 @@ End Function
 
 ' the rows of one sheet with sQuery in a cell (native search, values as shown) → out (at most FD_MAX in all)
 Private Sub SearchSheet(sName As String, r0 As Long, cLast As Integer, sQuery As String, out() As Variant, nOut As Long, nAll As Long, _
-    totals As String)
+    totals As String, cDate As Integer)
     Dim sh As Object, last As Long, desc As Object, found As Object, addrs As Variant, k As Long, r As Long, seen() As Boolean, d As Variant
-    Dim sum As Double, nSum As Long, unit As String, sameUnit As Boolean, nRead As Long
+    Dim sum As Double, nSum As Long, unit As String, sameUnit As Boolean, nRead As Long, dates As Variant, since As Double, useDates As Boolean
     sh = gDoc.Sheets.getByName(sName)
     last = WmsOrders.LastRow(sh)
     If last < r0 Then Exit Sub
@@ -519,6 +534,12 @@ Private Sub SearchSheet(sName As String, r0 As Long, cLast As Integer, sQuery As
     found = sh.getCellRangeByPosition(0, r0, cLast, last).findAll(desc)
     If IsNull(found) Then Exit Sub
     addrs = found.getRangeAddresses()
+    ' 1.0 (С7): the dates of the sheet read at once; a row older than 12 months is counted apart (gFdOld)
+    If cDate >= 0 And Not gFdAllHist Then
+        dates = sh.getCellRangeByPosition(cDate, 0, cDate, last).getDataArray()
+        since = WmsOrders.Today() - 365
+        useDates = True
+    End If
     ' 1.0: a row found in several cells counts once — an array of the rows (a text of the rows seen grew with every row
     ' and stopped the count after ~28 000 rows: a frequent word was slow and «найдено» too small)
     ReDim seen(last)
@@ -526,6 +547,14 @@ Private Sub SearchSheet(sName As String, r0 As Long, cLast As Integer, sQuery As
         For r = addrs(k).StartRow To addrs(k).EndRow
             If Not seen(r) Then
                 seen(r) = True
+                If useDates Then
+                    If VarType(dates(r)(0)) = 5 Then
+                        If dates(r)(0) > 0 And dates(r)(0) < since Then
+                            gFdOld = gFdOld + 1
+                            GoTo NEXT_ROW
+                        End If
+                    End If
+                End If
                 nAll = nAll + 1
                 ' every row is counted; only the rows shown (and of «Наличие» up to 5000 — the sum) are read
                 If nOut >= FD_MAX And (sName <> SH_STOCK Or nRead >= 5000) Then GoTo NEXT_ROW
@@ -836,7 +865,7 @@ Function CardShow(n As Long) As String
         IIf(CStr(st(SC_ART)) <> "", "артикул " & st(SC_ART), ""), st(SC_CAT)), "   ·   "))
     sh.getCellByPosition(1, FD_INFO + 1).setString(JoinParts(Array("Откуда: " & IIf(CStr(st(SC_SRC)) <> "", st(SC_SRC), "—") _
         & IIf(CStr(st(SC_STYPE)) <> "", " (" & st(SC_STYPE) & ")", ""), "пришло " & WmsIssue.QtyText(sumIn), "ушло " & WmsIssue.QtyText(sumOut), _
-        "движений " & nM, PriceText(n, IIf(VarType(q) = 5, q, 0))), "   ·   "))
+        "движений " & nM, PriceText(n, IIf(VarType(q) = 5, q, 0)), WmsItem.PropText(n), WmsItem.ReserveText(n, IIf(VarType(q) = 5, q, 0))), "   ·   "))
     If Not hasSrc Then
         sh.getCellByPosition(1, FD_INFO + 2).setString("•  Первичного прихода в книге нет (ЕИ начальных данных) — сверка остатка с движениями не выполняется")
     ElseIf ok Then
@@ -1180,4 +1209,22 @@ End Function
 
 Function TestFind(sQuery As String) As String
     TestFind = FindRun(sQuery)
+End Function
+
+' 1.0 (С7): the last search once over the whole history of the book
+Sub BtnFindAll(Optional oEvent As Variant)
+    WmsInit()
+    If gFdQuery = "" Then
+        WmsUi.UiMessage("Сначала найдите что-нибудь: впишите запрос и нажмите Enter.")
+        Exit Sub
+    End If
+    gFdAllHist = True
+    FindRun(gFdQuery)
+    gFdAllHist = False
+End Sub
+
+Function TestFindAll(sQuery As String) As String
+    gFdAllHist = True
+    TestFindAll = FindRun(sQuery)
+    gFdAllHist = False
 End Function

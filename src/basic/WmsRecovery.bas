@@ -42,6 +42,14 @@ Sub Analyze()
     ' 3. working path: a copy or a backup opened directly touches neither the lock, nor the journal, nor backups
     p = WmsLock.RegisteredProblem()
     If p <> "" Then
+        ' 1.0 (П4, П12): the training or the anonymous copy made by WMS — its first start registers it with a journal of its own
+        ' (the start runs again inside)
+        If WmsHelp.CopyRoleStart() Then Exit Sub
+        ' 1.0 (Н2): the copy a fresh order of «Вернуться к копии» returns to — the return goes on after the start
+        If WmsSafe.RestoreOrderMine() Then
+            SetBlocked("RESTORING", "идёт возврат к этой копии: рабочая книга будет отложена, копия встанет на её место")
+            Exit Sub
+        End If
         SetBlocked("NOT_REGISTERED", p)
         Exit Sub
     End If

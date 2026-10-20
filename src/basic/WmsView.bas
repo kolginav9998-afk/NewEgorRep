@@ -10,6 +10,34 @@ Global gVwT0 As Long
 Const PL_RANGE_MAX = 50
 
 ' the view sheet sName open for writing (unprotected); ViewDone protects it again
+' 1.0 (С1): the progress of a long action in the status bar of the window — the map, the search, the self-check, the export
+Global gVwInd As Object
+Global gVwIndOn As Boolean
+
+Sub ProgressStart(sText As String, nMax As Long)
+    On Error GoTo EH
+    gVwInd = gDoc.getCurrentController().getStatusIndicator()
+    gVwInd.start(sText, IIf(nMax > 0, nMax, 1))
+    gVwIndOn = True
+    Exit Sub
+EH:
+    gVwIndOn = False
+End Sub
+
+Sub ProgressSet(n As Long, Optional sText As Variant)
+    If Not gVwIndOn Then Exit Sub
+    On Error Resume Next
+    If Not IsMissing(sText) Then gVwInd.setText(sText)
+    gVwInd.setValue(n)
+End Sub
+
+Sub ProgressEnd()
+    If Not gVwIndOn Then Exit Sub
+    On Error Resume Next
+    gVwInd.end()
+    gVwIndOn = False
+End Sub
+
 Function ViewOpen(sName As String) As Object
     Dim sh As Object
     WmsInit()
@@ -491,6 +519,7 @@ Function OpName(sType As String) As String
     Case "KIT_DEL": OpName = "Разборка комплекта"
     Case "MONTH_CLOSE": OpName = "Закрытие месяца"
     Case "MONTH_OPEN": OpName = "Месяц открыт снова"
+    Case "EI_PROP": OpName = "Свойства ЕИ"
     Case "ISSUE_DOC": OpName = "Номер накладной в выдачах"
     Case "ABANDON": OpName = "Хвост журнала отложен"
     Case "START": OpName = "Начало журнала"

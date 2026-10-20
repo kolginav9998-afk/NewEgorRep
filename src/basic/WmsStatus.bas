@@ -63,7 +63,7 @@ Function LoCompat(ByRef why As String) As Integer
 End Function
 
 ' macro security: 0 low … 3 very high; the folder of the book among the trusted locations
-Private Function MacroSecurity(ByRef trusted As Boolean) As Integer
+Function MacroSecurity(ByRef trusted As Boolean) As Integer
     Dim lvl As Variant, urls As Variant, i As Integer, d As String
     lvl = Config("/org.openoffice.Office.Common/Security/Scripting", "MacroSecurityLevel")
     MacroSecurity = IIf(IsEmpty(lvl), -1, lvl)
@@ -82,7 +82,7 @@ End Function
 ' ================================================================ files
 
 ' "" when a probe file can be written and removed in the folder
-Private Function Writable(sDir As String) As String
+Function Writable(sDir As String) As String
     Dim f As String, n As Integer
     On Error GoTo EH
     If Not gSfa.exists(sDir) Then gSfa.createFolder(sDir)
@@ -254,7 +254,7 @@ Function Protections() As String
         sh = gDoc.Sheets.getByIndex(i)
         ' «Получатели» and «Топология» are the sheets of the user's own input (D-095)
         ' the storekeeper's own sheets (directories): «Получатели», «Топология», «Места», 1.0 «Поставщики», «Номенклатура»
-        If Not sh.isProtected() And InStr("|" & SH_RCPT & "|" & SH_TOPO & "|Места|Поставщики|Номенклатура|Комплекты|", "|" & sh.Name & "|") = 0 Then p = p & IIf(p <> "", "; ", "") & "лист «" & sh.Name & "» не защищён"
+        If Not sh.isProtected() And InStr("|" & SH_RCPT & "|" & SH_TOPO & "|Места|Поставщики|Номенклатура|Комплекты|Резервы|", "|" & sh.Name & "|") = 0 Then p = p & IIf(p <> "", "; ", "") & "лист «" & sh.Name & "» не защищён"
         If InStr(svc, "|" & sh.Name & "|") > 0 And sh.IsVisible Then p = p & IIf(p <> "", "; ", "") & "служебный лист «" & sh.Name & "» не скрыт"
     Next i
     If Not gDoc.isProtected() Then p = p & IIf(p <> "", "; ", "") & "структура книги не защищена"

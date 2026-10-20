@@ -48,7 +48,8 @@ End Function
 ' «Обновить из снимка»: the registry of the latest snapshot and the receipts (for «Подобрать ЕИ»); the EIs to print are listed on «Этикетки»: A ЕИ, B копий
 Sub BtnLblRefresh(Optional oEvent As Variant)
     Dim why As String, snap As String, n As Long
-    snap = TbPickSnapshot(why)
+    ' WMS 1.0 (С8): the light snapshot for the labels is enough
+    snap = TbPickSnapshot(why, True)
     If snap = "" Then
         TbMsg("ERR:" & why)
         Exit Sub

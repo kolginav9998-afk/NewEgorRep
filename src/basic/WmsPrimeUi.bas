@@ -651,6 +651,8 @@ Sub BtnMigrateFix(Optional oEvent As Variant)
         gUiLastMsg = "SKIP:окно закрыто без исправления"
         Exit Sub
     End If
+    ' 1.0 (Н6): a restore point before the correction of the transfer
+    WmsSafe.RestorePoint("перед коррекцией переноса " & sEI)
     res = WmsLegacy.MigrateFixEI(sEI, v(0), v(1), v(2), v(3), v(4), v(5), v(6), v(7), v(8))
     Report("«Исправить ЕИ переноса»", res)
 End Sub

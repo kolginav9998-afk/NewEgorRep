@@ -149,8 +149,11 @@ End Function
 ' ================================================================ the snapshot
 
 ' the latest complete snapshot (the greatest name WMS_SNAPSHOT_… with a manifest.csv), "" when none
-Function TbLatestSnapshot() As String
-    Dim sfa As Object, d As String, lst As Variant, i As Long, best As String, nm As String
+' bLiteOk (WMS 1.0, С8): the light snapshot «Снимок для этикеток» (WMS_STOCK_…: «Наличие», «Заказы», «Иной приход») counts too —
+' the newest of both by the time in the name
+Function TbLatestSnapshot(Optional bLiteOk As Variant) As String
+    Dim sfa As Object, d As String, lst As Variant, i As Long, best As String, nm As String, lite As Boolean, st As String, bestSt As String
+    If Not IsMissing(bLiteOk) Then lite = bLiteOk
     sfa = CreateUnoService("com.sun.star.ucb.SimpleFileAccess")
     d = TbExportDir()
     If Not sfa.exists(d) Then Exit Function
@@ -158,8 +161,12 @@ Function TbLatestSnapshot() As String
     For i = 0 To UBound(lst)
         nm = Mid(lst(i), Len(d) + 1)
         If Right(nm, 1) = "/" Then nm = Left(nm, Len(nm) - 1)
-        If Left(nm, 13) = "WMS_SNAPSHOT_" And sfa.isFolder(lst(i)) Then
-            If sfa.exists(d & nm & "/manifest.csv") And nm > best Then best = nm
+        If (Left(nm, 13) = "WMS_SNAPSHOT_" Or (lite And Left(nm, 10) = "WMS_STOCK_")) And sfa.isFolder(lst(i)) Then
+            st = Mid(nm, InStr(nm, "_2") + 1)
+            If sfa.exists(d & nm & "/manifest.csv") And st > bestSt Then
+                best = nm
+                bestSt = st
+            End If
         End If
     Next i
     If best <> "" Then TbLatestSnapshot = d & best & "/"
@@ -511,9 +518,9 @@ Function TbSheetIndex(sName As String) As Integer
 End Function
 
 ' the snapshot to use: the one of setting B4 when it still exists, otherwise the latest; verified. "" and why when none
-Function TbPickSnapshot(ByRef why As String) As String
+Function TbPickSnapshot(ByRef why As String, Optional bLiteOk As Variant) As String
     Dim snap As String
-    snap = TbLatestSnapshot()
+    If IsMissing(bLiteOk) Then snap = TbLatestSnapshot() Else snap = TbLatestSnapshot(bLiteOk)
     If snap = "" Then
         why = "в папке " & ConvertFromURL(TbExportDir()) & " нет снимков — в WMS нажмите «Экспорт для инструментов» на листе «Главная»"
         Exit Function

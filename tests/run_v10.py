@@ -5,6 +5,12 @@ from the sources, through the macros of the buttons (windows answered by the tes
 
 Every case builds its own fresh test book in WMS_TEST_OUT/cases/<case>/. Results: results_v10.json, TEST_REPORT_v10.md.
 """
+import datetime
+import glob
+import hashlib
+import re
+import shutil
+import time
 import os
 import sys
 
@@ -1567,6 +1573,518 @@ def v25_kits():
         sc = s.B("ActionSelfCheck")
         R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:300])
         oracle(c, s, "сборка и разборка комплекта, выдача комплекта")
+    finally:
+        s.close()
+
+
+def dtext(k):
+    return (datetime.date.today() + datetime.timedelta(days=k)).strftime("%d.%m.%Y")
+
+
+def shapes_named(sh, name):
+    dp = sh.getDrawPage()
+    return [dp.getByIndex(i) for i in range(dp.getCount()) if dp.getByIndex(i).Name == name]
+
+
+@case
+def v26_items():
+    """Ф1 этикетка ЕИ со штрихкодом Code 128 на странице размера этикетки; Ф3 фасовка нового ЕИ из «Номенклатуры»; Ф5 свойства ЕИ
+    (EI_PROP, поиск по серийному номеру, «годен до» во «Внимании»); Ф7 резерв и вопрос при выдаче сверх свободного; Ф4 инструмент на
+    руках со сроком возврата; Ф10 фото позиции из папки «WMS_Фото»"""
+    c = "V26"
+    s = ready(Session(new_wms("v26")))
+    try:
+        gd = s.doc.Sheets.getByName("Номенклатура")
+        put(s, "Номенклатура", 1, B="Перфоратор", C="ПФ-1", D="шт", Q=7.0)
+        put(s, "Номенклатура", 2, B="Герметик", C="ГМ-2", D="уп", F=12.0, G="туб")
+        hdr = gd.getCellByPosition(16, 0).getString()
+        order(s, 1, "1", "Перфоратор", qty="2", art="ПФ-1", J=9000.0)
+        receive(s, 1, "2", place="3-1-1", k=-20)
+        order(s, 2, "2", "Перчатки", qty="10", unit="пар", J=50.0)
+        receive(s, 2, "10", place="3-1-2")
+        order(s, 3, "3", "Герметик", qty="2", unit="уп", art="ГМ-2")
+        r3 = receive(s, 3, "2", place="3-1-3")
+        t, g, h = [ords(s, r)[21] for r in (1, 2, 3)]
+        nt, ng, nh = (int(x[3:]) for x in (t, g, h))
+        pk = list(s.doc.Sheets.getByName("_PACK").getCellRangeByPosition(0, nh, 3, nh).getDataArray()[0])
+        R.add(c, "Ф3: первый приход товара, у которого фасовка задана в «Номенклатуре» (F 12, G «туб»), — новый ЕИ получает её (EI_PACK) "
+                 "с примечанием «по «Номенклатуре»»; колонка Q «Номенклатуры» — «Вернуть через, дней»",
+              r3.startswith("OK") and pk[:3] == [h, "туб", 12.0] and "по «Номенклатуре»" in pk[3] and hdr.startswith("Вернуть через, дней"),
+              f"{r3}; {pk}; {hdr}")
+        # ---------------------------------------------------------------- Ф1 the labels
+        res = s.B("LabelPrint", (nt, ng), 2, "58×40", module="WmsItem")
+        pr = s.doc.Sheets.getByName("Печать")
+        bars = shapes_named(pr, "wmsbar")
+        heads = [pr.getCellByPosition(0, r).getString() for r in (0, 5, 10, 15)]
+        ps = s.doc.StyleFamilies.getByName("PageStyles").getByName("WMS_Этикетка")
+        code = s.B("WmsItemCode128C", "00000001", module="WmsItem")
+        want = "211232" + "212222" * 3 + "222122" + "122213" + "2331112"    # start C, 00 00 00 01, check (105 + 4·1) mod 103 = 6, stop
+        R.add(c, "Ф1: 2 ЕИ × 2 копии — 4 этикетки на «Печати» в стиле страницы 58×40 мм, номер ЕИ крупно, у каждой штрихкод из 22 полос "
+                 "(Code 128 C); код ЕИ-00000001 — по таблице стандарта, с контрольным символом",
+              res == "OK:этикеток 4 (58×40 мм)" and heads == [t, t, g, g] and pr.PageStyle == "WMS_Этикетка" and len(bars) == 88
+              and abs(ps.Width - 5800) <= 2 and abs(ps.Height - 4000) <= 2 and code == want and pr.getCellByPosition(0, 1).getString() == "Перфоратор"
+              and pr.getCellByPosition(0, 2).getString() == "Арт. ПФ-1" and pr.getCellByPosition(0, 3).getString() == "Место: 3-1-1",
+              f"{res}; {heads}; {pr.PageStyle}; {len(bars)}; {ps.Width}×{ps.Height}; {code}")
+        bad = s.B("LabelPrint", (nt,), 1, "10×5", module="WmsItem")
+        doc_res = s.B("InventoryList", "3-1", module="WmsPrint")
+        R.add(c, "Ф1: размер 10×5 — отказ с пояснением; следующий документ на «Печати» — снова страница A4 (WMS_Print), полос штрихкода не осталось",
+              bad.startswith("ERR:") and "30…210" in bad and doc_res.startswith("OK") and pr.PageStyle == "WMS_Print" and not shapes_named(pr, "wmsbar"),
+              f"{bad}; {doc_res}; {pr.PageStyle}; {len(shapes_named(pr, 'wmsbar'))}")
+        choose(s, 0)
+        s.B("LabelAfterReceipt", h, module="WmsItem")
+        after = pr.getCellByPosition(0, 0).getString()
+        R.add(c, "Ф1: после прихода (этикетки в книге уже печатали) — вопрос «Напечатать этикетку?»; «Напечатать» — этикетка нового ЕИ",
+              after == h and pr.PageStyle == "WMS_Этикетка" and len(shapes_named(pr, "wmsbar")) == 22, f"{after}; {pr.PageStyle}")
+        # ---------------------------------------------------------------- Ф5 the properties
+        p1 = s.B("PropSet", t, "SN-777", dtext(300), "калибровка в марте", module="WmsItem")
+        prow = list(s.doc.Sheets.getByName("_PROP").getCellRangeByPosition(0, nt, 3, nt).getDataArray()[0])
+        ent = [e for e in s.journal()[0] if e["type"] == "EI_PROP"]
+        fr = s.B("TestFind", "sn-777", module="WmsFind")
+        fd = s.doc.Sheets.getByName("Поиск")
+        info = fd.getCellByPosition(1, 8).getString()
+        R.add(c, "Ф5: «Свойства ЕИ» — операция EI_PROP (в журнале), строка _PROP; «Поиск» по серийному номеру (без учёта регистра) "
+                 "открывает карточку ЕИ, в ней «сер./инв. № SN-777 · годен до …»",
+              p1.startswith("OK") and prow[0] == t and prow[1] == "SN-777" and isinstance(prow[2], float) and prow[3] == "калибровка в марте"
+              and len(ent) == 1 and ent[0]["fields"].get("SERIAL") == "SN-777" and fd.getCellByPosition(1, 6).getString().startswith(t)
+              and "сер./инв. № SN-777 · годен до " + dtext(300) in info, f"{p1}; {prow}; {fr}; {info}")
+        same = s.B("PropSet", t, "SN-777", dtext(300), "калибровка в марте", module="WmsItem")
+        dup = s.B("PropSet", g, "sn-777", "", "", module="WmsItem")
+        badd = s.B("PropSet", g, "", "31.02.2026", "", module="WmsItem")
+        R.add(c, "Ф5: без изменений — пропуск; тот же серийный номер другому ЕИ — вопрос, «Не записывать»; неверная дата — отказ",
+              same.startswith("SKIP") and dup.startswith("SKIP") and t in dup and badd.startswith("ERR"), f"{same}; {dup}; {badd}")
+        s.B("PropSet", h, "", dtext(-1), "", module="WmsItem")
+        at = s.B("AttentionShow", module="WmsDash")
+        rows = [fd.getCellByPosition(1, r).getString() for r in range(12, 30)]
+        R.add(c, "Ф5: ЕИ с остатком и прошедшим «годен до» — во «Внимании» («Срок годности прошёл»)",
+              at.startswith("OK") and "Срок годности прошёл" in rows, f"{at}; {rows[:6]}")
+        clr = s.B("PropSet", h, "", "", "", module="WmsItem")
+        crow = list(s.doc.Sheets.getByName("_PROP").getCellRangeByPosition(0, nh, 3, nh).getDataArray()[0])
+        R.add(c, "Ф5: пустые свойства — строка _PROP очищена", clr.startswith("OK") and crow == ["", "", "", ""], f"{clr}; {crow}")
+        # ---------------------------------------------------------------- Ф7 the reserves
+        rs = s.doc.Sheets.getByName("Резервы")
+        for j, v in enumerate((g, 6.0, "Петров Пётр Сергеевич", serial(30), "объект Х")):
+            cell = rs.getCellByPosition(j, 1)
+            cell.setValue(v) if isinstance(v, float) else cell.setString(v)
+        put(s, "Выдачи", 1, L=g, E="5", H=serial(), I="ива")
+        choose(s, 1)
+        i1 = s.I("IssuePostRow", 1)
+        m1 = s.U("TestUiLastMessage")
+        bal1 = s.stock(ng)
+        put(s, "Выдачи", 1, L=g, E="4", H=serial(), I="ива")
+        i2 = s.I("IssuePostRow", 1)
+        put(s, "Выдачи", 2, L=g, E="5", H=serial(), I="пет")
+        i3 = s.I("IssuePostRow", 2)
+        R.add(c, "Ф7: резерв 6 пар для Петрова — выдача 5 другому (свободно 4) спрашивает, «Не выдавать» — не проведено; 4 — без вопроса; "
+                 "Петрову из его резерва — без вопроса",
+              i1.startswith("SKIP") and "сверх свободного" in i1 and bal1 == 10.0 and i2.startswith("OK") and i3.startswith("OK") and s.stock(ng) == 1.0,
+              f"{i1}; {m1[:200]}; {i2}; {i3}; {s.stock(ng)}")
+        s.B("CardShow", ng, module="WmsFind")
+        info = fd.getCellByPosition(1, 8).getString()
+        rs.getCellByPosition(3, 1).setValue(serial(-1))
+        s.B("CardShow", ng, module="WmsFind")
+        info2 = fd.getCellByPosition(1, 8).getString()
+        R.add(c, "Ф7: карточка ЕИ показывает резерв и свободное; прошедшая дата «До» резерв снимает",
+              "резерв 6 (6 для «Петров Пётр Сергеевич» до " in info and "свободно 0" in info and "резерв" not in info2, f"{info}; {info2}")
+        # ---------------------------------------------------------------- Ф4 the tools on the hands
+        put(s, "Выдачи", 3, L=t, E="1", H=serial(-10), I="ива")
+        t1 = s.I("IssuePostRow", 3)
+        put(s, "Выдачи", 4, L=t, E="1", H=serial(), I="егр")
+        t2 = s.I("IssuePostRow", 4)
+        n_t1 = s.doc.Sheets.getByName("Выдачи").getCellByPosition(0, 3).getValue()
+        ts = s.B("ToolsShow", module="WmsItem")
+        title = fd.getCellByPosition(1, 6).getString()
+        first = [fd.getCellByPosition(col, 12).getString() for col in range(1, 8)]
+        late = s.B("ToolsLate", module="WmsItem")
+        R.add(c, "Ф4: «Где инструмент» — два перфоратора на руках, просроченный (выдан 10 дней назад, срок 7) первым: кто, ЕИ, просрочено 3 дня; "
+                 "на «Главной» — «не вернули вовремя 1»",
+              t1.startswith("OK") and t2.startswith("OK") and ts.startswith("OK") and title == "Где инструмент: на руках 2, просрочен возврат 1"
+              and first[0] == "Иванов Иван Андреевич" and first[1] == t and first[6] == "3" and late == 1, f"{t1}; {t2}; {ts}; {title}; {first}; {late}")
+        put(s, "Возврат", 1, B=float(n_t1), F="1", H=serial(), I="ива")
+        rt = s.B("ReturnPostRow", 1, module="WmsReturn")
+        s.B("ToolsShow", module="WmsItem")
+        title2 = fd.getCellByPosition(1, 6).getString()
+        R.add(c, "Ф4: после возврата просроченного — на руках 1, без просрочки", rt.startswith("OK") and title2 == "Где инструмент: на руках 1"
+              and s.B("ToolsLate", module="WmsItem") == 0, f"{rt}; {title2}")
+        # ---------------------------------------------------------------- Ф10 the photo
+        folder = os.path.join(os.path.dirname(uno_path(s.doc.getURL())), "WMS_Фото")
+        os.makedirs(folder, exist_ok=True)
+        open(os.path.join(folder, "ПФ-1.jpg"), "wb").write(b"\xff\xd8\xff\xe0 test")
+        ph1 = s.B("PhotoOpen", nt, module="WmsItem")
+        ph2 = s.B("PhotoOpen", ng, module="WmsItem")
+        gd.getCellByPosition(10, 1).setString("perf.png")
+        open(os.path.join(folder, "perf.png"), "wb").write(b"\x89PNG test")
+        ph3 = s.B("PhotoOpen", nt, module="WmsItem")
+        R.add(c, "Ф10: фото по артикулу «ПФ-1.jpg» из папки «WMS_Фото» рядом с книгой; нет фото — как добавить; файл из K «Номенклатуры» — первым",
+              ph1.startswith("OK:") and ph1.endswith("ПФ-1.jpg") and ph2.startswith("ERR:") and "WMS_Фото" in ph2 and g + ".jpg" in ph2
+              and ph3.endswith("perf.png"), f"{ph1}; {ph2[:200]}; {ph3}")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:300])
+        oracle(c, s, "свойства ЕИ, резерв, инструмент, этикетки")
+    finally:
+        s.close()
+
+
+def uno_path(url):
+    import uno
+    return uno.fileUrlToSystemPath(url)
+
+
+def sys_url(path):
+    import uno
+    return uno.systemPathToFileUrl(os.path.abspath(path))
+
+
+def journal_lines(jdir):
+    out = []
+    for f in sorted(glob.glob(os.path.join(jdir, "WMS_journal_*.csv"))):
+        out += [x.rstrip("\r") for x in open(f, encoding="utf-8").read().split("\n") if x]
+    return out
+
+
+def chain_problems(jdir):
+    """the chain of the journal checked independently: the field CH of a line is «S» + the first 16 hex digits of SHA-256 of the
+    UTF-8 bytes of the line before; (lines with CH, problems)"""
+    prev, n, probs = None, 0, []
+    for ln in journal_lines(jdir):
+        m = re.search(r";CH=(S[0-9A-F]{16});END;\d+$", ln)
+        if m and prev is not None:
+            n += 1
+            want = "S" + hashlib.sha256(prev.encode("utf-8")).hexdigest()[:16].upper()
+            if m.group(1) != want:
+                probs.append(ln.split(";")[1])
+        prev = ln
+    return n, probs
+
+
+def find_doc(s, url, old=None, timeout=90):
+    """the open document of url other than old (a return to a copy opens a new one), waited for"""
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        en = s.o.desktop.getComponents().createEnumeration()
+        while en.hasMoreElements():
+            d = en.nextElement()
+            try:
+                if d.getURL() == url and d is not old and (old is None or not same_doc(d, old)):
+                    return d
+            except Exception:
+                pass
+        time.sleep(0.5)
+    return None
+
+
+def same_doc(a, b):
+    try:
+        return a.RuntimeUID == b.RuntimeUID
+    except Exception:
+        return False
+
+
+@case
+def v27_safety():
+    """Н1 копия на флешку (проверка, ротация, напоминание), Н9 сторож диска, Н8 сторож часов, Н6 точки восстановления и список копий,
+    Н4 контрольная цепочка журнала (независимая проверка и обнаружение правки), Н3 зеркало журнала (запись, недоступность, восстановление
+    журнала из зеркала), Н5 проверка дня и «Дашборд», Н7 отложенные операции и «Вернуть в работу», Н2 «Вернуться к копии»"""
+    c = "V27"
+    p = new_wms("v27")
+    s = ready(Session(p))
+    flash = os.path.join(OUT, "cases", "v27_flash")
+    mirror = os.path.join(OUT, "cases", "v27_mirror")
+    shutil.rmtree(flash, ignore_errors=True)
+    shutil.rmtree(mirror, ignore_errors=True)
+    os.makedirs(flash)
+    os.makedirs(mirror)
+    try:
+        bdir = os.path.join(s.dir, "WMS_Backups")
+        base = os.path.splitext(os.path.basename(p))[0]
+        # ---------------------------------------------------------------- Н1 the copy to a flash drive
+        r1 = issue(s, 1, "ЕИ-00000001", "1", "ива")
+        root = os.path.join(flash, "WMS_FLASH")
+        os.makedirs(root)
+        olds = [os.path.join(root, f"{base}_2020-01-0{i}_000000") for i in range(1, 9)]
+        for d in olds:
+            os.makedirs(d)
+        fc = s.B("FlashCopy", sys_url(flash), module="WmsSafe")
+        got = sorted(f for f in os.listdir(root))
+        new = [f for f in got if not f.startswith(f"{base}_2020")]
+        nd = os.path.join(root, new[0]) if new else ""
+        man = open(os.path.join(nd, "MANIFEST.txt"), encoding="utf-8").read() if nd else ""
+        jsrc = sorted(os.listdir(s.jdir))
+        jsrc = [f for f in jsrc if f.startswith("WMS_journal_")]
+        same = nd and all(os.path.getsize(os.path.join(nd, "WMS_Journal", f)) == os.path.getsize(os.path.join(s.jdir, f)) for f in jsrc) \
+            and os.path.getsize(os.path.join(nd, os.path.basename(p))) == os.path.getsize(p)
+        R.add(c, "Н1: «Копия на флешку» — папка WMS_FLASH/<книга>_<дата>: книга, журнал (размеры совпадают), MANIFEST; хранится 8 — самая старая удалена",
+              r1.startswith("OK") and fc.startswith("OK:") and len(new) == 1 and same and "WMS_Journal/" in man and len(got) == 8
+              and f"{base}_2020-01-01_000000" not in got, f"{fc[:160]}; {got}")
+        inside = s.B("FlashCopy", sys_url(os.path.join(s.dir, "sub")), module="WmsSafe")
+        nofold = s.B("FlashCopy", sys_url(os.path.join(flash, "нет")), module="WmsSafe")
+        st = open(os.path.join(s.dir, "WMS_State", "wms_state.txt"), encoding="utf-8").read()
+        R.add(c, "Н1: копия в папку WMS — отказ; несуществующая папка — отказ; дата копии записана в WMS_State",
+              inside.startswith("ERR:") and "папку WMS" in inside and nofold.startswith("ERR:") and "FLASH=" in st, f"{inside[:80]}; {nofold[:80]}; {st[:120]}")
+        # ---------------------------------------------------------------- Н9 the disk, Н8 the clock
+        real = s.B("DiskFreeMb", sys_url(s.dir), module="WmsSafe")
+        s.B("TestSafe", "", 50.0, module="WmsSafe")
+        n0 = len(os.listdir(bdir))
+        bk = s.B("BackupNow", "manual", module="WmsBackup")
+        fc2 = s.B("FlashCopy", sys_url(flash), module="WmsSafe")
+        note = s.B("DiskNote", module="WmsSafe")
+        s.B("TestSafe", "", 0.0, module="WmsSafe")
+        R.add(c, "Н9: свободное место определяется (df); мало места — резервная копия и копия на флешку не делаются, предупреждение при запуске",
+              real > 0 and bk.startswith("ОШИБКА") and "свободно 50 МБ" in bk and len(os.listdir(bdir)) == n0 and fc2.startswith("ERR:") and "свободно 50" in fc2
+              and note.startswith("ВНИМАНИЕ: на диске"), f"{real}; {bk[:120]}; {fc2[:80]}; {note[:80]}")
+        old = s.B("TestJposMark", "2099-01-01T10:00:00/300", module="WmsSafe")
+        clk = s.B("ClockNote", module="WmsSafe")
+        s.B("TestJposSet", old, module="WmsSafe")
+        clk2 = s.B("ClockNote", module="WmsSafe")
+        R.add(c, "Н8: часы ПК позади последней операции журнала — «часы компьютера отстают на N дн.»; в порядке — молчит",
+              clk.startswith("ВНИМАНИЕ: часы компьютера отстают на ") and "01.01.2099" in clk and clk2 == "", f"{clk[:140]}; {clk2!r}")
+        # ---------------------------------------------------------------- Н6 the restore points, the list of the copies
+        bk = s.B("BackupNow", "manual", module="WmsBackup")
+        pt = s.B("RestorePoint", "перед тестом", module="WmsSafe")
+        lst = s.B("CopyList", module="WmsSafe")
+        names = [x[0] for x in lst]
+        R.add(c, "Н6: точка восстановления — копия «_point» с пометкой; список копий (новые сверху) с числом операций и видом",
+              "точка восстановления перед тестом" in pt and names and names[0].endswith("_point.ods") and lst[0][3] == "перед тестом" and lst[0][2] == "point"
+              and any(x[2] == "manual" for x in lst) and s.B("CopyLabel", lst[0], module="WmsSafe").find("точка восстановления перед тестом") > 0,
+              f"{pt[:120]}; {[tuple(x[:4]) for x in lst][:3]}")
+        # ---------------------------------------------------------------- Н4 the chain
+        s.B("ChainCheck", 0, module="WmsSafe")
+        for r, ei in ((2, "ЕИ-00000002"), (3, "ЕИ-00000013"), (4, "ЕИ-00000004")):
+            issue(s, r, ei, "1", "ива")
+        n_ch, probs = chain_problems(s.jdir)
+        lines = journal_lines(s.jdir)
+        jf = sorted(glob.glob(os.path.join(s.jdir, "WMS_journal_*.csv")))[-1]
+        raw = open(jf, encoding="utf-8").read()
+        victim = lines[-3]
+        tampered = victim.replace("WHO=Иванов Иван Андреевич", "WHO=Иванов Иван Андреевиш")
+        open(jf, "w", encoding="utf-8", newline="").write(raw.replace(victim, tampered))
+        bad = s.B("ChainCheck", 0, module="WmsSafe")
+        n2, probs2 = chain_problems(s.jdir)
+        seq_after = lines[-2].split(";")[1]
+        open(jf, "w", encoding="utf-8", newline="").write(raw)
+        issue(s, 5, "ЕИ-00000005", "1", "ива")
+        ok_chain = s.B("ChainCheck", 0, module="WmsSafe")
+        R.add(c, "Н4: у каждой строки журнала 1.0 — CH (SHA-256 предыдущей), независимая проверка без ошибок; ручная правка строки — проверка цепочки "
+                 "называет следующую операцию; дальше цепочка снова сходится",
+              n_ch >= 3 and not probs and f"№ {seq_after}" in bad and "не продолжает цепочку" in bad and probs2 == [seq_after] and ok_chain == "",
+              f"{n_ch}; {probs}; {bad[:160]}; {probs2}; {ok_chain!r}")
+        # ---------------------------------------------------------------- Н3 the mirror
+        ms = s.B("MirrorSet", sys_url(mirror), module="WmsSafe")
+        mdir = os.path.join(mirror, f"WMS_Зеркало_журнала_{base}")
+        issue(s, 6, "ЕИ-00000006", "1", "ива")
+        jf = sorted(glob.glob(os.path.join(s.jdir, "WMS_journal_*.csv")))[-1]
+        mf = os.path.join(mdir, os.path.basename(jf))
+        eq1 = os.path.exists(mf) and open(mf, "rb").read() == open(jf, "rb").read()
+        shutil.rmtree(mdir)
+        open(mdir, "w").write("не папка")
+        i7 = issue(s, 7, "ЕИ-00000007", "1", "ива")
+        err = s.B("TestSafeAttention", module="WmsSafe")
+        os.remove(mdir)
+        i8 = issue(s, 8, "ЕИ-00000008", "1", "ива")
+        eq2 = os.path.exists(mf) and open(mf, "rb").read() == open(jf, "rb").read()
+        R.add(c, "Н3: зеркало включено — каждая строка и туда (файлы равны побайтно); зеркало недоступно — проводка идёт, «Внимание» говорит; "
+                 "снова доступно — файл догоняется целиком",
+              ms.startswith("OK:") and eq1 and i7.startswith("OK") and any("Зеркало журнала не пишется" == x[0] for x in err) and i8.startswith("OK") and eq2,
+              f"{ms[:100]}; {eq1}; {i7[:40]}; {err}; {eq2}")
+        # the journal lost its end: «Журнал из зеркала»
+        data = open(jf, encoding="utf-8").read()
+        cut = data[:data.rstrip("\n").rfind("\n") + 1]
+        open(jf, "w", encoding="utf-8", newline="").write(cut)
+        mr = s.B("MirrorRestore", module="WmsSafe")
+        aside = glob.glob(os.path.join(bdir, os.path.basename(jf) + ".отложен_*"))
+        R.add(c, "Н3: журнал потерял последнюю строку — «Журнал из зеркала» ставит целый файл, прежний откладывается; WMS снова «работа разрешена»",
+              mr.startswith("OK:") and "заменено файлов 1" in mr and open(jf, "rb").read() == open(mf, "rb").read() and len(aside) == 1
+              and s.state().get("STATE") == "CLEAN", f"{mr[:300]}; {aside}")
+        # ---------------------------------------------------------------- Н5 the check of the day
+        order(s, 1, "1", "Шуруп", qty="10")
+        receive(s, 1, "10", place="2-1-1")
+        nr = int(ords(s, 1)[21][3:])
+        dc = s.B("DailyCheck", True, module="WmsSafe")
+        s.B("DashRefresh", module="WmsDash")
+        title = s.doc.Sheets.getByName("Дашборд").getCellByPosition(8, 0).getString()
+        stk = s.doc.Sheets.getByName("Наличие")
+        stk.unprotect("wms")
+        q0 = stk.getCellByPosition(4, nr).getValue()
+        stk.getCellByPosition(4, nr).setValue(q0 + 1)
+        dc2 = s.B("DailyCheck", True, module="WmsSafe")
+        att = s.B("TestSafeAttention", module="WmsSafe")
+        stk.getCellByPosition(4, nr).setValue(q0)
+        stk.protect("wms")
+        s.B("DailyCheck", True, module="WmsSafe")
+        R.add(c, "Н5: проверка дня — «без замечаний», на «Дашборде» «проверка дня ✓»; остаток исправлен мимо WMS — «остаток не равен движениям», "
+                 "строка во «Внимании»",
+              dc.split("|")[1] == "OK" and "проверка дня ✓" in title and dc2.split("|")[1] == "FAIL" and "остаток не равен движениям" in dc2
+              and any(x[0] == "Проверка дня: замечания" for x in att), f"{dc[:120]}; {title[:120]}; {dc2[:160]}")
+        sv = s.B("ServiceRefresh", module="WmsSafe")
+        page = [s.doc.Sheets.getByName("Обслуживание").getCellByPosition(2, r).getString() for r in range(3, 9)]
+        R.add(c, "страница «Обслуживание»: состояние — копия на флешке, зеркало, проверка дня, копии, свободное место, книга и журнал",
+              sv == "OK" and page[0].startswith("✓ ") and page[1].startswith("✓ ") and "в «WMS_Backups»" in page[3] and "ГБ" in page[4] and "журнал" in page[5],
+              str(page))
+    finally:
+        s.close(save=True)
+    # ---------------------------------------------------------------- Н7 the operations put aside
+    s = ready(Session(p))
+    try:
+        s.B("MirrorSet", "", module="WmsSafe")
+        put(s, "Выдачи", 10, L="ЕИ-00000010", E="2", H=serial(-1), I="ива")
+        s.doc.store()
+        s.B("TestSetFault", 3, 2)
+        crash = s.I("IssuePostRow", 10)
+        s.kill()
+        s = ready(Session(p))
+        s.B("ActionForceUnlock")
+        ab = s.B("ActionAbandonTail")
+        pts = [x for x in s.B("CopyList", module="WmsSafe") if x[2] == "point"]
+        sh = s.B("AbandonedShow", module="WmsSafe")
+        fd = s.doc.Sheets.getByName("Поиск")
+        row = [fd.getCellByPosition(col, 12).getString() for col in range(1, 9)]
+        put(s, "Выдачи", 10, L="", E="", H="", I="")
+        rd = s.B("AbandonedRedo", (12,), module="WmsSafe")
+        iss = s.doc.Sheets.getByName("Выдачи")
+        last = max(r for r in range(1, 60) if iss.getCellByPosition(11, r).getString() != "")
+        back = [iss.getCellByPosition(col, last).getString() for col in (11, 4, 8, 14)]
+        po = s.I("IssuePostRow", last)
+        R.add(c, "Н6/Н7: «Отложить хвост» — сначала точка восстановления; «Отложенные операции» показывают выдачу (ЕИ, количество, кто); "
+                 "«Вернуть в работу» ставит её непроведённой строкой «Выдач», она проводится",
+              crash == "CRASH-SIM" and "отложено операций: 1" in ab and any("Отложить хвост" in x[3] for x in pts) and sh.startswith("OK")
+              and row[2] == "Выдача" and row[3] == "ЕИ-00000010" and row[4].startswith("2") and row[5] == "Иванов Иван Андреевич" and rd.startswith("OK:")
+              and back[0] == "ЕИ-00000010" and back[1] == "2" and back[3].startswith("отложенная операция журнала №") and po.startswith("OK"),
+              f"{crash}; {ab[:80]}; {[x[3] for x in pts]}; {row}; {rd[:100]}; {back}; {po[:60]}")
+        oracle(c, s, "отложенный хвост и возврат в работу")
+        # ---------------------------------------------------------------- Н2 «Вернуться к копии»
+        s.doc.store()
+        bk = s.B("BackupNow", "manual", module="WmsBackup")
+        name = [x for x in s.B("CopyList", module="WmsSafe")][0][0]
+        seq0 = s.sysv("LAST_SEQ")
+        for r, ei in ((20, "ЕИ-00000011"), (21, "ЕИ-00000012")):
+            issue(s, r, ei, "1", "ива")
+        seq1 = s.sysv("LAST_SEQ")
+        q11 = s.stock(11)
+        url = s.doc.getURL()
+        old_doc = s.doc
+        rt = s.B("ReturnToCopy", name, False, module="WmsSafe")
+        newd = find_doc(s, url, old_doc)
+        msg = ""
+        if newd is not None:
+            s.doc = newd
+            t0 = time.time()
+            while time.time() - t0 < 60:
+                msg = s.U("TestUiLastMessage") or ""
+                if "возвращена к копии" in msg or msg.startswith("ERR"):
+                    break
+                time.sleep(0.5)
+        aside = glob.glob(os.path.join(bdir, f"{base}_*_отложена.ods"))
+        copies_open = []
+        en = s.o.desktop.getComponents().createEnumeration()
+        while en.hasMoreElements():
+            d = en.nextElement()
+            try:
+                copies_open.append(d.getURL())
+            except Exception:
+                pass
+        R.add(c, "Н2: «Вернуться к копии» — рабочая книга закрыта и отложена («…_отложена.ods»), копия встала на её место, по журналу доведены "
+                 "2 операции после копии, самопроверка, «работа разрешена»; копия закрыта",
+              rt.startswith("OK") and newd is not None and "возвращена к копии" in msg and s.state().get("STATE") == "CLEAN" and s.sysv("LAST_SEQ") == seq1
+              and s.stock(11) == q11 and len(aside) == 1 and not any("/WMS_Backups/" in u for u in copies_open) and seq1 == seq0 + 2,
+              f"{rt}; {msg[:300]}; {s.state()}; {seq0}->{s.sysv('LAST_SEQ')} (было {seq1}); {aside}; {copies_open}")
+        oracle(c, s, "возврат к копии")
+    finally:
+        s.close()
+
+
+@case
+def v28_speed():
+    """С1–С8: время запуска, сохранения и карты (сторож роста, карта дольше 5 с — только кнопкой), ленивая карта между сеансами, рост книги
+    и прогноз, лишние ячейки, старые снимки, лёгкий снимок для этикеток (и печать этикеток из него), советы LibreOffice, замер скорости ПК,
+    поиск за 12 месяцев и «Вся история»"""
+    c = "V28"
+    p = new_wms("v28")
+    s = ready(Session(p))
+    try:
+        st = lambda: open(os.path.join(s.dir, "WMS_State", "wms_state.txt"), encoding="utf-8").read()
+        topology(s, {1: (4, 2), 2: (4, 2)})
+        mb = s.B("MapBuild", "OCC", True, module="WmsMap")
+        s.doc.store()
+        txt = st()
+        R.add(c, "С4: время запуска, сохранения и карты запоминаются (WMS_State)", mb.startswith("OK") and "T_OPEN=" in txt and "T_SAVE=" in txt
+              and "T_MAP=" in txt, f"{mb[:80]}; {[x for x in txt.splitlines() if x.startswith('T_')]}")
+        info0 = s.doc.Sheets.getByName("Карта склада").getCellByPosition(0, 4).getString()
+    finally:
+        s.close()
+    s = ready(Session(p))
+    try:
+        t_map = [x for x in open(os.path.join(s.dir, "WMS_State", "wms_state.txt"), encoding="utf-8").read().splitlines() if x.startswith("T_MAP=")]
+        s.B("OnMapFocus", module="WmsMap")
+        ms = s.B("TestMapState", module="WmsMap").split("|")
+        t_map2 = [x for x in open(os.path.join(s.dir, "WMS_State", "wms_state.txt"), encoding="utf-8").read().splitlines() if x.startswith("T_MAP=")]
+        info1 = s.doc.Sheets.getByName("Карта склада").getCellByPosition(0, 4).getString()
+        R.add(c, "С5: книга открыта снова — карта не перестраивается (та же отметка «Обновлено», время карты не замерялось заново), места и подсчёт "
+                 "прочитаны (16 мест)", ms[0] == "16" and float(ms[1]) == s.sysv("LAST_SEQ") and ms[2] == "OCC" and t_map == t_map2 and info1 == info0,
+              f"{ms}; {t_map} / {t_map2}; {info0[-20:]} / {info1[-20:]}")
+        # С4: a slow map is built again only by «Обновить»
+        issue(s, 1, "ЕИ-00000001", "1", "ива")
+        s.B("StSet", "T_MAP", "6000|2026-10-20 10:00", module="WmsSafe")
+        s.B("OnMapFocus", module="WmsMap")
+        ms2 = s.B("TestMapState", module="WmsMap").split("|")
+        info2 = s.doc.Sheets.getByName("Карта склада").getCellByPosition(0, 4).getString()
+        gn = s.B("GrowthNote", module="WmsCare")
+        R.add(c, "С4: карта строится 6 с — после операции не перестраивается сама, на ней «обновляется только кнопкой «Обновить»»; совет о росте книги",
+              float(ms2[1]) != s.sysv("LAST_SEQ") and "только кнопкой «Обновить»" in info2 and "карта строится 6 с" in gn, f"{ms2}; {info2[:120]}; {gn[:160]}")
+        s.B("StSet", "T_MAP", "300|2026-10-20 10:00", module="WmsSafe")
+        # С3: the growth
+        y, m = datetime.date.today().year, datetime.date.today().month - 2
+        if m < 1:
+            m, y = m + 12, y - 1
+        s.B("StSet", f"GROW_{y}-{m:02d}", "0.10|0", module="WmsSafe")
+        gt = s.B("GrowthText", module="WmsCare")
+        rc = s.doc.Sheets.getByName("Получатели")
+        rc.getCellByPosition(0, 6000).setFormula('=""')
+        ex = s.B("ExtraCells", module="WmsCare")
+        R.add(c, "С3: рост книги в месяц и прогноз до «Закрытия года»; «Лишние ячейки» называют лист с оформлением далеко ниже данных",
+              "в месяц +" in gt and "до 200 000 движений" in gt and "«Получатели»: занято до строки 6 001" in ex, f"{gt}; {ex[:200]}")
+        # С8: the light snapshot; the labels from it
+        t0 = time.time()
+        full = s.B("ExportSnapshot", module="WmsExport")
+        t_full = time.time() - t0
+        t0 = time.time()
+        lite = s.B("ExportSnapshot", True, module="WmsExport")
+        t_lite = time.time() - t0
+        ld = lite[3:].split(" — ")[0]
+        files = sorted(os.listdir(ld)) if os.path.isdir(ld) else []
+        man = open(os.path.join(ld, "manifest.csv"), encoding="utf-8").read() if files else ""
+        prn = os.path.join(OUT, "cases", "v28_labels.prn")
+        import subprocess
+        lab = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src", "toolbox", "scripts", "labels",
+                                                          "tspl_labels.py"), "--snapshot", ld, "--ei", "1", "--out", prn], capture_output=True, text=True)
+        R.add(c, "С8: «Снимок для этикеток» — папка WMS_STOCK_…: «Наличие», «Заказы», «Иной приход», без журнала, быстрее полного; этикетки "
+                 "набора печатаются из него",
+              lite.startswith("OK:") and "WMS_STOCK_" in ld and files == ["manifest.csv", "orders.csv", "service", "special.csv", "stock.csv"] and "kind;lite" in man
+              and t_lite < t_full and lab.returncode == 0 and os.path.exists(prn), f"{lite[:120]}; {files}; {t_lite:.1f} < {t_full:.1f}; {lab.stdout[-200:]} {lab.stderr[-200:]}")
+        for _ in range(2):
+            s.B("ExportSnapshot", module="WmsExport")
+        pr = s.B("CarePrune", 2, module="WmsCare")
+        left = [f for f in os.listdir(os.path.join(s.dir, "WMS_Export")) if f.startswith("WMS_")]
+        R.add(c, "С3: «Удалить старые снимки» — остаются два последних", pr.startswith("Старых снимков удалено: 2") and len(left) == 2, f"{pr}; {left}")
+        # С6, С2
+        tips = s.B("LoTips", 0, module="WmsCare")
+        ap = s.B("LoApply", module="WmsCare")
+        sp = s.B("SpeedTest", module="WmsCare")
+        mN = re.search(r"держит книгу до ~([\d\s ]+) движений", sp)
+        nN = int(re.sub(r"\D", "", mN.group(1))) if mN else 0
+        R.add(c, "С6: советы по настройкам LibreOffice (резервная копия, восстановление, пересчёт) и «Применить»; С2: замер скорости ПК — «держит до ~N движений»",
+              "«Всегда создавать резервную копию»" in tips and ap.startswith("Советы применены") and 30000 <= nN <= 600000 and "Сейчас в книге" in sp,
+              f"{tips[:200]}; {ap[:80]}; {sp[:240]}")
+        # С7: the search 12 months back
+        for r, k in ((2, -400), (3, -420), (4, -3)):
+            put(s, "Выдачи", r, L="ЕИ-00000002", E="1", H=serial(k), I="пет")
+            s.I("IssuePostRow", r)
+        f1 = s.B("TestFind", "Петров Пётр", module="WmsFind")
+        head1 = s.doc.Sheets.getByName("Поиск").getCellByPosition(1, 6).getString()
+        f2 = s.B("TestFindAll", "Петров Пётр", module="WmsFind")
+        head2 = s.doc.Sheets.getByName("Поиск").getCellByPosition(1, 6).getString()
+        R.add(c, "С7: поиск по умолчанию за 12 месяцев — старые строки посчитаны отдельно («Вся история»); «Вся история» — все",
+              "старше — ещё 2" in head1 and "вся история" in head2 and "Найдено «Петров Пётр»: 4" in head2 and "Найдено «Петров Пётр»: 2" in head1,
+              f"{f1}; {head1}; {f2}; {head2}")
+        oracle(c, s, "скорость и обслуживание")
     finally:
         s.close()
 

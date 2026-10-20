@@ -26,6 +26,14 @@ Global gJR_Lines As Long
 Global gJR_Files As Long
 ' 1.0: the mark («time/length») of the journal entry with the book's last seq, as read now ("" — not read)
 Global gJR_LastMark As String
+' 1.0 (Н3): the mirror of the journal — the folder every line is written to as well ("" — none; WmsSafe sets it at the start)
+' and its last trouble ("" — the mirror follows the journal); a mirror out of reach never stops the posting
+Global gJMirror As String
+Global gJMirrorErr As String
+' 1.0 (Н4): the checksum of the last line of the journal — the field CH of the next line (the chain); read once a session
+Global gJPrevHash As String
+Global gJPrevKnown As Boolean
+Global gJNss As Object
 
 Function JournalFileName(d As Date) As String
     JournalFileName = JOURNAL_PREFIX & Format(d, "YYYY-MM") & JOURNAL_EXT
@@ -68,7 +76,96 @@ Function BuildLine(seq As Long, sType As String, fields As Variant) As String
     For i = 0 To UBound(fields)
         body = body & ";" & fields(i)
     Next i
+    ' 1.0 (Н4): the checksum of the previous line — a damaged, edited or foreign line breaks the chain
+    ChainInit()
+    If gJPrevHash <> "" Then body = body & ";CH=" & gJPrevHash
     BuildLine = body & ";END;" & Len(body)
+End Function
+
+' ---------------------------------------------------------------- 1.0 (Н4) the chain of the checksums
+
+' the checksum of a journal line (without its LF): SHA-256 of its UTF-8 bytes (the NSS of LibreOffice, ~1,5 ms a line),
+' «S» and the first 16 hex digits; "" where the NSS is not available (the chain is not written then)
+Function LineHash(ln As String) As String
+    LineHash = LineSha(ln)
+End Function
+
+' SHA-256 of the UTF-8 bytes of a line by the NSS of LibreOffice: «S» and the first 16 hex digits; "" — not available
+Function LineSha(ln As String) As String
+    Dim pipe As Object, tos As Object, buf(), n As Long, ctx As Object, d As Variant, i As Integer, h As String, x As Integer
+    On Error GoTo EH
+    If IsNull(gJNss) Or IsEmpty(gJNss) Then gJNss = CreateUnoService("com.sun.star.xml.crypto.NSSInitializer")
+    ctx = gJNss.getDigestContext(com.sun.star.xml.crypto.DigestID.SHA256, Array())
+    pipe = CreateUnoService("com.sun.star.io.Pipe")
+    tos = CreateUnoService("com.sun.star.io.TextOutputStream")
+    tos.setOutputStream(pipe)
+    tos.setEncoding("UTF-8")
+    tos.writeString(ln)
+    tos.closeOutput()
+    n = pipe.readBytes(buf, 16777216)
+    ctx.updateDigest(buf)
+    d = ctx.finalizeDigestAndDispose()
+    For i = 0 To 7
+        x = d(i)
+        If x < 0 Then x = x + 256
+        h = h & Right("0" & Hex(x), 2)
+    Next i
+    LineSha = "S" & h
+    Exit Function
+EH:
+    LineSha = ""
+End Function
+
+' the checksum of the last line of the journal, once a session (the newest file; empty journal — no chain yet)
+Private Sub ChainInit()
+    Dim fn As String, files As Variant, ln As String
+    If gJPrevKnown Then Exit Sub
+    gJPrevKnown = True
+    gJPrevHash = ""
+    On Error GoTo EH
+    If gJDir = "" Then Exit Sub
+    fn = gJFile
+    If fn <> "" Then
+        If Not gSfa.exists(gJDir & fn) Then fn = ""
+    End If
+    If fn = "" Then
+        files = ListFiles()
+        If UBound(files) < 0 Then Exit Sub
+        fn = files(UBound(files))
+    End If
+    ln = LastLineOf(gJDir & fn)
+    If ln <> "" Then gJPrevHash = LineHash(ln)
+    Exit Sub
+EH:
+    gJPrevHash = ""
+End Sub
+
+' the last line of a file (without its LF; a line cut by a crash as it is), "" — an empty file
+Function LastLineOf(url As String) As String
+    Dim sz As Double, off As Double, s As String, p As Long
+    sz = gSfa.getSize(url)
+    If sz <= 0 Then Exit Function
+    off = sz - 262144
+    If off < 0 Then off = 0
+    Do
+        s = ReadFrom(url, off)
+        If Right(s, 1) = Chr(10) Then s = Left(s, Len(s) - 1)
+        If Right(s, 1) = Chr(13) Then s = Left(s, Len(s) - 1)
+        p = InStrRevLF(s)
+        If p > 0 Or off = 0 Then Exit Do
+        off = 0
+    Loop
+    LastLineOf = Mid(s, p + 1)
+End Function
+
+Private Function InStrRevLF(s As String) As Long
+    Dim i As Long
+    For i = Len(s) To 1 Step -1
+        If Mid(s, i, 1) = Chr(10) Then
+            InStrRevLF = i
+            Exit Function
+        End If
+    Next i
 End Function
 
 ' 1.0: the mark of an entry — its time and length («2026-10-15T09:30:12/245»). The book keeps the mark of its last entry
@@ -200,11 +297,48 @@ Function AppendLine(sLine As String, seq As Long, ByRef why As String) As Intege
     gJSize = nsz
     WmsCore.SysPutStr(SK_JPOS, fn & "|" & NumStr(nsz) & "|" & seq & "|" & LineMark(sLine))
     AppendLine = 1
+    gJPrevHash = LineHash(sLine)
+    gJPrevKnown = True
+    If gJMirror <> "" Then MirrorAppend(fn, txt, sz)
     Exit Function
 EH:
     why = "ошибка записи журнала: " & Error$
     AppendLine = VerifyAfterError(url, fn, sz, prefix & sLine & Chr(10), seq, LineMark(sLine))
+    ' the line of the chain is the one in the file: read again before the next line
+    gJPrevKnown = False
+    If AppendLine = 1 And gJMirror <> "" Then MirrorAppend(fn, prefix & sLine & Chr(10), sz)
 End Function
+
+' 1.0 (Н3): the line written to the mirror as well; a mirror that fell behind (out of reach for a while) or differs gets the
+' whole file again. Its trouble is kept in gJMirrorErr and said on the pages — the posting is never stopped by it
+Private Sub MirrorAppend(fn As String, txt As String, szBefore As Double)
+    Dim url As String, xs As Object, tos As Object, msz As Double
+    On Error GoTo EH
+    url = gJMirror & fn
+    If Not gSfa.exists(gJMirror) Then gSfa.createFolder(gJMirror)
+    msz = -1
+    If gSfa.exists(url) Then msz = gSfa.getSize(url)
+    If msz = szBefore Then
+        xs = gSfa.openFileReadWrite(url)
+        xs.seek(xs.getLength())
+        tos = CreateUnoService("com.sun.star.io.TextOutputStream")
+        tos.setOutputStream(xs.getOutputStream())
+        tos.setEncoding("UTF-8")
+        tos.writeString(txt)
+        tos.closeOutput()
+    Else
+        If msz >= 0 Then gSfa.kill(url)
+        gSfa.copy(gJDir & fn, url)
+    End If
+    If gSfa.getSize(url) <> gSfa.getSize(gJDir & fn) Then
+        gJMirrorErr = Format(Now(), "DD.MM.YYYY HH:MM") & " — зеркало «" & fn & "» не совпало по размеру с журналом"
+        Exit Sub
+    End If
+    gJMirrorErr = ""
+    Exit Sub
+EH:
+    gJMirrorErr = Format(Now(), "DD.MM.YYYY HH:MM") & " — " & Error$
+End Sub
 
 Private Function VerifyAfterError(url As String, fn As String, sz As Double, expected As String, seq As Long, sMark As String) As Integer
     Dim nsz As Double, got As String
@@ -253,7 +387,7 @@ Private Function LastByte(url As String) As Integer
 End Function
 
 ' text of the file from byte offset off to the end
-Private Function ReadFrom(url As String, off As Double) As String
+Function ReadFrom(url As String, off As Double) As String
     Dim xs As Object, tis As Object
     xs = gSfa.openFileRead(url)
     xs.seek(off)

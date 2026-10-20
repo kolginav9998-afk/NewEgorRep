@@ -38,6 +38,10 @@ Global gMpBusy As Boolean
 ' over a save and a reopening of the book
 Global gMpEdit As Boolean
 Public Const MP_EDIT_COL = 1105
+' 1.0 (С5): the stamp of the map saved with the book — «LAST_SEQ|слой|когда»: a map up to date is not counted again at the
+' next start, only its places are read
+Public Const MP_STAMP_COL = 1109
+Global gMpLazyNow As Boolean
 
 Private Function TopoSheet() As Object
     TopoSheet = gDoc.Sheets.getByName(SH_TOPO)
@@ -207,6 +211,8 @@ Sub BtnTopoLoad(Optional oEvent As Variant)
     fp.setTitle("Файл с топологией склада (лист, где места подписаны «ряд-секция-ярус»)")
     fp.appendFilter("Таблицы (*.ods; *.xlsx; *.xls)", "*.ods;*.xlsx;*.xls")
     If fp.execute() <> 1 Then Exit Sub
+    ' 1.0 (Н6): a restore point — the previous topology stays in a copy
+    WmsSafe.RestorePoint("перед загрузкой топологии")
     s = TopoLoad(fp.getFiles()(0))
     If Left(s, 3) = "OK:" Then
         MapBuild("OCC")
@@ -394,6 +400,10 @@ Function MapBuild(sLayer As String, Optional bForce As Variant) As String
         & "   ·   ЕИ не на карте: " & NumText(gMpNOff) & IIf(gMpNOff > 0, " — кнопка «Не на карте»", ""))
     mp.getCellByPosition(0, MP_INFO_ROW).setString("Щёлкните по месту — здесь появится, что на нём лежит.   Обновлено " & Format(Now(), "DD.MM.YYYY HH:MM"))
     Legend(mp, sLayer)
+    ' С5: the stamp of this map; С4: its time
+    mp.getCellByPosition(MP_STAMP_COL, 0).setString(NumStr(SysNum(SK_LAST_SEQ)) & "|" & sLayer & "|" & Format(Now(), "DD.MM.YYYY HH:MM"))
+    mp.getCellByPosition(MP_STAMP_COL, 1).setString(MapSigHash(gMpSig))
+    WmsCare.TimingSet("MAP", ViewMs())
     ViewDone(mp)
     gMpBusy = False
     MapBuild = "OK:мест " & gMpN & ", занято " & nOcc & ", свободно " & nFree & ", внимание " & nAtt & ", не на карте " & gMpNOff & ", вне стеллажей " _
@@ -410,7 +420,7 @@ End Function
 Private Function MapLayout(mp As Object, force As Boolean) As String
     Dim topo As Object, cur As Object, r0 As Long, c0 As Long, r1 As Long, c1 As Long, d As Variant, r As Long, c As Long, pk As String
     Dim sig As String, nPl As Long, oldLast As Long, dest As New com.sun.star.table.CellAddress, srcA As New com.sun.star.table.CellRangeAddress
-    Dim nTx As Long, pkR() As Long, pkC() As Long, pkK() As String, i As Long, nDt As Long
+    Dim nTx As Long, pkR() As Long, pkC() As Long, pkK() As String, i As Long, nDt As Long, lazy As Boolean
     topo = TopoSheet()
     cur = topo.createCursor()
     cur.gotoStartOfUsedArea(False)
@@ -438,6 +448,8 @@ Private Function MapLayout(mp As Object, force As Boolean) As String
     ' 1.0: a layout written by a macro fires no event of the sheet — the keys of the check of places are read again too
     If sig <> gMpSig Then gTkValid = False
     If Not force And sig = gMpSig And gMpN > 0 Then Exit Function
+    ' 1.0 (С5): the map saved with the book is of this very layout (its stamp) — the places read, the sheet not touched
+    lazy = gMpLazyNow And Not force And mp.getCellByPosition(MP_STAMP_COL, 1).getString() = MapSigHash(sig)
     ' the places: the key of each text read once
     ReDim pkR(nTx)
     ReDim pkC(nTx)
@@ -475,8 +487,10 @@ Private Function MapLayout(mp As Object, force As Boolean) As String
         Exit Function
     End If
     ' the previous map: its rows removed whole (contents, colours, merged cells, the hidden grid)
-    oldLast = WmsOrders.LastRow(mp)
-    If oldLast >= MP_TOP Then mp.getRows().removeByIndex(MP_TOP, oldLast - MP_TOP + 1)
+    If Not lazy Then
+        oldLast = WmsOrders.LastRow(mp)
+        If oldLast >= MP_TOP Then mp.getRows().removeByIndex(MP_TOP, oldLast - MP_TOP + 1)
+    End If
     gMpN = 0
     gMpCells = New Collection
     ReDim gMpKey(nPl)
@@ -489,6 +503,14 @@ Private Function MapLayout(mp As Object, force As Boolean) As String
         CollPut(gMpCells, gMpN, (MP_TOP + pkR(i)) & ":" & pkC(i))
         gMpN = gMpN + 1
     Next i
+    If lazy Then
+        gMpRows = r1 - r0 + 1
+        gMpCols = c1 - c0 + 1
+        MapKeys(mp, d, False)
+        gMpSig = sig
+        gMpStatSeq = -1
+        Exit Function
+    End If
     dest.Sheet = SheetIndex(SH_MAP)
     dest.Column = 0
     dest.Row = MP_TOP
@@ -515,16 +537,22 @@ Private Function MapLayout(mp As Object, force As Boolean) As String
     For c = MP_GRID_COL To MP_GRID_COL + gMpCols - 1
         mp.getColumns().getByIndex(c).IsVisible = False
     Next c
-    MapKeys(mp, d)
+    MapKeys(mp, d, True)
     gMpSig = sig
     gMpStatSeq = -1
+End Function
+
+' С5: the stamp of a layout (its signature of texts and frame) kept beside the map
+Private Function MapSigHash(sig As String) As String
+    MapSigHash = WmsJournal.LineHash(sig)
+    If MapSigHash = "" Then MapSigHash = "L" & Len(sig) & ":" & Right(sig, 200)
 End Function
 
 ' The sorted table of the texts of the places in hidden columns of the map: the key of each place (5-12-3) and its text in
 ' «Топология» when it is written otherwise (05-12-03), with the number of the place (1-based; a key met twice — the first
 ' place). MapStats finds the place of every EI in it by a binary search of the Calc engine (LOOKUP); the table is sorted by
 ' Calc itself, so its order is the one LOOKUP expects.
-Private Sub MapKeys(mp As Object, d As Variant)
+Private Sub MapKeys(mp As Object, d As Variant, bWrite As Boolean)
     Dim first As Object, seen As Object, keys() As Variant, n As Long, i As Long, raw As String, j As Long, um As Object, rng As Object
     Dim desc As Variant, k As Integer, sortF(0) As New com.sun.star.table.TableSortField
     first = New Collection
@@ -550,6 +578,11 @@ Private Sub MapKeys(mp As Object, d As Variant)
     Next i
     gMpKeyN = 0
     If n = 0 Then Exit Sub
+    ' С5: the sorted table is on the sheet already (a map saved with the book)
+    If Not bWrite Then
+        gMpKeyN = n
+        Exit Sub
+    End If
     ReDim Preserve keys(n - 1)
     um = gDoc.getUndoManager()
     um.lock()
@@ -1366,8 +1399,57 @@ Sub OnMapFocus(Optional oEvent As Variant)
     On Error GoTo EH
     WmsInit()
     If gMpBusy Or MapEditing() Then Exit Sub
-    If gMpN = 0 Or gMpStatSeq <> SysNum(SK_LAST_SEQ) Then MapBuild(IIf(gMpLayer <> "", gMpLayer, "OCC"))
+    ' 1.0 (С5): the map saved with the book is up to date — its places read, nothing counted or painted again
+    If gMpN = 0 Then
+        If MapLazy() Then Exit Sub
+    End If
+    If gMpN = 0 Or gMpStatSeq <> SysNum(SK_LAST_SEQ) Then
+        ' 1.0 (С4): a map that took more than 5 s is built again only by «Обновить»
+        If WmsCare.MapSlow() Then
+            MapStale()
+            Exit Sub
+        End If
+        MapBuild(IIf(gMpLayer <> "", gMpLayer, "OCC"))
+    End If
 EH:
+End Sub
+
+' С5: the map of the book is of the last operation (its stamp): the layout and the counts read (for the clicks and «Куда
+' положить?»), the painting kept as it was saved. True when so
+Function MapLazy() As Boolean
+    Dim mp As Object, a As Variant, why As String
+    On Error GoTo EH
+    mp = gDoc.Sheets.getByName(SH_MAP)
+    a = Split(mp.getCellByPosition(MP_STAMP_COL, 0).getString(), "|")
+    If UBound(a) < 2 Then Exit Function
+    If Val(a(0)) <> SysNum(SK_LAST_SEQ) Then Exit Function
+    gMpBusy = True
+    mp = ViewOpen(SH_MAP)
+    gMpLazyNow = True
+    why = MapLayout(mp, False)
+    gMpLazyNow = False
+    If why = "" Then
+        MapStats()
+        gMpLayer = a(1)
+        MapLazy = (gVwEngFail = "")
+    End If
+    ViewDone(mp)
+    gMpBusy = False
+    Exit Function
+EH:
+    gMpBusy = False
+    MapLazy = False
+End Function
+
+' С4: the map is older than the last operation and slow to build — said on it, built by «Обновить»
+Private Sub MapStale()
+    Dim mp As Object, a As Variant
+    On Error Resume Next
+    mp = ViewOpen(SH_MAP)
+    a = Split(mp.getCellByPosition(MP_STAMP_COL, 0).getString(), "|")
+    mp.getCellByPosition(0, MP_INFO_ROW).setString("Карта " & IIf(UBound(a) >= 2, "от " & a(2), "старая") & ": после неё проводились операции. Карта строится " _
+        & Format(WmsCare.TimingGet("MAP") / 1000, "0") & " с — обновляется только кнопкой «Обновить».")
+    ViewDone(mp)
 End Sub
 
 ' ================================================================ «Куда положить?»
@@ -1936,4 +2018,9 @@ Function TestPlaceNear(k As String) As String
         If KeyNear(k, gTkList(j)) Then r = r & IIf(r <> "", ",", "") & gTkList(j)
     Next j
     TestPlaceNear = gTkN & "|" & r
+End Function
+
+' test seam: «мест|LAST_SEQ подсчёта|слой» of the map in memory
+Function TestMapState() As String
+    TestMapState = gMpN & "|" & gMpStatSeq & "|" & gMpLayer
 End Function

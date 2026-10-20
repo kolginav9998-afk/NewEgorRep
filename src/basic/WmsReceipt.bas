@@ -529,7 +529,7 @@ Function ReceiptPostRow(r As Long) As String
     If Left(res, 6) = "ERR-RB" Then SetCtl(r, "Не проведено: " & Mid(res, 8))
     ' the packing of the new EI (its own operation EI_PACK): if it fails, the receipt stands and «Фасовка ЕИ» sets it later
     If Left(res, 3) = "OK:" And packN > 0 Then
-        why = WmsPack.PackSet(canon, WmsPack.PkNumText6(packN), packU, IIf(sPkFrom <> "", "как у " & sPkFrom & " (тот же товар)", "по документу " _
+        why = WmsPack.PackSet(canon, WmsPack.PkNumText6(packN), packU, IIf(sPkFrom <> "", IIf(Left(sPkFrom, 1) = "«", "по " & sPkFrom, "как у " & sPkFrom & " (тот же товар)"), "по документу " _
             & WmsIssue.QtyText(mDocQty) & " " & mUnit & ", факт частями"))
         If Left(why, 3) <> "OK:" Then gRcvNote = "Приход проведён (" & canon & "), но фасовка не записана: " & Mid(why, InStr(why, ":") + 1) _
             & Chr(10) & "Задайте её кнопкой «Фасовка ЕИ» на листе «" & SH_STOCK & "»."

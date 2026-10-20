@@ -415,9 +415,13 @@ Function WmsStartup() As String
     WmsOrders.RefreshAtStartup()
     ' the compatibility of LibreOffice (FINAL WMS MARATHON §5): a version WMS was not verified on is named, never blocking
     If WmsStatus.LoCompat(sCompat) > 0 Then AddNote("ВНИМАНИЕ: " & sCompat)
+    ' 1.0 (этап J): the clock, the disk, the copy on a medium, the mirror of the journal, the check of the day
+    AddNote(WmsSafe.StartupNotes())
     WmsUi.UiAfterStartup()
     UndoEnd()
     AddNote("запуск WMS " & (GetSystemTicks() - t0) & " мс")
+    ' 1.0 (С4): the time of the start remembered by the owner of the WMS
+    If gState = "CLEAN" Then WmsCare.TimingSet("OPEN", GetSystemTicks() - t0)
     gStarts = gStarts + 1
     WmsStartup = StateLine() & " | " & gReport
     Exit Function
@@ -451,6 +455,8 @@ Sub OnDocSave(Optional oEvent As Variant)
     If IsNull(gSysSh) Or IsEmpty(gSysSh) Then Exit Sub
     SysPutNum(SK_SAVE_STAMP, gDoc.getDocumentProperties().EditingCycles + 1)
     SysPutNum(SK_SAVE_SEQ, SysNum(SK_LAST_SEQ))
+    ' 1.0 (С1, С4): «Сохранение ~N с» in the status bar, the time of the save measured
+    WmsCare.SaveStart()
     ' D-041: rows hidden by a filter are unhidden for the save (LibreOffice would open a file with many hidden rows
     ' very slowly, WmsUi.FiltersStash); the filter conditions stay and are applied again after the save
     WmsUi.FiltersStash()
@@ -464,6 +470,7 @@ Sub OnDocSaveDone(Optional oEvent As Variant)
     WmsInit()
     WmsUi.FiltersRestore()
     WmsUi.UiSavedState(False)
+    WmsCare.SaveDone()
 End Sub
 
 ' ================================================================ explicit user actions (spec §21)
@@ -474,7 +481,10 @@ Function ActionRecover() As String
 End Function
 
 Function ActionAbandonTail() As String
+    Dim sPoint As String
     WmsInit()
+    ' 1.0 (Н6): a restore point before the tail is put aside
+    sPoint = WmsSafe.RestorePoint("перед «Отложить хвост»")
     ActionAbandonTail = WmsRecovery.AbandonTail() & " || " & StartupReport()
 End Function
 
@@ -499,7 +509,9 @@ End Function
 Function ActionSelfCheck() As String
     WmsInit()
     If gState = "" Then WmsStartup()
+    WmsView.ProgressStart("Самопроверка WMS…", 1)
     ActionSelfCheck = WmsDiagnostics.SelfCheck()
+    WmsView.ProgressEnd()
 End Function
 
 ' ================================================================ value encoding (printable, locale-independent)

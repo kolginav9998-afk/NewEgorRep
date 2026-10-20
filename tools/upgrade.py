@@ -330,6 +330,8 @@ def step_08(doc, leg, from_text, done):
     B.print_10(doc, sheets)
     B.ledger_10(doc, sheets)
     B.kits_10(doc, sheets)
+    B.items_10(doc, sheets)
+    B.service_10(doc, sheets)
     B.buttons_10(doc, sheets)
     B.colors_10(doc, sheets)
     B.hints_10(doc, sheets)
@@ -339,8 +341,10 @@ def step_08(doc, leg, from_text, done):
     done.append(f"страницы «{B.DASH}», «{B.FIND}», «{B.MAP}» и лист «{B.TOPO}» (вставьте туда схему склада); «{B.MAIN}» этого выпуска (кнопки к страницам)")
     done.append(f"1.0: справочники «{B.SUPPLIERS}» и «{B.GOODS}» (пополняются кнопками из «{B.ORDERS}» и «{B.STOCK}»), страницы «{B.SUPPLY}» и «{B.PRINT}»")
     done.append(f"1.0: справочник «{B.KITS}» (состав комплектов: «Собрать комплект…», «Выдать комплект…»)")
+    done.append(f"1.0: лист «{B.RESERVES}» (резерв ЕИ под получателя или объект), служебный {B.PROP} (серийный номер, «годен до») и колонка Q "
+                f"«{B.GOODS_RET_HEADER}» в «{B.GOODS}»; этикетки ЕИ со штрихкодом, фото позиции из папки «WMS_Фото»")
     done.append(f"1.0: страница «{B.REPORTS}» (остаток на дату, оборотная ведомость, выгрузка, сверка с 1С, закрытие месяца) и служебный {B.CLOSE}")
-    return [B.LEGREP, B.LEG, B.PACK, B.DASH, B.FIND, B.MAP, B.SUPPLY, B.PRINT, B.CLOSE, B.REPORTS]
+    return [B.LEGREP, B.LEG, B.PACK, B.DASH, B.FIND, B.MAP, B.SUPPLY, B.PRINT, B.CLOSE, B.REPORTS, B.PROP, B.SERVICE]
 
 
 def finish_doc(doc, was_protected, new_sheets, done):

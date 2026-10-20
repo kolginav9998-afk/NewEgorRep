@@ -832,7 +832,14 @@ Private Function AskBeforePost(why As String, vEI As Variant, oDate As Object, v
         End If
     End If
     If mCwhoSt = 2 And mCwho <> sOldWho Then
-        If WmsAsk.WhoAsk(mCwho, msg) <> 0 Then AskBeforePost = "SKIP:" & msg
+        If WmsAsk.WhoAsk(mCwho, msg) <> 0 Then
+            AskBeforePost = "SKIP:" & msg
+            Exit Function
+        End If
+    End If
+    ' 1.0: more than is free of the reserves of the others (a correction that keeps the quantity is not asked about)
+    If Not (mCn = extraEI And mCqty <= qtyAvailExtra + 0.0000001) Then
+        If WmsItem.ReserveAsk(mCcanon, mCqty, mCavail, mCwho, msg) <> 0 Then AskBeforePost = "SKIP:" & msg
     End If
 End Function
 

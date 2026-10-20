@@ -779,6 +779,34 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
     elif packs:
         bad("в журнале есть EI_PACK, а листа _PACK нет", "K")
 
+    # ------------------------------------------------------------ 9. 1.0 (Ф5): the properties of the EIs (_PROP) — the last EI_PROP of each EI
+    props = {}
+    for e in applied:
+        if e["seq"] in abandoned or e["type"] != "EI_PROP":
+            continue
+        f = e["fields"]
+        props[f.get("EI")] = (f.get("SERIAL", ""), f.get("EXPIRY", ""), f.get("NOTE", ""))
+    if doc.Sheets.hasByName("_PROP"):
+        rsh = doc.Sheets.getByName("_PROP")
+        rlast = max([ei_num(k) or 0 for k in props] + [used_rows(rsh)])
+        rows = rsh.getCellRangeByPosition(0, 0, 3, rlast).getDataArray() if rlast >= 1 else ()
+        for r in range(1, len(rows)):
+            cn = canon(r)
+            want = props.get(cn)
+            got = rows[r]
+            got_exp = ""
+            if isinstance(got[2], float) and got[2] > 0:
+                got_exp = (datetime.date(1899, 12, 30) + datetime.timedelta(days=int(got[2]))).isoformat()
+            elif got[2] != "":
+                got_exp = "?" + str(got[2])
+            if want is None:
+                if any(x != "" for x in got) and base is None:
+                    bad(f"_PROP строка {r + 1}: свойства «{got[1]} {got_exp} {got[3]}» без операции EI_PROP", "K")
+            elif (got[1], got_exp, got[3]) != want or got[0] != (cn if any(want) else ""):
+                bad(f"{cn}: свойства в _PROP «{got[0]} {got[1]} {got_exp} {got[3]}», по журналу «{want}»", "K")
+    elif props:
+        bad("в журнале есть EI_PROP, а листа _PROP нет", "K")
+
     info.update(dict(ops=len(ops), receipt_ops=n_rcpt_ops, receipts=len(receipts), live=sum(1 for x in receipts.values() if x["state"] == "LIVE"),
                      positions=len(positions), open_rows=open_rows, copies=copies, last_seq=last, journal_max=mx, return_ops=n_ret_ops,
                      invariants_failed=sorted(inv_fail, key=str)))
