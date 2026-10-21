@@ -1,8 +1,9 @@
 ' TbLabels — WMS_LABELS: этикетки ЕИ по снимку (задание «FINAL WMS MARATHON», §6; M6 PRIME §10). Лист «Этикетки»: список
 ' ЕИ и число копий — вручную или «Подобрать ЕИ» (массовый выбор из снимка: место, категория, тип источника, даты
 ' получения, диапазон номеров, только с остатком); «Построить этикетки» — лист «Макет»: одна этикетка — одна страница
-' размера этикетки (Настройки: ширина и высота, мм); на этикетке ЕИ крупно, наименование, артикул, место и штрихкод
-' Code 128 (номер ЕИ, 8 цифр) — рисуется прямоугольниками, внешние шрифты не нужны. «Предпросмотр» — одна этикетка
+' размера этикетки (Настройки: ширина и высота, мм, по умолчанию 40×30); на этикетке ЕИ крупно, полное наименование (шрифт
+' уменьшается, пока не уместится), единица измерения, по «Настройкам» — артикул и место (по умолчанию нет), и штрихкод
+' Code 128 (номер ЕИ, 8 цифр) в своей полосе внизу — рисуется прямоугольниками, внешние шрифты не нужны. «Предпросмотр» — одна этикетка
 ' первого ЕИ списка так, как она напечатается. «Печать» — системный принтер LibreOffice / CUPS (обычное окно печати);
 ' «В PDF» — файл для проверки; каждое задание записывается в «История печати», «Повторная печать»
 ' возвращает список задания (Настройки: номер; пусто — последнее) и строит его заново; история — файл
@@ -14,6 +15,10 @@ Private Const SH_LIST = "Этикетки"
 Private Const SH_LAYOUT = "Макет"
 Private Const SH_HIST = "История печати"
 Private Const ROWS_PER_LABEL = 5
+' WMS 1.0.1: the margins of the label (1/100 mm — 1 mm, 8 dots of a 203 dpi printer) and a little slack that keeps the rows
+' (rounded by Calc to its own units) inside one page
+Private Const LB_MARGIN = 100
+Private Const LB_SLACK = 30
 Private Const PICK_COL = 4             ' the filters of «Подобрать ЕИ»: column E of «Этикетки», rows 2–10
 Global gLblJob As Variant              ' the list (ЕИ, копий) of the layout built last — what «Печать» / «В PDF» record
                                        ' (Global: a Private module variable is reset at every run of a macro)
@@ -218,12 +223,12 @@ End Function
 ' the layout from the rows (ЕИ, копий)
 Private Function BuildFrom(d As Variant) As String
     Dim st As Object, lay As Object, i As Long, k As Long, c As Long, n As Long, e As String, row As Variant, job() As Variant, nJob As Long
-    Dim w As Double, h As Double, r As Long, bad As String, nBad As Long, dp As Object, ps As Object, stName As String, x As Long
+    Dim w As Double, h As Double, r As Long, bad As String, nBad As Long, dp As Object, ps As Object, stName As String, x As Long, yTop As Long
     On Error GoTo EH
     st = ThisComponent.Sheets.getByName("_stock")
     ReDim job(UBound(d))
-    w = Setting(5, 58)
-    h = Setting(6, 40)
+    w = Setting(5, 40)
+    h = Setting(6, 30)
     If ThisComponent.Sheets.hasByName(SH_LAYOUT) Then ThisComponent.Sheets.removeByName(SH_LAYOUT)
     ThisComponent.Sheets.insertNewByName(SH_LAYOUT, ThisComponent.Sheets.getCount())
     lay = ThisComponent.Sheets.getByName(SH_LAYOUT)
@@ -236,16 +241,17 @@ Private Function BuildFrom(d As Variant) As String
     ps = ThisComponent.StyleFamilies.getByName("PageStyles").getByName(stName)
     ps.Width = w * 100
     ps.Height = h * 100
-    ps.LeftMargin = 200
-    ps.RightMargin = 200
-    ps.TopMargin = 200
-    ps.BottomMargin = 200
+    ps.LeftMargin = LB_MARGIN
+    ps.RightMargin = LB_MARGIN
+    ps.TopMargin = LB_MARGIN
+    ps.BottomMargin = LB_MARGIN
     ps.HeaderIsOn = False
     ps.FooterIsOn = False
     ps.PrintGrid = False
-    ps.CenterHorizontally = True
+    ps.CenterHorizontally = False
+    ps.CenterVertically = False
     lay.PageStyle = stName
-    lay.getColumns().getByIndex(0).Width = (w - 4) * 100
+    lay.getColumns().getByIndex(0).Width = CLng(w * 100) - 2 * LB_MARGIN
     dp = lay.getDrawPage()
     For i = 0 To UBound(d)
         e = NormEI(CStr(d(i)(0)))
@@ -262,7 +268,7 @@ Private Function BuildFrom(d As Variant) As String
                 job(nJob) = Array(e, c)
                 nJob = nJob + 1
                 For x = 1 To c
-                    PutLabel(lay, dp, r, row, w, h)
+                    PutLabel(lay, dp, r, row, w, h, yTop)
                     r = r + ROWS_PER_LABEL
                     k = k + 1
                 Next x
@@ -441,30 +447,59 @@ Private Function NormEI(ByVal s As String) As String
     If t <> "" And Len(t) <= 8 And IsNumeric(t) And InStr(t, ",") = 0 And InStr(t, ".") = 0 Then NormEI = "ЕИ-" & Right("00000000" & CLng(t), 8)
 End Function
 
-' one label from row r: EI large, name, article, place, the barcode below; the first row starts a new page
-Private Sub PutLabel(lay As Object, dp As Object, r As Long, row As Variant, w As Double, h As Double)
-    Dim hrow As Double, rows As Object, i As Integer, c As Object, bars As String, x As Long, j As Integer, bw As Long, y As Long
-    Dim shp As Object, pt As New com.sun.star.awt.Point, sz As New com.sun.star.awt.Size, modW As Long, bcH As Long
-    hrow = (h - 4) * 100 / ROWS_PER_LABEL
+' one label from row r (WMS 1.0.1, as the label of WMS itself): the EI big, the full name (the font made smaller until the whole
+' name fits its part), the unit of measure, the article and the place on one line when «Настройки» ask for them (by default
+' no), and the Code 128 of the 8 digits of the EI in its own band at the bottom — nothing drawn over the text. yTop: the top of
+' the label on the sheet (the sum of the heights of the rows above), moved to the next label
+Private Sub PutLabel(lay As Object, dp As Object, r As Long, row As Variant, w As Double, h As Double, ByRef yTop As Long)
+    Dim rows As Object, c As Object, bars As String, x As Long, j As Integer, bw As Long, y As Long, i As Integer, extra As String
+    Dim shp As Object, pt As New com.sun.star.awt.Point, sz As New com.sun.star.awt.Size, modW As Long, bcH As Long, nMod As Long
+    Dim hTot As Long, hEI As Long, hName As Long, hUnit As Long, hExtra As Long, hBar As Long, wIn As Long, hReal(4) As Long, ptEI As Double
+    If Flag(8) And CStr(row(2)) <> "" Then extra = "Арт. " & row(2)
+    If Flag(9) And CStr(row(5)) <> "" Then extra = extra & IIf(extra <> "", " · ", "") & "Место: " & row(5)
+    hTot = CLng(h * 100) - 2 * LB_MARGIN - LB_SLACK
+    wIn = CLng(w * 100) - 2 * LB_MARGIN
+    hEI = hTot * 0.19
+    hUnit = hTot * 0.12
+    ' a row of the height 0 is given the default height by Calc: an empty line is kept at the smallest one
+    hExtra = IIf(extra <> "", hTot * 0.12, 2)
+    hBar = IIf(Flag(10), hTot * 0.3, 2)
+    hName = hTot - hEI - hUnit - hExtra - hBar
     rows = lay.getRows()
-    For i = 0 To ROWS_PER_LABEL - 1
-        rows.getByIndex(r + i).Height = hrow
-    Next i
     rows.getByIndex(r).IsStartOfNewPage = True
+    ' the EI: one line, as big as its part allows (no bigger than «Размер шрифта ЕИ»), shrunk to the width if need be
+    rows.getByIndex(r).Height = hEI
     c = lay.getCellByPosition(0, r)
     c.setString(row(0))
-    c.CharHeight = Setting(11, 20)
+    ptEI = Int(hEI / 100 / 0.3528 * 0.78)
+    If ptEI > Setting(11, 16) Then ptEI = Setting(11, 16)
+    If ptEI < 7 Then ptEI = 7
+    c.CharHeight = ptEI
     c.CharWeight = 150
-    c.HoriJustify = com.sun.star.table.CellHoriJustify.CENTER
-    If Flag(7) Then SetLine(lay, r + 1, Left(CStr(row(1)), 60), 9)
-    If Flag(8) Then SetLine(lay, r + 2, IIf(CStr(row(2)) <> "", "Арт. " & row(2), ""), 9)
-    If Flag(9) Then SetLine(lay, r + 3, IIf(CStr(row(5)) <> "", "Место: " & row(5), ""), 9)
+    LbCell(c)
+    c.ShrinkToFit = True
+    rows.getByIndex(r + 1).Height = hName
+    c = lay.getCellByPosition(0, r + 1)
+    LbCell(c)
+    c.IsTextWrapped = True
+    If Flag(7) Then FitName(lay, r + 1, c, Trim(CStr(row(1))), hName)
+    LbLine(lay, r + 2, hUnit, IIf(Trim(CStr(row(3))) <> "", "Ед. изм.: " & Trim(CStr(row(3))), ""))
+    LbLine(lay, r + 3, hExtra, extra)
+    rows.getByIndex(r + 4).Height = hBar
+    For i = 0 To ROWS_PER_LABEL - 1
+        hReal(i) = rows.getByIndex(r + i).Height
+    Next i
     If Flag(10) Then
         bars = Code128C(Mid(CStr(row(0)), 4))
-        modW = 30
-        bcH = hrow * 0.8
-        x = lay.getCellByPosition(0, r + 4).Position.X + ((w - 4) * 100 - modW * 101) / 2
-        y = lay.getCellByPosition(0, r + 4).Position.Y + hrow * 0.1
+        For j = 1 To Len(bars)
+            nMod = nMod + CLng(Mid(bars, j, 1))
+        Next j
+        ' the module: a whole number of the dots of a 203 dpi printer (0,125 mm) — 4 dots on a wide label, else 2
+        modW = 50
+        If (nMod + 20) * modW > wIn - 200 Then modW = 25
+        bcH = hReal(4) * 0.8
+        x = ((wIn - nMod * modW) \ 2 \ 25) * 25
+        y = yTop + hReal(0) + hReal(1) + hReal(2) + hReal(3) + (hReal(4) - bcH) \ 2
         For j = 1 To Len(bars)
             bw = CLng(Mid(bars, j, 1)) * modW
             If j Mod 2 = 1 Then
@@ -473,27 +508,70 @@ Private Sub PutLabel(lay As Object, dp As Object, r As Long, row As Variant, w A
                 pt.Y = y
                 sz.Width = bw
                 sz.Height = bcH
-                shp.setPosition(pt)
-                shp.setSize(sz)
+                ' added first, anchored to the page (shapes anchored to cells of two and more labels make LibreOffice 24.2 write an
+                ' endless file), then sized and placed: a position given before the shape is on the page is lost (the bars were
+                ' drawn at the top of the sheet, over the number of the EI)
                 dp.add(shp)
+                shp.Anchor = lay
+                shp.setSize(sz)
+                shp.setPosition(pt)
                 shp.FillColor = RGB(0, 0, 0)
                 shp.LineStyle = com.sun.star.drawing.LineStyle.NONE
-                ' anchored to the page (placed by the cell positions above): shapes anchored to cells of two and more labels make
-                ' LibreOffice 24.2 write an endless file when the book is saved
-                shp.Anchor = lay
             End If
             x = x + bw
         Next j
     End If
+    For i = 0 To ROWS_PER_LABEL - 1
+        yTop = yTop + hReal(i)
+    Next i
 End Sub
 
-Private Sub SetLine(lay As Object, r As Long, s As String, sz As Double)
+Private Sub LbLine(lay As Object, r As Long, hRow As Long, s As String)
     Dim c As Object
+    lay.getRows().getByIndex(r).Height = hRow
     c = lay.getCellByPosition(0, r)
     c.setString(s)
-    c.CharHeight = sz
+    c.CharHeight = 7
+    LbCell(c)
+    c.ShrinkToFit = True
+End Sub
+
+Private Sub LbCell(c As Object)
+    ' pure black: a thermal printer prints a grey as scattered dots
+    c.CharColor = RGB(0, 0, 0)
     c.HoriJustify = com.sun.star.table.CellHoriJustify.CENTER
-    c.IsTextWrapped = True
+    c.VertJustify = com.sun.star.table.CellVertJustify.CENTER
+    c.IsTextWrapped = False
+End Sub
+
+' the name in its row of height hName: the biggest font of the list with which the wrapped text needs no more height (Calc
+' measures it: the optimal height of the row); the very long name at the smallest font loses its tail words for «…»
+Private Sub FitName(lay As Object, r As Long, c As Object, s As String, hName As Long)
+    Dim sizes As Variant, i As Integer, rw As Object, fit As Boolean, words As Variant, n As Integer, t As String
+    sizes = Array(11, 10, 9, 8, 7, 6.5, 6, 5.5, 5)
+    rw = lay.getRows().getByIndex(r)
+    c.setString(s)
+    For i = 0 To UBound(sizes)
+        c.CharHeight = sizes(i)
+        rw.OptimalHeight = True
+        If rw.Height <= hName Then
+            fit = True
+            Exit For
+        End If
+    Next i
+    If Not fit Then
+        words = Split(s, " ")
+        n = UBound(words)
+        Do While n > 0 And Not fit
+            n = n - 1
+            ReDim Preserve words(n)
+            t = Join(words, " ") & "…"
+            c.setString(t)
+            rw.OptimalHeight = True
+            fit = (rw.Height <= hName)
+        Loop
+    End If
+    rw.Height = hName
 End Sub
 
 ' «Печать»: the usual print window of LibreOffice for the layout (the system printer / CUPS)

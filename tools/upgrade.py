@@ -56,6 +56,8 @@ import build_ods as B  # noqa: E402
 
 SCHEMA_06 = "WMS-SYS-3"
 SCHEMA_07 = "WMS-SYS-4"
+# 1.0.1: the cores of the schema of this release whose books are carried over too (the same data, the modules and the views new)
+CORES_SAME_SCHEMA = ("1.0.0",)
 OLD_SCHEMA = SCHEMA_06                 # the in-place upgrade (release 0.7 called it so)
 JOURNAL_DIR = "WMS_Journal"
 BACKUP_DIR = "WMS_Backups"
@@ -336,6 +338,7 @@ def step_08(doc, leg, from_text, done):
     B.buttons_10(doc, sheets)
     B.colors_10(doc, sheets)
     B.hints_10(doc, sheets)
+    B.stock_info_10(doc, sheets)
     B.stock_view_10(doc, sheets)
     B.hotkeys_10(doc)
     B.rebuild_main(doc, sheets.getByName(B.MAIN))
@@ -386,11 +389,26 @@ def upgrade_doc(doc, test_book, schema, leg, from_text):
     was = lift_protections(doc)
     replace_modules(doc, test_book, done)
     new = []
-    if schema == SCHEMA_06:
-        new += step_07(doc, done)
-    new += step_08(doc, leg, from_text, done)
+    if schema == B.SCHEMA:
+        # 1.0.0 → this release: the data and the sheets stay, the modules (above) and the views of 1.0.1 are new
+        new += step_101(doc, done)
+    else:
+        if schema == SCHEMA_06:
+            new += step_07(doc, done)
+        new += step_08(doc, leg, from_text, done)
     finish_doc(doc, was, new, done)
     return done
+
+
+def step_101(doc, done):
+    """1.0.0 → 1.0.1: «Наличие» L…T (what is known of the goods: for whom, where from, the packing, the serial number, «годен
+    до», the reserve — filled by WMS when the sheet is opened) with its button and the band over them; no new sheet"""
+    sheets = doc.Sheets
+    B.stock_info_10(doc, sheets)
+    B.stock_view_10(doc, sheets)
+    done.append(f"1.0.1: «{B.STOCK}» — колонки сведений о товаре ({', '.join(B.STOCK_INFO_HEADERS)}) и кнопка «Обновить сведения»; "
+                "сетка ячеек видна на всех листах; этикетка 40×30 (номер ЕИ, полное наименование, единица, штрихкод)")
+    return []
 
 
 def allow_insert_rows_all(path):
@@ -463,6 +481,8 @@ def same_schema_stop(core, names):
     schema, an older core) — the master carries a book of 0.7 over, not a book of 0.8. The core is written at the first start;
     a book never started has none, so a book of this release is also told by a page only it has («Обслуживание»)"""
     v = B.core_versions()
+    if core in CORES_SAME_SCHEMA:
+        return ""
     if core == v["WMS_CORE_VERSION"] or (not core and B.SERVICE in names):
         return f"книга уже версии {v['WMS_PRODUCT_VERSION']} (схема {B.SCHEMA}) — обновлять нечего"
     return (f"книга версии {core or 'неизвестной'} (промежуточный выпуск PRIME 0.8, схема {B.SCHEMA}) — мастер переносит в "
@@ -503,8 +523,11 @@ def check_source(o, book):
         sv = sys_values(doc)
         facts.update(schema=sv.get("SCHEMA"), instance=sv.get("INSTANCE_ID"), mode=sv.get("MODE"), last_seq=int(sv.get("LAST_SEQ") or 0),
                      tx=sv.get("TX_STATE"), bi=sv.get("TX_BEFORE_IMAGE"), core=sv.get("CORE_VERSION"), next_ei=int(sv.get("NEXT_EI") or 0))
+        facts["from10"] = facts["schema"] == B.SCHEMA and facts["core"] in CORES_SAME_SCHEMA
         if facts["schema"] == B.SCHEMA:
-            stops.append(same_schema_stop(facts["core"], [doc.Sheets.getByIndex(i).Name for i in range(doc.Sheets.getCount())]))
+            s = same_schema_stop(facts["core"], [doc.Sheets.getByIndex(i).Name for i in range(doc.Sheets.getCount())])
+            if s:
+                stops.append(s)
         elif facts["schema"] == SCHEMA_06:
             stops.append(f"книга версии 0.6 (схема {SCHEMA_06}) — она обновляется на месте: upgrade.py КНИГА")
         elif facts["schema"] != SCHEMA_07:
@@ -569,8 +592,8 @@ def allowed_change(sheet, r, c):
     if sheet == B.MAIN:
         return (r, c) in ((0, 1), (B.MAIN_HELP_ROW, 0))
     if sheet == B.STOCK:
-        # 1.0: the header of «Остаток частями» (K)
-        return (r, c) == (0, len(B.STOCK_HEADERS))
+        # 1.0: the header of «Остаток частями» (K); 1.0.1: the headers of the information L…T
+        return (r, c) == (0, len(B.STOCK_HEADERS)) or (r == 0 and B.STOCK_INFO_COL <= c < B.STOCK_INFO_COL + len(B.STOCK_INFO_HEADERS))
     if sheet == B.ADJ:
         # 1.0 (М1): the header «Новый ЕИ» (L)
         return (r, c) == (0, len(B.ADJ_HEADERS) - 1)
@@ -580,8 +603,9 @@ def allowed_change(sheet, r, c):
     return sheet == B.HELP
 
 
-def compare_books(old, new, leg_expected):
-    """every cell of every sheet of the old book against the new one; (problems, statistics)"""
+def compare_books(old, new, leg_expected, from10=False):
+    """every cell of every sheet of the old book against the new one; (problems, statistics). from10: the old book is of 1.0.0
+    (no sheet is added, its registry of the transfer stays as it was)"""
     P, stat = [], dict(sheets=0, cells=0)
     old_names = [old.Sheets.getByIndex(i).Name for i in range(old.Sheets.getCount())]
     new_names = [new.Sheets.getByIndex(i).Name for i in range(new.Sheets.getCount())]
@@ -589,7 +613,8 @@ def compare_books(old, new, leg_expected):
     if missing:
         P.append("в новой книге нет листов: " + ", ".join(missing))
     extra = [n for n in new_names if n not in old_names]
-    if sorted(extra) != sorted([B.LEG, B.LEGREP, B.PACK] + B.VIEW_SHEETS + B.SHEETS_10 + [x for x in (B.CARS, B.CAR) if x in extra]):
+    want_extra = [] if from10 else [B.LEG, B.LEGREP, B.PACK] + B.VIEW_SHEETS + B.SHEETS_10 + [x for x in (B.CARS, B.CAR) if x in extra]
+    if sorted(extra) != sorted(want_extra):
         P.append("в новой книге лишние листы: " + ", ".join(extra))
     for name in old_names:
         if name not in new_names:
@@ -631,8 +656,8 @@ def compare_books(old, new, leg_expected):
             P.append(f"«{name}»: всего отличающихся ячеек {bad}")
         stat["sheets"] += 1
         stat["cells"] += (lr + 1) * (lc + 1)
-    # the registry of the transfer against the journal
-    if new.Sheets.hasByName(B.LEG):
+    # the registry of the transfer against the journal (a book of 1.0.0: compared cell by cell above, as every sheet)
+    if new.Sheets.hasByName(B.LEG) and leg_expected is not None:
         sh = new.Sheets.getByName(B.LEG)
         lr, _ = used(sh)
         got = {}
@@ -819,7 +844,7 @@ def cmd_build(book, to, rehearsal=False, out=print):
                 "SHA-256 каждого совпадает", ""]
         # 3. the changes of 0.8 on the copy
         progress(to, f"3/5 изменения версии {B.core_versions()['WMS_PRODUCT_VERSION']} в копии")
-        leg = legacy_rows(jdst, facts["instance"], facts["last_seq"])
+        leg = None if facts.get("from10") else legacy_rows(jdst, facts["instance"], facts["last_seq"])
         from_text = "|".join([os.path.dirname(book), str(facts["last_seq"]), facts["book_hash"], now(), str(facts["journal_size"])])
         doc = o.load(target, macros=0, hidden=True)
         done = upgrade_doc(doc, facts.get("mode") == "TEST", facts["schema"], leg, from_text)
@@ -834,7 +859,7 @@ def cmd_build(book, to, rehearsal=False, out=print):
         oldd = o.load(book, macros=0, hidden=True, ReadOnly=True)
         newd = o.load(target, macros=0, hidden=True, ReadOnly=True)
         try:
-            P, stat = compare_books(oldd, newd, leg)
+            P, stat = compare_books(oldd, newd, leg, from10=bool(facts.get("from10")))
             P0, inf0 = oracle_problems(oldd, os.path.join(os.path.dirname(book), JOURNAL_DIR), {}) if facts.get("mode") != "TEST" else ([], {})
         finally:
             oldd.close(True)
@@ -938,6 +963,9 @@ def cmd_promote(to, out=print):
     if not os.path.isfile(src) or sha256(src) != b["source_hash"] or journal_hashes(os.path.join(os.path.dirname(src), JOURNAL_DIR)) != b["source_journal"]:
         out("СТОП: в старой книге работали после сборки (книга или журнал изменились) — соберите новую книгу заново, чтобы ничего не потерять")
         return 1
+    # 1.0: the folders of WMS next to the old book (its state, the photos, the PDF documents) come along — before the new book is
+    # opened, so that its first start finds the copy on a medium, the mirror of the journal and the rest as they were
+    carried_wms = carry_wms_folders(os.path.dirname(src), to)
     prof = tempfile.mkdtemp(prefix="wms_upgrade_")
     o = Office(f"upgprom{os.getpid()}", prof)
     try:
@@ -988,6 +1016,7 @@ def cmd_promote(to, out=print):
             carried += carry_tool_folders(os.path.dirname(src), to)
         except OSError as e:
             carried.append(f"папки инструментов не скопированы ({e})")
+    carried = carried_wms + carried
     locked = lock_old_book(src, target)
     state.d["promote"] = dict(ok=True, time=now(), book=target, report=lr, toolbox=toolbox, old_locked=locked, tool_data=carried)
     state.save()
@@ -1014,6 +1043,9 @@ TB_DATA_SHEETS = {"WMS_MANAGER.ods": ("Журнал работы",), "WMS_DOCS.o
 TB_SETTINGS = "Настройки"
 TB_SETTING_SKIP = (3,)                 # 0-based rows of «Настройки» not carried: B4 — the snapshot in use (a path of the old folder)
 TB_FOLDERS = ("WMS_Labels", "WMS_Docs")
+# 1.0: the folders of WMS itself next to the book — its state (the copy on a medium, the mirror of the journal, the check of the
+# day), the photos of the goods, the documents saved as PDF
+WMS_FOLDERS = ("WMS_State", "WMS_Фото", "WMS_Документы")
 
 
 def _used_rows(sh):
@@ -1076,6 +1108,22 @@ def carry_toolbox(o, old_tb, new_tb):
     return rep
 
 
+def carry_wms_folders(old_dir, new_dir):
+    """the folders of WMS itself next to the old book copied next to the new one (WMS_FOLDERS); the orders of a return to a copy
+    and the folder of a restore drill are not carried (they belong to the moment they were written)"""
+    rep = []
+    skip = shutil.ignore_patterns("wms_restore_order.txt", "wms_after_restore.txt", "drill")
+    for d in WMS_FOLDERS:
+        a, b = os.path.join(old_dir, d), os.path.join(new_dir, d)
+        if os.path.isdir(a) and not os.path.exists(b):
+            try:
+                shutil.copytree(a, b, ignore=skip)
+                rep.append(f"папка {d} скопирована")
+            except OSError as e:
+                rep.append(f"папка {d} не скопирована ({e}) — скопируйте её рядом с новой книгой вручную")
+    return rep
+
+
 def carry_tool_folders(old_dir, new_dir):
     """the folders of the tools next to the old book copied next to the new one (labels history, created acts)"""
     rep = []
@@ -1133,7 +1181,9 @@ def checks(o, book):
         facts = dict(schema=sv.get("SCHEMA"), instance=sv.get("INSTANCE_ID"), mode=sv.get("MODE"), last_seq=int(sv.get("LAST_SEQ") or 0),
                      tx=sv.get("TX_STATE"), bi=sv.get("TX_BEFORE_IMAGE"), reg=sv.get("REGISTERED_URL"), core=sv.get("CORE_VERSION"))
         if facts["schema"] == B.SCHEMA:
-            stops.append(same_schema_stop(facts["core"], [doc.Sheets.getByIndex(i).Name for i in range(doc.Sheets.getCount())]))
+            s = same_schema_stop(facts["core"], [doc.Sheets.getByIndex(i).Name for i in range(doc.Sheets.getCount())])
+            stops.append(s or f"книга версии {facts['core']} обновляется в новую папку: upgrade.py build КНИГА --to НОВАЯ_ПАПКА "
+                              "(или мастер WMS_UPGRADE.ods)")
         elif facts["schema"] == SCHEMA_07:
             stops.append(f"книга версии 0.7 (схема {SCHEMA_07}) обновляется в новую папку: upgrade.py build КНИГА --to НОВАЯ_ПАПКА "
                          "(или мастер WMS_UPGRADE.ods)")

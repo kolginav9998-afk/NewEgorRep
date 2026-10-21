@@ -321,6 +321,9 @@ Function LoTips(ByRef nBad As Integer) As String
         "«никогда» — большая книга открывается быстрее (результаты формул хранятся в файле)", nBad)
     v = Cfg("/org.openoffice.Office.Common/Undo", "Steps")
     s = s & Tip(Not IsEmpty(v) And v <= 100, "шагов отмены", IIf(IsEmpty(v), "?", CStr(v)), "не больше 100 — меньше памяти на большой книге", nBad)
+    v = Cfg("/org.openoffice.Office.Calc/Layout/Line", "GridOnColoredCells")
+    s = s & Tip(Not IsEmpty(v) And v = True, "линии сетки на цветных ячейках (Сервис → Параметры → LibreOffice Calc → Вид)", _
+        IIf(v = True, "показываются", "не показываются"), "показывать: серые колонки WMS не сливаются в полосу", nBad)
     LoTips = s
 End Function
 
@@ -351,10 +354,21 @@ Function LoApply() As String
     CfgSet("/org.openoffice.Office.Recovery/AutoSave", "UserAutoSave", False)
     CfgSet("/org.openoffice.Office.Calc/Formula/Load", "ODFRecalcMode", 1)
     If Cfg("/org.openoffice.Office.Common/Undo", "Steps") > 100 Then CfgSet("/org.openoffice.Office.Common/Undo", "Steps", 100)
+    CfgSet("/org.openoffice.Office.Calc/Layout/Line", "GridOnColoredCells", True)
     s = LoTips(n)
     LoApply = IIf(n = 0, "Советы применены:", "Применено не всё (" & n & "):") & Chr(10) & s
     gUiLastMsg = LoApply
 End Function
+
+' 1.0.1: the grid of the cells is drawn over the coloured ones too (the grey columns WMS writes, the colours of the statuses) —
+' at every start, once: without it the cells of those columns run together. A setting of LibreOffice of this computer, not of
+' the book
+Sub GridOnColored()
+    On Error Resume Next
+    If Cfg("/org.openoffice.Office.Calc/Layout/Line", "GridOnColoredCells") <> True Then
+        CfgSet("/org.openoffice.Office.Calc/Layout/Line", "GridOnColoredCells", True)
+    End If
+End Sub
 
 ' ================================================================ С2 the speed of this computer
 

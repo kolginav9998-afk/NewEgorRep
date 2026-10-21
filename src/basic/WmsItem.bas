@@ -1,5 +1,6 @@
-' WmsItem — 1.0 (этап I): вещи и их свойства. Этикетка ЕИ прямо из WMS — номер крупно, наименование, артикул, место и
-' штрихкод Code 128 (рисуется прямоугольниками, без шрифтов и интернета) на странице «Печать» размера этикетки (Ф1);
+' WmsItem — 1.0 (этап I): вещи и их свойства. Этикетка ЕИ прямо из WMS — номер крупно, полное наименование (шрифт
+' уменьшается, пока название не уместится), единица измерения и штрихкод Code 128 (рисуется прямоугольниками, без шрифтов и
+' интернета) в своей полосе — на странице «Печать» размера этикетки (Ф1; 1.0.1: 40×30 под термопринтер 203 dpi);
 ' свойства ЕИ — серийный или инвентарный номер, «годен до», примечание — своей операцией журнала EI_PROP, «Поиск» находит
 ' ЕИ по серийному номеру (Ф5); инструмент «на руки» со сроком возврата из «Номенклатуры» и список «Где инструмент» (Ф4);
 ' резерв под получателя или объект и вопрос при выдаче сверх свободного (Ф7); фото позиции из папки «WMS_Фото» рядом с
@@ -23,10 +24,15 @@ Public Const RS_NOTE = 4
 Public Const RS_LAST = 4
 ' Ф4: «Номенклатура» Q — the days a returnable thing (a tool) may stay on the hands
 Public Const GD_RETDAYS = 16
-' Ф1: the label — the rows of one label on «Печать», the size in a hidden cell of «Печать» (AH1, «58×40»)
-Public Const LB_ROWS = 5
+' Ф1: the label — the rows of one label on «Печать» (the EI, the name, the unit, the band of the barcode), the size in a hidden
+' cell of «Печать» (AH1, «40×30»)
+Public Const LB_ROWS = 4
 Public Const LB_SIZE_COL = 33
 Public Const LB_SHAPE = "wmsbar"
+' 1.0.1: the margins of the label (1/100 mm — 1 mm, 8 dots of a 203 dpi printer) and a little slack that keeps the rows (rounded
+' by Calc to its own units) inside one page
+Public Const LB_MARGIN = 100
+Public Const LB_SLACK = 30
 ' Ф10: the folder of the photos next to the book
 Public Const PHOTO_DIR = "WMS_Фото"
 Global gItPhotoTest As String
@@ -96,31 +102,31 @@ Sub BtnLabel(Optional oEvent As Variant)
     End If
     v(0) = "1"
     v(1) = LabelSize()
-    If Not WmsPrimeUi.UiForm("Этикетка", "Этикеток ЕИ: " & (UBound(eis) + 1) & ". Номер крупно, наименование, артикул, место и штрихкод. Размер — как у "  _
+    If Not WmsPrimeUi.UiForm("Этикетка", "Этикеток ЕИ: " & (UBound(eis) + 1) & ". Номер ЕИ крупно, полное наименование, единица измерения и штрихкод. Размер — как у "  _
         & "этикеток принтера (ширина×высота, мм).", Array("Копий каждой", "Размер, мм"), v, Array("", ""), "Сделать") Then Exit Sub
     n = Val(Trim(v(0)))
     s = LabelPrint(eis, IIf(n < 1, 1, n), Trim(v(1)))
     If Left(s, 4) = "ERR:" Then WmsUi.UiMessage(Mid(s, 5))
 End Sub
 
-' the size of the label kept in the book («58×40»)
+' the size of the label kept in the book («40×30» — the labels of the warehouse)
 Function LabelSize() As String
     Dim s As String
     On Error Resume Next
     s = Trim(gDoc.Sheets.getByName(SH_PRINT).getCellByPosition(LB_SIZE_COL, 0).getString())
-    If s = "" Then s = "58×40"
+    If s = "" Then s = "40×30"
     LabelSize = s
 End Function
 
-' the labels of the EIs eis (numbers), nCopies each, on «Печать» in its own page style of the label size sSize («58×40»): one
+' the labels of the EIs eis (numbers), nCopies each, on «Печать» in its own page style of the label size sSize («40×30»): one
 ' label — one page. OK:<labels> / ERR:…
 Function LabelPrint(eis As Variant, nCopies As Long, sSize As String) As String
     Dim a As Variant, w As Double, h As Double, sh As Object, ps As Object, st As Object, i As Long, j As Long, r As Long, row As Variant, n As Long
-    Dim pr(0) As New com.sun.star.table.CellRangeAddress, k As Long, d As Variant
+    Dim pr(0) As New com.sun.star.table.CellRangeAddress, k As Long, d As Variant, yTop As Long
     On Error GoTo EH
     a = Split(Replace(Replace(LCase(sSize), "x", "×"), "*", "×"), "×")
     If UBound(a) <> 1 Then
-        LabelPrint = "ERR:размер этикетки — «ширина×высота» в мм, например 58×40"
+        LabelPrint = "ERR:размер этикетки — «ширина×высота» в мм, например 40×30"
         gUiLastMsg = LabelPrint
         Exit Function
     End If
@@ -136,14 +142,14 @@ Function LabelPrint(eis As Variant, nCopies As Long, sSize As String) As String
     sh.getCellByPosition(LB_SIZE_COL, 0).setString(Format(w, "0") & "×" & Format(h, "0"))
     ps = LabelStyle(w, h)
     sh.PageStyle = "WMS_Этикетка"
-    sh.getColumns().getByIndex(0).Width = (w - 4) * 100
+    sh.getColumns().getByIndex(0).Width = LbInnerW(w)
     For i = 0 To UBound(eis)
         n = eis(i)
         row = st.getCellRangeByPosition(0, n, SC_LAST, n).getDataArray()(0)
         If CStr(row(SC_EI)) <> "" Then
             For j = 1 To nCopies
                 If r + LB_ROWS > PR_MAX Then Exit For
-                PutLabel(sh, r, row, w, h)
+                PutLabel(sh, r, row, w, h, yTop)
                 r = r + LB_ROWS
                 k = k + 1
             Next j
@@ -178,43 +184,82 @@ Private Function LabelStyle(w As Double, h As Double) As Object
     ps = fam.getByName("WMS_Этикетка")
     ps.Width = w * 100
     ps.Height = h * 100
-    ps.LeftMargin = 200
-    ps.RightMargin = 200
-    ps.TopMargin = 200
-    ps.BottomMargin = 200
+    ' 1 mm all round (8 dots of a 203 dpi printer: the bars of the barcode stay on whole dots); the column is the printable width
+    ps.LeftMargin = LB_MARGIN
+    ps.RightMargin = LB_MARGIN
+    ps.TopMargin = LB_MARGIN
+    ps.BottomMargin = LB_MARGIN
     ps.HeaderIsOn = False
     ps.FooterIsOn = False
     ps.PrintGrid = False
-    ps.CenterHorizontally = True
+    ps.CenterHorizontally = False
+    ps.CenterVertically = False
     ps.ScaleToPagesX = 0
     ps.ScaleToPagesY = 0
     LabelStyle = ps
 End Function
 
-' one label from row r: the EI big, the name, the article, the place, the Code 128 of the 8 digits of the EI
-Private Sub PutLabel(sh As Object, r As Long, row As Variant, w As Double, h As Double)
-    Dim hrow As Double, rows As Object, i As Integer, c As Object, bars As String, x As Long, j As Integer, bw As Long, y As Long, dp As Object
-    Dim shp As Object, pt As New com.sun.star.awt.Point, sz As New com.sun.star.awt.Size, modW As Long, bcH As Long
-    hrow = (h - 4) * 100 / LB_ROWS
+Private Function LbInnerW(w As Double) As Long
+    LbInnerW = CLng(w * 100) - 2 * LB_MARGIN
+End Function
+
+' one label from row r: the EI big, the full name (the font made smaller until the whole name fits its part), the unit of
+' measure, and the Code 128 of the 8 digits of the EI in its own band at the bottom — nothing drawn over the text. yTop: the
+' top of the label on the sheet (the sum of the heights of the rows above, kept by LabelPrint), moved to the next label
+Private Sub PutLabel(sh As Object, r As Long, row As Variant, w As Double, h As Double, ByRef yTop As Long)
+    Dim rows As Object, c As Object, bars As String, x As Long, j As Integer, bw As Long, y As Long, dp As Object, i As Integer
+    Dim shp As Object, pt As New com.sun.star.awt.Point, sz As New com.sun.star.awt.Size, modW As Long, bcH As Long, nMod As Long
+    Dim hTot As Long, hEI As Long, hName As Long, hUnit As Long, hBar As Long, wIn As Long, hReal(3) As Long, ptEI As Double
+    hTot = CLng(h * 100) - 2 * LB_MARGIN - LB_SLACK
+    wIn = LbInnerW(w)
+    hEI = hTot * 0.19
+    hUnit = hTot * 0.12
+    hBar = hTot * 0.3
+    hName = hTot - hEI - hUnit - hBar
     rows = sh.getRows()
-    For i = 0 To LB_ROWS - 1
-        rows.getByIndex(r + i).Height = hrow
-    Next i
     If r > 0 Then rows.getByIndex(r).IsStartOfNewPage = True
+    ' the EI: one line, as big as its part allows, never wider than the label (shrunk to fit if need be)
+    rows.getByIndex(r).Height = hEI
     c = sh.getCellByPosition(0, r)
     c.setString(row(SC_EI))
-    c.CharHeight = 18
+    ptEI = Int(hEI / 100 / 0.3528 * 0.78)
+    If ptEI > 16 Then ptEI = 16
+    If ptEI < 7 Then ptEI = 7
+    c.CharHeight = ptEI
     c.CharWeight = 150
-    c.HoriJustify = com.sun.star.table.CellHoriJustify.CENTER
-    LabelLine(sh, r + 1, Left(CStr(row(SC_NAME)), 60), 9)
-    LabelLine(sh, r + 2, IIf(CStr(row(SC_ART)) <> "", "Арт. " & row(SC_ART), ""), 9)
-    LabelLine(sh, r + 3, IIf(CStr(row(SC_PLACE)) <> "", "Место: " & row(SC_PLACE), ""), 9)
+    LbCell(c)
+    c.ShrinkToFit = True
+    ' the name: the whole of it, wrapped, the font made smaller until it fits its part
+    rows.getByIndex(r + 1).Height = hName
+    c = sh.getCellByPosition(0, r + 1)
+    LbCell(c)
+    c.IsTextWrapped = True
+    LbFitName(sh, r + 1, c, Trim(CStr(row(SC_NAME))), hName)
+    ' the unit of measure
+    rows.getByIndex(r + 2).Height = hUnit
+    c = sh.getCellByPosition(0, r + 2)
+    c.setString(IIf(Trim(CStr(row(SC_UNIT))) <> "", "Ед. изм.: " & Trim(CStr(row(SC_UNIT))), ""))
+    c.CharHeight = 7
+    LbCell(c)
+    c.ShrinkToFit = True
+    ' the band of the barcode: an empty row, the bars drawn inside it (placed by the heights just set, read back as Calc keeps them)
+    rows.getByIndex(r + 3).Height = hBar
+    sh.getCellByPosition(0, r + 3).setString("")
+    For i = 0 To 3
+        hReal(i) = rows.getByIndex(r + i).Height
+    Next i
     bars = WmsItemCode128C(Mid(CStr(row(SC_EI)), 4))
-    modW = 30
-    bcH = hrow * 0.8
+    For j = 1 To Len(bars)
+        nMod = nMod + CLng(Mid(bars, j, 1))
+    Next j
+    ' the module: a whole number of the dots of a 203 dpi printer (0,125 mm) — 4 dots on a wide label, else 2 — with the quiet
+    ' zones of 10 modules on both sides and 2 mm to spare
+    modW = 50
+    If (nMod + 20) * modW > wIn - 200 Then modW = 25
+    bcH = hReal(3) * 0.8
     dp = sh.getDrawPage()
-    x = sh.getCellByPosition(0, r + 4).Position.X + ((w - 4) * 100 - modW * 101) / 2
-    y = sh.getCellByPosition(0, r + 4).Position.Y + hrow * 0.1
+    x = ((wIn - nMod * modW) \ 2 \ 25) * 25
+    y = yTop + hReal(0) + hReal(1) + hReal(2) + (hReal(3) - bcH) \ 2
     For j = 1 To Len(bars)
         bw = CLng(Mid(bars, j, 1)) * modW
         If j Mod 2 = 1 Then
@@ -223,26 +268,58 @@ Private Sub PutLabel(sh As Object, r As Long, row As Variant, w As Double, h As 
             pt.Y = y
             sz.Width = bw
             sz.Height = bcH
-            shp.setPosition(pt)
-            shp.setSize(sz)
+            ' added first, anchored to the page (shapes anchored to cells make LibreOffice 24.2 write an endless file), then sized
+            ' and placed: a geometry given before the shape is on the page or before its anchor is not always kept (1.0: the bars
+            ' of a label were shown at the top of the sheet, over the number of the EI)
             dp.add(shp)
+            shp.Anchor = sh
+            shp.setSize(sz)
+            shp.setPosition(pt)
             shp.Name = LB_SHAPE
             shp.FillColor = RGB(0, 0, 0)
             shp.LineStyle = com.sun.star.drawing.LineStyle.NONE
-            ' anchored to the page (placed by the cell positions): shapes anchored to cells make LibreOffice 24.2 write an endless file
-            shp.Anchor = sh
         End If
         x = x + bw
     Next j
+    yTop = yTop + hReal(0) + hReal(1) + hReal(2) + hReal(3)
 End Sub
 
-Private Sub LabelLine(sh As Object, r As Long, s As String, sz As Double)
-    Dim c As Object
-    c = sh.getCellByPosition(0, r)
-    c.setString(s)
-    c.CharHeight = sz
+Private Sub LbCell(c As Object)
+    ' pure black: a thermal printer prints a grey as scattered dots
+    c.CharColor = RGB(0, 0, 0)
     c.HoriJustify = com.sun.star.table.CellHoriJustify.CENTER
-    c.IsTextWrapped = True
+    c.VertJustify = com.sun.star.table.CellVertJustify.CENTER
+    c.IsTextWrapped = False
+End Sub
+
+' the name in its row of height hName: the biggest font of the list with which the wrapped text needs no more height (Calc
+' measures it: the optimal height of the row); the very long name at the smallest font loses its tail words for «…»
+Private Sub LbFitName(sh As Object, r As Long, c As Object, s As String, hName As Long)
+    Dim sizes As Variant, i As Integer, rw As Object, fit As Boolean, words As Variant, n As Integer, t As String
+    sizes = Array(11, 10, 9, 8, 7, 6.5, 6, 5.5, 5)
+    rw = sh.getRows().getByIndex(r)
+    c.setString(s)
+    For i = 0 To UBound(sizes)
+        c.CharHeight = sizes(i)
+        rw.OptimalHeight = True
+        If rw.Height <= hName Then
+            fit = True
+            Exit For
+        End If
+    Next i
+    If Not fit Then
+        words = Split(s, " ")
+        n = UBound(words)
+        Do While n > 0 And Not fit
+            n = n - 1
+            ReDim Preserve words(n)
+            t = Join(words, " ") & "…"
+            c.setString(t)
+            rw.OptimalHeight = True
+            fit = (rw.Height <= hName)
+        Loop
+    End If
+    rw.Height = hName
 End Sub
 
 ' the shapes of the labels of «Печать» removed and the page style of the documents back (WmsPrint.PrintBegin calls it)
@@ -745,6 +822,190 @@ Function PhotoOpen(n As Long) As String
 EH:
     PhotoOpen = "ERR:фото не открыто: " & Error$
     gUiLastMsg = PhotoOpen
+End Function
+
+' ================================================================ 1.0.1 the information of «Наличие» (L…T)
+' For whom the goods were ordered, where they came from (the supplier or the kind of the receipt and who passed them, the date,
+' the document, the № of the order), the packing, the serial number, «годен до», the reserve. View only: filled at once from the
+' sheets (no operation, nothing journaled, never inside a posting), when «Наличие» is opened after an operation and by
+' «Обновить сведения»; a big registry only by the button (the opening of the sheet stays quick).
+Public Const SI_COL0 = 11
+Public Const SI_COLS = 9
+Public Const SI_AUTO_MAX = 30000
+
+Sub OnStockFocus(Optional oEvent As Variant)
+    On Error Resume Next
+    StockInfoRefresh(False)
+End Sub
+
+Sub BtnStockInfo(Optional oEvent As Variant)
+    Dim s As String
+    WmsInit()
+    s = StockInfoRefresh(True)
+    If Left(s, 4) = "ERR:" Then WmsUi.UiMessage(Mid(s, 5))
+End Sub
+
+' OK:<rows> — filled; SAME — nothing changed since the last fill; SKIP:… — a big registry left to the button; ERR:…
+Function StockInfoRefresh(bForce As Boolean) As String
+    Dim st As Object, last As Long, sh As Object, oLast As Long, i As Long, n As Long, s As String, stamp As String, um As Object
+    Dim rowOf() As Long, spOf() As Long, cV As Variant, cA As Variant, cC As Variant, cL As Variant, cN As Variant, cT As Variant
+    Dim xE As Variant, xT As Variant, xW As Variant, xD As Variant, xC As Variant, sp As Object, xLast As Long, pk As Variant, pr As Variant
+    Dim rs As Variant, resQ() As Double, resWho() As String, resN() As Long, canon As String, msg As String, out() As Variant, stk As Variant
+    Dim a(8) As Variant, k As Integer, locked As Boolean, units As Variant
+    WmsInit()
+    On Error GoTo EH
+    st = gDoc.Sheets.getByName(SH_STOCK)
+    last = WmsOrders.LastRow(st)
+    If last < 1 Then
+        StockInfoRefresh = "OK:0"
+        Exit Function
+    End If
+    rs = Array()
+    If gDoc.Sheets.hasByName(SH_RESERVES) Then
+        sh = gDoc.Sheets.getByName(SH_RESERVES)
+        i = WmsOrders.LastRow(sh)
+        If i >= 1 Then rs = sh.getCellRangeByPosition(0, 1, RS_UNTIL, i).getDataArray()
+    End If
+    stamp = Format(SysNum(SK_LAST_SEQ), "0") & "|" & last & "|" & SiReserveStamp(rs) & "|" & gDoc.getURL()
+    If Not bForce Then
+        If WmsSafe.StGet("STOCKINFO") = stamp Then
+            StockInfoRefresh = "SAME"
+            Exit Function
+        End If
+        If last > SI_AUTO_MAX Then
+            StockInfoRefresh = "SKIP:в «" & SH_STOCK & "» " & last & " строк — сведения обновляются кнопкой «Обновить сведения»"
+            Exit Function
+        End If
+    End If
+    ReDim rowOf(last) As Long
+    ReDim spOf(last) As Long
+    ' «Заказы»: the receipt row of each EI — the first row holding its key, as WMS finds it
+    sh = gDoc.Sheets.getByName(SH_ORDERS)
+    oLast = WmsOrders.LastRow(sh)
+    If oLast >= 1 Then
+        cV = sh.getCellRangeByPosition(OC_EI, 1, OC_EI, oLast).getDataArray()
+        For i = 0 To UBound(cV)
+            s = CStr(cV(i)(0))
+            If Left(s, 3) = "ЕИ-" Then
+                n = Val(Mid(s, 4))
+                If n >= 1 And n <= last Then
+                    If rowOf(n) = 0 Then rowOf(n) = i + 1
+                End If
+            End If
+        Next i
+        cA = sh.getCellRangeByPosition(OC_ORDER, 1, OC_ORDER, oLast).getDataArray()
+        cC = sh.getCellRangeByPosition(OC_DOC, 1, OC_DOC, oLast).getDataArray()
+        cL = sh.getCellRangeByPosition(OC_SUPPLIER, 1, OC_SUPPLIER, oLast).getDataArray()
+        cN = sh.getCellRangeByPosition(OC_RDATE, 1, OC_RDATE, oLast).getDataArray()
+        cT = sh.getCellRangeByPosition(OC_ASSIGNED, 1, OC_ASSIGNED, oLast).getDataArray()
+    End If
+    ' «Иной приход»: the kind of the receipt and who passed the goods
+    If gDoc.Sheets.hasByName(SH_SPECIAL) Then
+        sp = gDoc.Sheets.getByName(SH_SPECIAL)
+        xLast = WmsOrders.LastRow(sp)
+        If xLast >= 1 Then
+            xE = sp.getCellRangeByPosition(XC_EI, 1, XC_EI, xLast).getDataArray()
+            For i = 0 To UBound(xE)
+                s = CStr(xE(i)(0))
+                If Left(s, 3) = "ЕИ-" Then
+                    n = Val(Mid(s, 4))
+                    If n >= 1 And n <= last Then
+                        If spOf(n) = 0 And rowOf(n) = 0 Then spOf(n) = i + 1
+                    End If
+                End If
+            Next i
+            xT = sp.getCellRangeByPosition(XC_TYPE, 1, XC_TYPE, xLast).getDataArray()
+            xW = sp.getCellRangeByPosition(XC_WHO, 1, XC_WHO, xLast).getDataArray()
+            xD = sp.getCellRangeByPosition(XC_DATE, 1, XC_DATE, xLast).getDataArray()
+            xC = sp.getCellRangeByPosition(XC_DOC, 1, XC_DOC, xLast).getDataArray()
+        End If
+    End If
+    ' the packing (_PACK) and the properties (_PROP): one row per EI, the row of the EI
+    pk = Array()
+    If gDoc.Sheets.hasByName(SH_PACK) Then pk = gDoc.Sheets.getByName(SH_PACK).getCellRangeByPosition(0, 1, 2, last).getDataArray()
+    pr = Array()
+    If gDoc.Sheets.hasByName(SH_PROP) Then pr = gDoc.Sheets.getByName(SH_PROP).getCellRangeByPosition(0, 1, PR_EXPIRY, last).getDataArray()
+    ' the reserves: the sum and the first «for whom» of every EI
+    ReDim resQ(last) As Double
+    ReDim resWho(last) As String
+    ReDim resN(last) As Long
+    For i = 0 To UBound(rs)
+        If Trim(CStr(rs(i)(RS_EI))) <> "" And VarType(rs(i)(RS_QTY)) = 5 Then
+            If WmsIssue.NormalizeEI(rs(i)(RS_EI), n, canon, msg) Then
+                If n >= 1 And n <= last Then
+                    resQ(n) = resQ(n) + rs(i)(RS_QTY)
+                    resN(n) = resN(n) + 1
+                    If resWho(n) = "" Then
+                        resWho(n) = Trim(CStr(rs(i)(RS_WHO)))
+                        If VarType(rs(i)(RS_UNTIL)) = 5 Then resWho(n) = resWho(n) & " до " & Format(rs(i)(RS_UNTIL), "DD.MM.YYYY")
+                    End If
+                End If
+            End If
+        End If
+    Next i
+    stk = st.getCellRangeByPosition(SC_EI, 1, SC_UNIT, last).getDataArray()
+    ReDim out(last - 1)
+    For i = 1 To last
+        For k = 0 To 8
+            a(k) = ""
+        Next k
+        If CStr(stk(i - 1)(SC_EI)) <> "" Then
+            n = i
+            If rowOf(n) > 0 Then
+                a(0) = cT(rowOf(n) - 1)(0)
+                a(1) = cL(rowOf(n) - 1)(0)
+                a(2) = cN(rowOf(n) - 1)(0)
+                a(3) = cC(rowOf(n) - 1)(0)
+                a(4) = cA(rowOf(n) - 1)(0)
+            ElseIf spOf(n) > 0 Then
+                s = Trim(CStr(xT(spOf(n) - 1)(0)))
+                If Trim(CStr(xW(spOf(n) - 1)(0))) <> "" Then s = s & IIf(s <> "", " · ", "") & Trim(CStr(xW(spOf(n) - 1)(0)))
+                a(1) = s
+                a(2) = xD(spOf(n) - 1)(0)
+                a(3) = xC(spOf(n) - 1)(0)
+            End If
+            If UBound(pk) >= i - 1 Then
+                If CStr(pk(i - 1)(0)) = CStr(stk(i - 1)(SC_EI)) And VarType(pk(i - 1)(2)) = 5 Then
+                    If pk(i - 1)(2) > 0 Then a(5) = "в 1 " & stk(i - 1)(SC_UNIT) & " — " & WmsIssue.QtyText(pk(i - 1)(2)) & " " & pk(i - 1)(1)
+                End If
+            End If
+            If UBound(pr) >= i - 1 Then
+                If CStr(pr(i - 1)(PR_EI)) = CStr(stk(i - 1)(SC_EI)) Then
+                    a(6) = pr(i - 1)(PR_SERIAL)
+                    a(7) = pr(i - 1)(PR_EXPIRY)
+                End If
+            End If
+            If resN(n) > 0 Then a(8) = WmsIssue.QtyText(resQ(n)) & " · " & resWho(n) & IIf(resN(n) > 1, " и ещё " & (resN(n) - 1), "")
+        End If
+        out(i - 1) = Array(a(0), a(1), a(2), a(3), a(4), a(5), a(6), a(7), a(8))
+    Next i
+    ' written as one block, outside the undo of the user and without marking the book changed when it was not
+    st = WmsView.ViewOpen(SH_STOCK)
+    um = gDoc.getUndoManager()
+    um.lock()
+    locked = True
+    st.getCellRangeByPosition(SI_COL0, 1, SI_COL0 + SI_COLS - 1, last).setDataArray(out())
+    um.unlock()
+    locked = False
+    WmsView.ViewDone(st)
+    WmsSafe.StSet("STOCKINFO", stamp)
+    StockInfoRefresh = "OK:" & last
+    Exit Function
+EH:
+    StockInfoRefresh = "ERR:сведения «" & SH_STOCK & "» не обновлены: " & Error$ & " (строка " & Erl & ")"
+    On Error Resume Next
+    If locked Then um.unlock()
+    WmsView.ViewDone(gDoc.Sheets.getByName(SH_STOCK))
+End Function
+
+' the reserves as one short text: changed when a reserve is added, removed or changed
+Private Function SiReserveStamp(rs As Variant) As String
+    Dim i As Long, x As Double, s As String
+    For i = 0 To UBound(rs)
+        If VarType(rs(i)(RS_QTY)) = 5 Then x = x + rs(i)(RS_QTY) * (i + 1)
+        s = s & Left(CStr(rs(i)(RS_EI)), 12) & Left(CStr(rs(i)(RS_WHO)), 4)
+    Next i
+    SiReserveStamp = (UBound(rs) + 1) & "/" & Format(x, "0.000") & "/" & Len(s)
 End Function
 
 ' ================================================================ test seams (TEST books only)

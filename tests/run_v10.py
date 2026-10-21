@@ -1615,15 +1615,16 @@ def v26_items():
         res = s.B("LabelPrint", (nt, ng), 2, "58×40", module="WmsItem")
         pr = s.doc.Sheets.getByName("Печать")
         bars = shapes_named(pr, "wmsbar")
-        heads = [pr.getCellByPosition(0, r).getString() for r in (0, 5, 10, 15)]
+        heads = [pr.getCellByPosition(0, r).getString() for r in (0, 4, 8, 12)]
         ps = s.doc.StyleFamilies.getByName("PageStyles").getByName("WMS_Этикетка")
         code = s.B("WmsItemCode128C", "00000001", module="WmsItem")
         want = "211232" + "212222" * 3 + "222122" + "122213" + "2331112"    # start C, 00 00 00 01, check (105 + 4·1) mod 103 = 6, stop
-        R.add(c, "Ф1: 2 ЕИ × 2 копии — 4 этикетки на «Печати» в стиле страницы 58×40 мм, номер ЕИ крупно, у каждой штрихкод из 22 полос "
+        R.add(c, "Ф1: 2 ЕИ × 2 копии — 4 этикетки на «Печати» в стиле страницы 58×40 мм: номер ЕИ, наименование, единица (1.0.1: без "
+                 "артикула и места), у каждой штрихкод из 22 полос "
                  "(Code 128 C); код ЕИ-00000001 — по таблице стандарта, с контрольным символом",
               res == "OK:этикеток 4 (58×40 мм)" and heads == [t, t, g, g] and pr.PageStyle == "WMS_Этикетка" and len(bars) == 88
               and abs(ps.Width - 5800) <= 2 and abs(ps.Height - 4000) <= 2 and code == want and pr.getCellByPosition(0, 1).getString() == "Перфоратор"
-              and pr.getCellByPosition(0, 2).getString() == "Арт. ПФ-1" and pr.getCellByPosition(0, 3).getString() == "Место: 3-1-1",
+              and pr.getCellByPosition(0, 2).getString() == "Ед. изм.: шт" and pr.getCellByPosition(0, 3).getString() == "",
               f"{res}; {heads}; {pr.PageStyle}; {len(bars)}; {ps.Width}×{ps.Height}; {code}")
         bad = s.B("LabelPrint", (nt,), 1, "10×5", module="WmsItem")
         doc_res = s.B("InventoryList", "3-1", module="WmsPrint")
@@ -2100,10 +2101,10 @@ def v29_help():
         pc = s.B("PcCheck", module="WmsHelp")
         R.add(c, "П1: «Проверить этот ПК» — LibreOffice, макросы, запись, место, Python — с «что сделать»",
               pc.startswith("Проверка этого ПК") and "LibreOffice" in pc and "запись в папку WMS" in pc and "место на диске" in pc and "Python" in pc, pc[:300])
-        choose(s, 2)
+        choose(s, 3)
         wn = s.B("WhatsNew", module="WmsHelp")
         act = s.doc.getCurrentController().getActiveSheet().getName()
-        R.add(c, "П2: «Что нового в 1.0» — 6 карточек, «Показать» открывает лист карточки", len(s.B("WhatsNewCards", module="WmsHelp")) == 6 and wn == 2
+        R.add(c, "П2: «Что нового» — 7 карточек (первая — 1.0.1), «Показать» открывает лист карточки", len(s.B("WhatsNewCards", module="WmsHelp")) == 7 and wn == 3
               and act == "Поиск", f"{wn}; {act}")
         col0 = s.B("ButtonModel", "Заказы", "btnReceiveWin", module="WmsHelp").BackgroundColor
         tr = s.B("Tour", module="WmsHelp")
@@ -2427,6 +2428,188 @@ def v33_health():
               and dr2.startswith("OK:") and light_back[:1] in ("✓", "!") and light_ok[:1] in ("✓", "!") and s.state().get("STATE") == "CLEAN",
               f"{gap[:200]}; {light_bad[:200]}; {light_ok[:200]}; {light_back[:200]}")
         oracle(c, s, "после учений")
+    finally:
+        s.close()
+
+
+def label_layout(pr, n_labels, rows=4):
+    """the rows of each label on «Печать» (text, size of the font, height) and the bars of its barcode: (labels, problems) —
+    a bar outside the band of its label (the 4th row) or over a text is a problem. The geometry is read by getPosition() /
+    getSize(), once per bar: the property Position of a shape of Calc read through the bridge now and then gives 0 for X or Y"""
+    dp = pr.getDrawPage()
+    bars = []
+    for i in range(dp.getCount()):
+        b = dp.getByIndex(i)
+        if b.Name == "wmsbar":
+            p, z = b.getPosition(), b.getSize()
+            bars.append((p.X, p.Y, z.Width, z.Height))
+    labels, probs, y, seen = [], [], 0, 0
+    for k in range(n_labels):
+        h = [pr.getRows().getByIndex(k * rows + j).Height for j in range(rows)]
+        cells = [pr.getCellByPosition(0, k * rows + j) for j in range(rows)]
+        band0 = y + h[0] + h[1] + h[2]
+        band1 = band0 + h[3]
+        mine = [b for b in bars if y <= b[1] < y + sum(h)]
+        seen += len(mine)
+        for b in mine:
+            if b[1] < band0 or b[1] + b[3] > band1:
+                probs.append(f"этикетка {k + 1}: полоса {b[1]}…{b[1] + b[3]} вне полосы штрихкода {band0}…{band1}")
+        labels.append(dict(text=[c.getString() for c in cells], pt=[round(c.CharHeight, 1) for c in cells], h=h, bars=len(mine),
+                           width=(min(b[0] for b in mine), max(b[0] + b[2] for b in mine)) if mine else None))
+        y += sum(h)
+    if seen != len(bars):
+        probs.append(f"полос вне этикеток: {len(bars) - seen} из {len(bars)}")
+    return labels, probs
+
+
+@case
+def v34_release_101():
+    """1.0.1: этикетка 40×30 под термопринтер — номер ЕИ, полное наименование (шрифт уменьшается, пока не уместится; длинное не
+    обрезается), единица, штрихкод в своей полосе (ни одна полоса не заходит на текст), без артикула и места; PDF — страницы 40×30 мм;
+    сетка ячеек включена для всех листов; «Наличие» L…T — кому назначено, поставщик, дата и документ прихода, № заказа, фасовка,
+    серийный номер, «годен до», резерв — заполняются при открытии листа и кнопкой; проведение их не пишет"""
+    c = "V34"
+    s = ready(Session(new_wms("v34")))
+    try:
+        names = ['HG Ниппель 3/4" НР', "Кабель силовой ВВГнг(А)-LS 3х2,5 ок(N, PE)-0,66 ГОСТ 31996-2012 медный плоский, бухта 100 м",
+                 "Перчатки трикотажные с ПВХ покрытием «Точка» 10 класс вязки, размер 10 (XL), белые, упаковка 12 пар, для склада и цеха"]
+        eis = []
+        for i, nm in enumerate(names, start=1):
+            order(s, i, str(i), nm, qty="5", unit=["шт", "м", "пар"][i - 1], art=f"А-{i}", T="Участок 3, Иванов" if i == 1 else "")
+            receive(s, i, "5", place="4-8-3", doc=f"УПД-{i}")
+            eis.append(int(ords(s, i)[21][3:]))
+        size0 = s.B("LabelSize", module="WmsItem")
+        res = s.B("LabelPrint", tuple(eis), 1, "40×30", module="WmsItem")
+        pr = s.doc.Sheets.getByName("Печать")
+        labels, probs = label_layout(pr, 3)
+        ps = s.doc.StyleFamilies.getByName("PageStyles").getByName("WMS_Этикетка")
+        R.add(c, "этикетка 40×30: номер ЕИ, полное наименование (длинное — мельче, но целиком), «Ед. изм.: …», штрихкод (22 полосы) в нижней "
+                 "полосе, ни одна полоса не заходит на текст; артикула и места нет; размер по умолчанию — 40×30",
+              res == "OK:этикеток 3 (40×30 мм)" and size0 == "40×30" and not probs and abs(ps.Width - 4000) <= 2 and abs(ps.Height - 3000) <= 2
+              and [x["text"][1] for x in labels] == names and [x["text"][2] for x in labels] == ["Ед. изм.: шт", "Ед. изм.: м", "Ед. изм.: пар"]
+              and all(x["bars"] == 22 and x["text"][3] == "" and x["text"][0].startswith("ЕИ-") for x in labels)
+              and labels[0]["pt"][1] > labels[1]["pt"][1] >= 5 and labels[2]["pt"][1] >= 5
+              and all(x["width"][0] >= 0 and x["width"][1] <= ps.Width - ps.LeftMargin - ps.RightMargin for x in labels)
+              and not any("Арт" in " ".join(x["text"]) or "4-8-3" in " ".join(x["text"]) for x in labels),
+              f"{res}; {size0}; {probs[:3]}; {[(x['text'][1][:20], x['pt'], x['h'], x['bars'], x['width']) for x in labels]}")
+        pdf = s.B("PdfSave", module="WmsPrint")
+        pages = []
+        try:
+            import pymupdf
+            d = pymupdf.open(pdf[3:])
+            pages = [(round(pg.rect.width / 72 * 25.4, 1), round(pg.rect.height / 72 * 25.4, 1)) for pg in d]
+            words = [" ".join(w[4] for w in pg.get_text("words")) for pg in d]
+        except Exception as e:
+            words = [str(e)]
+        R.add(c, "PDF этикеток: 3 страницы 40×30 мм, на каждой полное наименование целиком", pdf.startswith("OK:") and pages == [(40.0, 30.0)] * 3
+              and all(nm.split()[-1] in w for nm, w in zip(names, words)), f"{pdf[:80]}; {pages}; {[w[:60] for w in words]}")
+        # «Наличие» L…T
+        pk = s.B("PackSet", ords(s, 3)[21], "12", "шт", "", module="WmsPack")
+        pp = s.B("PropSet", ords(s, 1)[21], "SN-77", dtext(400), "", module="WmsItem")
+        rs = s.doc.Sheets.getByName("Резервы")
+        rs.getCellByPosition(0, 1).setString(ords(s, 1)[21])
+        rs.getCellByPosition(1, 1).setValue(2)
+        rs.getCellByPosition(2, 1).setString("Объект Север")
+        seq0 = s.sysv("LAST_SEQ")
+        r1 = s.B("StockInfoRefresh", True, module="WmsItem")
+        st = s.doc.Sheets.getByName("Наличие")
+        hdr = [st.getCellByPosition(col, 0).getString() for col in range(11, 20)]
+        row1 = [st.getCellByPosition(col, eis[0]).getString() for col in range(11, 20)]
+        row2 = [st.getCellByPosition(col, eis[2]).getString() for col in range(11, 20)]
+        r2 = s.B("StockInfoRefresh", False, module="WmsItem")
+        R.add(c, "«Наличие» L…T: кому назначено, поставщик, дата и документ прихода, № заказа, фасовка, серийный номер, «годен до», резерв; "
+                 "второй раз без операций — не пересчитывается; операций в журнале не прибавилось",
+              r1.startswith("OK:") and r2 == "SAME" and hdr == ["Кому назначено", "Поставщик / откуда", "Дата прихода", "Документ прихода", "№ заказа",
+                                                                "Фасовка", "Серийный / инв. №", "Годен до", "Резерв"]
+              and row1[0] == "Участок 3, Иванов" and row1[1] == "Ромашка" and row1[3] == "УПД-1" and row1[4] == "1" and row1[6] == "SN-77"
+              and row1[7] == dtext(400) and row1[8] == "2 · Объект Север" and row2[5] == "в 1 пар — 12 шт" and row2[0] == ""
+              and s.sysv("LAST_SEQ") == seq0 and pk.startswith("OK") and pp.startswith("OK"), f"{r1}; {r2}; {hdr}; {row1}; {row2}")
+        # an operation — the information follows at the next opening of «Наличие»
+        put(s, "Заказы", 1, T="Участок 5")
+        issue(s, 1, ords(s, 2)[21], "1", "ива")
+        s.B("OnStockFocus", module="WmsItem")
+        R.add(c, "после операции открытие «Наличия» обновляет сведения (новое «Кому назначено»)", st.getCellByPosition(11, eis[0]).getString() == "Участок 5",
+              st.getCellByPosition(11, eis[0]).getString())
+        ctl = s.doc.getCurrentController()
+        grid = {}
+        for nm in ("Заказы", "Наличие", "Выдачи"):
+            ctl.setActiveSheet(s.doc.Sheets.getByName(nm))
+            grid[nm] = ctl.ShowGrid
+        cfg = s.B("LoTips", 0, module="WmsCare")
+        R.add(c, "сетка ячеек видна на рабочих листах; WMS включает линии сетки и на цветных ячейках (настройка LibreOffice)",
+              all(grid.values()) and "✓ линии сетки на цветных ячейках" in cfg, f"{grid}; {[x for x in cfg.splitlines() if 'сетки' in x]}")
+        oracle(c, s, "этикетки и сведения 1.0.1")
+    finally:
+        s.close()
+
+
+@case
+def v35_upgrade_100():
+    """1.0.1 для пользователя, уже работающего в 1.0: рабочая книга 1.0.0 (собрана исходниками выпуска 1.0.0, рабочий день в ней)
+    обновляется мастером до 1.0.1 — проверка, сборка (сверка каждой ячейки), «сделать рабочей»; данные те же, старая книга и журнал
+    побайтно те же; новая WMS — 1.0.1, колонки сведений, сетка, папка состояния WMS перенесена"""
+    import run_prime
+    import subprocess
+    from harness import git_sources
+    c = "V35"
+    src = os.path.join(OUT, "src_100")
+    why = "" if os.path.isdir(os.path.join(src, "tools")) else git_sources("3c46e94", src)
+    if why:
+        R.add(c, "исходники выпуска 1.0.0", "SKIP", why)
+        return
+    d = os.path.join(OUT, "cases", "v35 Склад")
+    shutil.rmtree(d, ignore_errors=True)
+    work = os.path.join(d, "WMS_RELEASE_1.0.0", "WMS_WORK")
+    os.makedirs(work)
+    p = os.path.join(work, "WMS_PROD.ods")
+    b = subprocess.run([sys.executable, os.path.join(src, "tools", "build_ods.py"), p, "--test"], capture_output=True, text=True, timeout=900)
+    if b.returncode != 0 or not os.path.exists(p):
+        R.add(c, "книга 1.0.0 собрана исходниками 1.0.0", False, (b.stdout + b.stderr)[-300:])
+        return
+    s = ready(Session(p))
+    try:
+        core0 = s.sysv("CORE_VERSION")
+        order(s, 1, "1", "Перфоратор Bosch", qty="2", art="ПФ-1", T="Участок 3")
+        receive(s, 1, "2", place="3-1-1", doc="УПД-7")
+        a = ords(s, 1)[21]
+        i1 = issue(s, 1, a, "1", "ива")
+        s.B("StSet", "FLASH", "2026-10-20 10:00|/media/флешка", module="WmsSafe")
+        stk = s.doc.Sheets.getByName("Наличие")
+        n_ei = int(s.sysv("NEXT_EI")) - 1
+        before = [tuple(r[:8]) for r in stk.getCellRangeByPosition(0, 1, 7, n_ei).getDataArray()]
+    finally:
+        s.close(save=True)
+    h0 = run_prime.sha(p)
+    j0 = {f: run_prime.sha(f) for f in glob.glob(os.path.join(work, "WMS_Journal", "*.csv"))}
+    rc0, o0 = run_prime.upgrade("check", p)
+    new = os.path.join(d, "WMS_RELEASE_1.0.1", "WMS_WORK")
+    rc1, o1 = run_prime.upgrade("build", p, "--to", new)
+    rc2, o2 = run_prime.upgrade("promote", "--to", new)
+    rep = open(os.path.join(new, "UPGRADE_REPORT.md"), encoding="utf-8").read() if os.path.exists(os.path.join(new, "UPGRADE_REPORT.md")) else ""
+    R.add(c, "книга 1.0.0: проверка «можно обновить», сборка — 0 расхождений ячеек, «сделать рабочей»; старая книга и журнал побайтно те же, "
+             "старая заперта", core0 == "1.0.0" and i1.startswith("OK") and rc0 == 0 and "1.0.0" in o0 and rc1 == 0 and rc2 == 0
+          and "расхождений: 0" in rep and run_prime.sha(p) == h0
+          and {f: run_prime.sha(f) for f in glob.glob(os.path.join(work, "WMS_Journal", "*.csv"))} == j0
+          and os.path.exists(os.path.join(work, "WMS_Journal", "wms.lock")), f"{core0}; {i1[:40]}; {o0[-200:]}; {o1[-200:]}; {o2[-200:]}")
+    nb = os.path.join(new, "WMS_PROD.ods")
+    s = ready(Session(nb))
+    try:
+        stk = s.doc.Sheets.getByName("Наличие")
+        after = [tuple(r[:8]) for r in stk.getCellRangeByPosition(0, 1, 7, n_ei).getDataArray()]
+        ri = s.B("StockInfoRefresh", True, module="WmsItem")
+        info = [stk.getCellByPosition(col, int(a[3:])).getString() for col in (11, 12, 14)]
+        ctl = s.doc.getCurrentController()
+        ctl.setActiveSheet(s.doc.Sheets.getByName("Заказы"))
+        flash = s.B("StGet", "FLASH", module="WmsSafe")
+        lb = s.B("LabelPrint", (int(a[3:]),), 1, "40×30", module="WmsItem")
+        i2 = issue(s, 2, a, "1", "ива")
+        R.add(c, "новая книга — WMS 1.0.1: «работа разрешена», каждый ЕИ тот же, сведения «Наличия» (кому назначено, поставщик, документ), "
+                 "сетка видна, состояние WMS (копия на флешку) перенесено, этикетка 40×30, проведение работает",
+              s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == "1.0.1" and before == after and ri.startswith("OK:")
+              and info == ["Участок 3", "Ромашка", "УПД-7"] and ctl.ShowGrid and flash.startswith("2026-10-20") and lb.startswith("OK:этикеток 1")
+              and i2.startswith("OK"), f"{s.state()}; {s.sysv('CORE_VERSION')}; {before == after}; {ri}; {info}; {ctl.ShowGrid}; {flash}; {lb}; {i2[:40]}")
+        P, inf, _ = s.adjcheck(0)
+        R.add(c, "оракул (журнал воспроизведён независимо): книга 1.0.0, обновлённая до 1.0.1", not P, f"{inf.get('ops')} операций; {P[:4]}")
     finally:
         s.close()
 

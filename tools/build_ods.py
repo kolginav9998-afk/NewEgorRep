@@ -1540,6 +1540,45 @@ def colors_10(doc, sheets):
             sheets.moveByName(LEGREP, names.index(HELP))
 
 
+# 1.0.1: «Наличие» L…T — what is known of the goods of an EI: for whom they were ordered, where they came from, the packing,
+# the serial number, «годен до», the reserve. View only: WmsItem.StockInfoRefresh fills them from the sheets when «Наличие» is
+# opened after an operation and by «Обновить сведения» (never inside a posting)
+STOCK_INFO_COL = 11                # WmsItem.SI_COL0
+STOCK_INFO_HEADERS = ["Кому назначено", "Поставщик / откуда", "Дата прихода", "Документ прихода", "№ заказа", "Фасовка",
+                      "Серийный / инв. №", "Годен до", "Резерв"]
+STOCK_INFO_WIDTHS = [3800, 4400, 2600, 3200, 2400, 3800, 3200, 2600, 4400]
+
+
+def stock_info_10(doc, sheets):
+    """1.0.1: the headers, widths and formats of «Наличие» L…T, the button «Обновить сведения», the event of the sheet, the
+    autofilter over them — for a new book and an upgraded one (the data are not touched)"""
+    st = sheets.getByName(STOCK)
+    j = st.getCellByPosition(len(STOCK_HEADERS) - 1, 0)
+    date = number_format(doc, "DD.MM.YYYY", ("ru", "RU"))
+    for k, (title, w) in enumerate(zip(STOCK_INFO_HEADERS, STOCK_INFO_WIDTHS)):
+        c = st.getCellByPosition(STOCK_INFO_COL + k, 0)
+        if c.getString() == "":
+            c.setString(title)
+            for prop in ("CharWeight", "CellBackColor", "IsTextWrapped", "VertJustify", "HoriJustify", "TopBorder", "BottomBorder",
+                         "LeftBorder", "RightBorder", "CharHeight"):
+                setattr(c, prop, getattr(j, prop))
+        col = st.getColumns().getByIndex(STOCK_INFO_COL + k)
+        if col.Width < w:
+            col.Width = w
+    for k in (2, 7):
+        st.getCellRangeByPosition(STOCK_INFO_COL + k, 1, STOCK_INFO_COL + k, LAST_ROW).NumberFormat = date
+    if not has_button(st, "btnStockInfo"):
+        add_button(doc, st, "btnStockInfo", "Обновить сведения", "WmsItem.BtnStockInfo", 15100, 880, 4200, 650, back=0xDDEBF7)
+    bind_event(st.Events, "OnFocus", "WmsItem.OnStockFocus")
+    if doc.DatabaseRanges.hasByName("WMS_STOCK"):
+        dbr = doc.DatabaseRanges.getByName("WMS_STOCK")
+        a = dbr.DataArea
+        if a.EndColumn < STOCK_INFO_COL + len(STOCK_INFO_HEADERS) - 1:
+            a.EndColumn = STOCK_INFO_COL + len(STOCK_INFO_HEADERS) - 1
+            dbr.DataArea = a
+            dbr.AutoFilter = True
+
+
 # 1.0 (В8): «Наличие» reads easier — a zero balance grey, every second row a shade darker, a gap between the balance and the place.
 # One conditional format per column range (Calc applies the first true entry of the first format of a cell): the status of H
 # keeps its colours first
@@ -1554,7 +1593,7 @@ def stock_view_10(doc, sheets):
     used, zero, even = '$A2<>""', 'N($E2)=0', 'ISEVEN(ROW())'
     common = [(f"AND({used};{zero};{even})", "WMS_StockZeroBand"), (f"AND({used};{zero})", "WMS_StockZero"), (f"AND({used};{even})", "WMS_StockBand")]
     status = [('$H2="Требует разбора"', "ST_Part"), ('LEFT($H2;13)="Приход удалён"', "ST_Gray")]
-    last = len(STOCK_HEADERS)          # with K «Остаток частями»
+    last = len(STOCK_HEADERS) + len(STOCK_INFO_HEADERS)          # with K «Остаток частями» and L…T (1.0.1)
     for c0, c1, rules in ((0, 6, common), (7, 7, status + common), (8, last, common)):
         rng = sh.getCellRangeByPosition(c0, 1, c1, LAST_ROW)
         cf = rng.ConditionalFormat
@@ -2174,10 +2213,9 @@ def apply_views(doc):
     ctl.select(sheets.getByName(ISSUES).getCellByPosition(11, 1))
     ctl.setActiveSheet(sheets.getByName(MAP))
     ctl.freezeAtPosition(0, 7)                      # WmsMap.MP_TOP: the header stays in view over the map
-    # the pages of PRIME without the grid of a table (the grid is a setting of each sheet)
-    for name in (DASH, FIND, MAP):
-        ctl.setActiveSheet(sheets.getByName(name))
-        ctl.ShowGrid = False
+    # 1.0.1: the grid of the cells on — it is one setting of the whole view (not of a sheet): turned off for the pages of 1.0 it
+    # was off on every sheet and the cells of the working sheets ran together
+    ctl.ShowGrid = True
     ctl.setActiveSheet(sheets.getByName(FIND))
     ctl.select(sheets.getByName(FIND).getCellByPosition(2, 3))
     ctl.setActiveSheet(sheets.getByName(DASH))
@@ -2267,6 +2305,7 @@ def build(office, out_path, test=False, instance_id=None):
     buttons_10(doc, sheets)
     colors_10(doc, sheets)
     hints_10(doc, sheets)
+    stock_info_10(doc, sheets)
     stock_view_10(doc, sheets)
     hotkeys_10(doc)
     build_service(doc, sheets)
@@ -2277,7 +2316,7 @@ def build(office, out_path, test=False, instance_id=None):
     autofilter(doc, order.index(RETURNS), "WMS_RETURNS", len(RETURN_HEADERS))
     autofilter(doc, order.index(ADJUST), "WMS_ADJUST", len(ADJUST_HEADERS))
     autofilter(doc, order.index(CARS), "WMS_CARS", len(CAR_HEADERS), start_row=CAR_HEAD_ROW)
-    autofilter(doc, order.index(STOCK), "WMS_STOCK", len(STOCK_HEADERS))
+    autofilter(doc, order.index(STOCK), "WMS_STOCK", STOCK_INFO_COL + len(STOCK_INFO_HEADERS))
     # lookups of the Calc engine (_IDX): whole-cell comparison, no regular expressions; wildcards are escaped by WMS
     doc.setPropertyValue("MatchWholeCell", True)
     doc.setPropertyValue("RegularExpressions", False)

@@ -81,7 +81,7 @@ def build(o, out_dir):
         sec.setString("Что обновляем")
         sec.CharWeight = 150
         sec.CharColor = 0x1F3864
-        for r, label in ((ROW_BOOK, "Рабочая книга WMS (0.7.x)"), (ROW_TO, "Новая папка для WMS 1.0")):
+        for r, label in ((ROW_BOOK, "Рабочая книга WMS (0.7.x или 1.0)"), (ROW_TO, "Новая папка для WMS 1.0")):
             m.getCellByPosition(1, r).setString(label)
             m.getCellByPosition(1, r).CharWeight = 150
             c = m.getCellByPosition(2, r)

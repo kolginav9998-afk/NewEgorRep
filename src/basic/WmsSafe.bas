@@ -437,6 +437,8 @@ Function StartupNotes() As String
         x = MirrorStart()
         If x <> "" Then s = s & IIf(s <> "", " | ", "") & x
     End If
+    ' 1.0.1: the grid over the coloured cells (a setting of LibreOffice, see WmsCare.GridOnColored)
+    WmsCare.GridOnColored()
     If gState = "CLEAN" Then
         x = FlashNote()
         If x <> "" Then s = s & IIf(s <> "", " | ", "") & x

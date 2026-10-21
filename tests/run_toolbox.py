@@ -659,6 +659,29 @@ def k06_manager():
 
 # ================================================================ K07 LABELS
 
+def band_probs(lay, n_labels, rows=5):
+    """the bars of the labels of «Макет» outside the band of their label (the last row of each label): a bar over a text, or
+    one out of every label, is a problem (geometry by getPosition() / getSize(): the property Position of a shape of Calc read
+    through the bridge now and then gives 0)"""
+    dp = lay.getDrawPage()
+    bars = []
+    for i in range(dp.getCount()):
+        p, z = dp.getByIndex(i).getPosition(), dp.getByIndex(i).getSize()
+        bars.append((p.Y, z.Height))
+    probs, y, seen = [], 0, 0
+    for k in range(n_labels):
+        h = [lay.getRows().getByIndex(k * rows + j).Height for j in range(rows)]
+        band0 = y + sum(h[:-1])
+        mine = [b for b in bars if y <= b[0] < y + sum(h)]
+        seen += len(mine)
+        probs += [f"этикетка {k + 1}: полоса {b[0]}…{b[0] + b[1]} вне {band0}…{band0 + h[-1]}" for b in mine
+                  if b[0] < band0 or b[0] + b[1] > band0 + h[-1]]
+        y += sum(h)
+    if seen != len(bars):
+        probs.append(f"полос вне этикеток: {len(bars) - seen} из {len(bars)}")
+    return probs
+
+
 @case
 def k07_labels():
     c = "K07"
@@ -675,11 +698,27 @@ def k07_labels():
         texts = [lay.getCellByPosition(0, r).getString() for r in range(0, 15)]
         shapes = lay.getDrawPage().getCount()
         bars = len(t.B("Code128C", "00000201", module="TbLabels"))
-        R.add(c, "ЕИ, которого нет в снимке, — ошибка списка; «Построить этикетки»: 3 этикетки (ЕИ-00000201, ЕИ-00000206 ×2) по одной на "
-                 "страницу: ЕИ крупно, наименование, артикул, место; штрихкод Code 128 C прямоугольниками",
-              r0 > 0 and bad.startswith("ERR") and "ЕИ-00999999" in bad and ok.startswith("OK:этикеток 3") and texts[0] == "ЕИ-00000201"
-              and texts[1] == "Болт М12х40" and texts[2] == "Арт. DIN933-M12" and texts[3] == "Место: A-02-1" and texts[5] == "ЕИ-00000206"
-              and texts[10] == "ЕИ-00000206" and shapes > 60 and bars == 6 * 6 + 7, f"{bad[:90]}; {ok}; {texts[:6]}; фигур {shapes}; штрихов {bars}")
+        probs = band_probs(lay, 3)
+        R.add(c, "ЕИ, которого нет в снимке, — ошибка списка; «Построить этикетки»: 3 этикетки 40×30 (ЕИ-00000201, ЕИ-00000206 ×2) по "
+                 "одной на страницу: ЕИ крупно, полное наименование, единица измерения, без артикула и места (по умолчанию «нет»); "
+                 "штрихкод Code 128 C прямоугольниками — каждая полоса в своей полосе внизу этикетки, ни одна не заходит на текст",
+              r0 > 0 and bad.startswith("ERR") and "ЕИ-00999999" in bad and ok.startswith("OK:этикеток 3 (40×30 мм)") and texts[0] == "ЕИ-00000201"
+              and texts[1] == "Болт М12х40" and texts[2] == "Ед. изм.: шт" and texts[3] == "" and texts[5] == "ЕИ-00000206"
+              and texts[10] == "ЕИ-00000206" and shapes == 3 * (bars // 2 + 1) and bars == 6 * 6 + 7 and not probs,
+              f"{bad[:90]}; {ok}; {texts[:6]}; фигур {shapes}; штрихов {bars}; {probs[:3]}")
+        t.setting(8, "да")
+        t.setting(9, "да")
+        ok2 = t.B("LblBuild", module="TbLabels")
+        lay = t.sheet("Макет")
+        texts2 = [lay.getCellByPosition(0, r).getString() for r in range(0, 5)]
+        probs2 = band_probs(lay, 3)
+        t.setting(8, "нет")
+        t.setting(9, "нет")
+        t.B("LblBuild", module="TbLabels")
+        lay = t.sheet("Макет")
+        R.add(c, "«Настройки»: «Артикул — да», «Место — да» — артикул и место одной строкой над штрихкодом, полосы по-прежнему не на тексте",
+              ok2.startswith("OK:этикеток 3") and texts2[3] == "Арт. DIN933-M12 · Место: A-02-1" and texts2[2] == "Ед. изм.: шт" and not probs2,
+              f"{ok2}; {texts2}; {probs2[:3]}")
         g = Guard(t)
         pdf = t.B("LblPdf", module="TbLabels")
         files = glob.glob(os.path.join(d, "WMS_Labels", "labels_*.pdf"))
