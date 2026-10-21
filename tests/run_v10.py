@@ -2466,8 +2466,9 @@ def label_layout(pr, n_labels, rows=4):
 def v34_release_101():
     """1.0.1: этикетка 40×30 под термопринтер — номер ЕИ, полное наименование (шрифт уменьшается, пока не уместится; длинное не
     обрезается), единица, штрихкод в своей полосе (ни одна полоса не заходит на текст), без артикула и места; PDF — страницы 40×30 мм;
-    сетка ячеек включена для всех листов; «Наличие» L…T — кому назначено, поставщик, дата и документ прихода, № заказа, фасовка,
-    серийный номер, «годен до», резерв — заполняются при открытии листа и кнопкой; проведение их не пишет"""
+    сетка ячеек включена для всех листов; «Наличие» L…V — пришло и осталось (рядом), кому назначено, поставщик, дата и документ
+    прихода, № заказа, фасовка, серийный номер, «годен до», резерв — заполняются при открытии листа и кнопкой; проведение их не
+    пишет; «Осталось» — всегда остаток E (формула), «Пришло» — приход заказа, иного прихода, разделения"""
     c = "V34"
     s = ready(Session(new_wms("v34")))
     try:
@@ -2513,23 +2514,44 @@ def v34_release_101():
         seq0 = s.sysv("LAST_SEQ")
         r1 = s.B("StockInfoRefresh", True, module="WmsItem")
         st = s.doc.Sheets.getByName("Наличие")
-        hdr = [st.getCellByPosition(col, 0).getString() for col in range(11, 20)]
-        row1 = [st.getCellByPosition(col, eis[0]).getString() for col in range(11, 20)]
-        row2 = [st.getCellByPosition(col, eis[2]).getString() for col in range(11, 20)]
+        hdr = [st.getCellByPosition(col, 0).getString() for col in range(11, 22)]
+        row1 = [st.getCellByPosition(col, eis[0]).getString() for col in range(11, 22)]
+        row2 = [st.getCellByPosition(col, eis[2]).getString() for col in range(11, 22)]
         r2 = s.B("StockInfoRefresh", False, module="WmsItem")
-        R.add(c, "«Наличие» L…T: кому назначено, поставщик, дата и документ прихода, № заказа, фасовка, серийный номер, «годен до», резерв; "
-                 "второй раз без операций — не пересчитывается; операций в журнале не прибавилось",
-              r1.startswith("OK:") and r2 == "SAME" and hdr == ["Кому назначено", "Поставщик / откуда", "Дата прихода", "Документ прихода", "№ заказа",
-                                                                "Фасовка", "Серийный / инв. №", "Годен до", "Резерв"]
-              and row1[0] == "Участок 3, Иванов" and row1[1] == "Ромашка" and row1[3] == "УПД-1" and row1[4] == "1" and row1[6] == "SN-77"
-              and row1[7] == dtext(400) and row1[8] == "2 · Объект Север" and row2[5] == "в 1 пар — 12 шт" and row2[0] == ""
+        R.add(c, "«Наличие» L…V: пришло и осталось рядом, кому назначено, поставщик, дата и документ прихода, № заказа, фасовка, серийный номер, "
+                 "«годен до», резерв; второй раз без операций — не пересчитывается; операций в журнале не прибавилось",
+              r1.startswith("OK:") and r2 == "SAME" and hdr == ["Пришло", "Осталось", "Кому назначено", "Поставщик / откуда", "Дата прихода",
+                                                                "Документ прихода", "№ заказа", "Фасовка", "Серийный / инв. №", "Годен до", "Резерв"]
+              and row1[:2] == ["5", "5"] and row2[:2] == ["5", "5"]
+              and row1[2] == "Участок 3, Иванов" and row1[3] == "Ромашка" and row1[5] == "УПД-1" and row1[6] == "1" and row1[8] == "SN-77"
+              and row1[9] == dtext(400) and row1[10] == "2 · Объект Север" and row2[7] == "в 1 пар — 12 шт" and row2[2] == ""
               and s.sysv("LAST_SEQ") == seq0 and pk.startswith("OK") and pp.startswith("OK"), f"{r1}; {r2}; {hdr}; {row1}; {row2}")
-        # an operation — the information follows at the next opening of «Наличие»
+        # an operation: the information follows at the next opening of «Наличие» — only the changed rows are written
         put(s, "Заказы", 1, T="Участок 5")
-        issue(s, 1, ords(s, 2)[21], "1", "ива")
-        s.B("OnStockFocus", module="WmsItem")
-        R.add(c, "после операции открытие «Наличия» обновляет сведения (новое «Кому назначено»)", st.getCellByPosition(11, eis[0]).getString() == "Участок 5",
-              st.getCellByPosition(11, eis[0]).getString())
+        e2 = ords(s, 2)[21]
+        iss = issue(s, 1, e2, "1,5", "ива")
+        rf = s.B("StockInfoRefresh", False, module="WmsItem")
+        left_now = (st.getCellByPosition(11, eis[1]).getString(), st.getCellByPosition(12, eis[1]).getString(), st.getCellByPosition(4, eis[1]).getString())
+        t_light = st.getCellByPosition(13, eis[0]).getString()
+        rfull = s.B("StockInfoRefresh", True, module="WmsItem")
+        R.add(c, "выдача 1,5 м, затем открытие «Наличия»: пересчитана только сдвинувшаяся строка — «Пришло» 5, «Осталось» 3,5 (как «Остаток»); "
+                 "«Кому назначено», исправленное на «Заказах» без операции, — по «Обновить сведения» (одна строка)",
+              iss.startswith("OK") and left_now == ("5", "3,5", "3,5") and rf == "OK:1" and t_light == "Участок 3, Иванов" and rfull == "OK:1"
+              and st.getCellByPosition(13, eis[0]).getString() == "Участок 5", f"{iss[:40]}; {rf}; {left_now}; {t_light}; {rfull}; {st.getCellByPosition(13, eis[0]).getString()}")
+        # «Пришло» of a line of «Иной приход» and of a new EI of a split; a new row of «Наличие» gets its «Осталось»
+        s.special_input(1, B="Офис", D="Стол офисный", F="3", G="шт", H=TODAY, I="1-1-1")
+        sp = s.click_spc("BtnSpcPost", 1)
+        e4 = str(s.spc(1)[13])
+        nxt = int(s.sysv("NEXT_EI"))
+        spl = s.B("SplitPost", ords(s, 1)[21], "2", "7-1-2", "часть", module="WmsDaily")
+        lf = s.B("StockInfoRefresh", False, module="WmsItem")
+        n4 = int(e4[3:]) if e4.startswith("ЕИ-") else 0
+        got = {k: (st.getCellByPosition(11, k).getString(), st.getCellByPosition(12, k).getString()) for k in (eis[0], n4, nxt) if k}
+        full = s.B("StockInfoRefresh", True, module="WmsItem")
+        R.add(c, "«Пришло» / «Осталось» (только сдвинувшиеся строки): иной приход 3 шт — 3 / 3; разделение 2 из 5 — у нового ЕИ 2 / 2, у исходного "
+                 "5 / 3; полный пересчёт после этого не меняет ни одной строки (построчный и полный расчёт совпадают)",
+              sp.startswith("OK") and spl.startswith("OK") and lf == "OK:3" and got.get(n4) == ("3", "3") and got.get(nxt) == ("2", "2")
+              and got.get(eis[0]) == ("5", "3") and full == "OK:0", f"{sp[:60]}; {e4}; {spl[:60]}; {lf}; {got}; {full}")
         ctl = s.doc.getCurrentController()
         grid = {}
         for nm in ("Заказы", "Наличие", "Выдачи"):
@@ -2597,7 +2619,7 @@ def v35_upgrade_100():
         stk = s.doc.Sheets.getByName("Наличие")
         after = [tuple(r[:8]) for r in stk.getCellRangeByPosition(0, 1, 7, n_ei).getDataArray()]
         ri = s.B("StockInfoRefresh", True, module="WmsItem")
-        info = [stk.getCellByPosition(col, int(a[3:])).getString() for col in (11, 12, 14)]
+        info = [stk.getCellByPosition(col, int(a[3:])).getString() for col in (11, 12, 13, 14, 16)]
         ctl = s.doc.getCurrentController()
         ctl.setActiveSheet(s.doc.Sheets.getByName("Заказы"))
         flash = s.B("StGet", "FLASH", module="WmsSafe")
@@ -2606,10 +2628,195 @@ def v35_upgrade_100():
         R.add(c, "новая книга — WMS 1.0.1: «работа разрешена», каждый ЕИ тот же, сведения «Наличия» (кому назначено, поставщик, документ), "
                  "сетка видна, состояние WMS (копия на флешку) перенесено, этикетка 40×30, проведение работает",
               s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == "1.0.1" and before == after and ri.startswith("OK:")
-              and info == ["Участок 3", "Ромашка", "УПД-7"] and ctl.ShowGrid and flash.startswith("2026-10-20") and lb.startswith("OK:этикеток 1")
+              and info == ["2", "1", "Участок 3", "Ромашка", "УПД-7"] and ctl.ShowGrid and flash.startswith("2026-10-20") and lb.startswith("OK:этикеток 1")
               and i2.startswith("OK"), f"{s.state()}; {s.sysv('CORE_VERSION')}; {before == after}; {ri}; {info}; {ctl.ShowGrid}; {flash}; {lb}; {i2[:40]}")
         P, inf, _ = s.adjcheck(0)
         R.add(c, "оракул (журнал воспроизведён независимо): книга 1.0.0, обновлённая до 1.0.1", not P, f"{inf.get('ops')} операций; {P[:4]}")
+    finally:
+        s.close()
+
+
+@case
+def v36_wizard_072_100_101():
+    """1.0.1 по пути пользователя: склад 0.7.2 → мастером выпуска 1.0.0 рабочая 1.0.0 (в WMS_RELEASE_1.0.0/WMS_WORK) → рабочий день в
+    ней → мастер WMS_UPGRADE.ods выпуска 1.0.1 (распакован рядом) сам находит рабочую 1.0, «ПРОВЕРИТЬ», «СОБРАТЬ И СВЕРИТЬ», «СДЕЛАТЬ
+    РАБОЧЕЙ»; книги 0.7.2 и 1.0.0 и их журналы побайтно те же; новая 1.0.1 — те же ЕИ, «Сверка переноса» и «остаток = движения» те же,
+    оракул"""
+    import run_prime
+    import subprocess
+    from harness import git_sources
+    c = "V36"
+    src = os.path.join(OUT, "src_100")
+    why = "" if os.path.isdir(os.path.join(src, "tools")) else git_sources("3c46e94", src)
+    if why:
+        R.add(c, "исходники выпуска 1.0.0", "SKIP", why)
+        return
+    d = os.path.join(OUT, "cases", "v36 Склад")
+    shutil.rmtree(d, ignore_errors=True)
+    old = run_prime.old_copy_at(os.path.join(d, "WMS_RELEASE_0.7.2", "WMS_WORK"))
+    h072 = run_prime.sha(old)
+    w100 = os.path.join(d, "WMS_RELEASE_1.0.0", "WMS_WORK")
+    up100 = os.path.join(src, "tools", "upgrade.py")
+    rr = [subprocess.run([sys.executable, up100] + a, capture_output=True, text=True, timeout=3600, env=run_prime.ENV)
+          for a in (["check", old], ["build", old, "--to", w100], ["promote", "--to", w100])]
+    p100 = os.path.join(w100, "WMS_PROD.ods")
+    if any(r.returncode for r in rr) or not os.path.isfile(p100):
+        R.add(c, "склад 0.7.2 обновлён программой выпуска 1.0.0", False, " | ".join((r.stdout + r.stderr)[-200:] for r in rr))
+        return
+    s = ready(Session(p100))
+    try:
+        core0 = s.sysv("CORE_VERSION")
+        stk = s.doc.Sheets.getByName("Наличие")
+        # a day in 1.0.0: a new order received and partly issued (the transferred EIs keep their own checks)
+        oc = s.doc.Sheets.getByName("Заказы").getCellRangeByPosition(0, 0, 21, 20000).getDataArray()
+        ro = max(i for i, r in enumerate(oc) if any(str(x).strip() for x in r)) + 2
+        order(s, ro, "9901", "Перфоратор Bosch", qty="3", art="ПФ-9")
+        receive(s, ro, "3", place="3-1-1", doc="УПД-99")
+        ei = ords(s, ro)[21]
+        n_ei = int(s.sysv("NEXT_EI")) - 1
+        col = s.doc.Sheets.getByName("Выдачи").getCellRangeByPosition(0, 0, 17, 20000).getDataArray()
+        free = max(i for i, r in enumerate(col) if any(str(x).strip() for x in r)) + 1
+        # a book of work (PROD): no test answers — the recipient is taken from «Получатели», as a storekeeper adds him
+        rc = s.doc.Sheets.getByName("Получатели")
+        rr = 2 + max([i for i, r in enumerate(rc.getCellRangeByPosition(0, 1, 1, 500).getDataArray()) if any(str(x).strip() for x in r)] or [-1])
+        rc.getCellByPosition(0, rr).setString("Петров")
+        rc.getCellByPosition(1, rr).setString("Петров")
+        s.B("RecipientsInvalidate", module="WmsIssue")
+        i1 = issue(s, free, ei, "1", "Петров")
+        rep0 = s.B("LegacyReport", module="WmsLegacy")
+        bc0 = s.B("BalanceCheck", module="WmsLegacy")
+        before = [tuple(r[:8]) for r in stk.getCellRangeByPosition(0, 1, 7, n_ei).getDataArray()]
+    finally:
+        s.close(save=True)
+    h100 = run_prime.sha(p100)
+    j100 = {f: run_prime.sha(f) for f in glob.glob(os.path.join(w100, "WMS_Journal", "*.csv"))}
+    w = run_prime.Wizard(os.path.join(d, f"WMS_RELEASE_{run_prime.VERS['WMS_PRODUCT_VERSION']}"))
+    try:
+        new_dir = os.path.join(w.folder, "WMS_WORK")
+        found = w.cell(4)
+        w.B("UpTestConfirm", 1)
+        w.B("BtnUpCheck")
+        m1 = w.msg()
+        w.B("BtnUpBuild")
+        m3 = w.msg()
+        w.B("BtnUpPromote")
+        m5 = w.msg()
+    finally:
+        w.close()
+    R.add(c, "мастер 1.0.1 сам нашёл рабочую 1.0.0 (а не прежнюю 0.7.2), «ПРОВЕРИТЬ» — можно обновить, «СОБРАТЬ И СВЕРИТЬ», «СДЕЛАТЬ "
+             "РАБОЧЕЙ»; книги 0.7.2 и 1.0.0 и журнал 1.0.0 побайтно те же, 1.0.0 заперта",
+          core0 == "1.0.0" and i1.startswith("OK") and found == p100 and m1.startswith("OK:") and "можно обновить" in m1
+          and m3.startswith("OK:") and m5.startswith("OK:") and run_prime.sha(old) == h072 and run_prime.sha(p100) == h100
+          and {f: run_prime.sha(f) for f in glob.glob(os.path.join(w100, "WMS_Journal", "*.csv"))} == j100
+          and os.path.exists(os.path.join(w100, "WMS_Journal", "wms.lock")) and os.path.isfile(os.path.join(new_dir, "WMS_PROD.ods")),
+          f"{core0}; {i1[:300]}; {found}; {m1[:160]}; {m3[:160]}; {m5[:160]}")
+    s = ready(Session(os.path.join(new_dir, "WMS_PROD.ods")))
+    try:
+        stk = s.doc.Sheets.getByName("Наличие")
+        after = [tuple(r[:8]) for r in stk.getCellRangeByPosition(0, 1, 7, n_ei).getDataArray()]
+        rep1 = s.B("LegacyReport", module="WmsLegacy")
+        bc1 = s.B("BalanceCheck", module="WmsLegacy")
+        ri = s.B("StockInfoRefresh", True, module="WmsItem")
+        lb = s.B("LabelPrint", (int(ei[3:]),), 1, "40×30", module="WmsItem")
+        labels, probs = label_layout(s.doc.Sheets.getByName("Печать"), 1)
+        col = s.doc.Sheets.getByName("Выдачи").getCellRangeByPosition(0, 0, 17, 20000).getDataArray()
+        i2 = issue(s, max(i for i, r in enumerate(col) if any(str(x).strip() for x in r)) + 1, ei, "1", "Петров")
+        R.add(c, "новая книга — WMS 1.0.1: «работа разрешена», каждый ЕИ тот же, «Сверка переноса» и «остаток = движения» те же, сведения "
+                 "«Наличия», этикетка 40×30 (штрихкод в своей полосе), выдача проводится",
+              s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == "1.0.1" and before == after
+              and re.sub(r", строк.*", "", rep1) == re.sub(r", строк.*", "", rep0) and rep1.startswith("OK:")
+              and bc1 == bc0 and ri.startswith("OK:") and lb.startswith("OK:этикеток 1") and labels[0]["bars"] > 20 and not probs and i2.startswith("OK"),
+              f"{s.sysv('CORE_VERSION')}; {before == after}; {rep0[:120]} / {rep1[:120]}; {bc0[:60]!r} / {bc1[:60]!r}; {ri}; {lb}; "
+              f"{probs[:2]}; {i2[:300]}")
+        P, inf, _ = s.adjcheck(0, initial={}, legacy_mn_empty=False)
+        R.add(c, "оракул (журнал 0.7.2 + 1.0.0 + 1.0.1 воспроизведён независимо): склад 0.7.2 → 1.0.0 → 1.0.1", not P, f"{inf.get('ops')} операций; {P[:4]}")
+    finally:
+        s.close()
+
+
+@case
+def v37_kits_by_ei():
+    """1.0.1: комплект из конкретных ЕИ — (1) в составе на «Комплектах» номер ЕИ вместо артикула: позиция берётся только с этого ЕИ
+    (не со старого ЕИ того же товара), не хватает на нём — отказ, а не добор с другого; неизвестный ЕИ — понятный отказ; (2) «Собрать из
+    ЕИ…» на «Наличии»: выделенные строки ЕИ, количество каждого на 1 комплект — та же операция KIT_BUILD, состав записывается на
+    «Комплекты» и собирается снова кнопкой «Собрать комплект…»; «Пришло» / «Осталось» комплекта; разборка возвращает позиции"""
+    c = "V37"
+    s = ready(Session(new_wms("v37")))
+    try:
+        order(s, 1, "1", "Кабель ВВГ 3х2,5", qty="8", unit="м", art="К-3", J=50.0)
+        receive(s, 1, "8", place="7-1-1", k=-30)
+        order(s, 2, "2", "Кабель ВВГ 3х2,5", qty="20", unit="м", art="К-3", J=50.0)
+        receive(s, 2, "20", place="7-1-2", k=-10)
+        order(s, 3, "3", "Розетка", qty="5", art="Р-1", J=100.0)
+        receive(s, 3, "5", place="7-2-1")
+        order(s, 4, "4", "Изолента", qty="3", J=30.0)
+        receive(s, 4, "3", place="7-2-2")
+        a1, a2, b, w = [ords(s, r)[21] for r in (1, 2, 3, 4)]
+        n1, n2, nb, nw = [int(x[3:]) for x in (a1, a2, b, w)]
+        kt = s.doc.Sheets.getByName("Комплекты")
+        rows = [("Набор по ЕИ", "Кабель ВВГ", a2.replace("ЕИ-000000", "ЕИ-"), 5.0, "м"), ("", "Розетка", "Р-1", 1.0, "шт"),
+                ("Набор с ошибкой", "Кабель", "ЕИ-999999", 1.0, "м")]
+        for i, row in enumerate(rows, start=1):
+            for j, v in enumerate(row):
+                cell = kt.getCellByPosition(j, i)
+                cell.setValue(v) if isinstance(v, float) else cell.setString(v)
+        btn = ("btnKitFromEis" in form_buttons(kt) and "btnKitFromEis" in form_buttons(s.doc.Sheets.getByName("Наличие"))
+               and "номер ЕИ" in kt.getCellByPosition(7, 0).getString())
+        r1 = s.B("KitBuild", "Набор по ЕИ", 1.0, "8-1-1", serial(), "к монтажу", module="WmsKit")
+        bad = s.B("KitBuild", "Набор с ошибкой", 1.0, "8-1-1", serial(), "", module="WmsKit")
+        short = s.B("KitBuild", "Набор по ЕИ", 4.0, "8-1-1", serial(), "", module="WmsKit")
+        R.add(c, "в составе номер ЕИ («ЕИ-<n>» в «Артикул»): кабель 5 м снят именно с него (20 → 15), старый ЕИ того же кабеля не тронут (8); "
+                 "4 комплекта — отказ «нужно 20 м, есть 15» (с другого ЕИ не добирается); неизвестный ЕИ — отказ «такого ЕИ нет»; кнопки "
+                 "«Собрать из ЕИ…» на «Комплектах» и «Наличии», подсказка листа",
+              btn and r1.startswith("OK:") and s.stock(n2) == 15.0 and s.stock(n1) == 8.0 and s.stock(nb) == 4.0
+              and bad.startswith("ERR:") and "такого ЕИ нет" in bad and short.startswith("ERR:") and "нужно 20 м, есть 15" in short,
+              f"{btn}; {r1[:80]}; {bad}; {short}; {[s.stock(x) for x in (n1, n2, nb)]}")
+        # «Собрать из ЕИ…» by the function: two EIs, 2 kits, the composition written on «Комплекты»
+        nxt = int(s.sysv("NEXT_EI"))
+        k2 = f"ЕИ-{nxt:08d}"
+        last0 = max(i for i, r in enumerate(kt.getCellRangeByPosition(0, 0, 5, 40).getDataArray()) if any(str(x) for x in r))
+        r2 = s.B("KitFromEis", (n1, nw), ("2", "1"), "Сборка из ЕИ", 2.0, "8-1-2", serial(), "тест", True, module="WmsKit")
+        rec = [list(r) for r in kt.getCellRangeByPosition(0, last0 + 1, 5, last0 + 2).getDataArray()]
+        dup = s.B("KitFromEis", (n1, nw), ("1", "1"), "Сборка из ЕИ", 1.0, "8-1-2", serial(), "тест", True, module="WmsKit")
+        badq = s.B("KitFromEis", (n1,), ("абв",), "Ещё набор", 1.0, "8-1-2", serial(), "тест", False, module="WmsKit")
+        R.add(c, "«Собрать из ЕИ» (2 ЕИ, 2 комплекта): кабель 2 м × 2 со старого ЕИ (8 → 4), изолента 1 × 2 (3 → 1), новый ЕИ «Сборка из ЕИ» "
+                 "2 компл; состав записан на «Комплекты» (ЕИ в «Артикул»); то же название с записью — отказ; количество «абв» — отказ",
+              r2.startswith("OK:" + k2) and "состав записан" in r2 and s.stock(n1) == 4.0 and s.stock(nw) == 1.0 and s.stock(nxt) == 2.0
+              and rec == [["Сборка из ЕИ", "Кабель ВВГ 3х2,5", a1, 2.0, "м", "собран из ЕИ " + dtext(0)], ["", "Изолента", w, 1.0, "шт", ""]]
+              and dup.startswith("ERR:") and "уже описан" in dup and badq.startswith("ERR:") and "на 1 комплект" in badq,
+              f"{r2}; {rec}; {dup}; {badq}; {[s.stock(x) for x in (n1, nw, nxt)]}")
+        r3 = s.B("KitBuild", "Сборка из ЕИ", 1.0, "8-1-2", serial(), "", module="WmsKit")
+        R.add(c, "записанный состав собирается кнопкой «Собрать комплект…» — с тех же ЕИ (кабель 4 → 2, изолента 1 → 0)",
+              r3.startswith("OK:") and s.stock(n1) == 2.0 and s.stock(nw) == 0.0, f"{r3}; {[s.stock(x) for x in (n1, nw)]}")
+        # the button on «Наличие»: the selected rows (two EIs side by side), the window, no composition written
+        nxt = int(s.sysv("NEXT_EI"))
+        k4 = f"ЕИ-{nxt:08d}"
+        s.goto("Наличие", f"$B${n2 + 1}:$C${nb + 1}")
+        s.B("TestPrimeForm", f"Набор UI\t1\t3\t1\t8-1-3\t{TODAY}\tчерез окно\tнет", module="WmsPrimeUi")
+        s.B("BtnKitFromEis", module="WmsKit")
+        msg = s.U("TestUiLastMessage")
+        st = s.doc.Sheets.getByName("Наличие")
+        info = (st.getCellByPosition(11, nxt).getString(), st.getCellByPosition(12, nxt).getString(), st.getCellByPosition(12, n2).getString())
+        kit_rows = sum(1 for r in kt.getCellRangeByPosition(0, 0, 0, 60).getDataArray() if r[0] == "Набор UI")
+        R.add(c, "кнопка «Собрать из ЕИ…» на «Наличии»: выделены строки двух ЕИ, в окне 3 м кабеля и 1 розетка на комплект — новый ЕИ «Набор UI», "
+                 "кабель 15 → 12, розетка 4 → 3; «Пришло» / «Осталось» обновлены сразу (комплект 1 / 1, кабель «Осталось» 12); «нет» — состав не записан",
+              msg.startswith(k4) and s.stock(n2) == 12.0 and s.stock(nb) == 3.0 and s.stock(nxt) == 1.0 and info == ("1", "1", "12") and kit_rows == 0,
+              f"{msg[:120]}; {[s.stock(x) for x in (n2, nb, nxt)]}; {info}; {kit_rows}")
+        # the storno of a build from EIs: its row «Удалить» takes the kit apart
+        adj = s.doc.Sheets.getByName("Корректировки")
+        ctl = [adj.getCellByPosition(16, r).getString() for r in range(1, 40)]
+        r_first = 1 + next(i for i, x in enumerate(ctl) if x == f"Проведено · в комплект {k4}")
+        s.U("TestOpReason", "передумали")
+        d = s.A("AdjustDeleteRow", r_first)
+        R.add(c, "«Удалить» строки сборки из ЕИ разбирает комплект: кабель 12 → 15, розетка 3 → 4, комплект 0",
+              d.startswith("OK") and s.stock(n2) == 15.0 and s.stock(nb) == 4.0 and s.stock(nxt) == 0.0, f"{d[:120]}")
+        lf = s.B("StockInfoRefresh", False, module="WmsItem")
+        full = s.B("StockInfoRefresh", True, module="WmsItem")
+        R.add(c, "«Наличие» после разборки: построчное обновление (кабель, розетка, комплект) и полный пересчёт совпадают — полный не меняет ничего",
+              lf.startswith("OK:") and full == "OK:0" and st.getCellByPosition(12, nxt).getString() == "0", f"{lf}; {full}")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок («остаток = движения» и у комплектов из ЕИ)", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:300])
+        oracle(c, s, "комплекты из конкретных ЕИ")
     finally:
         s.close()
 

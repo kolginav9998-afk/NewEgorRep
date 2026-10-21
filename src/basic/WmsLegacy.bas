@@ -438,7 +438,7 @@ Sub ExpectedBalances(ByRef ex() As Double, ByRef mv() As Double, ByRef src() As 
 End Sub
 
 ' the number of EI text s («ЕИ-00000017»), or 0 when it is not an EI below NEXT_EI
-Private Function EiNum(s As String, nextEI As Long) As Long
+Function EiNum(s As String, nextEI As Long) As Long
     Dim x As Long
     If Len(s) <> 11 Or Left(s, 3) <> EI_PREFIX Then Exit Function
     If Not IsDigits(Mid(s, 4)) Then Exit Function

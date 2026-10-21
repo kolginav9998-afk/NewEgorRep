@@ -1,12 +1,12 @@
-' UpMain — книга WMS_UPGRADE.ods: мастер «Обновление из текущей WMS» (PRIME 0.8, 1.0; D-091). Пользователь выбирает свою
-' рабочую книгу WMS 0.7 и новую папку и нажимает кнопки шагов; вся работа — в программе tools/upgrade.py папки выпуска
+' UpMain — книга WMS_UPGRADE.ods: мастер «Обновление из текущей WMS» (PRIME 0.8, 1.0, 1.0.1; D-091, D-115). Пользователь выбирает свою
+' рабочую книгу WMS (0.7.x или 1.0) и новую папку и нажимает кнопки шагов; вся работа — в программе tools/upgrade.py папки выпуска
 ' (запускается отсюда, её ход показывается на странице). Рабочая книга только читается: новая книга 1.0 собирается в
 ' новой папке из побайтной копии, сверяется ячейка в ячейку и открывается WMS 1.0; рабочей она становится только по
 ' кнопке «4. СДЕЛАТЬ РАБОЧЕЙ». Откат — старая книга, она не меняется никогда. Эта книга не часть WMS: её данные — пути и
 ' результаты шагов (файлы UPGRADE_* новой папки).
 Option Explicit
 
-Public Const UP_VERSION = "1.0.0"
+Public Const UP_VERSION = "1.0.1"
 Public Const UP_MAIN = "ОБНОВЛЕНИЕ"
 Public Const UP_REPORT = "Отчёт"
 ' «ОБНОВЛЕНИЕ»: rows (0-based) of the paths (column C), the steps (status in column C), the state line
@@ -119,13 +119,13 @@ Function UpFolderFree(url As String) As Boolean
 End Function
 
 ' a free folder for the new WMS: «WMS_WORK» next to this book (the folder of the release, as the transfer of 0.7 made it),
-' or «<папка книги>_WMS_1.0» next to the folder of the book when that is the same folder; with _2, _3 … when taken
+' or «<папка книги>_WMS_<версия>» next to the folder of the book when that is the same folder; with _2, _3 … when taken
 Function UpProposeFolder(bookUrl As String) As String
     Dim sBase As String, cand As String, k As Integer
     If UpUrl(ConvertFromURL(UpFolder()) & "WMS_WORK", True) <> UpParent(bookUrl) Then
         sBase = ConvertFromURL(UpFolder()) & "WMS_WORK"
     Else
-        sBase = ConvertFromURL(UpParent(UpParent(bookUrl))) & UpBaseName(UpParent(bookUrl)) & "_WMS_1.0"
+        sBase = ConvertFromURL(UpParent(UpParent(bookUrl))) & UpBaseName(UpParent(bookUrl)) & "_WMS_" & UP_VERSION
     End If
     cand = UpUrl(sBase, True)
     k = 1
@@ -137,8 +137,8 @@ Function UpProposeFolder(bookUrl As String) As String
     UpProposeFolder = cand
 End Function
 
-' the working books of WMS 0.7 near this book: ./WMS_WORK, ../WMS_WORK and <every folder next to this one>/WMS_WORK
-' (the release folders of 0.7.x keep their working WMS there); the most recently changed one, "" when none
+' the working books of WMS (0.7.x, 1.0) near this book: ./WMS_WORK, ../WMS_WORK and <every folder next to this one>/WMS_WORK
+' (the release folders keep their working WMS there); the most recently changed one, "" when none
 Function UpFindBook(ByRef nFound As Integer) As String
     Dim sfa As Object, c As Variant, i As Long, u As String, best As String, bestT As Double
     sfa = CreateUnoService("com.sun.star.ucb.SimpleFileAccess")

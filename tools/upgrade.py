@@ -401,8 +401,9 @@ def upgrade_doc(doc, test_book, schema, leg, from_text):
 
 
 def step_101(doc, done):
-    """1.0.0 → 1.0.1: «Наличие» L…T (what is known of the goods: for whom, where from, the packing, the serial number, «годен
-    до», the reserve — filled by WMS when the sheet is opened) with its button and the band over them; no new sheet"""
+    """1.0.0 → 1.0.1: «Наличие» L…V (what is known of the goods: how much came in and how much is left, for whom, where from,
+    the packing, the serial number, «годен до», the reserve — filled by WMS when the sheet is opened) with its button and the
+    band over them; no new sheet"""
     sheets = doc.Sheets
     B.stock_info_10(doc, sheets)
     B.stock_view_10(doc, sheets)
@@ -592,7 +593,7 @@ def allowed_change(sheet, r, c):
     if sheet == B.MAIN:
         return (r, c) in ((0, 1), (B.MAIN_HELP_ROW, 0))
     if sheet == B.STOCK:
-        # 1.0: the header of «Остаток частями» (K); 1.0.1: the headers of the information L…T
+        # 1.0: the header of «Остаток частями» (K); 1.0.1: the headers of the information L…V
         return (r, c) == (0, len(B.STOCK_HEADERS)) or (r == 0 and B.STOCK_INFO_COL <= c < B.STOCK_INFO_COL + len(B.STOCK_INFO_HEADERS))
     if sheet == B.ADJ:
         # 1.0 (М1): the header «Новый ЕИ» (L)
@@ -600,6 +601,9 @@ def allowed_change(sheet, r, c):
     if sheet == B.RCPT:
         # 1.0 (А3): the header «Подразделение» (C) of an empty column
         return (r, c) == (0, 2)
+    if sheet == B.KITS:
+        # 1.0.1: the hint of «Комплекты» (H1) — a number of an EI in the composition, «Собрать из ЕИ…»
+        return (r, c) == (0, 7)
     return sheet == B.HELP
 
 

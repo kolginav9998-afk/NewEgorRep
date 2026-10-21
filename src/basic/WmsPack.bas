@@ -836,6 +836,8 @@ Function PackSet(sEI As String, sN As String, sPart As String, sNote As String) 
         PlanSetValue(SH_PACK, n, PK_NOTE, "", False)
     End If
     PackSet = ApplyOperation(0, 0)
+    ' 1.0.1: «Фасовка» of «Наличие» follows at the next opening of the sheet (the balance did not move)
+    If Left(PackSet, 3) = "OK:" Then WmsItem.SiMark(n)
     Exit Function
 EH:
     PackSet = "ERR:фасовка не записана: " & Error$ & " (строка " & Erl & ")"

@@ -9,7 +9,7 @@ Option Explicit
 Global gPrChoiceSet As Boolean
 Global gPrChoice As Integer
 Global gPrFormSet As Boolean
-Global gPrFormIn(11) As String
+Global gPrFormIn(23) As String
 Global gPrShown As String
 ' UiButtons: the window being shown and the button pressed (Global: the button listener is a call of its own)
 Global gWmsBtnDlg As Object
@@ -695,7 +695,7 @@ Function TestPrimeForm(sValues As String) As String
         Exit Function
     End If
     a = Split(sValues, Chr(9))
-    For i = 0 To 11
+    For i = 0 To 23
         If i <= UBound(a) Then gPrFormIn(i) = a(i) Else gPrFormIn(i) = FORM_KEEP
     Next i
     gPrFormSet = True

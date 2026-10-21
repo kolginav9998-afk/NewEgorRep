@@ -1286,6 +1286,14 @@ def dash_10(doc, sheets):
             add_button(doc, sh, name, "Все…", macro, x, y, 1800, 520, back=0xDDEBF7)
 
 
+# 1.0.1: a component may be one EI (its number in «Артикул»); «Собрать из ЕИ…» builds from the EIs selected on «Наличие»
+KITS_HINT = ("Одна строка — одна позиция комплекта: комплект, наименование, артикул — или номер ЕИ (ЕИ-427: позиция берётся только с "
+             "этого ЕИ), количество на 1 комплект, единица. «Собрать комплект…» — позиции снимаются с их ЕИ, готовые комплекты "
+             "становятся новым ЕИ (единица «компл»). «Собрать из ЕИ…» — выделите на «Наличии» строки нужных ЕИ и нажмите эту кнопку "
+             "там: комплект соберётся именно из них, состав можно записать сюда. «Выдать комплект…» — WMS заполняет строки «Выдач» "
+             "нужными ЕИ, их проводят обычным «Провести».")
+
+
 def build_kits(doc, sh):
     """«Комплекты» (WmsKit): a kit — its rows (the name in A of the first row is enough, an empty A continues the kit above);
     the buttons over the header; the sheet stays open for the storekeeper"""
@@ -1294,9 +1302,7 @@ def build_kits(doc, sh):
     for c in (0, 1, 2, 4, 5):
         sh.getCellRangeByPosition(c, 1, c, LAST_ROW).NumberFormat = text
     hint = sh.getCellByPosition(7, 0)
-    hint.setString("Одна строка — одна позиция комплекта: комплект, наименование (или артикул), количество на 1 комплект, единица. "
-                   "«Собрать комплект…» — позиции снимаются с их ЕИ, готовые комплекты становятся новым ЕИ (единица «компл»). "
-                   "«Выдать комплект…» — WMS заполняет строки «Выдач» нужными ЕИ, их проводят обычным «Провести».")
+    hint.setString(KITS_HINT)
     hint.IsTextWrapped = True
     hint.VertJustify = 1
     hint.CharHeight = 9
@@ -1540,17 +1546,20 @@ def colors_10(doc, sheets):
             sheets.moveByName(LEGREP, names.index(HELP))
 
 
-# 1.0.1: «Наличие» L…T — what is known of the goods of an EI: for whom they were ordered, where they came from, the packing,
-# the serial number, «годен до», the reserve. View only: WmsItem.StockInfoRefresh fills them from the sheets when «Наличие» is
-# opened after an operation and by «Обновить сведения» (never inside a posting)
+# 1.0.1: «Наличие» L…V — what is known of the goods of an EI: how much came in and how much is left (side by side), for whom
+# they were ordered, where they came from, the packing, the serial number, «годен до», the reserve. View only: WmsItem.
+# StockInfoRefresh fills them from the sheets when «Наличие» is opened after an operation and by «Обновить сведения» (never
+# inside a posting); «Осталось» is a formula over E, so it is never behind the balance
 STOCK_INFO_COL = 11                # WmsItem.SI_COL0
-STOCK_INFO_HEADERS = ["Кому назначено", "Поставщик / откуда", "Дата прихода", "Документ прихода", "№ заказа", "Фасовка",
-                      "Серийный / инв. №", "Годен до", "Резерв"]
-STOCK_INFO_WIDTHS = [3800, 4400, 2600, 3200, 2400, 3800, 3200, 2600, 4400]
+STOCK_INFO_HEADERS = ["Пришло", "Осталось", "Кому назначено", "Поставщик / откуда", "Дата прихода", "Документ прихода", "№ заказа",
+                      "Фасовка", "Серийный / инв. №", "Годен до", "Резерв"]
+STOCK_INFO_WIDTHS = [2300, 2300, 3800, 4400, 2600, 3200, 2400, 3800, 3200, 2600, 4400]
+STOCK_INFO_QTY = (0, 1)               # «Пришло», «Осталось» (a formula: always the balance of E) — the number format of E
+STOCK_INFO_DATES = (4, 9)             # «Дата прихода», «Годен до»
 
 
 def stock_info_10(doc, sheets):
-    """1.0.1: the headers, widths and formats of «Наличие» L…T, the button «Обновить сведения», the event of the sheet, the
+    """1.0.1: the headers, widths and formats of «Наличие» L…V, the button «Обновить сведения», the event of the sheet, the
     autofilter over them — for a new book and an upgraded one (the data are not touched)"""
     st = sheets.getByName(STOCK)
     j = st.getCellByPosition(len(STOCK_HEADERS) - 1, 0)
@@ -1565,10 +1574,21 @@ def stock_info_10(doc, sheets):
         col = st.getColumns().getByIndex(STOCK_INFO_COL + k)
         if col.Width < w:
             col.Width = w
-    for k in (2, 7):
+    for k in STOCK_INFO_DATES:
         st.getCellRangeByPosition(STOCK_INFO_COL + k, 1, STOCK_INFO_COL + k, LAST_ROW).NumberFormat = date
+    qty = st.getCellByPosition(4, 1).NumberFormat
+    for k in STOCK_INFO_QTY:
+        st.getCellRangeByPosition(STOCK_INFO_COL + k, 1, STOCK_INFO_COL + k, LAST_ROW).NumberFormat = qty
     if not has_button(st, "btnStockInfo"):
         add_button(doc, st, "btnStockInfo", "Обновить сведения", "WmsItem.BtnStockInfo", 15100, 880, 4200, 650, back=0xDDEBF7)
+    # 1.0.1: a kit from the EIs selected here; on «Комплекты» the same button and the hint that tells it
+    if not has_button(st, "btnKitFromEis"):
+        add_button(doc, st, "btnKitFromEis", "Собрать из ЕИ…", "WmsKit.BtnKitFromEis", 19450, 880, 3800, 650, back=0xC6E0B4)
+    if sheets.hasByName(KITS):
+        ks = sheets.getByName(KITS)
+        if not has_button(ks, "btnKitFromEis"):
+            add_button(doc, ks, "btnKitFromEis", "Собрать из ЕИ…", "WmsKit.BtnKitFromEis", 9250, 120, 4400, 650, back=0xC6E0B4)
+        ks.getCellByPosition(7, 0).setString(KITS_HINT)
     bind_event(st.Events, "OnFocus", "WmsItem.OnStockFocus")
     if doc.DatabaseRanges.hasByName("WMS_STOCK"):
         dbr = doc.DatabaseRanges.getByName("WMS_STOCK")
@@ -1593,7 +1613,7 @@ def stock_view_10(doc, sheets):
     used, zero, even = '$A2<>""', 'N($E2)=0', 'ISEVEN(ROW())'
     common = [(f"AND({used};{zero};{even})", "WMS_StockZeroBand"), (f"AND({used};{zero})", "WMS_StockZero"), (f"AND({used};{even})", "WMS_StockBand")]
     status = [('$H2="Требует разбора"', "ST_Part"), ('LEFT($H2;13)="Приход удалён"', "ST_Gray")]
-    last = len(STOCK_HEADERS) + len(STOCK_INFO_HEADERS)          # with K «Остаток частями» and L…T (1.0.1)
+    last = len(STOCK_HEADERS) + len(STOCK_INFO_HEADERS)          # with K «Остаток частями» and L…V (1.0.1)
     for c0, c1, rules in ((0, 6, common), (7, 7, status + common), (8, last, common)):
         rng = sh.getCellRangeByPosition(c0, 1, c1, LAST_ROW)
         cf = rng.ConditionalFormat

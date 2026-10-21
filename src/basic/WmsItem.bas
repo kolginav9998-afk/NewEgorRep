@@ -414,6 +414,8 @@ Sub BtnProps(Optional oEvent As Variant)
         Array("Серийный / инвентарный №", "Годен до", "Примечание"), v, Array("", "", ""), "Записать") Then Exit Sub
     s = PropSet(WmsIssue.EiCanon(n), Trim(v(0)), Trim(v(1)), Trim(v(2)))
     If Left(s, 3) = "OK:" Then
+        ' 1.0.1: the serial number and «годен до» of «Наличие» follow at once when the window was opened there
+        If gDoc.getCurrentController().getActiveSheet().getName() = SH_STOCK Then StockInfoRefresh(False)
         WmsOrdersUi.UiInfo("Свойства " & WmsIssue.EiCanon(n) & " записаны.")
     ElseIf Left(s, 5) <> "SKIP:" Then
         WmsUi.UiMessage(Mid(s, InStr(s, ":") + 1))
@@ -484,6 +486,8 @@ Function PropSet(sEI As String, sSerial As String, sExpiry As String, sNote As S
     PlanSetValue(SH_PROP, n, PR_EXPIRY, IIf(dExp > 0, dExp, ""), False)
     PlanSetValue(SH_PROP, n, PR_NOTE, sNote, False)
     PropSet = ApplyOperation(0, 0)
+    ' 1.0.1: the serial number and «годен до» of «Наличие» follow at the next opening of the sheet (the balance did not move)
+    If Left(PropSet, 3) = "OK:" Then SiMark(n)
     gUiLastMsg = PropSet
     Exit Function
 EH:
@@ -824,14 +828,23 @@ EH:
     gUiLastMsg = PhotoOpen
 End Function
 
-' ================================================================ 1.0.1 the information of «Наличие» (L…T)
-' For whom the goods were ordered, where they came from (the supplier or the kind of the receipt and who passed them, the date,
-' the document, the № of the order), the packing, the serial number, «годен до», the reserve. View only: filled at once from the
-' sheets (no operation, nothing journaled, never inside a posting), when «Наличие» is opened after an operation and by
-' «Обновить сведения»; a big registry only by the button (the opening of the sheet stays quick).
+' ================================================================ 1.0.1 the information of «Наличие» (L…V)
+' How much came in and how much is left, side by side (L «Пришло», M «Осталось» — the balance E), for whom the goods were
+' ordered, where they came from (the supplier or the kind of the receipt and who passed them, the date, the document, the №
+' of the order), the packing, the serial number, «годен до», the reserve. View only: filled from the sheets (no operation,
+' nothing journaled, never inside a posting) when «Наличие» is opened after an operation and by «Обновить сведения». An
+' opening computes only the rows that moved (SiLight: Calc itself finds them, 0,1 s on 20 000 EIs); the whole registry — the
+' first fill of a book, the first opening of a session of a small registry, the button. Only the rows that differ are
+' written (a write into «Наличие» is slow: its conditional formats and its filter). The constants of the other library are
+' copied into locals before the loops: each use of one costs about 30 µs in LibreOffice Basic (a loop over 20 000 rows —
+' seconds instead of tenths)
 Public Const SI_COL0 = 11
-Public Const SI_COLS = 9
-Public Const SI_AUTO_MAX = 30000
+Public Const SI_COLS = 11
+Public Const SI_AUTO_MAX = 3000
+' this session of WMS has filled the whole registry once (later openings take only the rows that moved); the EIs whose
+' information changed without a movement (SiMark)
+Global gSiSession As Boolean
+Global gSiDirty As String
 
 Sub OnStockFocus(Optional oEvent As Variant)
     On Error Resume Next
@@ -845,13 +858,18 @@ Sub BtnStockInfo(Optional oEvent As Variant)
     If Left(s, 4) = "ERR:" Then WmsUi.UiMessage(Mid(s, 5))
 End Sub
 
-' OK:<rows> — filled; SAME — nothing changed since the last fill; SKIP:… — a big registry left to the button; ERR:…
+' OK:<rows written> — filled (the whole registry, or the rows that moved since: SiLight); SAME — nothing changed since the
+' last fill; ERR:…
 Function StockInfoRefresh(bForce As Boolean) As String
     Dim st As Object, last As Long, sh As Object, oLast As Long, i As Long, n As Long, s As String, stamp As String, um As Object
     Dim rowOf() As Long, spOf() As Long, cV As Variant, cA As Variant, cC As Variant, cL As Variant, cN As Variant, cT As Variant
     Dim xE As Variant, xT As Variant, xW As Variant, xD As Variant, xC As Variant, sp As Object, xLast As Long, pk As Variant, pr As Variant
     Dim rs As Variant, resQ() As Double, resWho() As String, resN() As Long, canon As String, msg As String, out() As Variant, stk As Variant
-    Dim a(8) As Variant, k As Integer, locked As Boolean, units As Variant
+    Dim a(10) As Variant, k As Integer, locked As Boolean, came() As Double, hasCame() As Boolean, cur As Variant, nChg As Long
+    Dim kEI As Integer, kName As Integer, kUnit As Integer, kQty As Integer, kPrEi As Integer, kPrSer As Integer, kPrExp As Integer, ei As String
+    Dim kRsEi As Integer, kRsQty As Integer, kRsWho As Integer, kRsUntil As Integer, nPk As Long, nPr As Long, r0 As Long, r1 As Long, blk() As Variant
+    Dim rw As Variant, rc As Variant, rp As Variant, x As Variant, j As Long, pos() As Long, old As String, p0 As Variant, p1 As Variant, bRes As Boolean
+    Dim bLight As Boolean, res As String
     WmsInit()
     On Error GoTo EH
     st = gDoc.Sheets.getByName(SH_STOCK)
@@ -868,15 +886,45 @@ Function StockInfoRefresh(bForce As Boolean) As String
     End If
     stamp = Format(SysNum(SK_LAST_SEQ), "0") & "|" & last & "|" & SiReserveStamp(rs) & "|" & gDoc.getURL()
     If Not bForce Then
-        If WmsSafe.StGet("STOCKINFO") = stamp Then
+        old = WmsSafe.StGet("STOCKINFO")
+        If old = stamp Then
             StockInfoRefresh = "SAME"
             Exit Function
         End If
-        If last > SI_AUTO_MAX Then
-            StockInfoRefresh = "SKIP:в «" & SH_STOCK & "» " & last & " строк — сведения обновляются кнопкой «Обновить сведения»"
-            Exit Function
+        ' only the rows that moved, when this book was filled before (the first fill of a book — the whole registry, once)
+        ' and either this session filled it already (its first opening — the whole registry again: the edits of «Заказы»
+        ' without an operation) or the registry is big (then the whole — by the button); a change of the reserves of a small
+        ' registry — the whole
+        p0 = Split(old, "|")
+        p1 = Split(stamp, "|")
+        bRes = True
+        If UBound(p0) >= 3 Then bRes = (p0(2) <> p1(2))
+        bLight = (old <> "" And Right(old, Len(gDoc.getURL()) + 1) = "|" & gDoc.getURL()) And (gSiSession Or last > SI_AUTO_MAX) _
+            And (Not bRes Or last > SI_AUTO_MAX)
+        If bLight Then
+            res = SiLight(st, last, rs, bRes)
+            If Left(res, 3) = "OK:" Then
+                WmsSafe.StSet("STOCKINFO", stamp)
+                gSiDirty = ""
+            End If
+            If Left(res, 3) = "OK:" Or Left(res, 4) = "ERR:" Then
+                StockInfoRefresh = res
+                Exit Function
+            End If
+            ' too many rows moved for one by one (a batch), or Calc did not answer: the whole registry
         End If
     End If
+    kEI = SC_EI
+    kName = SC_NAME
+    kUnit = SC_UNIT
+    kQty = SC_QTY
+    kPrEi = PR_EI
+    kPrSer = PR_SERIAL
+    kPrExp = PR_EXPIRY
+    kRsEi = RS_EI
+    kRsQty = RS_QTY
+    kRsWho = RS_WHO
+    kRsUntil = RS_UNTIL
     ReDim rowOf(last) As Long
     ReDim spOf(last) As Long
     ' «Заказы»: the receipt row of each EI — the first row holding its key, as WMS finds it
@@ -922,74 +970,137 @@ Function StockInfoRefresh(bForce As Boolean) As String
     End If
     ' the packing (_PACK) and the properties (_PROP): one row per EI, the row of the EI
     pk = Array()
-    If gDoc.Sheets.hasByName(SH_PACK) Then pk = gDoc.Sheets.getByName(SH_PACK).getCellRangeByPosition(0, 1, 2, last).getDataArray()
+    If gDoc.Sheets.hasByName(SH_PACK) Then
+        n = WmsOrders.LastRow(gDoc.Sheets.getByName(SH_PACK))
+        If n > last Then n = last
+        If n >= 1 Then pk = gDoc.Sheets.getByName(SH_PACK).getCellRangeByPosition(0, 1, 2, n).getDataArray()
+    End If
+    nPk = UBound(pk)
     pr = Array()
-    If gDoc.Sheets.hasByName(SH_PROP) Then pr = gDoc.Sheets.getByName(SH_PROP).getCellRangeByPosition(0, 1, PR_EXPIRY, last).getDataArray()
+    If gDoc.Sheets.hasByName(SH_PROP) Then
+        n = WmsOrders.LastRow(gDoc.Sheets.getByName(SH_PROP))
+        If n > last Then n = last
+        If n >= 1 Then pr = gDoc.Sheets.getByName(SH_PROP).getCellRangeByPosition(0, 1, kPrExp, n).getDataArray()
+    End If
+    nPr = UBound(pr)
     ' the reserves: the sum and the first «for whom» of every EI
     ReDim resQ(last) As Double
     ReDim resWho(last) As String
     ReDim resN(last) As Long
     For i = 0 To UBound(rs)
-        If Trim(CStr(rs(i)(RS_EI))) <> "" And VarType(rs(i)(RS_QTY)) = 5 Then
-            If WmsIssue.NormalizeEI(rs(i)(RS_EI), n, canon, msg) Then
+        If Trim(CStr(rs(i)(kRsEi))) <> "" And VarType(rs(i)(kRsQty)) = 5 Then
+            If WmsIssue.NormalizeEI(rs(i)(kRsEi), n, canon, msg) Then
                 If n >= 1 And n <= last Then
-                    resQ(n) = resQ(n) + rs(i)(RS_QTY)
+                    resQ(n) = resQ(n) + rs(i)(kRsQty)
                     resN(n) = resN(n) + 1
                     If resWho(n) = "" Then
-                        resWho(n) = Trim(CStr(rs(i)(RS_WHO)))
-                        If VarType(rs(i)(RS_UNTIL)) = 5 Then resWho(n) = resWho(n) & " до " & Format(rs(i)(RS_UNTIL), "DD.MM.YYYY")
+                        resWho(n) = Trim(CStr(rs(i)(kRsWho)))
+                        If VarType(rs(i)(kRsUntil)) = 5 Then resWho(n) = resWho(n) & " до " & Format(rs(i)(kRsUntil), "DD.MM.YYYY")
                     End If
                 End If
             End If
         End If
     Next i
-    stk = st.getCellRangeByPosition(SC_EI, 1, SC_UNIT, last).getDataArray()
+    ' how much came in: the receipts, the transfer, the splits and the kits
+    ReDim came(last) As Double
+    ReDim hasCame(last) As Boolean
+    SiCame(last, came, hasCame)
+    stk = st.getCellRangeByPosition(0, 1, kQty, last).getDataArray()
+    cur = st.getCellRangeByPosition(SI_COL0, 1, SI_COL0 + SI_COLS - 1, last).getDataArray()
+    ' every row computed and compared with what the sheet shows (in the same pass: the row of the sheet once); only the rows
+    ' that differ are kept (out, their rows in pos)
     ReDim out(last - 1)
+    ReDim pos(last) As Long
     For i = 1 To last
-        For k = 0 To 8
+        rw = stk(i - 1)
+        ei = CStr(rw(kEI))
+        For k = 0 To 10
             a(k) = ""
         Next k
-        If CStr(stk(i - 1)(SC_EI)) <> "" Then
+        If ei <> "" Then
             n = i
+            If hasCame(n) Then a(0) = Int(came(n) * 1000 + 0.5) / 1000
+            a(1) = rw(kQty)
             If rowOf(n) > 0 Then
-                a(0) = cT(rowOf(n) - 1)(0)
-                a(1) = cL(rowOf(n) - 1)(0)
-                a(2) = cN(rowOf(n) - 1)(0)
-                a(3) = cC(rowOf(n) - 1)(0)
-                a(4) = cA(rowOf(n) - 1)(0)
+                j = rowOf(n) - 1
+                a(2) = cT(j)(0)
+                a(3) = cL(j)(0)
+                a(4) = cN(j)(0)
+                a(5) = cC(j)(0)
+                a(6) = cA(j)(0)
             ElseIf spOf(n) > 0 Then
-                s = Trim(CStr(xT(spOf(n) - 1)(0)))
-                If Trim(CStr(xW(spOf(n) - 1)(0))) <> "" Then s = s & IIf(s <> "", " · ", "") & Trim(CStr(xW(spOf(n) - 1)(0)))
-                a(1) = s
-                a(2) = xD(spOf(n) - 1)(0)
-                a(3) = xC(spOf(n) - 1)(0)
+                j = spOf(n) - 1
+                s = Trim(CStr(xT(j)(0)))
+                If Trim(CStr(xW(j)(0))) <> "" Then s = s & IIf(s <> "", " · ", "") & Trim(CStr(xW(j)(0)))
+                a(3) = s
+                a(4) = xD(j)(0)
+                a(5) = xC(j)(0)
             End If
-            If UBound(pk) >= i - 1 Then
-                If CStr(pk(i - 1)(0)) = CStr(stk(i - 1)(SC_EI)) And VarType(pk(i - 1)(2)) = 5 Then
-                    If pk(i - 1)(2) > 0 Then a(5) = "в 1 " & stk(i - 1)(SC_UNIT) & " — " & WmsIssue.QtyText(pk(i - 1)(2)) & " " & pk(i - 1)(1)
+            If nPk >= i - 1 Then
+                rp = pk(i - 1)
+                If CStr(rp(0)) = ei And VarType(rp(2)) = 5 Then
+                    If rp(2) > 0 Then a(7) = "в 1 " & rw(kUnit) & " — " & WmsIssue.QtyText(rp(2)) & " " & rp(1)
                 End If
             End If
-            If UBound(pr) >= i - 1 Then
-                If CStr(pr(i - 1)(PR_EI)) = CStr(stk(i - 1)(SC_EI)) Then
-                    a(6) = pr(i - 1)(PR_SERIAL)
-                    a(7) = pr(i - 1)(PR_EXPIRY)
+            If nPr >= i - 1 Then
+                rp = pr(i - 1)
+                If CStr(rp(kPrEi)) = ei Then
+                    a(8) = rp(kPrSer)
+                    a(9) = rp(kPrExp)
                 End If
             End If
-            If resN(n) > 0 Then a(8) = WmsIssue.QtyText(resQ(n)) & " · " & resWho(n) & IIf(resN(n) > 1, " и ещё " & (resN(n) - 1), "")
+            If resN(n) > 0 Then a(10) = WmsIssue.QtyText(resQ(n)) & " · " & resWho(n) & IIf(resN(n) > 1, " и ещё " & (resN(n) - 1), "")
         End If
-        out(i - 1) = Array(a(0), a(1), a(2), a(3), a(4), a(5), a(6), a(7), a(8))
+        rc = cur(i - 1)
+        For k = 0 To 10
+            x = rc(k)
+            If VarType(x) <> VarType(a(k)) Then
+                Exit For
+            ElseIf x <> a(k) Then
+                Exit For
+            End If
+        Next k
+        If k <= 10 Then
+            out(nChg) = Array(a(0), a(1), a(2), a(3), a(4), a(5), a(6), a(7), a(8), a(9), a(10))
+            pos(i) = nChg + 1
+            nChg = nChg + 1
+        End If
     Next i
-    ' written as one block, outside the undo of the user and without marking the book changed when it was not
-    st = WmsView.ViewOpen(SH_STOCK)
-    um = gDoc.getUndoManager()
-    um.lock()
-    locked = True
-    st.getCellRangeByPosition(SI_COL0, 1, SI_COL0 + SI_COLS - 1, last).setDataArray(out())
-    um.unlock()
-    locked = False
-    WmsView.ViewDone(st)
+    If nChg > 0 Then
+        ' outside the undo of the user and without marking the book changed when it was not; the changed rows by runs (an
+        ' unchanged row between two changed ones close together joins the run with what the sheet already shows)
+        st = WmsView.ViewOpen(SH_STOCK)
+        um = gDoc.getUndoManager()
+        um.lock()
+        locked = True
+        i = 1
+        Do While i <= last
+            If pos(i) > 0 Then
+                r0 = i
+                r1 = i
+                j = i + 1
+                Do While j <= last And j - r1 <= 8
+                    If pos(j) > 0 Then r1 = j
+                    j = j + 1
+                Loop
+                ReDim blk(r1 - r0)
+                For k = 0 To r1 - r0
+                    If pos(r0 + k) > 0 Then blk(k) = out(pos(r0 + k) - 1) Else blk(k) = cur(r0 + k - 1)
+                Next k
+                st.getCellRangeByPosition(SI_COL0, r0, SI_COL0 + SI_COLS - 1, r1).setDataArray(blk())
+                i = r1 + 1
+            Else
+                i = i + 1
+            End If
+        Loop
+        um.unlock()
+        locked = False
+        WmsView.ViewDone(st)
+    End If
     WmsSafe.StSet("STOCKINFO", stamp)
-    StockInfoRefresh = "OK:" & last
+    gSiSession = True
+    gSiDirty = ""
+    StockInfoRefresh = "OK:" & nChg
     Exit Function
 EH:
     StockInfoRefresh = "ERR:сведения «" & SH_STOCK & "» не обновлены: " & Error$ & " (строка " & Erl & ")"
@@ -997,6 +1108,333 @@ EH:
     If locked Then um.unlock()
     WmsView.ViewDone(gDoc.Sheets.getByName(SH_STOCK))
 End Function
+
+' ---------------------------------------------------------------- the light refresh: only the rows that moved
+
+' an EI whose information WMS changed without moving its balance (its properties, its packing): its row is taken by the next
+' light refresh
+Sub SiMark(n As Long)
+    gSiDirty = gSiDirty & ";" & n
+End Sub
+
+' the rows of «Наличие» to compute again, found by Calc itself (one formula over the registry, no loop of Basic): «Осталось»
+' differs from «Остаток» (an operation moved the EI, a new EI has none yet), and the EIs marked by SiMark; with bRes — also
+' the reserved ones and those that showed a reserve. OK:<rows written> / FULL — too many rows for one by one / "" — Calc did
+' not answer (the caller computes everything)
+Private Function SiLight(st As Object, last As Long, rs As Variant, bRes As Boolean) As String
+    Dim cA As String, cE As String, cM As String, cV As String, body As String, ok As Boolean, s As String, items As Variant, i As Long, n As Long
+    Dim seen As String, rows() As Long, nR As Long, a As Variant, rc As Variant, k As Integer, nW As Long, um As Object, locked As Boolean
+    Dim opened As Boolean, canon As String, msg As String, t As String
+    On Error GoTo EH
+    cA = WmsView.ColRng(SH_STOCK, 0, 1, last)
+    cE = WmsView.ColRng(SH_STOCK, SC_QTY, 1, last)
+    cM = WmsView.ColRng(SH_STOCK, SI_COL0 + 1, 1, last)
+    body = "TEXTJOIN("";"";1;IF((" & cA & "<>"""")*IF(ISNUMBER(" & cE & ");IF(ISNUMBER(" & cM & ");" & cM & "<>" & cE & ";1);ISNUMBER(" & cM _
+        & "));ROW(" & cA & ")-1;""""))"
+    s = WmsOrders.ScratchEval(body, ok)
+    If Not ok Then Exit Function
+    If bRes Then
+        cV = WmsView.ColRng(SH_STOCK, SI_COL0 + SI_COLS - 1, 1, last)
+        t = WmsOrders.ScratchEval("TEXTJOIN("";"";1;IF(" & cV & "<>"""";ROW(" & cV & ")-1;""""))", ok)
+        If Not ok Then Exit Function
+        If t <> "" Then s = s & IIf(s <> "", ";", "") & t
+        For i = 0 To UBound(rs)
+            If WmsIssue.NormalizeEI(rs(i)(RS_EI), n, canon, msg) Then s = s & IIf(s <> "", ";", "") & n
+        Next i
+    End If
+    s = s & gSiDirty
+    items = Split(s, ";")
+    ReDim rows(UBound(items) + 1) As Long
+    seen = ";"
+    For i = 0 To UBound(items)
+        If items(i) <> "" Then
+            n = Val(items(i))
+            If n >= 1 And n <= last And InStr(seen, ";" & n & ";") = 0 Then
+                seen = seen & n & ";"
+                rows(nR) = n
+                nR = nR + 1
+            End If
+        End If
+    Next i
+    If nR > 400 Then
+        SiLight = "FULL"
+        Exit Function
+    End If
+    For i = 0 To nR - 1
+        n = rows(i)
+        a = SiRowOne(st, n, rs)
+        rc = st.getCellRangeByPosition(SI_COL0, n, SI_COL0 + SI_COLS - 1, n).getDataArray()(0)
+        For k = 0 To 10
+            If VarType(rc(k)) <> VarType(a(k)) Then
+                Exit For
+            ElseIf rc(k) <> a(k) Then
+                Exit For
+            End If
+        Next k
+        If k <= 10 Then
+            If Not opened Then
+                ' outside the undo of the user and without marking the book changed when it was not
+                st = WmsView.ViewOpen(SH_STOCK)
+                opened = True
+                um = gDoc.getUndoManager()
+                um.lock()
+                locked = True
+            End If
+            st.getCellRangeByPosition(SI_COL0, n, SI_COL0 + SI_COLS - 1, n).setDataArray(Array(a))
+            nW = nW + 1
+        End If
+    Next i
+    If locked Then
+        um.unlock()
+        locked = False
+    End If
+    If opened Then WmsView.ViewDone(st)
+    SiLight = "OK:" & nW
+    Exit Function
+EH:
+    SiLight = "ERR:сведения «" & SH_STOCK & "» не обновлены: " & Error$ & " (строка " & Erl & ")"
+    On Error Resume Next
+    If locked Then um.unlock()
+    If opened Then WmsView.ViewDone(st)
+End Function
+
+' the information L…V of EI n alone, as the full pass computes it (the same sources, read for this row only)
+Private Function SiRowOne(st As Object, n As Long, rs As Variant) As Variant
+    Dim a(10) As Variant, d As Variant, ei As String, k As Integer, r As Long, o As Variant, c As Double, has As Boolean, s As String
+    Dim i As Long, m As Long, canon As String, msg As String, resQ As Double, resN As Long, resWho As String
+    For k = 0 To 10
+        a(k) = ""
+    Next k
+    d = st.getCellRangeByPosition(0, n, SC_QTY, n).getDataArray()(0)
+    ei = CStr(d(SC_EI))
+    If ei <> "" Then
+        SiCameOne(n, ei, c, has)
+        If has Then a(0) = Int(c * 1000 + 0.5) / 1000
+        a(1) = d(SC_QTY)
+        r = SiFindRow(SH_ORDERS, OC_EI, n)
+        If r > 0 Then
+            o = gDoc.Sheets.getByName(SH_ORDERS).getCellRangeByPosition(0, r, OC_EI, r).getDataArray()(0)
+            a(2) = o(OC_ASSIGNED)
+            a(3) = o(OC_SUPPLIER)
+            a(4) = o(OC_RDATE)
+            a(5) = o(OC_DOC)
+            a(6) = o(OC_ORDER)
+        ElseIf gDoc.Sheets.hasByName(SH_SPECIAL) Then
+            r = SiFindRow(SH_SPECIAL, XC_EI, n)
+            If r > 0 Then
+                o = gDoc.Sheets.getByName(SH_SPECIAL).getCellRangeByPosition(0, r, XC_EI, r).getDataArray()(0)
+                s = Trim(CStr(o(XC_TYPE)))
+                If Trim(CStr(o(XC_WHO))) <> "" Then s = s & IIf(s <> "", " · ", "") & Trim(CStr(o(XC_WHO)))
+                a(3) = s
+                a(4) = o(XC_DATE)
+                a(5) = o(XC_DOC)
+            End If
+        End If
+        If gDoc.Sheets.hasByName(SH_PACK) Then
+            o = gDoc.Sheets.getByName(SH_PACK).getCellRangeByPosition(0, n, 2, n).getDataArray()(0)
+            If CStr(o(0)) = ei And VarType(o(2)) = 5 Then
+                If o(2) > 0 Then a(7) = "в 1 " & d(SC_UNIT) & " — " & WmsIssue.QtyText(o(2)) & " " & o(1)
+            End If
+        End If
+        If gDoc.Sheets.hasByName(SH_PROP) Then
+            o = gDoc.Sheets.getByName(SH_PROP).getCellRangeByPosition(0, n, PR_EXPIRY, n).getDataArray()(0)
+            If CStr(o(PR_EI)) = ei Then
+                a(8) = o(PR_SERIAL)
+                a(9) = o(PR_EXPIRY)
+            End If
+        End If
+        For i = 0 To UBound(rs)
+            If Trim(CStr(rs(i)(RS_EI))) <> "" And VarType(rs(i)(RS_QTY)) = 5 Then
+                If WmsIssue.NormalizeEI(rs(i)(RS_EI), m, canon, msg) Then
+                    If m = n Then
+                        resQ = resQ + rs(i)(RS_QTY)
+                        resN = resN + 1
+                        If resN = 1 Then
+                            resWho = Trim(CStr(rs(i)(RS_WHO)))
+                            If VarType(rs(i)(RS_UNTIL)) = 5 Then resWho = resWho & " до " & Format(rs(i)(RS_UNTIL), "DD.MM.YYYY")
+                        End If
+                    End If
+                End If
+            End If
+        Next i
+        If resN > 0 Then a(10) = WmsIssue.QtyText(resQ) & " · " & resWho & IIf(resN > 1, " и ещё " & (resN - 1), "")
+    End If
+    SiRowOne = Array(a(0), a(1), a(2), a(3), a(4), a(5), a(6), a(7), a(8), a(9), a(10))
+End Function
+
+' how much came into EI n (canonical ei), as SiCame counts it for the whole registry
+Private Sub SiCameOne(n As Long, ei As String, ByRef c As Double, ByRef has As Boolean)
+    Dim d As Variant, sh As Object, rr As Variant, i As Long
+    c = 0
+    has = False
+    d = WmsOrders.RcvSheet().getCellRangeByPosition(0, n, RV_QTY, n).getDataArray()(0)
+    If CStr(d(RV_STATE)) = RV_LIVE And CStr(d(RV_EI)) <> "" And VarType(d(RV_QTY)) = 5 Then
+        c = c + d(RV_QTY)
+        has = True
+    End If
+    If gDoc.Sheets.hasByName(SH_LEG) Then
+        d = WmsLegacy.LegSheet().getCellRangeByPosition(0, n, LG_BAL0, n).getDataArray()(0)
+        If CStr(d(LG_KIND)) = LG_MIGRATE And VarType(d(LG_BAL0)) = 5 Then
+            c = c + d(LG_BAL0)
+            has = True
+        End If
+    End If
+    If gDoc.Sheets.hasByName(SH_SPR) Then
+        sh = gDoc.Sheets.getByName(SH_SPR)
+        rr = SiFindAll(sh, SR_EI, "^" & ei & "$")
+        For i = 0 To UBound(rr)
+            d = sh.getCellRangeByPosition(0, rr(i), SR_STATE, rr(i)).getDataArray()(0)
+            If CStr(d(SR_STATE)) = RV_LIVE And VarType(d(SR_QTY)) = 5 Then
+                c = c + d(SR_QTY)
+                has = True
+            End If
+        Next i
+    End If
+    If gDoc.Sheets.hasByName(SH_ADJ) Then
+        sh = gDoc.Sheets.getByName(SH_ADJ)
+        rr = SiFindAll(sh, AJ_NEW, "^" & ei & "$")
+        For i = 0 To UBound(rr)
+            d = sh.getCellRangeByPosition(0, rr(i), AJ_NEW, rr(i)).getDataArray()(0)
+            If CStr(d(AJ_STATE)) = RV_LIVE And VarType(d(AJ_QTY)) = 5 Then
+                If CStr(d(AJ_KIND)) = "SPLIT" Then
+                    c = c - d(AJ_QTY)
+                    has = True
+                ElseIf CStr(d(AJ_KIND)) = "KIT" And CStr(d(AJ_EI)) = CStr(d(AJ_NEW)) Then
+                    c = c + d(AJ_QTY)
+                    has = True
+                End If
+            End If
+        Next i
+    End If
+End Sub
+
+' the first data row of sheet sName whose column col holds the key of EI n («ЕИ-…» with the number n), 0 — none
+Private Function SiFindRow(sName As String, col As Integer, n As Long) As Long
+    Dim rr As Variant, i As Long
+    rr = SiFindAll(gDoc.Sheets.getByName(sName), col, "^ЕИ-0*" & n & "$")
+    For i = 0 To UBound(rr)
+        If SiFindRow = 0 Or rr(i) < SiFindRow Then SiFindRow = rr(i)
+    Next i
+End Function
+
+' the data rows of sheet sh whose cell of column col matches the regular expression sRe (the search of Calc), Array() — none
+Private Function SiFindAll(sh As Object, col As Integer, sRe As String) As Variant
+    Dim l As Long, desc As Object, found As Object, ad As Variant, k As Long, r As Long, out() As Long, nO As Long
+    SiFindAll = Array()
+    l = WmsOrders.LastRow(sh)
+    If l < 1 Then Exit Function
+    desc = sh.createSearchDescriptor()
+    desc.SearchString = sRe
+    desc.SearchRegularExpression = True
+    desc.SearchCaseSensitive = True
+    found = sh.getCellRangeByPosition(col, 1, col, l).findAll(desc)
+    If IsNull(found) Then Exit Function
+    ad = found.getRangeAddresses()
+    ReDim out(15)
+    For k = 0 To UBound(ad)
+        For r = ad(k).StartRow To ad(k).EndRow
+            If nO > UBound(out) Then
+                ReDim Preserve out(2 * nO)
+            End If
+            out(nO) = r
+            nO = nO + 1
+        Next r
+    Next k
+    If nO = 0 Then Exit Function
+    ReDim Preserve out(nO - 1)
+    SiFindAll = out
+End Function
+
+' how much came into EIs 1..last, in the unit of the EI: its receipt of «Заказы» (_RCV, a receipt of the transfer too — the
+' whole quantity that came), a balance brought by the transfer without a receipt (MIGRATE), the posted lines of «Иной приход»
+' (a part replenished — all of them), what a split moved into a new EI, what a kit was built with. A receipt or a line taken
+' back (storno) does not count; hasCame(n) — WMS knows how EI n came in
+Private Sub SiCame(last As Long, came() As Double, hasCame() As Boolean)
+    Dim sh As Object, l As Long, d As Variant, i As Long, n As Long, k1 As Integer, k2 As Integer, k3 As Integer, k4 As Integer, sLive As String
+    Dim sKind As String, s As String
+    sLive = RV_LIVE
+    sh = WmsOrders.RcvSheet()
+    l = WmsOrders.LastRow(sh)
+    If l > last Then l = last
+    If l >= 1 Then
+        k1 = RV_EI
+        k2 = RV_STATE
+        k3 = RV_QTY
+        d = sh.getCellRangeByPosition(0, 1, k3, l).getDataArray()
+        For i = 0 To UBound(d)
+            If CStr(d(i)(k2)) = sLive Then
+                If CStr(d(i)(k1)) <> "" And VarType(d(i)(k3)) = 5 Then
+                    came(i + 1) = came(i + 1) + d(i)(k3)
+                    hasCame(i + 1) = True
+                End If
+            End If
+        Next i
+    End If
+    If gDoc.Sheets.hasByName(SH_LEG) Then
+        sh = WmsLegacy.LegSheet()
+        l = WmsOrders.LastRow(sh)
+        If l > last Then l = last
+        If l >= 1 Then
+            k1 = LG_KIND
+            k2 = LG_BAL0
+            sKind = LG_MIGRATE
+            d = sh.getCellRangeByPosition(0, 1, k2, l).getDataArray()
+            For i = 0 To UBound(d)
+                If CStr(d(i)(k1)) = sKind And VarType(d(i)(k2)) = 5 Then
+                    came(i + 1) = came(i + 1) + d(i)(k2)
+                    hasCame(i + 1) = True
+                End If
+            Next i
+        End If
+    End If
+    If gDoc.Sheets.hasByName(SH_SPR) Then
+        sh = gDoc.Sheets.getByName(SH_SPR)
+        l = WmsOrders.LastRow(sh)
+        If l >= 1 Then
+            k1 = SR_EI
+            k2 = SR_STATE
+            k3 = SR_QTY
+            d = sh.getCellRangeByPosition(0, 1, k2, l).getDataArray()
+            For i = 0 To UBound(d)
+                If CStr(d(i)(k2)) = sLive And VarType(d(i)(k3)) = 5 Then
+                    n = WmsLegacy.EiNum(CStr(d(i)(k1)), last + 1)
+                    If n > 0 Then
+                        came(n) = came(n) + d(i)(k3)
+                        hasCame(n) = True
+                    End If
+                End If
+            Next i
+        End If
+    End If
+    If gDoc.Sheets.hasByName(SH_ADJ) Then
+        sh = gDoc.Sheets.getByName(SH_ADJ)
+        l = WmsOrders.LastRow(sh)
+        If l >= 1 Then
+            k1 = AJ_KIND
+            k2 = AJ_STATE
+            k3 = AJ_QTY
+            k4 = AJ_NEW
+            d = sh.getCellRangeByPosition(0, 1, k4, l).getDataArray()
+            For i = 0 To UBound(d)
+                s = CStr(d(i)(k1))
+                If s = "SPLIT" Or s = "KIT" Then
+                    If CStr(d(i)(k2)) = sLive And VarType(d(i)(k3)) = 5 Then
+                        n = WmsLegacy.EiNum(CStr(d(i)(k4)), last + 1)
+                        If n > 0 And s = "SPLIT" Then
+                            ' the new EI of a split: what was taken from the source
+                            came(n) = came(n) - d(i)(k3)
+                            hasCame(n) = True
+                        ElseIf n > 0 And CStr(d(i)(AJ_EI)) = CStr(d(i)(k4)) Then
+                            ' the kit itself: its own row of the build
+                            came(n) = came(n) + d(i)(k3)
+                            hasCame(n) = True
+                        End If
+                    End If
+                End If
+            Next i
+        End If
+    End If
+End Sub
 
 ' the reserves as one short text: changed when a reserve is added, removed or changed
 Private Function SiReserveStamp(rs As Variant) As String
