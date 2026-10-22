@@ -86,6 +86,44 @@ def p02_printer_check():
           rc3 == 2 and "ПЕЧАТЬ НЕ УДАЛАСЬ" in rec, o3.strip()[-200:])
 
 
+@case
+def p03_offline_audit():
+    """tools/offline_audit.py: the sources and a production book of WMS — nothing that reaches the network; a sample planted
+    with every kind of way out — each one found (the check is not blind)"""
+    c = "P03"
+    d = os.path.join(OUT, "cases", "p03")
+    shutil.rmtree(d, ignore_errors=True)
+    os.makedirs(os.path.join(d, "book"))
+    rcb, ob = run("build_ods.py", os.path.join(d, "book", "WMS_PROD.ods"))
+    reps = []
+    for name, path in (("src", os.path.join(ROOT, "src")), ("tools", os.path.join(ROOT, "tools")), ("книга", os.path.join(d, "book"))):
+        rc, o = run("offline_audit.py", path)
+        reps.append((name, rc, o))
+    R.add(c, "исходники WMS (src/, tools/) и рабочая книга без тестового модуля: сетевых возможностей не найдено, код 0",
+          rcb == 0 and all(rc == 0 and "СЕТЕВЫХ ВОЗМОЖНОСТЕЙ НЕ НАЙДЕНО" in o and "НАЙДЕНО  " not in o for _, rc, o in reps)
+          and "проверено файлов (книги, макросы, программы): 1" in reps[2][2],
+          "; ".join(f"{n}: код {rc}, {o.strip().splitlines()[1] if len(o.strip().splitlines()) > 1 else o[:80]}" for n, rc, o in reps) + f"; сборка {rcb} {ob[-80:]}")
+    bad = os.path.join(d, "bad")
+    os.makedirs(bad)
+    open(os.path.join(bad, "leak.bas"), "w", encoding="utf-8").write(
+        'Sub Leak\n    c = CreateUnoService("com.sun.star.connection.Connector")\n    m = CreateUnoService("com.sun.star.system.SimpleSystemMail")\n'
+        '    x = CreateObject("MSXML2.XMLHTTP")\n    u = "https://example.org/upload"\nEnd Sub\n')
+    open(os.path.join(bad, "leak.py"), "w", encoding="utf-8").write('import urllib.request\nimport socket\ns = socket.socket()\ns.connect(("10.0.0.5", 80))\n')
+    import zipfile
+    with zipfile.ZipFile(os.path.join(bad, "leak.ods"), "w") as z:
+        z.writestr("mimetype", "application/vnd.oasis.opendocument.spreadsheet")
+        z.writestr("content.xml", '<office:document-content><table:table-cell><text:p><text:a xlink:href="https://example.org/x">a</text:a></text:p>'
+                   '</table:table-cell><table:table-cell table:formula="of:=WEBSERVICE(&quot;https://example.org/api&quot;)"/>'
+                   '<table:table-source xlink:href="file:///другой.ods"/></office:document-content>')
+    rc, o = run("offline_audit.py", bad)
+    want = ["отправка почты", "сетевое соединение UNO", "HTTP-запрос через Windows", "адрес в коде — https://example.org/upload", "гиперссылок: 1",
+            "внешняя ссылка — https://example.org/x", "формула WEBSERVICE", "связь с внешним файлом", "адрес в содержимом — https://example.org/api",
+            "сетевой модуль Python", "сетевое соединение —", "socket.socket"]
+    miss = [w for w in want if w not in o]
+    R.add(c, "образец с почтой, соединением UNO, HTTP, адресами, гиперссылкой, WEBSERVICE, внешней связью и сетью Python: каждое найдено, код 1",
+          rc == 1 and not miss, f"код {rc}; не найдено: {miss}; {o.strip().splitlines()[-1]}")
+
+
 def main():
     only = set(a.lower() for a in sys.argv[1:])
     t0 = time.time()
