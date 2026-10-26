@@ -191,6 +191,10 @@ RESERVE_HEADERS = ["ЕИ", "Количество", "Для кого / объек
 # 1.0 (Ф4): «Номенклатура» Q — the days a returnable thing (a tool) may stay on the hands (WmsItem GD_RETDAYS)
 GOODS_RET_COL = 16
 GOODS_RET_HEADER = "Вернуть через, дней (инструмент)"
+# 1.0.2: «Номенклатура» R — how many pieces come in one pack (WmsItem GD_PACKQ): the label of such goods says «Выдача по 1 шт · в уп. 10».
+# The hint of the sheet (R1 up to 1.0.1) moved one column to the right
+GOODS_PACKQ_COL = 17
+GOODS_PACKQ_HEADER = "В упаковке, шт (на этикетке: выдача по 1 шт)"
 # 1.0 (этапы J, K): «Обслуживание» (WmsSafe) — the safety of the data and the care of the book: the state on top (refreshed when
 # the page is opened), the buttons with what they do below
 SERVICE = "Обслуживание"
@@ -1075,6 +1079,11 @@ def build_suppliers(doc, sh):
     sh.getColumns().getByIndex(6).Width = 11000
 
 
+GOODS_HINT = ("Товар — строка: артикул (или наименование, если артикула нет) объединяет все его ЕИ. «Минимум» и «Заказывать по» — для "
+              "«Нужно заказать» на странице «Снабжение». «В упаковке, шт» — сколько штук в упаковке: на этикетке такого товара будет "
+              "«Выдача по 1 шт · в уп. 10». Серые колонки WMS заполняет кнопкой «Обновить».")
+
+
 def build_goods(doc, sh):
     """«Номенклатура» (1.0, З10 / Ф3): the goods (an article, or the name when there is none, joins the EIs of one goods):
     the minimum and the batch of «Нужно заказать», the usual supplier, the default packing, the photo; M..P — written by WMS"""
@@ -1088,12 +1097,11 @@ def build_goods(doc, sh):
     sh.getCellRangeByPosition(0, 0, n - GOODS_WMS_COLS - 1, 0).CellBackColor = INPUT_HEAD_10
     sh.getCellRangeByPosition(n - GOODS_WMS_COLS, 1, n - 1, 5000).CharColor = MUTED
     sh.getCellRangeByPosition(n - 1, 1, n - 1, LAST_ROW).NumberFormat = number_format(doc, "DD.MM.YYYY")
-    hint = sh.getCellByPosition(n + 1, 0)
-    hint.setString("Товар — строка: артикул (или наименование, если артикула нет) объединяет все его ЕИ. «Минимум» и «Заказывать по» — для "
-                   "«Нужно заказать» на странице «Снабжение». Серые колонки WMS заполняет кнопкой «Обновить».")
+    hint = sh.getCellByPosition(n + 2, 0)
+    hint.setString(GOODS_HINT)
     hint.CharColor = MUTED
     hint.IsTextWrapped = True
-    sh.getColumns().getByIndex(n + 1).Width = 11000
+    sh.getColumns().getByIndex(n + 2).Width = 11000
 
 
 def build_supply(doc, sh):
@@ -1374,6 +1382,252 @@ def items_10(doc, sheets):
         h.CellBackColor = INPUT_HEAD_10
         gs.getColumns().getByIndex(GOODS_RET_COL).Width = 3000
         gs.getCellRangeByPosition(GOODS_RET_COL, 1, GOODS_RET_COL, LAST_ROW).CharColor = gs.getCellByPosition(GOODS_RET_COL - 5, 1).CharColor
+
+
+def goods_102(doc, sheets):
+    """1.0.2: the column R «В упаковке, шт» of «Номенклатура» (WmsItem GD_PACKQ) for a new book and an upgraded one. The hint of the
+    sheet stood in R1 up to 1.0.1: it moves to S1 with its look; a cell R1 holding something else is not touched"""
+    gs = sheets.getByName(GOODS)
+    h = gs.getCellByPosition(GOODS_PACKQ_COL, 0)
+    old = h.getString().strip()
+    if old == GOODS_PACKQ_HEADER:
+        return
+    if old != "" and not old.startswith("Товар — строка"):
+        return
+    if old != "":
+        t = gs.getCellByPosition(GOODS_PACKQ_COL + 1, 0)
+        t.setString(GOODS_HINT)
+        for prop in ("CharColor", "IsTextWrapped", "VertJustify", "HoriJustify", "CharHeight", "CharWeight"):
+            setattr(t, prop, getattr(h, prop))
+        gs.getColumns().getByIndex(GOODS_PACKQ_COL + 1).Width = 11000
+    ref = gs.getCellByPosition(GOODS_RET_COL, 0)
+    h.setString(GOODS_PACKQ_HEADER)
+    for prop in ("CharWeight", "CellBackColor", "IsTextWrapped", "VertJustify", "HoriJustify", "CharHeight", "CharColor"):
+        setattr(h, prop, getattr(ref, prop))
+    gs.getColumns().getByIndex(GOODS_PACKQ_COL).Width = 3600
+    gs.getCellRangeByPosition(GOODS_PACKQ_COL, 1, GOODS_PACKQ_COL, LAST_ROW).CharColor = gs.getCellByPosition(GOODS_RET_COL, 1).CharColor
+
+
+# 1.0.2: «Акты» — the register of the acts (WmsDocs SH_ACTS, AK_*): the storekeeper's own sheet, not protected, not journaled; «Отчёт дня» —
+# the lists of the daily report (WmsDocs SH_DAYREP, DR_*)
+ACTS = "Акты"
+ACTS_HEADERS = ["№ акта", "Дата", "Вид", "Получатель", "Позиций", "Выдачи (№)", "Заметка"]
+ACTS_SETTINGS = [("Настройки акта", "Значение"), ("Город в шапке", "г Москва"), ("Получатель «офис» (если несколько — через запятую)", "Офис"),
+                 ("Подпись кладовщика под актом (необязательно)", "")]
+DAYREP = "Отчёт дня"
+DAYREP_TASKS = ["Выдача инструмента/оборудования", "Взаимодействие с руководителем склада", "Оформление пропусков", "Приём поставок на склад",
+                "Оформление документов и товара к отправке в офис"]
+DAYREP_PROG = ["Работа над учётом склада"]
+DAYREP_HINT = ("«Подготовить отчёт» открывает отчёт за выбранный день отдельным документом Writer: что сделано по данным WMS (приёмка, выдачи — "
+               "и оцифровка выдач за прошлые рабочие дни, акты, исправления), задачи на следующий рабочий день, в процессе, контроль данных. "
+               "Графики 5/2: выходные пропускаются. Здесь — то, чего WMS знать не может: впишите своё по спискам ниже. «Сделано вручную» "
+               "очищается кнопкой в начале нового дня; задачи и «в процессе» остаются, пока вы их не измените.")
+DAYREP_ROW0 = 5                      # WmsDocs DR_ROW0
+
+
+def build_acts(doc, sh):
+    """«Акты» (WmsDocs): the register of the acts — № акта, дата, вид, получатель, позиций, номера выдач; the settings of the act on the
+    right (the city of the head, the recipient that is the office, the signature of the storekeeper); «Повторить акт» prints the act of a
+    row of the register again"""
+    header(sh, ACTS_HEADERS, [2200, 2600, 6600, 7000, 2000, 6000, 8000], height=1700)
+    text = number_format(doc, "@", ("ru", "RU"))
+    for c in (2, 3, 5, 6):
+        sh.getCellRangeByPosition(c, 1, c, LAST_ROW).NumberFormat = text
+    sh.getCellRangeByPosition(1, 1, 1, LAST_ROW).NumberFormat = number_format(doc, "DD.MM.YYYY")
+    sh.getColumns().getByIndex(7).Width = 600
+    sh.getColumns().getByIndex(8).Width = 9500
+    sh.getColumns().getByIndex(9).Width = 5000
+    for k, (a, v) in enumerate(ACTS_SETTINGS):
+        sh.getCellByPosition(8, k).setString(a)
+        sh.getCellByPosition(9, k).setString(v)
+        sh.getCellByPosition(9, k).NumberFormat = text
+        sh.getCellByPosition(9, k).CellBackColor = INPUT_HEAD_10 if k else 0xE7E6E6
+    sh.getCellRangeByPosition(8, 0, 9, 0).CharWeight = 150
+    sh.getCellRangeByPosition(8, 0, 9, 0).VertJustify = 3
+    sh.getCellRangeByPosition(8, 1, 8, 3).CharColor = MUTED
+    sh.getCellRangeByPosition(8, 1, 8, 3).IsTextWrapped = True
+    add_button(doc, sh, "btnActRepeat", "Повторить акт", "WmsDocs.BtnActRepeat", 150, 120, 4200, 650, back=0xC6E0B4)
+
+
+def build_dayrep(doc, sh):
+    """«Отчёт дня» (WmsDocs): the date and the signature of the report, three lists written by hand — done by hand today (A), tasks for the
+    next working day (C), in progress (E) — and the button that builds the report"""
+    sh.getColumns().getByIndex(0).Width = 10500
+    sh.getColumns().getByIndex(1).Width = 5500
+    sh.getColumns().getByIndex(2).Width = 10500
+    sh.getColumns().getByIndex(3).Width = 600
+    sh.getColumns().getByIndex(4).Width = 10500
+    sh.getRows().getByIndex(0).Height = 1500
+    text = number_format(doc, "@", ("ru", "RU"))
+    sh.getCellRangeByPosition(0, 0, 4, 30).NumberFormat = text
+    sh.getCellByPosition(0, 1).setString("Дата отчёта (пусто — сегодня), дд.мм.гггг")
+    sh.getCellByPosition(0, 2).setString("Подпись в отчёте")
+    sh.getCellByPosition(1, 2).setString("Егор, кладовщик.")
+    for r in (1, 2):
+        sh.getCellByPosition(1, r).CellBackColor = INPUT_HEAD_10
+        sh.getCellByPosition(0, r).CharColor = MUTED
+    hint = sh.getCellByPosition(2, 1)
+    hint.setString(DAYREP_HINT)
+    hint.IsTextWrapped = True
+    hint.VertJustify = 1
+    hint.CharHeight = 9
+    hint.CharColor = MUTED
+    merge(sh, 2, 1, 4, 3)
+    for c, t in ((0, "Сегодня сделано вручную (чего нет в WMS)"), (2, "Задачи на следующий рабочий день"), (4, "В процессе")):
+        cell = sh.getCellByPosition(c, DAYREP_ROW0 - 1)
+        cell.setString(t)
+        cell.CharWeight = 150
+        cell.CellBackColor = 0xE7E6E6
+    for c in (0, 2, 4):
+        rng = sh.getCellRangeByPosition(c, DAYREP_ROW0, c, DAYREP_ROW0 + 19)
+        rng.CellBackColor = INPUT_HEAD_10
+        rng.IsTextWrapped = True
+    for k, t in enumerate(DAYREP_TASKS):
+        sh.getCellByPosition(2, DAYREP_ROW0 + k).setString(t)
+    for k, t in enumerate(DAYREP_PROG):
+        sh.getCellByPosition(4, DAYREP_ROW0 + k).setString(t)
+    add_button(doc, sh, "btnDayReport", "Подготовить отчёт", "WmsDocs.BtnDayReport", 150, 120, 5400, 760, bold=True, back=0xC6E0B4)
+    add_button(doc, sh, "btnDrClear", "Очистить «Сделано вручную»", "WmsDocs.BtnDrClear", 5700, 120, 5700, 760, back=0xDDEBF7)
+
+
+def docs_102(doc, sheets):
+    """1.0.2: the sheets «Акты» and «Отчёт дня» for a new book and an upgraded one (after «Печать»); nothing that exists is touched"""
+    names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+    at = names.index(PRINT) + 1 if PRINT in names else len(names)
+    if not sheets.hasByName(ACTS):
+        sheets.insertNewByName(ACTS, at)
+        build_acts(doc, sheets.getByName(ACTS))
+        at += 1
+    names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+    if not sheets.hasByName(DAYREP):
+        sheets.insertNewByName(DAYREP, names.index(ACTS) + 1 if ACTS in names else len(names))
+        build_dayrep(doc, sheets.getByName(DAYREP))
+
+
+# 1.0.2: «Категории» — the hints of the categories by the name (WmsCat SH_CATS): a category and the words that tell it in a name; «Метизы» —
+# the directory of the fasteners made from «Наличие» by the names (WmsCat SH_FAST, FS_*): the storekeeper's own sheets, not protected, not journaled
+CATS = "Категории"
+CATS_HEADERS = ["Категория", "Слова в названии (через запятую; части слова достаточно: «болт» найдёт «болты»)"]
+CATS_SEED = [
+    ("Инструмент", "дрел, перфоратор, шуруповерт, отверт, молоток, ключ, болгарк, болторез, пассатиж, плоскогуб, кусачк, рулетк, уровен, дальномер, лобзик, паяльник, пила"),
+    ("Метизы", "болт, гайк, шайб, винт, саморез, шуруп, шпильк, дюбел, анкер, заклепк, гвозд, хомут, шплинт"),
+    ("Кабель и провод", "кабел, провод, шнур"),
+    ("Электрика", "лампа, лампоч, розетк, выключател, автомат, удлинител, светильник, клемм, патрон, пускател"),
+    ("СИЗ", "перчатк, каск, очки, респиратор, наушник, жилет, комбинезон, ботинк, сапог, щиток, маска"),
+    ("Металл", "труб, уголок, швеллер, арматур, двутавр, полоса, пруток, профиль, лист стал, лист оцинк"),
+    ("Химия и краски", "краск, эмаль, растворител, клей, герметик, смазк, масло, очистител, грунт, ацетон"),
+    ("Расходники", "диск отрез, диск шлиф, электрод, сверло, лента, скотч, изолент, ветош, салфетк, пленк"),
+    ("Детали", "шестерн, подшипник, втулк, кронштейн, фланец, муфт, звездочк, ремень, редуктор, датчик"),
+    ("Офис", "бумаг, картридж, ручка, степлер, папк, скрепк"),
+]
+FAST = "Метизы"
+FAST_HEADERS = ["Тип", "Размер", "Стандарт", "Класс", "Покрытие / материал", "Наименование (как в учёте)", "Артикул", "Остаток", "Ед.", "Места", "ЕИ с остатком"]
+FAST_WIDTHS = [2800, 2600, 3000, 1800, 4200, 9000, 3200, 2200, 1500, 5000, 2200]
+FAST_HINT = ("Справочник метизов из «Наличия»: болты, гайки, шайбы, винты, саморезы … WMS узнаёт их по названию (и по категории «Метизы» / «Крепёж») и "
+             "разбирает его: размер (М8×20), стандарт (DIN 933, ГОСТ 7798-70), класс прочности (8.8, А2), покрытие. Одна строка — одно наименование с артикулом: "
+             "остаток всех его ЕИ и места. Впишите слова в «Найти» — например «болт м8 цинк» — и нажмите Enter: останутся строки, где есть все слова. "
+             "Список обновляется при открытии листа и кнопкой «Обновить». Только просмотр: ничего не проводится.")
+# the sheets 1.0.2 adds to a book of 1.0.0 / 1.0.1
+SHEETS_102 = [ACTS, DAYREP, CATS, FAST]
+FAST_FIND_ROW = 1
+FAST_HEAD = 3
+
+
+def build_cats(doc, sh):
+    header(sh, CATS_HEADERS, [6000, 20000], height=900)
+    text = number_format(doc, "@", ("ru", "RU"))
+    sh.getCellRangeByPosition(0, 0, 1, 300).NumberFormat = text
+    sh.getCellRangeByPosition(0, 1, 1, 300).CellBackColor = INPUT_HEAD_10
+    for r, (a, w) in enumerate(CATS_SEED, start=1):
+        sh.getCellByPosition(0, r).setString(a)
+        sh.getCellByPosition(1, r).setString(w)
+    sh.getCellRangeByPosition(1, 1, 1, 300).IsTextWrapped = True
+    hint = sh.getCellByPosition(3, 0)
+    hint.setString("Подсказки категорий. Вписали наименование товара на «Заказах» — пустая «Категория» получает подсказку по словам отсюда (первая подходящая "
+                   "строка сверху вниз; поэтому узкие категории — выше). Можно написать свою категорию — подсказка её не трогает. Свои строки и слова — "
+                   "добавляйте и меняйте: это ваш справочник, учёт он не меняет. Список слева — выпадающий список «Категории» на «Заказах» и «Ином приходе».")
+    hint.IsTextWrapped = True
+    hint.VertJustify = 1
+    hint.CharHeight = 9
+    hint.CharColor = MUTED
+    sh.getColumns().getByIndex(2).Width = 600
+    sh.getColumns().getByIndex(3).Width = 12000
+    bind_event(sh.Events, "OnChange", "WmsCat.OnCatsChange")
+
+
+def build_fast(doc, sh):
+    header(sh, FAST_HEADERS, FAST_WIDTHS, height=1500)
+    # the head of the table is row 3: above it the buttons, the search, the count
+    sh.getRows().getByIndex(0).Height = 1500
+    for c in range(FAST_HEADERS.__len__()):
+        sh.getCellByPosition(c, FAST_HEAD).setString(FAST_HEADERS[c])
+        sh.getCellByPosition(c, 0).setString("")
+    hd = sh.getCellRangeByPosition(0, FAST_HEAD, len(FAST_HEADERS) - 1, FAST_HEAD)
+    hd.CharWeight = 150
+    hd.IsTextWrapped = True
+    hd.VertJustify = 2
+    hd.CellBackColor = 0xE7E6E6
+    sh.getCellRangeByPosition(0, 0, len(FAST_HEADERS) - 1, 0).CellBackColor = 0xFFFFFF
+    text = number_format(doc, "@", ("ru", "RU"))
+    for c in (0, 1, 2, 3, 4, 5, 6, 8, 9):
+        sh.getCellRangeByPosition(c, FAST_HEAD + 1, c, 6000).NumberFormat = text
+    sh.getCellByPosition(0, FAST_FIND_ROW).setString("Найти в названии:")
+    sh.getCellByPosition(0, FAST_FIND_ROW).CharWeight = 150
+    sh.getCellByPosition(1, FAST_FIND_ROW).CellBackColor = INPUT_HEAD_10
+    sh.getCellByPosition(1, FAST_FIND_ROW).NumberFormat = text
+    merge(sh, 1, FAST_FIND_ROW, 4, FAST_FIND_ROW)
+    sh.getCellByPosition(0, 2).CharColor = MUTED
+    hint = sh.getCellByPosition(12, 0)
+    hint.setString(FAST_HINT)
+    hint.IsTextWrapped = True
+    hint.VertJustify = 1
+    hint.CharHeight = 9
+    hint.CharColor = MUTED
+    sh.getColumns().getByIndex(11).IsVisible = False
+    sh.getColumns().getByIndex(12).Width = 12000
+    sh.getCellRangeByPosition(7, FAST_HEAD + 1, 7, 6000).HoriJustify = 3
+    add_button(doc, sh, "btnFastRefresh", "Обновить", "WmsCat.BtnFastRefresh", 150, 120, 3000, 650, bold=True, back=0xC6E0B4)
+    bind_event(sh.Events, "OnFocus", "WmsCat.OnFastFocus")
+    bind_event(sh.Events, "OnChange", "WmsCat.OnFastChange")
+
+
+def categories_102(doc, sheets):
+    """1.0.2: «Категории» and «Метизы» for a new book and an upgraded one (after «Комплекты»), the list of the categories on «Заказы» and
+    «Иной приход» (a drop-down that accepts any word); nothing that exists is touched"""
+    names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+    at = names.index(KITS) + 1 if KITS in names else (names.index(GOODS) + 1 if GOODS in names else len(names))
+    if not sheets.hasByName(CATS):
+        sheets.insertNewByName(CATS, at)
+        build_cats(doc, sheets.getByName(CATS))
+    names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+    if not sheets.hasByName(FAST):
+        sheets.insertNewByName(FAST, names.index(CATS) + 1)
+        build_fast(doc, sheets.getByName(FAST))
+    for sheet, col in ((ORDERS, 18), (SPECIAL, 9)):
+        sh = sheets.getByName(sheet)
+        rng = sh.getCellRangeByPosition(col, 1, col, LAST_ROW)
+        v = rng.Validation
+        v.Type = uno.Enum("com.sun.star.sheet.ValidationType", "LIST")
+        v.setFormula1("$" + CATS + ".$A$2:$A$300")
+        v.ShowList = 1
+        v.ShowErrorMessage = False
+        v.IgnoreBlankCells = True
+        rng.Validation = v
+
+
+# 1.0.2: the new buttons — only the missing ones are added (a new book and an upgraded one both)
+BUTTONS_102 = [
+    (STOCK, "btnSerials", "Серийные…", "WmsParts.BtnSerials", 23450, 880, 3400, 650, 0xDDEBF7),
+    (ISSUES, "btnAct", "Акт…", "WmsDocs.BtnAct", 25100, 880, 2900, 650, 0xC6E0B4),
+]
+
+
+def buttons_102(doc, sheets):
+    for sheet, name, label, macro, x, y, w, h, back in BUTTONS_102:
+        if sheets.hasByName(sheet):
+            sh = sheets.getByName(sheet)
+            if not has_button(sh, name):
+                add_button(doc, sh, name, label, macro, x, y, w, h, back=back)
 
 
 def ledger_10(doc, sheets):
@@ -1784,7 +2038,7 @@ def buttons_10(doc, sheets):
             h = sh.getCellByPosition(0, 2).Position.Y - y - 40
         elif x is None and sheet == GOODS:
             # over the hint right of the table
-            x = sh.getCellByPosition(len(GOODS_HEADERS) + 1, 0).Position.X + {"btnGoodsRefresh": 0, "btnGoodsFill": 2700}[name]
+            x = sh.getCellByPosition(len(GOODS_HEADERS) + 2, 0).Position.X + {"btnGoodsRefresh": 0, "btnGoodsFill": 2700}[name]
             y = 120
         elif x is None and name in ("btnLabel", "btnProps", "btnPhoto", "btnTools", "btnFindAll"):
             # «Поиск»: the second row, under «Выдать» … (right of the hint of row 5)
@@ -2327,6 +2581,10 @@ def build(office, out_path, test=False, instance_id=None):
     hints_10(doc, sheets)
     stock_info_10(doc, sheets)
     stock_view_10(doc, sheets)
+    goods_102(doc, sheets)
+    docs_102(doc, sheets)
+    categories_102(doc, sheets)
+    buttons_102(doc, sheets)
     hotkeys_10(doc)
     build_service(doc, sheets)
     order = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]

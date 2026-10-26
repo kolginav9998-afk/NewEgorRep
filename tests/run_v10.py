@@ -16,7 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from harness import OUT, Results, Session, new_wms  # noqa: E402
-from run_prime import TODAY, issue, order, put, receive, serial, topology  # noqa: E402
+from run_prime import T, TODAY, issue, order, put, receive, serial, topology  # noqa: E402
 
 R = Results()
 CASES = []
@@ -2101,10 +2101,10 @@ def v29_help():
         pc = s.B("PcCheck", module="WmsHelp")
         R.add(c, "П1: «Проверить этот ПК» — LibreOffice, макросы, запись, место, Python — с «что сделать»",
               pc.startswith("Проверка этого ПК") and "LibreOffice" in pc and "запись в папку WMS" in pc and "место на диске" in pc and "Python" in pc, pc[:300])
-        choose(s, 3)
+        choose(s, 4)
         wn = s.B("WhatsNew", module="WmsHelp")
         act = s.doc.getCurrentController().getActiveSheet().getName()
-        R.add(c, "П2: «Что нового» — 7 карточек (первая — 1.0.1), «Показать» открывает лист карточки", len(s.B("WhatsNewCards", module="WmsHelp")) == 7 and wn == 3
+        R.add(c, "П2: «Что нового» — 8 карточек (первая — 1.0.2), «Показать» открывает лист карточки", len(s.B("WhatsNewCards", module="WmsHelp")) == 8 and wn == 4
               and act == "Поиск", f"{wn}; {act}")
         col0 = s.B("ButtonModel", "Заказы", "btnReceiveWin", module="WmsHelp").BackgroundColor
         tr = s.B("Tour", module="WmsHelp")
@@ -2133,6 +2133,16 @@ def v29_help():
         f = os.path.join(desk, "WMS склад.desktop")
         R.add(c, "П10: ярлык «WMS склад» открывает эту книгу", sc.startswith("OK:") and os.path.exists(f) and p in open(f, encoding="utf-8").read(), sc[:160])
         issue(s, 1, "ЕИ-00000001", "2", "ива")
+        # 1.0.2: an act of the recipient, a hand-written line of the report, a signer — none of them may reach the anonymous copy
+        s.goto("Выдачи", "$A$2")
+        s.B("ActFromSelection", module="WmsDocs")
+        s.B("DcDocClose", module="WmsDocs")
+        ak = s.doc.Sheets.getByName("Акты")
+        ak.getCellByPosition(6, 1).setString("Для Иванова Секретный")
+        ak.getCellByPosition(9, 3).setString("Подписант Секретов")
+        s.doc.Sheets.getByName("Отчёт дня").getCellByPosition(0, 5).setString("Секретная работа")
+        s.doc.Sheets.getByName("Отчёт дня").getCellByPosition(1, 2).setString("Секретов, кладовщик.")
+        s.B("FastRefresh", "", module="WmsCat")
         s.doc.store()
         h0 = {g: hashlib.sha256(open(g, "rb").read()).hexdigest() for g in glob.glob(os.path.join(s.jdir, "*.csv"))}
         mt = s.B("MakeCopy", "TRAINING", False, module="WmsHelp")
@@ -2167,6 +2177,22 @@ def v29_help():
                  "самопроверка без ошибок", ma.startswith("OK:") and st.get("STATE") == "CLEAN" and all(x.startswith("Товар ") for x in nm)
               and all(x.startswith("Получатель ") for x in rc) and a.stock(1) == q1 and sc2.startswith("САМОПРОВЕРКА WMS: ошибок 0"),
               f"{ma[:120]}; {st}; {nm}; {rc}; {sc2[:120]}")
+        left = []
+        if a:
+            names_ = [a.doc.Sheets.getByIndex(i).Name for i in range(a.doc.Sheets.getCount())]
+            for nme in names_:
+                sh_ = a.doc.Sheets.getByName(nme)
+                cur_ = sh_.createCursor()
+                cur_.gotoEndOfUsedArea(False)
+                ad_ = cur_.getRangeAddress()
+                for row_ in sh_.getCellRangeByPosition(0, 0, min(ad_.EndColumn, 40), min(ad_.EndRow, 5100)).getDataArray():
+                    for x_ in row_:
+                        if isinstance(x_, str) and any(w in x_ for w in ("Секрет", "Иванова")):
+                            left.append((nme, x_[:30]))
+            ak_ = a.doc.Sheets.getByName("Акты")
+        R.add(c, "П12 (1.0.2): в обезличенной копии нет подписанта и примечания акта, подписи и своей строки «Отчёта дня»; получатель акта заменён; «Метизы» очищены",
+              a and not left and ak_.getCellByPosition(3, 1).getString().startswith("Получатель ")
+              and a.doc.Sheets.getByName("Метизы").getCellByPosition(0, 4).getString() == "", f"{left[:5]}")
     finally:
         if a:
             a.close()
@@ -2567,9 +2593,9 @@ def v34_release_101():
 
 @case
 def v35_upgrade_100():
-    """1.0.1 для пользователя, уже работающего в 1.0: рабочая книга 1.0.0 (собрана исходниками выпуска 1.0.0, рабочий день в ней)
-    обновляется мастером до 1.0.1 — проверка, сборка (сверка каждой ячейки), «сделать рабочей»; данные те же, старая книга и журнал
-    побайтно те же; новая WMS — 1.0.1, колонки сведений, сетка, папка состояния WMS перенесена"""
+    """1.0.2 для пользователя, уже работающего в 1.0: рабочая книга 1.0.0 (собрана исходниками выпуска 1.0.0, рабочий день в ней)
+    обновляется мастером до 1.0.2 — проверка, сборка (сверка каждой ячейки), «сделать рабочей»; данные те же, старая книга и журнал
+    побайтно те же; новая WMS — 1.0.2, колонки сведений, сетка, папка состояния WMS перенесена"""
     import run_prime
     import subprocess
     from harness import git_sources
@@ -2604,7 +2630,7 @@ def v35_upgrade_100():
     h0 = run_prime.sha(p)
     j0 = {f: run_prime.sha(f) for f in glob.glob(os.path.join(work, "WMS_Journal", "*.csv"))}
     rc0, o0 = run_prime.upgrade("check", p)
-    new = os.path.join(d, "WMS_RELEASE_1.0.1", "WMS_WORK")
+    new = os.path.join(d, "WMS_RELEASE_1.0.2", "WMS_WORK")
     rc1, o1 = run_prime.upgrade("build", p, "--to", new)
     rc2, o2 = run_prime.upgrade("promote", "--to", new)
     rep = open(os.path.join(new, "UPGRADE_REPORT.md"), encoding="utf-8").read() if os.path.exists(os.path.join(new, "UPGRADE_REPORT.md")) else ""
@@ -2625,22 +2651,22 @@ def v35_upgrade_100():
         flash = s.B("StGet", "FLASH", module="WmsSafe")
         lb = s.B("LabelPrint", (int(a[3:]),), 1, "40×30", module="WmsItem")
         i2 = issue(s, 2, a, "1", "ива")
-        R.add(c, "новая книга — WMS 1.0.1: «работа разрешена», каждый ЕИ тот же, сведения «Наличия» (кому назначено, поставщик, документ), "
+        R.add(c, "новая книга — WMS 1.0.2: «работа разрешена», каждый ЕИ тот же, сведения «Наличия» (кому назначено, поставщик, документ), "
                  "сетка видна, состояние WMS (копия на флешку) перенесено, этикетка 40×30, проведение работает",
-              s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == "1.0.1" and before == after and ri.startswith("OK:")
+              s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == "1.0.2" and before == after and ri.startswith("OK:")
               and info == ["2", "1", "Участок 3", "Ромашка", "УПД-7"] and ctl.ShowGrid and flash.startswith("2026-10-20") and lb.startswith("OK:этикеток 1")
               and i2.startswith("OK"), f"{s.state()}; {s.sysv('CORE_VERSION')}; {before == after}; {ri}; {info}; {ctl.ShowGrid}; {flash}; {lb}; {i2[:40]}")
         P, inf, _ = s.adjcheck(0)
-        R.add(c, "оракул (журнал воспроизведён независимо): книга 1.0.0, обновлённая до 1.0.1", not P, f"{inf.get('ops')} операций; {P[:4]}")
+        R.add(c, "оракул (журнал воспроизведён независимо): книга 1.0.0, обновлённая до 1.0.2", not P, f"{inf.get('ops')} операций; {P[:4]}")
     finally:
         s.close()
 
 
 @case
 def v36_wizard_072_100_101():
-    """1.0.1 по пути пользователя: склад 0.7.2 → мастером выпуска 1.0.0 рабочая 1.0.0 (в WMS_RELEASE_1.0.0/WMS_WORK) → рабочий день в
-    ней → мастер WMS_UPGRADE.ods выпуска 1.0.1 (распакован рядом) сам находит рабочую 1.0, «ПРОВЕРИТЬ», «СОБРАТЬ И СВЕРИТЬ», «СДЕЛАТЬ
-    РАБОЧЕЙ»; книги 0.7.2 и 1.0.0 и их журналы побайтно те же; новая 1.0.1 — те же ЕИ, «Сверка переноса» и «остаток = движения» те же,
+    """1.0.2 по пути пользователя: склад 0.7.2 → мастером выпуска 1.0.0 рабочая 1.0.0 (в WMS_RELEASE_1.0.0/WMS_WORK) → рабочий день в
+    ней → мастер WMS_UPGRADE.ods выпуска 1.0.2 (распакован рядом) сам находит рабочую 1.0, «ПРОВЕРИТЬ», «СОБРАТЬ И СВЕРИТЬ», «СДЕЛАТЬ
+    РАБОЧЕЙ»; книги 0.7.2 и 1.0.0 и их журналы побайтно те же; новая 1.0.2 — те же ЕИ, «Сверка переноса» и «остаток = движения» те же,
     оракул"""
     import run_prime
     import subprocess
@@ -2703,7 +2729,7 @@ def v36_wizard_072_100_101():
         m5 = w.msg()
     finally:
         w.close()
-    R.add(c, "мастер 1.0.1 сам нашёл рабочую 1.0.0 (а не прежнюю 0.7.2), «ПРОВЕРИТЬ» — можно обновить, «СОБРАТЬ И СВЕРИТЬ», «СДЕЛАТЬ "
+    R.add(c, "мастер 1.0.2 сам нашёл рабочую 1.0.0 (а не прежнюю 0.7.2), «ПРОВЕРИТЬ» — можно обновить, «СОБРАТЬ И СВЕРИТЬ», «СДЕЛАТЬ "
              "РАБОЧЕЙ»; книги 0.7.2 и 1.0.0 и журнал 1.0.0 побайтно те же, 1.0.0 заперта",
           core0 == "1.0.0" and i1.startswith("OK") and found == p100 and m1.startswith("OK:") and "можно обновить" in m1
           and m3.startswith("OK:") and m5.startswith("OK:") and run_prime.sha(old) == h072 and run_prime.sha(p100) == h100
@@ -2721,15 +2747,15 @@ def v36_wizard_072_100_101():
         labels, probs = label_layout(s.doc.Sheets.getByName("Печать"), 1)
         col = s.doc.Sheets.getByName("Выдачи").getCellRangeByPosition(0, 0, 17, 20000).getDataArray()
         i2 = issue(s, max(i for i, r in enumerate(col) if any(str(x).strip() for x in r)) + 1, ei, "1", "Петров")
-        R.add(c, "новая книга — WMS 1.0.1: «работа разрешена», каждый ЕИ тот же, «Сверка переноса» и «остаток = движения» те же, сведения "
+        R.add(c, "новая книга — WMS 1.0.2: «работа разрешена», каждый ЕИ тот же, «Сверка переноса» и «остаток = движения» те же, сведения "
                  "«Наличия», этикетка 40×30 (штрихкод в своей полосе), выдача проводится",
-              s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == "1.0.1" and before == after
+              s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == "1.0.2" and before == after
               and re.sub(r", строк.*", "", rep1) == re.sub(r", строк.*", "", rep0) and rep1.startswith("OK:")
               and bc1 == bc0 and ri.startswith("OK:") and lb.startswith("OK:этикеток 1") and labels[0]["bars"] > 20 and not probs and i2.startswith("OK"),
               f"{s.sysv('CORE_VERSION')}; {before == after}; {rep0[:120]} / {rep1[:120]}; {bc0[:60]!r} / {bc1[:60]!r}; {ri}; {lb}; "
               f"{probs[:2]}; {i2[:300]}")
         P, inf, _ = s.adjcheck(0, initial={}, legacy_mn_empty=False)
-        R.add(c, "оракул (журнал 0.7.2 + 1.0.0 + 1.0.1 воспроизведён независимо): склад 0.7.2 → 1.0.0 → 1.0.1", not P, f"{inf.get('ops')} операций; {P[:4]}")
+        R.add(c, "оракул (журнал 0.7.2 + 1.0.0 + 1.0.2 воспроизведён независимо): склад 0.7.2 → 1.0.0 → 1.0.2", not P, f"{inf.get('ops')} операций; {P[:4]}")
     finally:
         s.close()
 
@@ -2817,6 +2843,611 @@ def v37_kits_by_ei():
         sc = s.B("ActionSelfCheck")
         R.add(c, "самопроверка — без ошибок («остаток = движения» и у комплектов из ЕИ)", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:300])
         oracle(c, s, "комплекты из конкретных ЕИ")
+    finally:
+        s.close()
+
+
+def label_layout_var(pr, rows_list):
+    """like label_layout, for labels of different heights in rows: rows_list[k] — the rows of label k (4 + its extra lines); the band of
+    the barcode is the last row of the label, the bars must lie inside it"""
+    dp = pr.getDrawPage()
+    bars = []
+    for i in range(dp.getCount()):
+        b = dp.getByIndex(i)
+        if b.Name == "wmsbar":
+            p, z = b.getPosition(), b.getSize()
+            bars.append((p.X, p.Y, z.Width, z.Height))
+    labels, probs, y, seen, r0 = [], [], 0, 0, 0
+    for k, nr in enumerate(rows_list):
+        h = [pr.getRows().getByIndex(r0 + j).Height for j in range(nr)]
+        cells = [pr.getCellByPosition(0, r0 + j) for j in range(nr)]
+        band0 = y + sum(h[:-1])
+        band1 = band0 + h[-1]
+        mine = [b for b in bars if y <= b[1] < y + sum(h)]
+        seen += len(mine)
+        for b in mine:
+            if b[1] < band0 or b[1] + b[3] > band1:
+                probs.append(f"этикетка {k + 1}: полоса {b[1]}…{b[1] + b[3]} вне полосы штрихкода {band0}…{band1}")
+        labels.append(dict(text=[c.getString() for c in cells], pt=[round(c.CharHeight, 1) for c in cells], h=h, bars=len(mine)))
+        y += sum(h)
+        r0 += nr
+    if seen != len(bars):
+        probs.append(f"полос вне этикеток: {len(bars) - seen} из {len(bars)}")
+    return labels, probs
+
+
+@case
+def v38_labels_102():
+    """1.0.2: этикетки — (1) товар, который приходит упаковками («В упаковке» в «Номенклатуре» R): на этикетке «Выдача по 1 шт · в уп. 10»,
+    одна этикетка на всю поставку; (2) у деталей (категория «Детали») на этикетке артикул, у остальных нет; (3) серийный номер ЕИ — на
+    этикетке «S/N: …»; (4) массовая печать: для каждой позиции своё число этикеток, «0» — не печатать, кнопка «По количеству единиц» —
+    столько этикеток, сколько пришло (не больше 200 на позицию); этикетки разной высоты, штрихкод всегда в своей полосе; слишком много
+    — отказ до печати"""
+    c = "V38"
+    s = ready(Session(new_wms("v38")))
+    try:
+        gd = s.doc.Sheets.getByName("Номенклатура")
+        gd.getCellByPosition(1, 1).setString("Краска белая 0,9 л")
+        gd.getCellByPosition(2, 1).setString("КР-1")
+        gd.getCellByPosition(17, 1).setValue(10)
+        gd.getCellByPosition(1, 2).setString("Болт М8х30 с шестигранной головкой")
+        gd.getCellByPosition(17, 2).setValue(1)
+        order(s, 1, "1", "Краска белая 0,9 л", qty="100", art="КР-1", S="Краска")
+        receive(s, 1, "100", place="4-1-1", doc="УПД-1")
+        order(s, 2, "2", "Шестерня Z-40", qty="5", art="GR-40", S="Детали")
+        receive(s, 2, "5", place="4-1-2", doc="УПД-2")
+        order(s, 3, "3", "Болт М8х30 с шестигранной головкой", qty="50", art="", S="Метизы")
+        receive(s, 3, "50", place="4-1-3", doc="УПД-3")
+        order(s, 4, "4", "Кабель", qty="3", unit="м", S="Кабель")
+        receive(s, 4, "3", place="4-1-4", doc="УПД-4")
+        eis = [int(ords(s, r)[21][3:]) for r in (1, 2, 3, 4)]
+        s.B("PropSet", ords(s, 2)[21], "SN-77", "", "", module="WmsItem")
+        res = s.B("LabelPrintN", tuple(eis), (1, 2, 1, 1), "40×30", module="WmsItem")
+        pr = s.doc.Sheets.getByName("Печать")
+        # rows per label: краска — EI, name, unit, the pack line, bars = 5; шестерня — EI, name, unit, article / serial, bars = 5 (twice); болт (pack 1 is no pack) and кабель — 4
+        rows = [5, 5, 5, 4, 4]
+        labels, probs = label_layout_var(pr, rows)
+        t0, t1, t3, t4 = labels[0]["text"], labels[1]["text"], labels[3]["text"], labels[4]["text"]   # краска, шестерня, болт, кабель
+        R.add(c, "печать 6 этикеток, у каждой своё число копий: краска 1, шестерня 2, болт 1, кабель 1; штрихкод каждой в своей полосе (этикетки "
+                 "разной высоты в строках), ни одна полоса не заходит на текст",
+              res == "OK:этикеток 5 (40×30 мм)" and not probs and all(x["bars"] > 20 for x in labels), f"{res}; {probs[:3]}; {[(x['bars'], x['h']) for x in labels]}")
+        R.add(c, "краска (в упаковке 10): строка «Выдача по 1 шт · в уп. 10», артикула нет (не «Детали»); шестерня (Детали): «Арт.: GR-40 · S/N: SN-77»; "
+                 "болт (в упаковке 1) и кабель — без дополнительных строк",
+              t0[0].startswith("ЕИ-") and t0[1] == "Краска белая 0,9 л" and t0[2] == "Ед. изм.: шт" and t0[3] == "Выдача по 1 шт · в уп. 10" and t0[4] == ""
+              and t1[3] == "Арт.: GR-40 · S/N: SN-77" and t1[4] == "" and t3[2] == "Ед. изм.: шт" and t3[3] == "" and t4[2] == "Ед. изм.: м" and t4[3] == ""
+              and "Арт" not in " ".join(t0) and "GR-40" not in " ".join(t4), f"{t0}; {t1}; {t3}; {t4}")
+        # the packing of the EI: «в 1 уп — 10 шт»
+        s.B("PackSet", ords(s, 4)[21], "4", "шт", "", module="WmsPack")
+        res2 = s.B("LabelPrintN", (eis[3],), (1,), "40×30", module="WmsItem")
+        labels2, probs2 = label_layout_var(pr, [5])
+        R.add(c, "у ЕИ с фасовкой («в 1 м — 4 шт»): «Выдача по 1 шт · в 1 м — 4 шт»", res2.startswith("OK:") and labels2[0]["text"][3] == "Выдача по 1 шт · в 1 м — 4 шт"
+              and not probs2, f"{res2}; {labels2[0]['text']}; {probs2[:2]}")
+        # zero: not printed; all zeros: refused; a window answered by the seam
+        res3 = s.B("LabelPrintN", tuple(eis), (0, 0, 0, 0), "40×30", module="WmsItem")
+        res4 = s.B("LabelPrintN", tuple(eis[:2]), (0, 3), "40×30", module="WmsItem")
+        labels4, probs4 = label_layout_var(pr, [5, 5, 5])
+        R.add(c, "«0» — позиция не печатается: все нули — отказ «ни для одной позиции не указано число», (0, 3) — три этикетки только второй позиции",
+              res3.startswith("ERR:") and "не указано число этикеток" in res3 and res4 == "OK:этикеток 3 (40×30 мм)" and not probs4
+              and all("GR-40" in x["text"][3] for x in labels4), f"{res3}; {res4}; {[x['text'][1] for x in labels4]}")
+        res5 = s.B("LabelPrintN", tuple(eis), (200, 200, 200, 200), "40×30", module="WmsItem")
+        R.add(c, "800 этикеток не помещаются на странице «Печать» — отказ до печати с подсказкой, страница не тронута",
+              res5.startswith("ERR:") and "помещается" in res5 and pr.getCellByPosition(0, 0).getString().startswith("ЕИ-"), f"{res5}; {pr.getCellByPosition(0, 0).getString()}")
+        # the window: the first position 2 labels, the second 0, the third and the fourth as proposed (1); the size as proposed
+        s.goto("Заказы", "$A$2:$A$5")
+        s.B("TestPrimeForm", "2\t0\t1\t1\t40×30", module="WmsPrimeUi")
+        w1 = s.B("LabelWindow", tuple(eis), module="WmsItem")
+        R.add(c, "окно этикеток: для каждой позиции своё число (2, 0, 1, 1) — «OK:этикеток 4»", w1 == "OK:этикеток 4 (40×30 мм)", w1)
+        # «По количеству единиц»: краска 100, шестерня 5, болт 50, кабель 3 → 158 labels (the cap 200 per position is not reached)
+        s.B("TestPrimeForm", "1\t1\t1\t1\t40×30", module="WmsPrimeUi")
+        s.B("TestPrimeFormNext", module="WmsPrimeUi")
+        w2 = s.B("LabelWindow", tuple(eis), module="WmsItem")
+        u = [s.B("LbUnits", e, module="WmsItem") for e in eis]
+        R.add(c, "кнопка «По количеству единиц»: этикеток столько, сколько пришло — 100 + 5 + 50 + 3 = 158", u == [100, 5, 50, 3] and w2 == "OK:этикеток 158 (40×30 мм)",
+              f"{u}; {w2}")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:300])
+        oracle(c, s, "этикетки 1.0.2")
+    finally:
+        s.close()
+
+
+@case
+def v39_serial_parts():
+    """1.0.2: детали с серийным номером — «Серийные…»: из ЕИ в N деталей получается N отдельных ЕИ (по одной детали; тот же артикул,
+    место, «годен до» и примечание), каждый со своим серийным номером и своей этикеткой («Арт.: … · S/N: …»); деталь без номера остаётся в
+    общем ЕИ; когда номера есть у всех, последняя деталь остаётся в самом ЕИ; повтор номера, чужой номер, лишние номера, дробный остаток,
+    фасовка — отказ до проведения; цепочка прежних операций SPLIT и EI_PROP (журнал и оракул те же)"""
+    c = "V39"
+    s = ready(Session(new_wms("v39")))
+    try:
+        order(s, 1, "1", "Шестерня Z-40", qty="5", art="GR-40", S="Детали")
+        receive(s, 1, "5", place="4-2-1", doc="УПД-1")
+        order(s, 2, "2", "Датчик давления", qty="3", art="DD-7", S="Детали")
+        receive(s, 2, "3", place="4-2-2", doc="УПД-2")
+        order(s, 3, "3", "Лента", qty="2.5", unit="м", art="L-1", S="Лента")
+        receive(s, 3, "2,5", place="4-2-3", doc="УПД-3")
+        e1, e2, e3 = [ords(s, r)[21] for r in (1, 2, 3)]
+        n1, n2 = int(e1[3:]), int(e2[3:])
+        s.B("PropSet", e1, "", dtext(300), "проверена", module="WmsItem")
+        seq0 = int(s.sysv("LAST_SEQ"))
+        bad_dup = s.B("SerialSplit", e1, ("SN-9", "sn-9"), module="WmsParts")
+        bad_many = s.B("SerialSplit", e1, ("a", "b", "c", "d", "e", "f"), module="WmsParts")
+        bad_none = s.B("SerialSplit", e1, ("", " "), module="WmsParts")
+        bad_frac = s.B("SerialSplit", e3, ("L-1",), module="WmsParts")
+        R.add(c, "отказ до проведения: номер дважды («SN-9», «sn-9»), номеров больше деталей, ни одного номера, дробный остаток 2,5 м — "
+                 "журнал не вырос", bad_dup.startswith("ERR:") and "дважды" in bad_dup and bad_many.startswith("ERR:") and "а деталей в" in bad_many
+              and bad_none.startswith("ERR:") and "ни один" in bad_none and bad_frac.startswith("ERR:") and "целых" in bad_frac
+              and int(s.sysv("LAST_SEQ")) == seq0, f"{bad_dup}; {bad_many}; {bad_none}; {bad_frac}")
+        res = s.B("SerialSplit", e1, ("SN-1", "SN-2", "", "SN-4"), module="WmsParts")
+        new = res.split("|")[1].split(",") if res.startswith("OK:") else []
+        nn = [int(x[3:]) for x in new]
+        st = s.doc.Sheets.getByName("Наличие")
+        rows = [st.getCellRangeByPosition(0, k, 9, k).getDataArray()[0] for k in nn]
+        props = [s.B("PropOf", k, module="WmsItem") for k in nn]
+        orig = st.getCellRangeByPosition(0, n1, 9, n1).getDataArray()[0]
+        R.add(c, "5 деталей, номера у трёх (SN-1, SN-2, —, SN-4): три новых ЕИ по 1 шт с теми же названием, артикулом, категорией «Детали» и местом; "
+                 "у каждого свой серийный №, «годен до» и примечание исходного; в исходном ЕИ осталось 2 без номера",
+              res.startswith("OK:3|") and len(nn) == 3 and all(r[4] == 1.0 and r[1] == "Шестерня Z-40" and r[2] == "GR-40" and r[6] == "Детали" and r[5] == "4-2-1" for r in rows)
+              and [p[0] for p in props] == ["SN-1", "SN-2", "SN-4"] and all(p[2] == "проверена" and p[1] > 0 for p in props) and orig[4] == 2.0
+              and s.B("PropOf", n1, module="WmsItem")[0] == "", f"{res}; {[r[:7] for r in rows]}; {props}; {orig[:7]}")
+        ops = s.journal()[0]
+        types = [o[4] if isinstance(o, (list, tuple)) else o for o in ops[-6:]] if ops else []
+        R.add(c, "в журнале цепочка прежних операций: 3 × SPLIT и 3 × EI_PROP (новых видов операций нет); поиск по серийному номеру находит ЕИ",
+              int(s.sysv("LAST_SEQ")) == seq0 + 6 and s.B("SerialEI", "SN-2", module="WmsItem") == nn[1], f"{s.sysv('LAST_SEQ')} {seq0}; {types}")
+        dup = s.B("SerialSplit", e1, ("SN-1",), module="WmsParts")
+        R.add(c, "номер, уже записанный у другого ЕИ («SN-1»), — отказ «уже записан у ЕИ-…»", dup.startswith("ERR:") and "уже записан у ЕИ-" in dup, dup)
+        # every part has a number: the last stays in the EI itself
+        res2 = s.B("SerialSplit", e2, ("A-1", "A-2", "A-3"), module="WmsParts")
+        new2 = res2.split("|")[1].split(",") if res2.startswith("OK:") else []
+        R.add(c, "у всех трёх деталей есть номера: два новых ЕИ, третья деталь осталась в самом ЕИ с номером A-3 (его остаток 1)",
+              res2.startswith("OK:3|") and len(new2) == 3 and new2[-1] == e2 and s.stock(n2) == 1.0 and s.B("PropOf", n2, module="WmsItem")[0] == "A-3"
+              and [s.B("PropOf", int(x[3:]), module="WmsItem")[0] for x in new2] == ["A-1", "A-2", "A-3"], f"{res2}; {s.stock(n2)}")
+        # the labels of the serial parts: the article and the serial number
+        lab = s.B("LabelPrintN", tuple(nn), (1, 1, 1), "40×30", module="WmsItem")
+        labels, probs = label_layout_var(s.doc.Sheets.getByName("Печать"), [5, 5, 5])
+        R.add(c, "этикетки трёх серийных деталей: «Арт.: GR-40 · S/N: SN-1 / SN-2 / SN-4»", lab == "OK:этикеток 3 (40×30 мм)" and not probs
+              and [x["text"][3] for x in labels] == ["Арт.: GR-40 · S/N: SN-1", "Арт.: GR-40 · S/N: SN-2", "Арт.: GR-40 · S/N: SN-4"], f"{lab}; {[x['text'] for x in labels]}")
+        # the window: 2 parts left in the first EI — the numbers typed in the form, the question about the labels answered «Напечатать»
+        s.B("TestPrimeForm", "W-1\tW-2", module="WmsPrimeUi")
+        w = s.B("SerialWindow", n1, module="WmsParts")
+        labels2, probs2 = label_layout_var(s.doc.Sheets.getByName("Печать"), [5, 5])
+        R.add(c, "окно «Серийные…»: в ЕИ осталось 2 детали, вписаны W-1, W-2 — остался один ЕИ с W-2 и один новый с W-1; этикетки напечатаны (ответ «Напечатать» по умолчанию)",
+              w.startswith("OK:2|") and not probs2 and sorted(x["text"][3] for x in labels2) == ["Арт.: GR-40 · S/N: W-1", "Арт.: GR-40 · S/N: W-2"], f"{w}; {[x['text'] for x in labels2]}")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок («остаток = движения» у всех новых ЕИ)", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:300])
+        oracle(c, s, "серийные детали")
+    finally:
+        s.close()
+
+
+def doc_of(s, name="Text"):
+    """a document made by WMS (the last one) as text: the whole text or the cells of its first table"""
+    return s.B("DcDocText" if name == "Text" else "DcDocTable", module="WmsDocs")
+
+
+@case
+def v40_acts():
+    """1.0.2: акт по выделенным строкам «Выдач» — документ Writer по образцу пользователя: «АКТ № …», «приема-передачи оборудования»
+    (офису) или «выдачи оборудования» (получателю), город и дата, таблица № п/п · Наименование · Артикул · Количество · Ед изм (серийный №
+    в наименовании), подписи; номер из реестра «Акты» и в «№ документа выдачи» выдач (ISSUE_DOC); повтор акта; выдачи разным
+    получателям — отказ"""
+    c = "V40"
+    s = ready(Session(new_wms("v40")))
+    try:
+        order(s, 1, "1", "Перфоратор Bosch", qty="4", art="ПФ-1")
+        receive(s, 1, "4", place="3-1-1", doc="УПД-1")
+        order(s, 2, "2", "Кабель ВВГ 3х2,5", qty="30", unit="м", art="")
+        receive(s, 2, "30", place="3-1-2", doc="УПД-2")
+        order(s, 3, "3", "Канистра 5 л", qty="2", art="КН-5")
+        receive(s, 3, "2", place="3-1-3", doc="УПД-3")
+        e1, e2, e3 = [ords(s, r)[21] for r in (1, 2, 3)]
+        s.B("PropSet", e1, "SN-5", "", "", module="WmsItem")
+        s.B("PackSet", e3, "4", "кан", "", module="WmsPack")
+        i1 = issue(s, 1, e1, "1", "офис")
+        i2 = issue(s, 2, e2, "4", "офис")
+        i3 = issue(s, 3, e1, "1", "ива")
+        i4 = issue(s, 4, e3, "0,25", "офис")
+        ish = s.doc.Sheets.getByName("Выдачи")
+        R.add(c, "четыре выдачи проведены (две офису, одна Иванову, одна канистра частью)", all(x.startswith("OK") for x in (i1, i2, i3, i4)), f"{i1[:30]}; {i2[:30]}; {i3[:30]}; {i4[:30]}")
+        ak = s.doc.Sheets.getByName("Акты")
+        seq0 = int(s.sysv("LAST_SEQ"))
+        # the act to the office: rows 1 and 2
+        s.goto("Выдачи", "$A$2:$A$3")
+        r1 = s.B("ActFromSelection", module="WmsDocs")
+        table = doc_of(s, "Table").split("\n")
+        text = doc_of(s)
+        iss = [ish.getCellByPosition(1, k).getString() for k in (1, 2, 3, 4)]
+        reg = [list(x) for x in ak.getCellRangeByPosition(0, 1, 6, 1).getDataArray()]
+        R.add(c, "акт офису по выдачам 1–2: «АКТ № 1», «приема-передачи оборудования», «г Москва» и дата, «а офисом принято»; таблица: №, наименование "
+                 "с серийным номером, артикул, количество, единица; подписи «сдал / принял»",
+              r1 == "OK:1|1|Офис|2" and text.startswith("АКТ № 1\nприема-передачи оборудования\nг Москва\t" + TODAY + " г.\n")
+              and "а офисом принято следующее оборудование:" in text and table[0] == "№ п/п|Наименование|Артикул|Количество|Ед изм"
+              and table[1] == "1.|Перфоратор Bosch, S/N SN-5|ПФ-1|1|шт" and table[2] == "2.|Кабель ВВГ 3х2,5||4|м" and len(table) == 3
+              and "Оборудование сдал:\tОборудование принял:" in text, f"{r1}; {text[:260]!r}; {table}")
+        R.add(c, "реестр «Акты»: № 1, сегодня, «Приёма-передачи (в офис)», Офис, 2 позиции, выдачи «1,2»; «№ документа выдачи» выдач 1–2 — «А-1», у других пусто; "
+                 "в журнале одна операция ISSUE_DOC", reg[0][0] == 1.0 and reg[0][2] == "Приёма-передачи (в офис)" and reg[0][3] == "Офис" and reg[0][4] == 2.0
+              and reg[0][5] == "1,2" and iss == ["А-1", "А-1", "", ""] and int(s.sysv("LAST_SEQ")) == seq0 + 1, f"{reg}; {iss}; {s.sysv('LAST_SEQ')} {seq0}")
+        s.B("DcDocClose", module="WmsDocs")
+        # the act of issue to a person: one row selected, «Только эта выдача», the kind suggested for a person — «выдачи»
+        s.goto("Выдачи", "$A$4")
+        r2 = s.B("ActFromSelection", module="WmsDocs")
+        text2 = doc_of(s)
+        table2 = doc_of(s, "Table").split("\n")
+        R.add(c, "акт выдачи Иванову: «АКТ № 2», «выдачи оборудования», «а получателем Иванов Иван Андреевич принято», «Оборудование выдал / получил», под линией получателя — "
+                 "его ФИО; номер «А-2» в выдаче 3",
+              r2 == "OK:2|2|Иванов Иван Андреевич|1" and text2.startswith("АКТ № 2\nвыдачи оборудования\n") and "а получателем Иванов Иван Андреевич принято следующее оборудование:" in text2
+              and "Оборудование выдал:\tОборудование получил:" in text2 and "/ Иванов Иван Андреевич /" in text2 and table2[1] == "1.|Перфоратор Bosch, S/N SN-5|ПФ-1|1|шт"
+              and ish.getCellByPosition(1, 3).getString() == "А-2", f"{r2}; {text2!r}")
+        s.B("DcDocClose", module="WmsDocs")
+        # a part of a unit with a packing: «1 кан» of «1 шт = 4 кан»
+        s.goto("Выдачи", "$A$5")
+        r3 = s.B("ActFromSelection", module="WmsDocs")
+        table3 = doc_of(s, "Table").split("\n")
+        R.add(c, "канистра частью (0,25 шт = 1 кан): в акте «1» и «кан», а не «0,25 шт»", r3 == "OK:3|1|Офис|1" and table3[1] == "1.|Канистра 5 л|КН-5|1|кан", f"{r3}; {table3}")
+        s.B("DcDocClose", module="WmsDocs")
+        # different recipients selected: a refusal, no number taken
+        s.goto("Выдачи", "$A$2:$A$4")
+        r4 = s.B("ActFromSelection", module="WmsDocs")
+        nreg = len([1 for x in ak.getCellRangeByPosition(0, 1, 0, 30).getDataArray() if x[0] != ""])
+        R.add(c, "выдачи разным получателям — отказ «разным получателям», номер не взят (в реестре 3 акта)", r4.startswith("ERR:") and "разным получателям" in r4 and nreg == 3, f"{r4}; {nreg}")
+        # the act again: the same number, date and rows; the register does not grow, the journal does not grow
+        seq1 = int(s.sysv("LAST_SEQ"))
+        rp = s.B("ActRepeat", 1, False, module="WmsDocs")
+        tp = doc_of(s, "Table").split("\n")
+        textp = doc_of(s)
+        R.add(c, "«Повторить акт» № 1: тот же номер, дата, строки и серийный номер; реестр и журнал не выросли", rp == "OK:1|1|Офис|2" and textp.startswith("АКТ № 1\n") and tp[1] == table[1]
+              and tp[2] == table[2] and int(s.sysv("LAST_SEQ")) == seq1 and len([1 for x in ak.getCellRangeByPosition(0, 1, 0, 30).getDataArray() if x[0] != ""]) == 3, f"{rp}; {tp}")
+        s.B("DcDocClose", module="WmsDocs")
+        r5 = s.B("ActRepeat", 0, False, module="WmsDocs")
+        R.add(c, "«Повторить акт» без строки реестра — понятный отказ", r5.startswith("ERR:") and "строку акта" in r5, r5)
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок («№ документа выдачи» записан прежней операцией)", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:300])
+        oracle(c, s, "акты")
+    finally:
+        s.close()
+
+
+@case
+def v41_day_report():
+    """1.0.2: отчёт дня — документ Writer по шаблону пользователя («1. Завершено сегодня», «2. Задачи на <следующий рабочий день>», «3. В
+    процессе», «4. Контроль данных»): приёмка (машины, позиции, количество, внутренние коды ЕИ, адресное хранение), иной приход, выдачи
+    — «Оцифровка выдач за <дата>» за прошлый рабочий день отдельно от выдач сегодняшним числом (выдача, проведённая и удалённая в тот
+    же день, не считается), акты, исправления, свои строки с листа «Отчёт дня»; график 5/2: выходные пропускаются"""
+    import datetime
+    c = "V41"
+    names = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
+    acc = ["понедельник", "вторник", "среду", "четверг", "пятницу", "субботу", "воскресенье"]
+    s = ready(Session(new_wms("v41")))
+    try:
+        today = T
+        prev = today - datetime.timedelta(days=1)
+        while prev.weekday() >= 5:
+            prev -= datetime.timedelta(days=1)
+        nxt = today + datetime.timedelta(days=1)
+        while nxt.weekday() >= 5:
+            nxt += datetime.timedelta(days=1)
+        order(s, 1, "1", "Краска белая 0,9 л", qty="100", art="КР-1")
+        receive(s, 1, "100", place="4-1-1", doc="УПД-1")
+        order(s, 2, "2", "Кабель ВВГ", qty="3", unit="м")
+        receive(s, 2, "3", place="4-1-2", doc="УПД-2")
+        order(s, 3, "3", "Шестерня Z-40", qty="5", art="GR-40")
+        receive(s, 3, "5", place="4-1-3", doc="УПД-3")
+        e1, e2, e3 = [ords(s, r)[21] for r in (1, 2, 3)]
+        s.special_input(1, B="Производство", D="Кронштейн сварной", F="12", G="шт", H=TODAY, I="P-3")
+        sp = s.click_spc("BtnSpcPost", 1)
+        car = s.B("CarArrive", "Газель А123ВС", "Петрович", module="WmsCar")
+
+        def issue_on(r, ei, qty, who, d):
+            put(s, "Выдачи", r, L=ei, E=qty, H=serial((d - today).days), I=who)
+            return s.I("IssuePostRow", r)
+
+        i1 = issue_on(1, e1, "5", "офис", prev)
+        i2 = issue_on(2, e2, "1", "ива", prev)
+        i3 = issue_on(3, e3, "1", "егр", today)
+        i4 = issue_on(4, e3, "1", "егр", today)
+        s.U("TestOpReason", "ошибка ввода")
+        dl = s.I("IssueDeleteRow", 4)
+        s.goto("Выдачи", "$A$2")
+        ak = s.B("ActFromSelection", module="WmsDocs")
+        s.B("DcDocClose", module="WmsDocs")
+        dr = s.doc.Sheets.getByName("Отчёт дня")
+        dr.getCellByPosition(0, 5).setString("Оформление пропусков для курьеров")
+        dr.getCellByPosition(1, 2).setString("Иванов, кладовщик.")
+        seq = int(s.sysv("LAST_SEQ"))
+        ok = all(x.startswith("OK") for x in (i1, i2, i3, i4, dl, ak))
+        R.add(c, "день подготовлен: приход 3 позиций, иной приход, машина, 4 выдачи (две прошлого рабочего дня, две сегодняшнего), удаление одной, акт",
+              ok and str(sp).startswith("OK") and str(car).startswith("OK"), f"{[x[:30] for x in (i1, i2, i3, i4, dl, ak)]}; {sp}; {str(car)[:60]}")
+        res = s.B("DayReport", serial(0), False, module="WmsDocs")
+        text = doc_of(s)
+        lines = text.split("\n")
+        R.add(c, "шаблон: дата «дд.мм.гггг г.», подпись с листа, четыре раздела; «Задачи на <следующий рабочий день> (дата)»; «в процессе» — по умолчанию «Работа над учётом склада»",
+              res.startswith("OK:") and lines[0] == TODAY + " г." and lines[1] == "Иванов, кладовщик." and "1. Завершено сегодня:" in lines
+              and f"2. Задачи на {acc[nxt.weekday()]} ({nxt.strftime('%d.%m.%Y')}):" in lines and "3. В процессе:" in lines and "4. Контроль данных (по журналу WMS):" in lines
+              and "• Работа над учётом склада" in lines, f"{res}; {lines[:8]}")
+        pd = prev.strftime("%d.%m.%Y")
+        bul = [x[2:] for x in lines if x.startswith("• ")]
+        want = {
+            "машины": "Принято машин с поставками: 1 (Петрович)",
+            "приёмка": "Приёмка по заказам: принято позиций — 3; количество: 105 шт, 3 м. Товар пересчитан и принят в WMS",
+            "иной": "Иной приход (инвентаризация текущих остатков, принятое от производства и др.): записей — 1 (Производство — 1)",
+            "коды": "Присвоены внутренние коды (ЕИ) для складского учёта: 4 — от ЕИ-00000201 до ЕИ-00000204",
+            "хранение": "Выставлено на адресное хранение (указано место): 4",
+            "оцифровка": f"Оцифровка выдач за {pd} ({names[prev.weekday()]}): проведено выдач — 2; выдано: 5 шт, 1 м; получатели: ",
+            "сегодня": f"Выдачи сегодняшним числом ({TODAY}): проведено выдач — 1; выдано: 1 шт; получатели: Ермолин Егор Павлович — 1",
+            "акты": "Оформлены акты (документы и товар к отправке): 1 — № 1 (приёма-передачи (в офис), Офис, позиций — 1)",
+            "накладные": "Оформлены накладные / документы выдачи: А-1",
+            "исправления": "Исправления учёта: исправлено операций — 0, удалено (сторно) — 1",
+            "вручную": "Оформление пропусков для курьеров",
+        }
+        got = {k: next((b for b in bul if b.startswith(v)), None) for k, v in want.items()}
+        R.add(c, "«Завершено сегодня»: машины, приёмка со суммой по единицам, иной приход по источникам, внутренние коды ЕИ, адресное хранение, "
+                 "оцифровка выдач за прошлый рабочий день (2 выдачи, 5 шт и 1 м) отдельно от сегодняшних (1; удалённая не считается), акты, накладные, исправления, "
+                 "строка с листа «Отчёт дня»", all(v is not None for v in got.values()),
+              f"{[k for k, v in got.items() if v is None]}; {[b for b in bul if 'выдач' in b.lower()]}")
+        ctl = [x for x in bul if x.startswith("Операций проведено за день:")]
+        R.add(c, "«Контроль данных»: операций за день — столько же, сколько в журнале (с № 1), число ЕИ в учёте",
+              len(ctl) == 1 and ctl[0] == f"Операций проведено за день: {seq} (журнал № 1–{seq})" and any(b.startswith("ЕИ в учёте: ") for b in bul), f"{ctl}; {seq}")
+        s.B("DcDocClose", module="WmsDocs")
+        # a later day: the digitising of the working days after the last date of an issue (5/2: the weekend is skipped)
+        later = today + datetime.timedelta(days=4)
+        s.B("BtnDrClear", module="WmsDocs")
+        res2 = s.B("DayReport", serial(4), False, module="WmsDocs")
+        t2 = doc_of(s)
+        days = []
+        d = today
+        while True:
+            d += datetime.timedelta(days=1)
+            if d > later:
+                break
+            if d.weekday() < 5:
+                days.append(f"{d.strftime('%d.%m.%Y')} ({names[d.weekday()]})")
+        want_line = "Оцифровка выдач за " + ", ".join(days) + f" (последняя оцифрованная дата выдачи — {TODAY})"
+        R.add(c, "задачи: «Оцифровка выдач за …» — рабочие дни после последней даты выдачи до дня отчёта, выходные пропущены; и «Операций в журнале за этот день нет»",
+              res2.startswith("OK:") and ("• " + want_line) in t2.split("\n") and "• операций в WMS за этот день не проведено" in t2.split("\n")
+              and "• Операций в журнале за этот день нет" in t2.split("\n"), f"{res2}; {want_line}; {[x for x in t2.split(chr(10)) if 'Оцифровка' in x]}")
+        s.B("DcDocClose", module="WmsDocs")
+        fri = datetime.date(2026, 10, 23)
+        r_work = [s.B("DrIsWork", float((fri + datetime.timedelta(days=k) - datetime.date(1899, 12, 30)).days), module="WmsDocs") for k in range(0, 4)]
+        nw = s.B("DrNextWork", float((fri - datetime.date(1899, 12, 30)).days), module="WmsDocs")
+        R.add(c, "график 5/2: пятница — рабочий, суббота и воскресенье — нет, понедельник — да; после пятницы следующий рабочий день — понедельник",
+              list(r_work) == [True, False, False, True] and int(nw) == (datetime.date(2026, 10, 26) - datetime.date(1899, 12, 30)).days, f"{r_work}; {nw}")
+        # «Очистить «Сделано вручную»» (done above before the report of the later day)
+        R.add(c, "«Очистить «Сделано вручную»» — список очищен, задачи и «в процессе» остались", dr.getCellByPosition(0, 5).getString() == ""
+              and dr.getCellByPosition(2, 5).getString() == "Выдача инструмента/оборудования" and dr.getCellByPosition(4, 5).getString() == "Работа над учётом склада", "")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок; журнал отчётом не менялся", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0") and int(s.sysv("LAST_SEQ")) == seq, sc[:200])
+        oracle(c, s, "отчёт дня")
+    finally:
+        s.close()
+
+
+@case
+def v42_categories_fasteners():
+    """1.0.2: подсказки категорий по названию («Категории»): пустая «Категория» на «Заказах» и в «Ином приходе» получает подсказку, своя
+    категория пользователя не заменяется; справочник «Метизы» из «Наличия»: тип, размер, стандарт, класс, покрытие; одна строка на
+    наименование с артикулом (остаток, места, число ЕИ), порядок по типу–диаметру–длине, поиск по словам; «Болторез» и «Болт» с
+    чужой категорией — не метизы; журнал справочниками не меняется"""
+    c = "V42"
+    s = ready(Session(new_wms("v42")))
+    try:
+        sug = lambda n: s.B("TestCategory", n, module="WmsCat")
+        cases = [("Болт М8х30 DIN 933 8.8 оцинкованный", "Метизы"), ("Гайка М8", "Метизы"), ("Болторез 900 мм", "Инструмент"),
+                 ("Выключатель одноклавишный", "Электрика"), ("Кабель ВВГ 3х2,5", "Кабель и провод"), ("Шестерня Z-40", "Детали"),
+                 ("Краска белая 0,9 л", "Химия и краски"), ("Перчатки (хлопок)", "СИЗ"), ("Лист стальной 3 мм", "Металл"), ("Уголок 50х50", "Металл"),
+                 ("Нечто странное", ""), ("", "")]
+        got = [(n, sug(n)) for n, _ in cases]
+        bad = [(n, g, w) for (n, g), (_, w) in zip(got, cases) if g != w]
+        R.add(c, "подсказки по названию: болт/гайка → Метизы, болторез → Инструмент (узкая категория выше), выключатель — не «ключ», кабель, шестерня, краска, "
+                 "перчатки в скобках, лист стальной, уголок; незнакомое название — без подсказки", not bad, str(bad))
+        seq0 = int(s.sysv("LAST_SEQ"))
+        # «Заказы»: the name typed → the empty category gets the hint; the category typed by the user stays
+        s.type_ord("B", 1, "Болт М8х30 DIN 933 8.8 оцинкованный")
+        s.type_ord("B", 2, "Нечто странное")
+        s.type_ord("S", 3, "Моя группа")
+        s.type_ord("B", 3, "Гайка М8 DIN 934")
+        s.type_ord("B", 4, "Шестерня Z-40")
+        s.type_ord("S", 4, "")
+        osh = s.doc.Sheets.getByName("Заказы")
+        cats = [osh.getCellByPosition(18, r).getString() for r in (1, 2, 3, 4)]
+        R.add(c, "«Заказы»: название → «Категория» «Метизы»; незнакомое — пусто; своя «Моя группа» не заменена; удалённая вручную категория после "
+                 "того, как название уже есть, не возвращается", cats == ["Метизы", "", "Моя группа", ""], str(cats))
+        # «Иной приход»: the name of a new part
+        s.special_input(1, B="Производство", D="Подшипник 6204")
+        scat = s.doc.Sheets.getByName("Иной приход").getCellByPosition(9, 1).getString()
+        R.add(c, "«Иной приход»: название «Подшипник 6204» → категория «Детали»", scat == "Детали", scat)
+        # the list of the categories and the own words
+        v = osh.getCellByPosition(18, 6).Validation
+        R.add(c, "«Категория»: выпадающий список из листа «Категории», но любое своё слово допускается (сообщение об ошибке выключено)",
+              v.Type.value == "LIST" and "Категории" in v.getFormula1() and not v.ShowErrorMessage, f"{v.Type.value}; {v.getFormula1()}; {v.ShowErrorMessage}")
+        s.goto("Категории", "$A$12")
+        s.o.dispatch(s.doc, ".uno:EnterString", StringName="Мебель")
+        s.goto("Категории", "$B$12")
+        s.o.dispatch(s.doc, ".uno:EnterString", StringName="стол, стул, шкаф")
+        R.add(c, "своя строка в «Категории» («Мебель: стол, стул, шкаф») работает сразу, без перезапуска", sug("Стул офисный") == "Мебель", sug("Стул офисный"))
+        # fasteners from the stock
+        n0 = int(s.B("FastRefresh", "", module="WmsCat").split(":")[1])
+        order(s, 5, "5", "Болт М8х30 DIN 933 8.8 оцинкованный", qty="100", art="B-830")
+        order(s, 6, "6", "Болт М8х20 DIN 933 8.8 оцинкованный", qty="50", art="B-820")
+        order(s, 7, "7", "Болт М10х30 DIN 933 8.8 оцинкованный", qty="40", art="B-1030")
+        order(s, 8, "8", "Гайка М8 DIN 934", qty="200", art="G-8")
+        order(s, 9, "9", "Болторез 900 мм", qty="1", art="BR-900")
+        order(s, 10, "10", "Болт М8х30 DIN 933 8.8 оцинкованный", qty="20", art="B-830")
+        order(s, 11, "11", "Заклёпка 4,8х10 алюминий", qty="500", art="Z-48", S="Крепёж")
+        order(s, 12, "12", "Болт М6 для мебели", qty="10", art="M-6", S="Мебель")
+        places = {5: "5-1-1", 6: "5-1-2", 7: "5-1-3", 8: "5-2-1", 9: "6-1-1", 10: "5-1-4", 11: "5-2-2", 12: "6-1-2"}
+        res = [receive(s, r, str(q), doc=f"УПД-{r}", place=pl) for r, q, pl in
+               [(5, 100, places[5]), (6, 50, places[6]), (7, 40, places[7]), (8, 200, places[8]), (9, 1, places[9]), (10, 20, places[10]),
+                (11, 500, places[11]), (12, 10, places[12])]]
+        seq1 = int(s.sysv("LAST_SEQ"))
+        R.add(c, "приход 8 позиций (болты, гайка, болторез, заклёпка со своей категорией «Крепёж», болт для мебели с категорией «Мебель»)",
+              all(str(x).startswith("OK") for x in res), str(res)[:200])
+        fr = s.B("FastRefresh", "", module="WmsCat")
+        n_all = int(fr.split(":")[1]) if fr.startswith("OK:") else -1
+        fsh = s.doc.Sheets.getByName("Метизы")
+
+        def rows_of(k):
+            return [list(r) for r in fsh.getCellRangeByPosition(0, 4, 10, 4 + k - 1).getDataArray()] if k > 0 else []
+
+        mine = ("B-820", "B-830", "B-1030", "G-8", "Z-48")
+        rr = rows_of(n_all)
+        ours = [x for x in rr if x[6] in mine]
+        # the fixture book has its own fasteners: ours are 5 new rows among them, and neither «Болторез» nor «Болт для мебели» is there
+        R.add(c, "«Метизы»: к метизам книги добавились 5 строк — Болт М8×20, Болт М8×30 (две партии одной строкой), Болт М10×30, Гайка М8, Заклёпка (в таком порядке: "
+                 "тип, диаметр, длина); болторез и «Болт для мебели» с чужой категорией — не метизы",
+              n_all == n0 + 5 and [x[6] for x in ours] == list(mine) and not any(("Болторез" in x[5] or "для мебели" in x[5]) for x in rr), f"{fr} (было {n0}); {[x[6] for x in ours]}")
+        b830 = ours[1]
+        R.add(c, "строка «Болт М8х30»: тип, размер М8×30, DIN 933, класс 8.8, покрытие, остаток двух партий 120, места «5-1-1; 5-1-4», ЕИ с остатком 2",
+              b830[0] == "Болт" and b830[1] == "М8×30" and b830[2] == "DIN 933" and b830[3] == "8.8" and b830[4] == "Оцинкованный" and b830[6] == "B-830"
+              and float(b830[7]) == 120 and b830[9] == "5-1-1; 5-1-4" and float(b830[10]) == 2, str(b830))
+        zk = ours[4]
+        R.add(c, "«Заклёпка 4,8х10»: размер «4,8×10», покрытие «Алюминий», остаток 500", zk[0] == "Заклёпка" and zk[1] == "4,8×10" and zk[4] == "Алюминий"
+              and float(zk[7]) == 500, str(zk))
+        parse = lambda n: s.B("TestFastParse", n, module="WmsCat").replace(",", ".")
+        ps = [(parse("Болт М8х30 DIN 933 8.8 оцинкованный"), "М8×30|8|30|DIN 933|8.8|Оцинкованный|Болт".replace(",", ".")),
+              (parse("Винт 4,2х32 ГОСТ 1144-80 А2"), "4.2×32|4.2|32|ГОСТ 1144-80|А2||Винт"),
+              (parse("Гайка М10 DIN 934 нержавеющая"), "М10|10|0|DIN 934||Нержавеющая сталь|Гайка"),
+              (parse("Шайба 8"), "|0|0|||" + "|Шайба"),
+              (parse("Саморез 3,5х25 чёрный"), "3.5×25|3.5|25|||Чёрный|Саморез")]
+        badp = [(g, w) for g, w in ps if g != w]
+        R.add(c, "разбор названия: размер (М8×30, 4,2×32, М10, «8» не размер), стандарт (DIN, ГОСТ), класс (8.8, А2), покрытие, тип", not badp, str(badp))
+
+        def found(words):
+            n = s.B("FastRefresh", words, module="WmsCat")
+            k = int(n.split(":")[1]) if n.startswith("OK:") else -1
+            return k, [x[6] for x in rows_of(k)]
+
+        k1, n1 = found("b-8")
+        k2, n2 = found("5-1-4")
+        k3, n3 = found("g-8 din 934")
+        k4, n4 = found("нет такого слова")
+        k5, n5 = found("заклепка алюм")
+        R.add(c, "поиск по словам: артикул «b-8» — 2 болта М8; место «5-1-4» — Болт М8×30; «g-8 din 934» — гайка; «заклепка алюм» (е вместо ё) — заклёпка; "
+                 "чужое слово — 0 строк",
+              sorted(n1) == ["B-820", "B-830"] and "B-830" in n2 and n3 == ["G-8"] and n5 == ["Z-48"] and k4 == 0, f"{n1}; {n2}; {n3}; {n5}; {k4}")
+        # the search cell of the sheet, as the user types: Enter in «Найти»
+        s.goto("Метизы", "$B$2")
+        s.o.dispatch(s.doc, ".uno:EnterString", StringName="g-8")
+        r6 = rows_of(1)
+        stat = fsh.getCellByPosition(0, 2).getString()
+        R.add(c, "ячейка «Найти» листа «Метизы»: «g-8» + Enter — в списке одна гайка; строка итога называет слова и номер журнала",
+              len(r6) == 1 and r6[0][6] == "G-8" and stat.startswith("Метизов (позиций): 1") and "g-8" in stat and "журнал № 8" in stat, f"{r6}; {stat}")
+        s.goto("Метизы", "$B$2")
+        s.o.dispatch(s.doc, ".uno:EnterString", StringName="")
+        R.add(c, f"пустое «Найти» — список снова полный ({n_all})", fsh.getCellByPosition(0, 2).getString().startswith(f"Метизов (позиций): {n_all}."),
+              fsh.getCellByPosition(0, 2).getString())
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "справочники ничего не проводят: журнал после приходов не изменился при списках и подсказках; самопроверка — без ошибок",
+              int(s.sysv("LAST_SEQ")) == seq1 and seq1 > seq0 and sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), f"{seq0} → {seq1} → {s.sysv('LAST_SEQ')}; {sc[:120]}")
+        oracle(c, s, "метизы и категории")
+    finally:
+        s.close()
+
+
+@case
+def v43_upgrade_101_102():
+    """1.0.2 для пользователя, уже работающего в 1.0.1: рабочая книга 1.0.1 (собрана исходниками выпуска 1.0.1, день работы в ней) обновляется
+    мастером — проверка, сборка (сверка каждой ячейки), «сделать рабочей»; данные те же, старая книга и журнал побайтно те же; в новой —
+    листы «Акты», «Отчёт дня», «Категории», «Метизы» (без защиты), «В упаковке, шт» в «Номенклатуре» (прежняя подсказка сдвинута), список
+    категорий, кнопки; всё новое работает на данных этой книги: метизы, подсказка категории, серийные детали, этикетка, акт, отчёт дня"""
+    import run_prime
+    import subprocess
+    from harness import git_sources
+    c = "V43"
+    src = os.path.join(OUT, "src_101")
+    why = "" if os.path.isdir(os.path.join(src, "tools")) else git_sources("456d7b4", src)
+    if why:
+        R.add(c, "исходники выпуска 1.0.1", "SKIP", why)
+        return
+    d = os.path.join(OUT, "cases", "v43 Склад")
+    shutil.rmtree(d, ignore_errors=True)
+    work = os.path.join(d, "WMS_RELEASE_1.0.1", "WMS_WORK")
+    os.makedirs(work)
+    p = os.path.join(work, "WMS_PROD.ods")
+    b = subprocess.run([sys.executable, os.path.join(src, "tools", "build_ods.py"), p, "--test"], capture_output=True, text=True, timeout=900)
+    if b.returncode != 0 or not os.path.exists(p):
+        R.add(c, "книга 1.0.1 собрана исходниками 1.0.1", False, (b.stdout + b.stderr)[-300:])
+        return
+    s = ready(Session(p))
+    try:
+        core0 = s.sysv("CORE_VERSION")
+        gs = s.doc.Sheets.getByName("Номенклатура")
+        hint0 = gs.getCellByPosition(17, 0).getString()
+        order(s, 1, "1", "Болт М8х30 DIN 933 8.8 оцинкованный", qty="100", art="B-830")
+        receive(s, 1, "100", place="5-1-1", doc="УПД-1")
+        order(s, 2, "2", "Краска белая 0,9 л", qty="10", art="КР-1")
+        receive(s, 2, "10", place="4-1-1", doc="УПД-2")
+        order(s, 3, "3", "Шестерня Z-40", qty="3", art="GR-40")
+        receive(s, 3, "3", place="4-1-2", doc="УПД-3")
+        e1, e2, e3 = [ords(s, r)[21] for r in (1, 2, 3)]
+        i1 = issue(s, 1, e2, "2", "ива")
+        stk = s.doc.Sheets.getByName("Наличие")
+        n_ei = int(s.sysv("NEXT_EI")) - 1
+        before = [tuple(r[:8]) for r in stk.getCellRangeByPosition(0, 1, 7, n_ei).getDataArray()]
+        seq_old = int(s.sysv("LAST_SEQ"))
+    finally:
+        s.close(save=True)
+    h0 = run_prime.sha(p)
+    j0 = {f: run_prime.sha(f) for f in glob.glob(os.path.join(work, "WMS_Journal", "*.csv"))}
+    rc0, o0 = run_prime.upgrade("check", p)
+    new = os.path.join(d, "WMS_RELEASE_1.0.2", "WMS_WORK")
+    rc1, o1 = run_prime.upgrade("build", p, "--to", new)
+    rc2, o2 = run_prime.upgrade("promote", "--to", new)
+    rep = open(os.path.join(new, "UPGRADE_REPORT.md"), encoding="utf-8").read() if os.path.exists(os.path.join(new, "UPGRADE_REPORT.md")) else ""
+    R.add(c, "книга 1.0.1: проверка «можно обновить», сборка — 0 расхождений ячеек (нового только четыре листа и заголовок «В упаковке»), «сделать "
+             "рабочей»; старая книга и журнал побайтно те же, старая заперта",
+          core0 == "1.0.1" and i1.startswith("OK") and hint0.startswith("Товар — строка") and rc0 == 0 and "1.0.1" in o0 and rc1 == 0 and rc2 == 0
+          and "расхождений: 0" in rep and run_prime.sha(p) == h0 and {f: run_prime.sha(f) for f in glob.glob(os.path.join(work, "WMS_Journal", "*.csv"))} == j0
+          and os.path.exists(os.path.join(work, "WMS_Journal", "wms.lock")), f"{core0}; {i1[:40]}; {o0[-200:]}; {o1[-200:]}; {o2[-200:]}; {rep[-300:]}")
+    nb = os.path.join(new, "WMS_PROD.ods")
+    s = ready(Session(nb))
+    try:
+        sh = s.doc.Sheets
+        stk = sh.getByName("Наличие")
+        after = [tuple(r[:8]) for r in stk.getCellRangeByPosition(0, 1, 7, n_ei).getDataArray()]
+        names = [sh.getByIndex(i).Name for i in range(sh.getCount())]
+        own = ("Акты", "Отчёт дня", "Категории", "Метизы")
+        gs = sh.getByName("Номенклатура")
+        v = sh.getByName("Заказы").getCellByPosition(18, 5).Validation
+        v2 = sh.getByName("Иной приход").getCellByPosition(9, 5).Validation
+
+        def btn(sheet, name):
+            f = sh.getByName(sheet).getDrawPage().getForms()
+            return f.getCount() > 0 and any(f.getByIndex(0).getByIndex(i).Name == name for i in range(f.getByIndex(0).getCount()))
+
+        R.add(c, "новая книга — WMS 1.0.2: «работа разрешена», тот же журнал и каждый ЕИ; четыре новых листа без защиты; «В упаковке, шт» в R, прежняя "
+                 "подсказка «Номенклатуры» в S; список категорий на «Заказах» и «Ином приходе»; кнопки «Серийные…» и «Акт…»",
+              s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == "1.0.2" and before == after and int(s.sysv("LAST_SEQ")) == seq_old
+              and all(n in names and not sh.getByName(n).isProtected() for n in own)
+              and gs.getCellByPosition(17, 0).getString().startswith("В упаковке") and gs.getCellByPosition(18, 0).getString().startswith("Товар — строка") and "В упаковке, шт" in gs.getCellByPosition(18, 0).getString()
+              and v.Type.value == "LIST" and "Категории" in v.getFormula1() and v2.Type.value == "LIST" and btn("Наличие", "btnSerials") and btn("Выдачи", "btnAct"),
+              f"{s.state()}; {s.sysv('CORE_VERSION')}; {before == after}; {[n for n in own if n not in names]}; {gs.getCellByPosition(17, 0).getString()[:30]}; "
+              f"{v.Type.value}; {btn('Наличие', 'btnSerials')} {btn('Выдачи', 'btnAct')}")
+        # the new features on the data of this book
+        fr = s.B("FastRefresh", "B-830", module="WmsCat")
+        fsh = sh.getByName("Метизы")
+        fast = [list(r) for r in fsh.getCellRangeByPosition(0, 4, 10, 4).getDataArray()]
+        R.add(c, "«Метизы» из «Наличия» книги 1.0.1: по артикулу B-830 одна строка — Болт М8×30, DIN 933, 8.8, оцинкованный, остаток 100", fr == "OK:1"
+              and fast[0][0] == "Болт" and fast[0][1] == "М8×30" and fast[0][2] == "DIN 933" and fast[0][3] == "8.8" and fast[0][4] == "Оцинкованный"
+              and float(fast[0][7]) == 100, f"{fr}; {fast}")
+        sg = s.B("TestCategory", "Шестерня Z-40", module="WmsCat")
+        sp = s.B("SerialSplit", e3, ("SN-1", "SN-2", "SN-3"), module="WmsParts")
+        lb = s.B("LabelPrint", (int(e2[3:]),), 1, "40×30", module="WmsItem")
+        R.add(c, "подсказка «Детали»; серийные детали: 3 детали → 3 ЕИ с номерами; этикетка с упаковкой не мешает", sg == "Детали" and sp.startswith("OK:3|")
+              and lb.startswith("OK:этикеток 1"), f"{sg}; {sp}; {lb}")
+        i2 = issue(s, 2, e2, "1", "ива")
+        s.goto("Выдачи", "$A$2")
+        ak = s.B("ActFromSelection", module="WmsDocs")
+        s.B("DcDocClose", module="WmsDocs")
+        rd = s.B("DayReport", serial(0), False, module="WmsDocs")
+        txt = doc_of(s)
+        s.B("DcDocClose", module="WmsDocs")
+        R.add(c, "после обновления: выдача проводится, акт оформляется (А-1 в реестре «Акты»), отчёт дня строится из журнала книги 1.0.1",
+              i2.startswith("OK") and ak.startswith("OK") and rd.startswith("OK:") and TODAY + " г." in txt and "1. Завершено сегодня:" in txt
+              and "Приёмка по заказам: принято позиций — 3" in txt, f"{i2[:40]}; {ak[:80]}; {rd}; {txt[:200]!r}")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:200])
+        P, inf, _ = s.adjcheck(0)
+        R.add(c, "оракул (журнал воспроизведён независимо): книга 1.0.1, обновлённая до 1.0.2, и новые операции", not P, f"{inf.get('ops')} операций; {P[:4]}")
     finally:
         s.close()
 

@@ -24,6 +24,13 @@ Public Const RS_NOTE = 4
 Public Const RS_LAST = 4
 ' Ф4: «Номенклатура» Q — the days a returnable thing (a tool) may stay on the hands
 Public Const GD_RETDAYS = 16
+' 1.0.2: «Номенклатура» R — how many pieces come in one pack: the label of such goods says «Выдача по 1 шт · в уп. 10» (one label
+' on the whole delivery, the pieces are given out one by one)
+Public Const GD_PACKQ = 17
+' 1.0.2: the labels of one printing (the page «Печать» holds PR_MAX rows), the labels «по количеству единиц» of one position, and
+' the positions asked in one window
+Public Const LB_MAX_UNITS = 200
+Public Const LB_PAGE = 18
 ' Ф1: the label — the rows of one label on «Печать» (the EI, the name, the unit, the band of the barcode), the size in a hidden
 ' cell of «Печать» (AH1, «40×30»)
 Public Const LB_ROWS = 4
@@ -92,22 +99,98 @@ End Function
 ' ================================================================ Ф1 the label of an EI
 
 Sub BtnLabel(Optional oEvent As Variant)
-    Dim eis As Variant, v(1) As String, s As String, n As Long
+    Dim eis As Variant, s As String
     WmsInit()
     eis = CursorEIs()
     If UBound(eis) < 0 Then
         WmsUi.UiMessage("Встаньте на строку с ЕИ («Наличие», «Заказы», «Иной приход», «Выдачи», «Корректировки») или откройте карточку ЕИ на «Поиске» " _
-            & "и нажмите «Этикетка». Несколько строк «Наличия» — несколько этикеток.")
+            & "и нажмите «Этикетка». Выделите несколько строк (весь заказ) — окно спросит число этикеток для каждой позиции.")
         Exit Sub
     End If
-    v(0) = "1"
-    v(1) = LabelSize()
-    If Not WmsPrimeUi.UiForm("Этикетка", "Этикеток ЕИ: " & (UBound(eis) + 1) & ". Номер ЕИ крупно, полное наименование, единица измерения и штрихкод. Размер — как у "  _
-        & "этикеток принтера (ширина×высота, мм).", Array("Копий каждой", "Размер, мм"), v, Array("", ""), "Сделать") Then Exit Sub
-    n = Val(Trim(v(0)))
-    s = LabelPrint(eis, IIf(n < 1, 1, n), Trim(v(1)))
+    s = LabelWindow(eis)
     If Left(s, 4) = "ERR:" Then WmsUi.UiMessage(Mid(s, 5))
 End Sub
+
+' 1.0.2: the window of the labels of the EIs eis — for every position its own number of labels (1: one label on the position;
+' 0: none), «Печатать»; «По количеству единиц» — as many labels as there are units (100 pcs — 100 labels, at most LB_MAX_UNITS
+' of a position) for this and the positions that follow. More than LB_PAGE positions are asked page by page. OK:… / ERR:… / SKIP:…
+Function LabelWindow(eis As Variant) As String
+    Dim nAll As Long, counts() As Long, p0 As Long, p1 As Long, i As Long, k As Integer, nF As Integer, labels() As String, v() As String, lists() As String
+    Dim sSize As String, info As String, page As Long, pages As Long, ln As String
+    nAll = UBound(eis) + 1
+    ReDim counts(nAll - 1)
+    sSize = LabelSize()
+    pages = (nAll + LB_PAGE - 1) \ LB_PAGE
+    p0 = 0
+    Do While p0 < nAll
+        p1 = p0 + LB_PAGE - 1
+        If p1 > nAll - 1 Then p1 = nAll - 1
+        nF = p1 - p0 + 1
+        If p0 = 0 Then nF = nF + 1
+        ReDim labels(nF - 1)
+        ReDim v(nF - 1)
+        ReDim lists(nF - 1)
+        For i = p0 To p1
+            labels(i - p0) = LbPosText(CLng(eis(i)))
+            v(i - p0) = "1"
+        Next i
+        If p0 = 0 Then
+            labels(nF - 1) = "Размер, мм"
+            v(nF - 1) = sSize
+        End If
+        page = p0 \ LB_PAGE + 1
+        info = "Позиций: " & nAll & IIf(pages > 1, " (страница " & page & " из " & pages & ")", "") & ". Справа — сколько этикеток напечатать для каждой позиции " _
+            & "(1 — одна на всю позицию, 0 — не печатать). «По количеству единиц» — этикеток столько, сколько единиц пришло (до " & LB_MAX_UNITS & " на позицию)."
+        k = WmsPrimeUi.UiForm2("Этикетки", info, labels, v, lists, "Печатать", "По количеству единиц")
+        If k = 0 Then
+            LabelWindow = "SKIP:окно закрыто"
+            gUiLastMsg = LabelWindow
+            Exit Function
+        End If
+        If p0 = 0 Then sSize = Trim(v(nF - 1))
+        If k = 2 Then
+            For i = p0 To nAll - 1
+                counts(i) = LbUnits(CLng(eis(i)))
+            Next i
+            Exit Do
+        End If
+        For i = p0 To p1
+            ln = Trim(v(i - p0))
+            If ln <> "" And Not IsNumeric(ln) Then
+                LabelWindow = "ERR:число этикеток для «" & labels(i - p0) & "» — целое число, например 1 или 5 (сейчас «" & ln & "»)"
+                gUiLastMsg = LabelWindow
+                Exit Function
+            End If
+            counts(i) = CLng(Val(ln))
+            If counts(i) < 0 Then counts(i) = 0
+            If ln = "" Then counts(i) = 1
+        Next i
+        p0 = p1 + 1
+    Loop
+    LabelWindow = LabelPrintN(eis, counts, sSize)
+End Function
+
+' «ЕИ-123 · Краска белая 0,9 л · 100 шт» for the window of the labels (the line is short: the field of a window is narrow)
+Private Function LbPosText(n As Long) As String
+    Dim d As Variant, q As Double, c As Double, has As Boolean, nm As String
+    d = WmsIssue.StockData(n)
+    nm = Trim(CStr(d(SC_NAME)))
+    If Len(nm) > 22 Then nm = Left(nm, 21) & "…"
+    SiCameOne(n, CStr(d(SC_EI)), c, has)
+    If has Then q = c Else q = CDbl(d(SC_QTY))
+    LbPosText = "ЕИ-" & n & " · " & nm & " · " & WmsIssue.QtyText(q) & " " & Trim(CStr(d(SC_UNIT)))
+End Function
+
+' the labels «по количеству единиц» of EI n: what came into it (its balance when nothing is known), rounded, at least 1, at most LB_MAX_UNITS
+Function LbUnits(n As Long) As Long
+    Dim d As Variant, q As Double, c As Double, has As Boolean
+    d = WmsIssue.StockData(n)
+    SiCameOne(n, CStr(d(SC_EI)), c, has)
+    If has Then q = c Else q = CDbl(d(SC_QTY))
+    LbUnits = CLng(q + 0.4999)
+    If LbUnits < 1 Then LbUnits = 1
+    If LbUnits > LB_MAX_UNITS Then LbUnits = LB_MAX_UNITS
+End Function
 
 ' the size of the label kept in the book («40×30» — the labels of the warehouse)
 Function LabelSize() As String
@@ -118,26 +201,65 @@ Function LabelSize() As String
     LabelSize = s
 End Function
 
-' the labels of the EIs eis (numbers), nCopies each, on «Печать» in its own page style of the label size sSize («40×30»): one
-' label — one page. OK:<labels> / ERR:…
+' the labels of the EIs eis (numbers), nCopies each (see LabelPrintN)
 Function LabelPrint(eis As Variant, nCopies As Long, sSize As String) As String
+    Dim counts() As Long, i As Long
+    If UBound(eis) < 0 Then
+        LabelPrint = LabelPrintN(eis, Array(), sSize)
+        Exit Function
+    End If
+    ReDim counts(UBound(eis))
+    For i = 0 To UBound(eis)
+        counts(i) = nCopies
+    Next i
+    LabelPrint = LabelPrintN(eis, counts, sSize)
+End Function
+
+' the labels of the EIs eis (numbers), counts(i) labels of eis(i) (its own number of every position), on «Печать» in its own page style
+' of the label size sSize («40×30»): one label — one page. Below the unit: «Арт.: …» for the goods of the category «Детали» and
+' «S/N: …» of an EI with a serial number; «Выдача по 1 шт · в уп. 10» for the goods that come in packs of «Номенклатуры» R (or an EI
+' with a packing). OK:<labels> / ERR:…
+Function LabelPrintN(eis As Variant, counts As Variant, sSize As String) As String
     Dim a As Variant, w As Double, h As Double, sh As Object, ps As Object, st As Object, i As Long, j As Long, r As Long, row As Variant, n As Long
-    Dim pr(0) As New com.sun.star.table.CellRangeAddress, k As Long, d As Variant, yTop As Long
+    Dim pr(0) As New com.sun.star.table.CellRangeAddress, k As Long, d As Variant, yTop As Long, goods As Variant, ex As Variant, nx As Integer, need As Long
+    Dim exs() As Variant
     On Error GoTo EH
     a = Split(Replace(Replace(LCase(sSize), "x", "×"), "*", "×"), "×")
     If UBound(a) <> 1 Then
-        LabelPrint = "ERR:размер этикетки — «ширина×высота» в мм, например 40×30"
-        gUiLastMsg = LabelPrint
+        LabelPrintN = "ERR:размер этикетки — «ширина×высота» в мм, например 40×30"
+        gUiLastMsg = LabelPrintN
         Exit Function
     End If
     w = Val(Replace(Trim(a(0)), ",", "."))
     h = Val(Replace(Trim(a(1)), ",", "."))
     If w < 30 Or w > 210 Or h < 20 Or h > 297 Then
-        LabelPrint = "ERR:размер этикетки " & sSize & " — ширина 30…210 мм, высота 20…297 мм"
-        gUiLastMsg = LabelPrint
+        LabelPrintN = "ERR:размер этикетки " & sSize & " — ширина 30…210 мм, высота 20…297 мм"
+        gUiLastMsg = LabelPrintN
         Exit Function
     End If
     st = WmsIssue.StockSheet()
+    goods = LbGoods()
+    ' what every label carries (the extra lines) and how many rows the printing takes — before the page is touched
+    ReDim exs(UBound(eis))
+    For i = 0 To UBound(eis)
+        n = eis(i)
+        row = st.getCellRangeByPosition(0, n, SC_LAST, n).getDataArray()(0)
+        If CStr(row(SC_EI)) <> "" Then
+            exs(i) = LbExtra(n, row, goods)
+            nx = 0
+            If exs(i)(0) <> "" Then nx = nx + 1
+            If exs(i)(1) <> "" Then nx = nx + 1
+            If UBound(counts) >= i Then need = need + CLng(counts(i)) * (LB_ROWS + nx)
+            If UBound(counts) >= i Then k = k + CLng(counts(i))
+        End If
+    Next i
+    If need > PR_MAX - 2 Then
+        LabelPrintN = "ERR:этикеток " & k & " — на странице «Печать» за один раз помещается меньше (около " & (PR_MAX \ (LB_ROWS + 1)) _
+            & "). Напечатайте двумя-тремя частями: выделите меньше строк."
+        gUiLastMsg = LabelPrintN
+        Exit Function
+    End If
+    k = 0
     sh = WmsPrint.PrintBegin("", "Этикетки " & Format(Now(), "YYYY-MM-DD HHMM"))
     sh.getCellByPosition(LB_SIZE_COL, 0).setString(Format(w, "0") & "×" & Format(h, "0"))
     ps = LabelStyle(w, h)
@@ -146,15 +268,24 @@ Function LabelPrint(eis As Variant, nCopies As Long, sSize As String) As String
     For i = 0 To UBound(eis)
         n = eis(i)
         row = st.getCellRangeByPosition(0, n, SC_LAST, n).getDataArray()(0)
-        If CStr(row(SC_EI)) <> "" Then
-            For j = 1 To nCopies
-                If r + LB_ROWS > PR_MAX Then Exit For
-                PutLabel(sh, r, row, w, h, yTop)
-                r = r + LB_ROWS
+        If CStr(row(SC_EI)) <> "" And UBound(counts) >= i Then
+            ex = exs(i)
+            nx = 0
+            If ex(0) <> "" Then nx = nx + 1
+            If ex(1) <> "" Then nx = nx + 1
+            For j = 1 To counts(i)
+                PutLabel(sh, r, row, w, h, yTop, CStr(ex(0)), CStr(ex(1)))
+                r = r + LB_ROWS + nx
                 k = k + 1
             Next j
         End If
     Next i
+    If k = 0 Then
+        WmsView.ViewDone(sh)
+        LabelPrintN = "ERR:ни для одной позиции не указано число этикеток (больше 0)"
+        gUiLastMsg = LabelPrintN
+        Exit Function
+    End If
     pr(0).Sheet = sh.getRangeAddress().Sheet
     pr(0).StartColumn = 0
     pr(0).StartRow = 0
@@ -163,14 +294,57 @@ Function LabelPrint(eis As Variant, nCopies As Long, sSize As String) As String
     sh.setPrintAreas(pr())
     WmsView.ViewDone(sh)
     WmsView.GoCell(SH_PRINT, 0, 0)
-    LabelPrint = "OK:этикеток " & k & " (" & Format(w, "0") & "×" & Format(h, "0") & " мм)"
-    gUiLastMsg = LabelPrint
+    LabelPrintN = "OK:этикеток " & k & " (" & Format(w, "0") & "×" & Format(h, "0") & " мм)"
+    gUiLastMsg = LabelPrintN
     Exit Function
 EH:
-    LabelPrint = "ERR:этикетки не построены: " & Error$ & " (строка " & Erl & ")"
-    gUiLastMsg = LabelPrint
+    LabelPrintN = "ERR:этикетки не построены: " & Error$ & " (строка " & Erl & ")"
+    gUiLastMsg = LabelPrintN
     On Error Resume Next
     WmsView.ViewDone(gDoc.Sheets.getByName(SH_PRINT))
+End Function
+
+' «Номенклатура» as an array (A…R) for the packs of the labels; Array() when the sheet is not there
+Private Function LbGoods() As Variant
+    Dim gs As Object, last As Long
+    LbGoods = Array()
+    If Not gDoc.Sheets.hasByName(WmsSupply.SH_GOODS) Then Exit Function
+    gs = gDoc.Sheets.getByName(WmsSupply.SH_GOODS)
+    last = WmsOrders.LastRow(gs)
+    If last < 1 Then Exit Function
+    LbGoods = gs.getCellRangeByPosition(0, 1, GD_PACKQ, last).getDataArray()
+End Function
+
+' the extra lines of the label of EI n (its stock row `row`): (1) «Арт.: …» — only for the goods of the category «Детали» — and
+' «S/N: …» of an EI with a serial number; (2) the way the pieces are given out: «Выдача по 1 шт · в уп. 10» — the packing of the EI,
+' otherwise «В упаковке» of its goods in «Номенклатуре» (matched by the article, else by the name)
+Private Function LbExtra(n As Long, row As Variant, goods As Variant) As Variant
+    Dim l1 As String, l2 As String, p As Variant, pu As String, pn As Double, i As Long, art As String, nm As String, q As Double, unit As String
+    Dim cArt As Long, cName As Long
+    cArt = WmsSupply.GD_ART
+    cName = WmsSupply.GD_NAME
+    art = Trim(CStr(row(SC_ART)))
+    nm = LCase(Trim(CStr(row(SC_NAME))))
+    unit = Trim(CStr(row(SC_UNIT)))
+    If LCase(Trim(CStr(row(SC_CAT)))) = "детали" And art <> "" Then l1 = "Арт.: " & art
+    p = PropOf(n)
+    If CStr(p(0)) <> "" Then l1 = l1 & IIf(l1 <> "", " · ", "") & "S/N: " & p(0)
+    If WmsPack.PackOf(n, pu, pn) Then
+        l2 = "Выдача по 1 " & pu & " · в 1 " & unit & " — " & WmsIssue.QtyText(pn) & " " & pu
+    ElseIf UBound(goods) >= 0 Then
+        For i = 0 To UBound(goods)
+            If VarType(goods(i)(GD_PACKQ)) = 5 Then
+                If goods(i)(GD_PACKQ) > 1 Then
+                    If (art <> "" And LCase(Trim(CStr(goods(i)(cArt)))) = LCase(art)) Or LCase(Trim(CStr(goods(i)(cName)))) = nm Then
+                        q = goods(i)(GD_PACKQ)
+                        l2 = "Выдача по 1 " & unit & " · в уп. " & WmsIssue.QtyText(q)
+                        Exit For
+                    End If
+                End If
+            End If
+        Next i
+    End If
+    LbExtra = Array(l1, l2)
 End Function
 
 ' the page style of the labels (made once; the size follows the last labels)
@@ -204,18 +378,25 @@ Private Function LbInnerW(w As Double) As Long
 End Function
 
 ' one label from row r: the EI big, the full name (the font made smaller until the whole name fits its part), the unit of
-' measure, and the Code 128 of the 8 digits of the EI in its own band at the bottom — nothing drawn over the text. yTop: the
-' top of the label on the sheet (the sum of the heights of the rows above, kept by LabelPrint), moved to the next label
-Private Sub PutLabel(sh As Object, r As Long, row As Variant, w As Double, h As Double, ByRef yTop As Long)
-    Dim rows As Object, c As Object, bars As String, x As Long, j As Integer, bw As Long, y As Long, dp As Object, i As Integer
-    Dim shp As Object, pt As New com.sun.star.awt.Point, sz As New com.sun.star.awt.Size, modW As Long, bcH As Long, nMod As Long
-    Dim hTot As Long, hEI As Long, hName As Long, hUnit As Long, hBar As Long, wIn As Long, hReal(3) As Long, ptEI As Double
+' measure, the extra lines ex1 (the article of a part, the serial number) and ex2 (the way the pieces are given out) when there are
+' any, and the Code 128 of the 8 digits of the EI in its own band at the bottom — nothing drawn over the text. The label takes
+' LB_ROWS rows, one more for every extra line. yTop: the top of the label on the sheet (the sum of the heights of the rows above,
+' kept by LabelPrintN), moved to the next label
+Private Sub PutLabel(sh As Object, r As Long, row As Variant, w As Double, h As Double, ByRef yTop As Long, ex1 As String, ex2 As String)
+    Dim rows As Object, c As Object, bars As String, x As Long, j As Integer, bw As Long, y As Long, dp As Object, i As Integer, nx As Integer, nr As Integer
+    Dim shp As Object, pt As New com.sun.star.awt.Point, sz As New com.sun.star.awt.Size, modW As Long, bcH As Long, nMod As Long, yAbove As Long
+    Dim hTot As Long, hEI As Long, hName As Long, hUnit As Long, hBar As Long, hX As Long, wIn As Long, hReal(7) As Long, ptEI As Double, rx As Long
+    nx = 0
+    If ex1 <> "" Then nx = nx + 1
+    If ex2 <> "" Then nx = nx + 1
+    nr = LB_ROWS + nx
     hTot = CLng(h * 100) - 2 * LB_MARGIN - LB_SLACK
     wIn = LbInnerW(w)
     hEI = hTot * 0.19
     hUnit = hTot * 0.12
     hBar = hTot * 0.3
-    hName = hTot - hEI - hUnit - hBar
+    hX = hTot * IIf(nx = 2, 0.1, 0.11)
+    hName = hTot - hEI - hUnit - hBar - nx * hX
     rows = sh.getRows()
     If r > 0 Then rows.getByIndex(r).IsStartOfNewPage = True
     ' the EI: one line, as big as its part allows, never wider than the label (shrunk to fit if need be)
@@ -242,10 +423,32 @@ Private Sub PutLabel(sh As Object, r As Long, row As Variant, w As Double, h As 
     c.CharHeight = 7
     LbCell(c)
     c.ShrinkToFit = True
+    ' the extra lines: the article / the serial number, then how the pieces are given out (bold: it is what the storekeeper must see)
+    rx = r + 3
+    If ex1 <> "" Then
+        rows.getByIndex(rx).Height = hX
+        c = sh.getCellByPosition(0, rx)
+        c.setString(ex1)
+        c.CharHeight = 8
+        c.CharWeight = 150
+        LbCell(c)
+        c.ShrinkToFit = True
+        rx = rx + 1
+    End If
+    If ex2 <> "" Then
+        rows.getByIndex(rx).Height = hX
+        c = sh.getCellByPosition(0, rx)
+        c.setString(ex2)
+        c.CharHeight = 8
+        c.CharWeight = 150
+        LbCell(c)
+        c.ShrinkToFit = True
+        rx = rx + 1
+    End If
     ' the band of the barcode: an empty row, the bars drawn inside it (placed by the heights just set, read back as Calc keeps them)
-    rows.getByIndex(r + 3).Height = hBar
-    sh.getCellByPosition(0, r + 3).setString("")
-    For i = 0 To 3
+    rows.getByIndex(rx).Height = hBar
+    sh.getCellByPosition(0, rx).setString("")
+    For i = 0 To nr - 1
         hReal(i) = rows.getByIndex(r + i).Height
     Next i
     bars = WmsItemCode128C(Mid(CStr(row(SC_EI)), 4))
@@ -256,10 +459,13 @@ Private Sub PutLabel(sh As Object, r As Long, row As Variant, w As Double, h As 
     ' zones of 10 modules on both sides and 2 mm to spare
     modW = 50
     If (nMod + 20) * modW > wIn - 200 Then modW = 25
-    bcH = hReal(3) * 0.8
+    bcH = hReal(nr - 1) * 0.8
     dp = sh.getDrawPage()
     x = ((wIn - nMod * modW) \ 2 \ 25) * 25
-    y = yTop + hReal(0) + hReal(1) + hReal(2) + (hReal(3) - bcH) \ 2
+    For i = 0 To nr - 2
+        yAbove = yAbove + hReal(i)
+    Next i
+    y = yTop + yAbove + (hReal(nr - 1) - bcH) \ 2
     For j = 1 To Len(bars)
         bw = CLng(Mid(bars, j, 1)) * modW
         If j Mod 2 = 1 Then
@@ -281,7 +487,7 @@ Private Sub PutLabel(sh As Object, r As Long, row As Variant, w As Double, h As 
         End If
         x = x + bw
     Next j
-    yTop = yTop + hReal(0) + hReal(1) + hReal(2) + hReal(3)
+    yTop = yTop + yAbove + hReal(nr - 1)
 End Sub
 
 Private Sub LbCell(c As Object)

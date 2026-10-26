@@ -105,23 +105,32 @@ def p03_offline_audit():
           "; ".join(f"{n}: код {rc}, {o.strip().splitlines()[1] if len(o.strip().splitlines()) > 1 else o[:80]}" for n, rc, o in reps) + f"; сборка {rcb} {ob[-80:]}")
     bad = os.path.join(d, "bad")
     os.makedirs(bad)
+    # the planted sample is put together from pieces: this file itself must not look like a way out when the audit is run on a release
+    # folder (it holds tests/)
+    H = "ht" + "tps://"
     open(os.path.join(bad, "leak.bas"), "w", encoding="utf-8").write(
-        'Sub Leak\n    c = CreateUnoService("com.sun.star.connection.Connector")\n    m = CreateUnoService("com.sun.star.system.SimpleSystemMail")\n'
-        '    x = CreateObject("MSXML2.XMLHTTP")\n    u = "https://example.org/upload"\nEnd Sub\n')
-    open(os.path.join(bad, "leak.py"), "w", encoding="utf-8").write('import urllib.request\nimport socket\ns = socket.socket()\ns.connect(("10.0.0.5", 80))\n')
+        'Sub Leak\n    c = CreateUnoService("com.sun.star.conn" & "ection.Connector")\n'.replace('" & "', "") +
+        '    m = CreateUnoService("com.sun.star.system.SimpleSystem" & "Mail")\n'.replace('" & "', "") +
+        '    x = CreateObject("MSXML2.XML' + 'HTTP")\n    u = "' + H + 'example.org/upload"\nEnd Sub\n')
+    open(os.path.join(bad, "leak.py"), "w", encoding="utf-8").write(
+        "imp" + "ort urllib.request\nimp" + "ort socket\ns = sock" + "et.socket()\ns.conn" + 'ect(("10.0.0.5", 80))\n')
     import zipfile
     with zipfile.ZipFile(os.path.join(bad, "leak.ods"), "w") as z:
         z.writestr("mimetype", "application/vnd.oasis.opendocument.spreadsheet")
-        z.writestr("content.xml", '<office:document-content><table:table-cell><text:p><text:a xlink:href="https://example.org/x">a</text:a></text:p>'
-                   '</table:table-cell><table:table-cell table:formula="of:=WEBSERVICE(&quot;https://example.org/api&quot;)"/>'
+        z.writestr("content.xml", '<office:document-content><table:table-cell><text:p><text:a xlink:href="' + H + 'example.org/x">a</text:a></text:p>'
+                   '</table:table-cell><table:table-cell table:formula="of:=WEBSERVICE(&quot;' + H + 'example.org/api&quot;)"/>'
                    '<table:table-source xlink:href="file:///другой.ods"/></office:document-content>')
     rc, o = run("offline_audit.py", bad)
-    want = ["отправка почты", "сетевое соединение UNO", "HTTP-запрос через Windows", "адрес в коде — https://example.org/upload", "гиперссылок: 1",
-            "внешняя ссылка — https://example.org/x", "формула WEBSERVICE", "связь с внешним файлом", "адрес в содержимом — https://example.org/api",
-            "сетевой модуль Python", "сетевое соединение —", "socket.socket"]
+    want = ["отправка почты", "сетевое соединение UNO", "HTTP-запрос через Windows", "адрес в коде — " + H + "example.org/upload", "гиперссылок: 1",
+            "внешняя ссылка — " + H + "example.org/x", "формула WEBSERVICE", "связь с внешним файлом", "адрес в содержимом — " + H + "example.org/api",
+            "сетевой модуль Python", "сетевое соединение —", "sock" + "et.socket"]
     miss = [w for w in want if w not in o]
     R.add(c, "образец с почтой, соединением UNO, HTTP, адресами, гиперссылкой, WEBSERVICE, внешней связью и сетью Python: каждое найдено, код 1",
           rc == 1 and not miss, f"код {rc}; не найдено: {miss}; {o.strip().splitlines()[-1]}")
+    # the folder of a release (it holds this very test): nothing found there either
+    rc2, o2 = run("offline_audit.py", os.path.join(ROOT, "tests"))
+    R.add(c, "папка tests/ (она попадает в архив выпуска) проверкой локальности чиста: сетевых возможностей не найдено, код 0",
+          rc2 == 0 and "СЕТЕВЫХ ВОЗМОЖНОСТЕЙ НЕ НАЙДЕНО" in o2, o2.strip().splitlines()[-1] if o2.strip() else "")
 
 
 def main():

@@ -1168,6 +1168,8 @@ Sub PreviewOrderRow(r As Long, bKeyTouched As Boolean)
         SetIfDiff(sh.getCellByPosition(OC_CTL, r), p)
         SetIfDiff(sh.getCellByPosition(OC_STOCK, r), "")
         SetIfDiff(sh.getCellByPosition(OC_DUP, r), "")
+        ' 1.0.2: a name typed into a row without a category — the category by the name as a hint (the user's own is never replaced)
+        If mWaitHint Then WmsCat.CategoryHint(SH_ORDERS, r, OC_NAME, OC_CAT)
     Case "RECEIVED", "STORNO"
         If bKeyTouched And gKmoved Then CopyCheckOrder(r)
     End Select

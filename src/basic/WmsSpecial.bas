@@ -26,6 +26,8 @@ Global gXwhy As String
 Global gXev(4) As String
 
 Private mInHandler As Boolean
+' 1.0.2: the name of one row was just typed → a category hint for a row without one
+Private mNameTyped As Boolean
 
 ' the row being checked (CheckRow)
 Private mType As Integer
@@ -1650,16 +1652,19 @@ Private Sub HandleRange(ra As Variant)
     um = gDoc.getUndoManager()
     um.enterUndoContext("WMS: проверка строки иного прихода")
     inCtx = True
+    mNameTyped = (ra.StartRow = ra.EndRow And ra.StartColumn <= XC_NAME And ra.EndColumn >= XC_NAME)
     For r = IIf(ra.StartRow < 1, 1, ra.StartRow) To r1
         n = n + 1
         If n > PREVIEW_MAX_ROWS Then Exit For
         PreviewSpecialRow(r)
     Next r
+    mNameTyped = False
     um.leaveUndoContext()
     mInHandler = False
     Exit Sub
 EH:
     On Error Resume Next
+    mNameTyped = False
     If inCtx Then um.leaveUndoContext()
     mInHandler = False
 End Sub
@@ -1686,6 +1691,7 @@ Sub PreviewSpecialRow(r As Long)
     why = CheckRow(r, False, "")
     If why <> "" Then
         ClearDerived(r, False)
+        If mNameTyped Then WmsCat.CategoryHint(SH_SPECIAL, r, XC_NAME, XC_CAT)
         SetCtl(r, "Ошибка: " & why)
         Exit Sub
     End If
@@ -1704,6 +1710,7 @@ Sub PreviewSpecialRow(r As Long)
     Else
         ClearDerived(r, False)
     End If
+    If mNameTyped Then WmsCat.CategoryHint(SH_SPECIAL, r, XC_NAME, XC_CAT)
     SetCtl(r, IIf(mMissing = "", "Можно провести: ", "") & DescribeCap() & IIf(mMissing <> "", " — укажите " & mMissing, "") _
         & IIf(mWarn <> "", " · " & mWarn, ""))
 End Sub

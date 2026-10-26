@@ -96,6 +96,10 @@ End Function
 ' the cards: «заголовок|что это|лист, куда «Показать» ведёт»
 Function WhatsNewCards() As Variant
     WhatsNewCards = Array( _
+        "1.0.2: этикетки, акты, отчёт дня, метизы|Этикетки пачкой — по числу на каждую позицию заказа или «по количеству единиц»; в упаковке — «Выдача по 1 шт, в 1 упаковке 10». " _
+            & "У «Деталей» на этикетке артикул, у деталей с серийным номером — свой ЕИ и S/N («Серийные…»). «Акт…» на «Выдачах»: акт приёма-передачи " _
+            & "в офис или выдачи получателю с номером. «Отчёт дня» — отчёт по журналу в вашем шаблоне. «Метизы» — справочник с поиском по названию, " _
+            & "«Категории» — подсказки категорий по названию.|" & SH_STOCK, _
         "1.0.1: этикетка, «Наличие», комплекты|Этикетка 40×30: номер ЕИ, полное название (шрифт сам уменьшается), единица, штрихкод. " _
             & "В «Наличии» рядом — сколько пришло и сколько осталось, а дальше кому назначено, откуда, фасовка, серийный номер, «годен до», " _
             & "резерв. Комплект из выбранных ЕИ — «Собрать из ЕИ…». Сетка ячеек видна на всех листах.|" & SH_STOCK, _
@@ -514,7 +518,7 @@ Private Function Anonymize(hd As Object) As Long
         Array(SH_CARS, CC_PLATE & ":6", CC_SUP & ":3", CC_NOTE & ":5"), _
         Array(SH_RCPT, "0:2", "1:2"), Array("Поставщики", "0:3", "1:5", "2:2", "4:5"), _
         Array("Номенклатура", "1:0", "9:3", "10:5", "11:5"), Array("Комплекты", "0:0", "1:0", "5:5"), _
-        Array("Резервы", "2:2", "4:5"), Array("_PROP", "3:5"))
+        Array("Резервы", "2:2", "4:5"), Array("_PROP", "3:5"), Array("Акты", "3:2", "6:5"))
     For i = 0 To UBound(spec)
         If hd.Sheets.hasByName(spec(i)(0)) Then
             sh = hd.Sheets.getByName(spec(i)(0))
@@ -557,6 +561,24 @@ Private Function Anonymize(hd As Object) As Long
             Next r
             sh.getCellRangeByPosition(3, 1, 3, last).setDataArray(d)
         End If
+    End If
+    ' 1.0.2: the signer of the acts (the settings of «Акты», J4); the hand-written lists of «Отчёт дня» (the signature, done by hand, tasks,
+    ' in progress); the directory «Метизы» (made from the stock again by its button) hold names — emptied
+    If hd.Sheets.hasByName("Акты") Then
+        sh = hd.Sheets.getByName("Акты")
+        sh.getCellByPosition(9, 3).setString("")
+    End If
+    If hd.Sheets.hasByName("Отчёт дня") Then
+        sh = hd.Sheets.getByName("Отчёт дня")
+        sh.getCellByPosition(1, 2).setString("")
+        For Each a In Array(0, 2, 4)
+            sh.getCellRangeByPosition(CInt(a), 5, CInt(a), 24).clearContents(1 + 2 + 4)
+        Next a
+    End If
+    If hd.Sheets.hasByName("Метизы") Then
+        sh = hd.Sheets.getByName("Метизы")
+        sh.getCellRangeByPosition(0, 4, 11, 5004).clearContents(1 + 2 + 4)
+        sh.getCellByPosition(0, 2).setString("")
     End If
     ' the pages that show names: emptied (they are made again by their buttons)
     For Each a In Array(SH_FIND, SH_PRINT, "Дашборд", "Сверка переноса")

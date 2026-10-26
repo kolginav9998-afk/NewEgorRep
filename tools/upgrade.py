@@ -56,8 +56,8 @@ import build_ods as B  # noqa: E402
 
 SCHEMA_06 = "WMS-SYS-3"
 SCHEMA_07 = "WMS-SYS-4"
-# 1.0.1: the cores of the schema of this release whose books are carried over too (the same data, the modules and the views new)
-CORES_SAME_SCHEMA = ("1.0.0",)
+# 1.0.1, 1.0.2: the cores of the schema of this release whose books are carried over too (the same data, the modules and the views new)
+CORES_SAME_SCHEMA = ("1.0.0", "1.0.1")
 OLD_SCHEMA = SCHEMA_06                 # the in-place upgrade (release 0.7 called it so)
 JOURNAL_DIR = "WMS_Journal"
 BACKUP_DIR = "WMS_Backups"
@@ -340,6 +340,11 @@ def step_08(doc, leg, from_text, done):
     B.hints_10(doc, sheets)
     B.stock_info_10(doc, sheets)
     B.stock_view_10(doc, sheets)
+    # 1.0.2: the same four steps as a book of 1.0.x gets (step_102); their sheets are the storekeeper's own — not in the list of the new sheets
+    B.goods_102(doc, sheets)
+    B.docs_102(doc, sheets)
+    B.categories_102(doc, sheets)
+    B.buttons_102(doc, sheets)
     B.hotkeys_10(doc)
     B.rebuild_main(doc, sheets.getByName(B.MAIN))
     # «Главная» of this release is built anew above: its «?» (П6) is put back
@@ -352,6 +357,8 @@ def step_08(doc, leg, from_text, done):
     done.append(f"1.0: страница «{B.REPORTS}» (остаток на дату, оборотная ведомость, выгрузка, сверка с 1С, закрытие месяца) и служебный {B.CLOSE}")
     done.append(f"1.0: страница «{B.SERVICE}» (здоровье WMS, копия на флешку, зеркало журнала, возврат к копии, проверка дня, учебное "
                 "восстановление, скорость и обслуживание книги)")
+    done.append(f"1.0.2: листы {', '.join('«' + n + '»' for n in B.SHEETS_102)} (ваши, без защиты), выпадающий список категорий, колонка «В упаковке, шт», "
+                "кнопки «Серийные…» и «Акт…»")
     return [B.LEGREP, B.LEG, B.PACK, B.DASH, B.FIND, B.MAP, B.SUPPLY, B.PRINT, B.CLOSE, B.REPORTS, B.PROP, B.SERVICE]
 
 
@@ -390,8 +397,10 @@ def upgrade_doc(doc, test_book, schema, leg, from_text):
     replace_modules(doc, test_book, done)
     new = []
     if schema == B.SCHEMA:
-        # 1.0.0 → this release: the data and the sheets stay, the modules (above) and the views of 1.0.1 are new
-        new += step_101(doc, done)
+        # 1.0.0 / 1.0.1 → this release: the data and the sheets stay, the modules (above) and the views are new
+        if sys_values(doc).get("CORE_VERSION") == "1.0.0":
+            new += step_101(doc, done)
+        new += step_102(doc, done)
     else:
         if schema == SCHEMA_06:
             new += step_07(doc, done)
@@ -409,6 +418,20 @@ def step_101(doc, done):
     B.stock_view_10(doc, sheets)
     done.append(f"1.0.1: «{B.STOCK}» — колонки сведений о товаре ({', '.join(B.STOCK_INFO_HEADERS)}) и кнопка «Обновить сведения»; "
                 "сетка ячеек видна на всех листах; этикетка 40×30 (номер ЕИ, полное наименование, единица, штрихкод)")
+    return []
+
+
+def step_102(doc, done):
+    """1.0.0 / 1.0.1 → 1.0.2: «Номенклатура» R «В упаковке, шт» (the old hint of R1 moves to S1), the sheets «Акты», «Отчёт дня», «Категории»,
+    «Метизы» (the storekeeper's own: not protected, not journaled), the lists of the categories on «Заказы» and «Иной приход», the buttons
+    «Серийные…» («Наличие») and «Акт…» («Выдачи»). No cell of the data is written"""
+    sheets = doc.Sheets
+    B.goods_102(doc, sheets)
+    B.docs_102(doc, sheets)
+    B.categories_102(doc, sheets)
+    B.buttons_102(doc, sheets)
+    done.append(f"1.0.2: листы {', '.join('«' + n + '»' for n in B.SHEETS_102)} (ваши, без защиты, в журнал не пишут), выпадающий список категорий на "
+                f"«{B.ORDERS}» и «{B.SPECIAL}», колонка «В упаковке, шт» в «{B.GOODS}», кнопки «Серийные…» и «Акт…»; данные не менялись")
     return []
 
 
@@ -604,12 +627,15 @@ def allowed_change(sheet, r, c):
     if sheet == B.KITS:
         # 1.0.1: the hint of «Комплекты» (H1) — a number of an EI in the composition, «Собрать из ЕИ…»
         return (r, c) == (0, 7)
+    if sheet == B.GOODS:
+        # 1.0.2: the header «В упаковке, шт» (R1) and the hint that stood there (S1)
+        return r == 0 and c in (B.GOODS_PACKQ_COL, B.GOODS_PACKQ_COL + 1)
     return sheet == B.HELP
 
 
 def compare_books(old, new, leg_expected, from10=False):
-    """every cell of every sheet of the old book against the new one; (problems, statistics). from10: the old book is of 1.0.0
-    (no sheet is added, its registry of the transfer stays as it was)"""
+    """every cell of every sheet of the old book against the new one; (problems, statistics). from10: the old book is of 1.0.0 / 1.0.1
+    (only the sheets of 1.0.2 are added, its registry of the transfer stays as it was)"""
     P, stat = [], dict(sheets=0, cells=0)
     old_names = [old.Sheets.getByIndex(i).Name for i in range(old.Sheets.getCount())]
     new_names = [new.Sheets.getByIndex(i).Name for i in range(new.Sheets.getCount())]
@@ -617,7 +643,8 @@ def compare_books(old, new, leg_expected, from10=False):
     if missing:
         P.append("в новой книге нет листов: " + ", ".join(missing))
     extra = [n for n in new_names if n not in old_names]
-    want_extra = [] if from10 else [B.LEG, B.LEGREP, B.PACK] + B.VIEW_SHEETS + B.SHEETS_10 + [x for x in (B.CARS, B.CAR) if x in extra]
+    want_extra = list(B.SHEETS_102) if from10 else [B.LEG, B.LEGREP, B.PACK] + B.VIEW_SHEETS + B.SHEETS_10 + list(B.SHEETS_102) \
+        + [x for x in (B.CARS, B.CAR) if x in extra]
     if sorted(extra) != sorted(want_extra):
         P.append("в новой книге лишние листы: " + ", ".join(extra))
     for name in old_names:

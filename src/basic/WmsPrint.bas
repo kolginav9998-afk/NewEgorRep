@@ -565,7 +565,7 @@ End Function
 
 ' К12: the number of the note into B of the issues that had none — one operation ISSUE_DOC (journal, recovery); "" when nothing
 ' to write, otherwise the result of ApplyOperation
-Private Function NoteNumber(ish As Object, rs() As Long, n As Long, docNo As String) As String
+Function NoteNumber(ish As Object, rs() As Long, n As Long, docNo As String) As String
     Dim i As Long, k As Long, nos As String
     For i = 0 To n - 1
         If Trim(ish.getCellByPosition(IC_DOC, rs(i)).getString()) = "" Then

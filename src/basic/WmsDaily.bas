@@ -828,8 +828,10 @@ Function SplitWindow() As String
 End Function
 
 ' a row «Разделение» of «Корректировки» filled and posted: OK:<new EI>|строка N, or the refusal (said in a window)
-Function SplitPost(sEI As String, sQty As String, sPlace As String, sReason As String) As String
-    Dim ash As Object, r As Long, res As String, ctl As String
+Function SplitPost(sEI As String, sQty As String, sPlace As String, sReason As String, Optional bQuiet As Variant) As String
+    Dim ash As Object, r As Long, res As String, ctl As String, quiet As Boolean
+    quiet = False
+    If Not IsMissing(bQuiet) Then quiet = bQuiet
     ash = gDoc.Sheets.getByName(SH_ADJUST)
     r = WmsOrders.LastRow(ash) + 1
     If r < 1 Then r = 1
@@ -843,11 +845,11 @@ Function SplitPost(sEI As String, sQty As String, sPlace As String, sReason As S
     ctl = ash.getCellByPosition(AC_CTL, r).getString()
     If Left(res, 3) = "OK:" Then
         SplitPost = "OK:" & Mid(ctl, InStr(ctl, "новый ") + 6) & "|строка " & (r + 1)
-        WmsUi.UiMessage("Готово: " & Mid(ctl, InStr(ctl, "новый ")) & " — " & sQty & " на месте «" & ash.getCellByPosition(AC_PLACE, r).getString() _
+        If Not quiet Then WmsUi.UiMessage("Готово: " & Mid(ctl, InStr(ctl, "новый ")) & " — " & sQty & " на месте «" & ash.getCellByPosition(AC_PLACE, r).getString() _
             & "». Наклейте на него свою этикетку.")
     Else
         SplitPost = res
-        If Left(res, 5) <> "SKIP:" Then WmsUi.UiMessage("Разделение не проведено: " & Mid(res, InStr(res, ":") + 1) & " (строка " & (r + 1) & " «" & SH_ADJUST & "»)")
+        If Left(res, 5) <> "SKIP:" And Not quiet Then WmsUi.UiMessage("Разделение не проведено: " & Mid(res, InStr(res, ":") + 1) & " (строка " & (r + 1) & " «" & SH_ADJUST & "»)")
     End If
 End Function
 

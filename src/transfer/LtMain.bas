@@ -6,7 +6,7 @@
 ' книгу не переносятся), копия книги сохраняется в рабочую папку переноса — программа читает только её.
 Option Explicit
 
-Public Const LT_VERSION = "1.0.1"
+Public Const LT_VERSION = "1.0.2"
 Public Const LT_MAIN = "LEGACY TRANSFER"
 Public Const LT_ORDERS = "1_Вставить_Заказы"
 Public Const LT_STOCK = "1B_Вставить_Наличие"

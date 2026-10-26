@@ -40,8 +40,9 @@ SYS_KEYS = ("SCHEMA", "INSTANCE_ID", "MODE", "CORE_VERSION", "LAST_SEQ")
 # the service sheets of WMS (hidden and protected) and the one sheet kept by hand without protection (WmsStatus.Protections)
 SERVICE_SHEETS = ("_ORD", "_RCV", "_SPR", "_ART", "_RET", "_ISS", "_ADJ", "_CAR", "_LEG", "_PACK", "_IDX", "_SYS")
 # the sheets of the user's own input: «Получатели» and (WMS 0.8) «Топология» — the scheme of the warehouse
-# WMS 1.0: the directories of the supplies «Поставщики» and «Номенклатура» are the storekeeper's own sheets too
-FREE_SHEETS = ("Получатели", "Топология", "Места", "Поставщики", "Номенклатура", "Комплекты", "Резервы")
+# WMS 1.0: the directories of the supplies «Поставщики» and «Номенклатура» are the storekeeper's own sheets too; 1.0.2: «Акты»,
+# «Отчёт дня», «Категории», «Метизы»
+FREE_SHEETS = ("Получатели", "Топология", "Места", "Поставщики", "Номенклатура", "Комплекты", "Резервы", "Акты", "Отчёт дня", "Категории", "Метизы")
 
 
 class Report:
