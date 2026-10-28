@@ -1976,14 +1976,20 @@ def v27_safety():
                     break
                 time.sleep(0.5)
         aside = glob.glob(os.path.join(bdir, f"{base}_*_отложена.ods"))
-        copies_open = []
-        en = s.o.desktop.getComponents().createEnumeration()
-        while en.hasMoreElements():
-            d = en.nextElement()
-            try:
-                copies_open.append(d.getURL())
-            except Exception:
-                pass
+        # (1.1: right after the return WMS opens the book put aside, hidden and for reading, to compare the directories, and closes it — wait for that)
+        t1 = time.time()
+        while True:
+            copies_open = []
+            en = s.o.desktop.getComponents().createEnumeration()
+            while en.hasMoreElements():
+                d = en.nextElement()
+                try:
+                    copies_open.append(d.getURL())
+                except Exception:
+                    pass
+            if not any("/WMS_Backups/" in u for u in copies_open) or time.time() - t1 > 30:
+                break
+            time.sleep(0.5)
         R.add(c, "Н2: «Вернуться к копии» — рабочая книга закрыта и отложена («…_отложена.ods»), копия встала на её место, по журналу доведены "
                  "2 операции после копии, самопроверка, «работа разрешена»; копия закрыта",
               rt.startswith("OK") and newd is not None and "возвращена к копии" in msg and s.state().get("STATE") == "CLEAN" and s.sysv("LAST_SEQ") == seq1
