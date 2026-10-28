@@ -28,6 +28,7 @@ Public Const AK_MAX = 60
 Public Const SH_DAYREP = "Отчёт дня"
 Public Const DR_DATE_ROW = 1
 Public Const DR_SIGN_ROW = 2
+Public Const DR_END_ROW = 3
 Public Const DR_ROW0 = 5
 Public Const DR_ROWS = 20
 Public Const DR_COL_DONE = 0
@@ -38,6 +39,11 @@ Public Const DR_COL_PROG = 4
 Global gDcDoc As Object
 ' the lines of the report being built: «D|…» done today, «T|…» tasks, «P|…» in progress, «C|…» control
 Global gDrOut As String
+' 1.1: a report of a period is being built (the day lists written by hand and the state of today are left out of a past day); the operations of the day read last; the month of the journal read last
+Global gDrPeriod As Boolean
+Global gDrOps As Long
+Global gDrUrl As String
+Global gDrLines As Variant
 
 ' ================================================================ Writer: the building blocks
 
@@ -546,9 +552,10 @@ Function DrDate() As Double
     End If
 End Function
 
-' Monday … Friday are working days (the schedule 5/2)
+' a working day: Monday … Friday (the schedule 5/2) except the days off of «Календарь», and the working days of «Календарь»
 Function DrIsWork(d As Double) As Boolean
-    DrIsWork = (Weekday(d, 2) <= 5)
+    ' 1.1: the schedule 5/2 corrected by the sheet «Календарь» (a holiday on a weekday, a working Saturday)
+    DrIsWork = WmsPeriod.IsWorkDay(d)
 End Function
 
 ' the next working day after d
@@ -623,6 +630,7 @@ Function DayReport(dt As Double, bShow As Boolean) As String
     On Error GoTo EH
     WmsInit()
     gDrOut = ""
+    gDrPeriod = False
     DrFill(dt)
     a = Split(gDrOut, Chr(10))
     nwd = DrNextWork(dt)
@@ -659,6 +667,129 @@ EH:
     gUiLastMsg = DayReport
 End Function
 
+' ---------------------------------------------------------------- 1.1: the report of a period
+
+' the last day of a period: B4 of «Отчёт дня» (a date); empty — 0
+Function DrEndDate() As Double
+    Dim sh As Object, c As Object, msg As String, d As Double
+    If Not gDoc.Sheets.hasByName(SH_DAYREP) Then Exit Function
+    sh = gDoc.Sheets.getByName(SH_DAYREP)
+    c = sh.getCellByPosition(1, DR_END_ROW)
+    If c.getType() = com.sun.star.table.CellContentType.VALUE Then
+        If c.getValue() > 1 Then DrEndDate = Int(c.getValue())
+    ElseIf Trim(c.getString()) <> "" Then
+        If WmsOrders.ParseDateTextAs(Trim(c.getString()), "по дату", d, msg) Then DrEndDate = Int(d)
+    End If
+End Function
+
+Sub BtnPeriodReport(Optional oEvent As Variant)
+    Dim s As String, d1 As Double
+    WmsInit()
+    d1 = DrEndDate()
+    If d1 = 0 Then
+        WmsUi.UiMessage("Впишите на листе «" & SH_DAYREP & "» даты периода: «Дата отчёта» (с какой) и «по дату» (по какую), потом нажмите «Отчёт за период».")
+        Exit Sub
+    End If
+    s = PeriodReport(DrDate(), d1, gUiAuto = 0)
+    If Left(s, 4) = "ERR:" Then WmsUi.UiMessage(Mid(s, 5))
+End Sub
+
+' the week of the date of the report: from Monday to that date
+Sub BtnWeekReport(Optional oEvent As Variant)
+    Dim s As String, d As Double
+    WmsInit()
+    d = DrDate()
+    s = PeriodReport(d - (Weekday(d, 2) - 1), d, gUiAuto = 0)
+    If Left(s, 4) = "ERR:" Then WmsUi.UiMessage(Mid(s, 5))
+End Sub
+
+' the month of the date of the report: from the 1st to that date
+Sub BtnMonthReport(Optional oEvent As Variant)
+    Dim s As String, d As Double
+    WmsInit()
+    d = DrDate()
+    s = PeriodReport(d - Day(CDate(d)) + 1, d, gUiAuto = 0)
+    If Left(s, 4) = "ERR:" Then WmsUi.UiMessage(Mid(s, 5))
+End Sub
+
+' The reports of the days from d0 to d1 one after another in one document: for every working day (and a day off that had operations) what was done and how many operations were
+' posted, then the totals of the period. The lists written by hand and the state of today belong to the report of the day and are not in it. At most 62 days.
+' OK:<days shown>|<days with operations> / ERR:…
+Function PeriodReport(d0 As Double, d1 As Double, bShow As Boolean) As String
+    Dim doc As Object, d As Double, i As Long, a As Variant, n As Long, sign As String, sh As Object, nShown As Long, nDays As Long, tot As String, t As Double, b As Variant, nW As Long
+    On Error GoTo EH
+    WmsInit()
+    If d1 < d0 Then
+        t = d0
+        d0 = d1
+        d1 = t
+    End If
+    If d1 - d0 > 61 Then
+        PeriodReport = "ERR:период — не больше 62 дней (два месяца); сделайте два отчёта"
+        gUiLastMsg = PeriodReport
+        Exit Function
+    End If
+    sign = "Кладовщик."
+    If gDoc.Sheets.hasByName(SH_DAYREP) Then
+        sh = gDoc.Sheets.getByName(SH_DAYREP)
+        If Trim(sh.getCellByPosition(1, DR_SIGN_ROW).getString()) <> "" Then sign = Trim(sh.getCellByPosition(1, DR_SIGN_ROW).getString())
+    End If
+    doc = DcNewDoc(bShow)
+    DcPara(doc, "Отчёт за период " & Format(CDate(d0), "DD.MM.YYYY") & " — " & Format(CDate(d1), "DD.MM.YYYY") & " г.", 0, 12, True, 100)
+    DcPara(doc, sign, 0, 12, False, 400)
+    gDrPeriod = True
+    gDrUrl = ""
+    d = d0
+    Do While d <= d1
+        gDrOut = ""
+        DrFill(d)
+        nW = IIf(DrIsWork(d), 1, 0)
+        If nW = 1 Or gDrOps > 0 Then
+            a = Split(gDrOut, Chr(10))
+            DcPara(doc, Format(CDate(d), "DD.MM.YYYY") & ", " & DrDayName(d) & IIf(nW = 0, " (нерабочий день)", ""), 0, 12, True, 100)
+            n = 0
+            For i = 0 To UBound(a)
+                If Left(a(i), 2) = "D|" Then
+                    DcPara(doc, "• " & Mid(a(i), 3), 0, 12, False, 60, -500, 500)
+                    n = n + 1
+                End If
+            Next i
+            If n = 0 Then DcPara(doc, "• операций в WMS за этот день не проведено", 0, 12, False, 60, -500, 500)
+            For i = 0 To UBound(a)
+                If Left(a(i), 2) = "C|" Then
+                    DcPara(doc, "• " & Mid(a(i), 3), 0, 12, False, 60, -500, 500)
+                    Exit For
+                End If
+            Next i
+            DcPara(doc, "", 0, 6, False, 0)
+            nShown = nShown + 1
+            If gDrOps > 0 Then nDays = nDays + 1
+        End If
+        d = d + 1
+    Loop
+    gDrPeriod = False
+    gDrUrl = ""
+    DcPara(doc, "Итого за период:", 0, 12, True, 100)
+    tot = WmsPeriod.PeriodTotals(d0, d1, n)
+    If tot = "" Then
+        DcPara(doc, "• операций в WMS за период не проведено", 0, 12, False, 60, -500, 500)
+    Else
+        b = Split(tot, Chr(10))
+        For i = 0 To UBound(b)
+            DcPara(doc, CStr(b(i)), 0, 12, False, 60, -500, 500)
+        Next i
+    End If
+    gDcDoc = doc
+    PeriodReport = "OK:" & nShown & "|" & nDays
+    gUiLastMsg = PeriodReport
+    Exit Function
+EH:
+    gDrPeriod = False
+    gDrUrl = ""
+    PeriodReport = "ERR:отчёт за период не построен: " & Error$ & " (строка " & Erl & ")"
+    gUiLastMsg = PeriodReport
+End Function
+
 ' «Очистить «Сделано вручную»»: the list of the day is emptied for the next day (the tasks and «в процессе» stay)
 Sub BtnDrClear(Optional oEvent As Variant)
     Dim sh As Object
@@ -688,17 +819,25 @@ Private Sub DrFill(dt As Double)
     codes = Split(SRC_CODES, "|")
     names = Split(SRC_NAMES, "|")
     day = Format(CDate(dt), "YYYY-MM-DD")
+    gDrOps = 0
     ' ---- the journal of the month of the day: the lines of that day, from the end
     url = gJDir & WmsJournal.JournalFileName(CDate(dt))
     If gSfa.exists(url) Then
-        xs = gSfa.openFileRead(url)
-        tis = CreateUnoService("com.sun.star.io.TextInputStream")
-        tis.setInputStream(xs)
-        tis.setEncoding("UTF-8")
-        txt = tis.readString(Array(), False)
-        tis.closeInput()
-        a = Split(Replace(txt, Chr(13), ""), Chr(10))
-        txt = ""
+        ' (a report of a period reads each month of the journal once)
+        If gDrPeriod And url = gDrUrl Then
+            a = gDrLines
+        Else
+            xs = gSfa.openFileRead(url)
+            tis = CreateUnoService("com.sun.star.io.TextInputStream")
+            tis.setInputStream(xs)
+            tis.setEncoding("UTF-8")
+            txt = tis.readString(Array(), False)
+            tis.closeInput()
+            a = Split(Replace(txt, Chr(13), ""), Chr(10))
+            txt = ""
+            gDrUrl = IIf(gDrPeriod, url, "")
+            If gDrPeriod Then gDrLines = a
+        End If
         ' from the end back to the first line of the day, then the lines of the day in the order they were posted
         iHi = -1
         iLo = 0
@@ -831,14 +970,17 @@ Private Sub DrFill(dt As Double)
     DrActsOfDay(dt)
     If nDocNo > 0 Then DrAdd("D", "Оформлены накладные / документы выдачи: " & docNos)
     If nFix + nDel + nCancel > 0 Then DrAdd("D", "Исправления учёта: исправлено операций — " & nFix & ", удалено (сторно) — " & nDel & IIf(nCancel > 0, ", отменено заказов — " & nCancel, ""))
-    DrManual("D", DR_COL_DONE)
+    If Not gDrPeriod Then DrManual("D", DR_COL_DONE)
     ' ---- 2. tasks for the next working day
-    DrBacklog(dt)
-    DrManual("T", DR_COL_TASKS)
-    DrOpenWork()
-    ' ---- 3. in progress
-    DrManual("P", DR_COL_PROG)
-    DrStockState()
+    If Not gDrPeriod Then
+        DrBacklog(dt)
+        DrManual("T", DR_COL_TASKS)
+        DrOpenWork()
+        ' ---- 3. in progress
+        DrManual("P", DR_COL_PROG)
+        DrStockState()
+    End If
+    gDrOps = nOps
     ' ---- 4. control
     If nOps > 0 Then
         DrAdd("C", "Операций проведено за день: " & nOps & " (журнал № " & seqFirst & "–" & seqLast & ")")
@@ -846,7 +988,7 @@ Private Sub DrFill(dt As Double)
         DrAdd("C", "Операций в журнале за этот день нет")
     End If
     u = WmsSafe.StGet("FLASH")
-    If u <> "" Then DrAdd("C", "Последняя копия на флешку: " & Left(u, InStr(u & "|", "|") - 1))
+    If u <> "" And Not gDrPeriod Then DrAdd("C", "Последняя копия на флешку: " & Left(u, InStr(u & "|", "|") - 1))
     Exit Sub
 EH:
     DrAdd("C", "Часть данных не прочитана: " & Error$ & " (строка " & Erl & ")")

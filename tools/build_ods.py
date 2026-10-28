@@ -1447,7 +1447,8 @@ DAYREP_PROG = ["Работа над учётом склада"]
 DAYREP_HINT = ("«Подготовить отчёт» открывает отчёт за выбранный день отдельным документом Writer: что сделано по данным WMS (приёмка, выдачи — "
                "и оцифровка выдач за прошлые рабочие дни, акты, исправления), задачи на следующий рабочий день, в процессе, контроль данных. "
                "Графики 5/2: выходные пропускаются. Здесь — то, чего WMS знать не может: впишите своё по спискам ниже. «Сделано вручную» "
-               "очищается кнопкой в начале нового дня; задачи и «в процессе» остаются, пока вы их не измените.")
+               "очищается кнопкой в начале нового дня; задачи и «в процессе» остаются, пока вы их не измените. «Отчёт за период» собирает отчёты дней подряд — с «Даты отчёта» по «по дату» "
+               "(не больше 62 дней) — в один документ с итогами; «За неделю» и «За месяц» — с понедельника или с 1-го числа по «Дату отчёта».")
 DAYREP_ROW0 = 5                      # WmsDocs DR_ROW0
 
 
@@ -1514,6 +1515,64 @@ def build_dayrep(doc, sh):
         sh.getCellByPosition(4, DAYREP_ROW0 + k).setString(t)
     add_button(doc, sh, "btnDayReport", "Подготовить отчёт", "WmsDocs.BtnDayReport", 150, 120, 5400, 760, bold=True, back=0xC6E0B4)
     add_button(doc, sh, "btnDrClear", "Очистить «Сделано вручную»", "WmsDocs.BtnDrClear", 5700, 120, 5700, 760, back=0xDDEBF7)
+    dayrep_period(doc, sh)
+
+
+DAYREP_PERIOD_LABEL = "по дату (период с «Даты отчёта»; пусто — отчёт за день)"
+
+
+def dayrep_period(doc, sh):
+    """1.1: the end of a period (B4) and the buttons of the report of a period, of the week, of the month on «Отчёт дня»; what stands there is not touched"""
+    text = number_format(doc, "@", ("ru", "RU"))
+    if sh.getCellByPosition(0, 3).getString().strip() == "" and sh.getCellByPosition(1, 3).getString().strip() == "":
+        sh.getCellByPosition(0, 3).setString(DAYREP_PERIOD_LABEL)
+        sh.getCellByPosition(0, 3).CharColor = MUTED
+        sh.getCellByPosition(1, 3).CellBackColor = INPUT_HEAD_10
+        sh.getCellByPosition(1, 3).NumberFormat = text
+    for name, label, macro, x, w, back in (("btnPeriodReport", "Отчёт за период", "WmsDocs.BtnPeriodReport", 11600, 4300, 0xC6E0B4),
+                                           ("btnWeekReport", "За неделю", "WmsDocs.BtnWeekReport", 16100, 2800, 0xDDEBF7),
+                                           ("btnMonthReport", "За месяц", "WmsDocs.BtnMonthReport", 19100, 2800, 0xDDEBF7)):
+        if not has_button(sh, name):
+            add_button(doc, sh, name, label, macro, x, 120, w, 760, bold=(name == "btnPeriodReport"), back=back)
+
+
+# 1.1: «Календарь» (WmsPeriod SH_CAL) — the days that are not as the schedule 5/2 says: a holiday on a weekday, a working Saturday; the storekeeper's own sheet
+CALENDAR = "Календарь"
+CALENDAR_HEADERS = ["Дата", "День (выходной / рабочий)", "Что это (для себя)"]
+CALENDAR_HINT = ("Рабочие дни WMS считает по графику 5/2 (понедельник–пятница). Здесь — дни, которые не по графику: праздник в будний день («выходной») и рабочая суббота («рабочий»). От календаря "
+                 "зависят «Задачи на следующий рабочий день», оцифровка выдач за рабочие дни и отчёт за период. Праздники ниже внесены по правилу «выпало на выходной — переносится на понедельник» "
+                 "для 2026–2027 годов: ПРОВЕРЬТЕ их по производственному календарю на сайте КонсультантПлюс/Гаранта и поправьте, добавьте свои дни. Учёт этот лист не меняет.")
+CALENDAR_SEED = [
+    ((2026, 1, 1), "выходной", "Новый год"), ((2026, 1, 2), "выходной", "Новогодние каникулы"), ((2026, 1, 5), "выходной", "Новогодние каникулы"), ((2026, 1, 6), "выходной", "Новогодние каникулы"),
+    ((2026, 1, 7), "выходной", "Рождество"), ((2026, 1, 8), "выходной", "Новогодние каникулы"), ((2026, 1, 9), "выходной", "перенос с воскресенья 4 января"),
+    ((2026, 2, 23), "выходной", "День защитника Отечества"), ((2026, 3, 9), "выходной", "перенос с воскресенья 8 марта"), ((2026, 5, 1), "выходной", "Праздник Весны и Труда"),
+    ((2026, 5, 11), "выходной", "перенос с субботы 9 мая"), ((2026, 6, 12), "выходной", "День России"), ((2026, 11, 4), "выходной", "День народного единства"),
+    ((2026, 12, 31), "выходной", "перенос с субботы 3 января"),
+    ((2027, 1, 1), "выходной", "Новый год"), ((2027, 1, 4), "выходной", "Новогодние каникулы"), ((2027, 1, 5), "выходной", "Новогодние каникулы"), ((2027, 1, 6), "выходной", "Новогодние каникулы"),
+    ((2027, 1, 7), "выходной", "Рождество"), ((2027, 1, 8), "выходной", "Новогодние каникулы"), ((2027, 2, 23), "выходной", "День защитника Отечества"),
+    ((2027, 3, 8), "выходной", "Международный женский день"), ((2027, 5, 3), "выходной", "перенос с субботы 1 мая"), ((2027, 5, 10), "выходной", "перенос с воскресенья 9 мая"),
+    ((2027, 6, 14), "выходной", "перенос с субботы 12 июня"), ((2027, 11, 4), "выходной", "День народного единства"),
+]
+
+
+def build_calendar(doc, sh):
+    import datetime
+    header(sh, CALENDAR_HEADERS, [3200, 5200, 12000], height=900)
+    sh.getCellRangeByPosition(0, 1, 0, 400).NumberFormat = number_format(doc, "DD.MM.YYYY")
+    sh.getCellRangeByPosition(1, 0, 2, 400).NumberFormat = number_format(doc, "@", ("ru", "RU"))
+    sh.getCellRangeByPosition(0, 1, 2, 400).CellBackColor = INPUT_HEAD_10
+    for r, ((y, m, d), kind, what) in enumerate(CALENDAR_SEED, start=1):
+        sh.getCellByPosition(0, r).setValue((datetime.date(y, m, d) - datetime.date(1899, 12, 30)).days)
+        sh.getCellByPosition(1, r).setString(kind)
+        sh.getCellByPosition(2, r).setString(what)
+    hint = sh.getCellByPosition(4, 0)
+    hint.setString(CALENDAR_HINT)
+    hint.IsTextWrapped = True
+    hint.VertJustify = 1
+    hint.CharHeight = 9
+    hint.CharColor = MUTED
+    sh.getColumns().getByIndex(3).Width = 600
+    sh.getColumns().getByIndex(4).Width = 12000
 
 
 def docs_102(doc, sheets):
@@ -1562,7 +1621,7 @@ FAST_HINT_COL = 18
 # the sheets 1.0.2 adds to a book of 1.0.0 / 1.0.1
 SHEETS_102 = [ACTS, DAYREP, CATS, FAST]
 # the sheets 1.1 adds to a book of 1.0.x (filled in as the release grows)
-SHEETS_110 = ["Наличие по названию", "Остаток деталей", "Операции дня", "Проверка названий", "Стандарты", "Синонимы", "Без категории", "Настройки"]
+SHEETS_110 = ["Наличие по названию", "Остаток деталей", "Операции дня", "Проверка названий", "Стандарты", "Синонимы", "Без категории", "Настройки", "Календарь"]
 FAST_FIND_ROW = 1
 FAST_FILTER_ROW = 2
 FAST_HEAD = 3
@@ -1986,6 +2045,12 @@ def views_110(doc, sheets):
     if not sheets.hasByName(NOCAT):
         sheets.insertNewByName(NOCAT, names.index(CATS) + 1 if CATS in names else len(names))
         build_nocat(doc, sheets.getByName(NOCAT))
+    names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+    if not sheets.hasByName(CALENDAR):
+        sheets.insertNewByName(CALENDAR, names.index(DAYREP) + 1 if DAYREP in names else len(names))
+        build_calendar(doc, sheets.getByName(CALENDAR))
+    if sheets.hasByName(DAYREP):
+        dayrep_period(doc, sheets.getByName(DAYREP))
     names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
     if not sheets.hasByName(SETTINGS):
         sheets.insertNewByName(SETTINGS, names.index(NOCAT) + 1 if NOCAT in names else len(names))

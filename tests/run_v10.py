@@ -3127,6 +3127,8 @@ def v41_day_report():
     acc = ["понедельник", "вторник", "среду", "четверг", "пятницу", "субботу", "воскресенье"]
     s = ready(Session(new_wms("v41")))
     try:
+        # (the holidays of «Календарь» are left out: the test counts the days by the schedule 5/2)
+        s.doc.Sheets.getByName("Календарь").getCellRangeByPosition(0, 1, 2, 400).clearContents(1 + 2 + 4 + 16)
         today = T
         prev = today - datetime.timedelta(days=1)
         while prev.weekday() >= 5:
@@ -4365,6 +4367,108 @@ def v54_past_hints():
         R.add(c, "«Иной приход»: название «Кабель ВВГ 3х2,5» — единица «м» и место «3-1-2» подставлены, артикул пуст", row1[6] == "м" and row1[8] == "3-1-2" and row1[4] == "", f"{row1}")
         sc = s.B("ActionSelfCheck")
         R.add(c, "подсказки ничего не проводят; самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0") and int(s.sysv("LAST_SEQ")) == 2, f"{sc[:100]}; {s.sysv('LAST_SEQ')}")
+    finally:
+        s.close()
+
+
+@case
+def v55_period_report():
+    """1.1: отчёт за период: отчёты дней подряд в одном документе (рабочие дни графика 5/2 по листу «Календарь»: праздник в будний день пропускается, рабочая суббота включается, нерабочий день
+    с операциями показывается), итоги периода по журналу (приёмка, выдачи и кому чаще, возвраты, корректировки); «За неделю» и «За месяц»; больше 62 дней — отказ; журнал не меняется"""
+    import datetime
+    c = "V55"
+    names = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
+    s = ready(Session(new_wms("v55")))
+    try:
+        cal = s.doc.Sheets.getByName("Календарь")
+        seeds = [list(r) for r in cal.getCellRangeByPosition(0, 1, 2, 30).getDataArray() if r[0] != ""]
+        R.add(c, "лист «Календарь»: праздники 2026–2027 внесены (с пометкой проверить), лист без защиты", len(seeds) >= 20 and not cal.isProtected()
+              and any(r[1] == "выходной" and "Новый год" in r[2] for r in seeds), f"{len(seeds)}")
+        cal.getCellRangeByPosition(0, 1, 2, 400).clearContents(1 + 2 + 4 + 16)
+        today = T
+        order(s, 1, "1", "Болт М8х30", qty="100", art="B-830")
+        receive(s, 1, "100", place="5-1-1", doc="УПД-1")
+        order(s, 2, "2", "Гайка М8", qty="50", art="G-8")
+        receive(s, 2, "50", place="5-1-2", doc="УПД-2")
+        e1 = ords(s, 1)[21]
+        issue(s, 1, e1, "10", "ива")
+        issue(s, 2, e1, "5", "ива")
+        issue(s, 3, e1, "2", "пет")
+        seq0 = int(s.sysv("LAST_SEQ"))
+        d0 = today - datetime.timedelta(days=6)
+
+        def work_days(a, b, off=(), on=()):
+            out, d = [], a
+            while d <= b:
+                if (d.weekday() < 5 and d not in off) or d in on:
+                    out.append(d)
+                d += datetime.timedelta(days=1)
+            return out
+
+        def serial_of(d):
+            return float((d - datetime.date(1899, 12, 30)).days)
+
+        r1 = s.B("PeriodReport", serial_of(d0), serial_of(today), False, module="WmsDocs")
+        txt = doc_of(s)
+        s.B("DcDocClose", module="WmsDocs")
+        wd = work_days(d0, today)
+        heads = [f"{d.strftime('%d.%m.%Y')}, {names[d.weekday()]}" for d in wd]
+        R.add(c, "отчёт за 7 дней: заголовок «Отчёт за период …», по заголовку на каждый рабочий день (понедельник–пятница) и ни одного выходного, в день с операциями — приёмка и выдачи; «Итого за период»",
+              r1.startswith("OK:") and txt.startswith(f"Отчёт за период {d0.strftime('%d.%m.%Y')} — {today.strftime('%d.%m.%Y')} г.") and all(h in txt for h in heads)
+              and not any(f"{d.strftime('%d.%m.%Y')}, {names[d.weekday()]}" in txt for d in work_days(d0, today) if False) and txt.count("(нерабочий день)") == 0
+              and "Приёмка по заказам: принято позиций — 2" in txt and "Итого за период:" in txt, f"{r1}; {txt[:300]!r}")
+        i_tot = txt.index("Итого за период:")
+        tot = txt[i_tot:]
+        R.add(c, "итоги периода: операций, приёмка 2 позиции (150 шт), выдачи — 3 (17 шт), чаще всего «ива» — 2",
+              "Операций проведено: " in tot and "Приёмка по заказам: принято позиций — 2; количество: 150 шт" in tot and "Выдачи: 3; количество: 17 шт" in tot
+              and "ива" in tot.lower() and "— 2" in tot, tot[:500].replace(chr(10), " ¶ "))
+        # the calendar: yesterday is a holiday, the nearest Saturday works
+        yest = today - datetime.timedelta(days=1)
+        sat = d0 + datetime.timedelta(days=(5 - d0.weekday()) % 7)
+        cal.getCellByPosition(0, 1).setValue(serial_of(yest))
+        cal.getCellByPosition(1, 1).setString("выходной")
+        cal.getCellByPosition(0, 2).setValue(serial_of(sat))
+        cal.getCellByPosition(1, 2).setString("рабочий")
+        flags = (s.B("TestIsWork", serial_of(yest), module="WmsPeriod"), s.B("TestIsWork", serial_of(sat), module="WmsPeriod"))
+        r2 = s.B("PeriodReport", serial_of(d0), serial_of(today), False, module="WmsDocs")
+        txt2 = doc_of(s)
+        s.B("DcDocClose", module="WmsDocs")
+        wd2 = work_days(d0, today, off=(yest,), on=(sat,))
+        hy = f"{yest.strftime('%d.%m.%Y')}, {names[yest.weekday()]}"
+        hs = f"{sat.strftime('%d.%m.%Y')}, {names[sat.weekday()]}"
+        R.add(c, "«Календарь»: вчера — выходной (дня нет в отчёте, если в нём нет операций), суббота — рабочая (день есть)",
+              flags == (("0" if yest.weekday() < 5 or True else "1"), "1") and (hy not in txt2 if yest.weekday() < 5 else True) and hs in txt2, f"{flags}; {hy in txt2}; {hs in txt2}")
+        # a day off with operations is shown
+        cal.getCellByPosition(0, 3).setValue(serial_of(today))
+        cal.getCellByPosition(1, 3).setString("выходной")
+        r3 = s.B("PeriodReport", serial_of(today), serial_of(today), False, module="WmsDocs")
+        txt3 = doc_of(s)
+        s.B("DcDocClose", module="WmsDocs")
+        R.add(c, "сегодня объявлен выходным, но операции были — день показан с пометкой «(нерабочий день)»", "(нерабочий день)" in txt3 and "Приёмка по заказам" in txt3, txt3[:200])
+        cal.getCellRangeByPosition(0, 3, 1, 3).clearContents(1 + 2 + 4 + 16)
+        # a period of more than 62 days
+        r4 = s.B("PeriodReport", serial_of(today - datetime.timedelta(days=100)), serial_of(today), False, module="WmsDocs")
+        R.add(c, "период больше 62 дней — отказ с понятной причиной", r4.startswith("ERR:") and "62" in r4, r4)
+        # the week and the month of the date of the report
+        dr = s.doc.Sheets.getByName("Отчёт дня")
+        dr.getCellByPosition(1, 1).setString(today.strftime("%d.%m.%Y"))
+        s.B("BtnWeekReport", module="WmsDocs")
+        tw = doc_of(s)
+        s.B("DcDocClose", module="WmsDocs")
+        mon = today - datetime.timedelta(days=today.weekday())
+        s.B("BtnMonthReport", module="WmsDocs")
+        tm = doc_of(s)
+        s.B("DcDocClose", module="WmsDocs")
+        first = today.replace(day=1)
+        R.add(c, "«За неделю» — с понедельника по дату отчёта; «За месяц» — с 1-го числа", tw.startswith(f"Отчёт за период {mon.strftime('%d.%m.%Y')} — {today.strftime('%d.%m.%Y')}")
+              and tm.startswith(f"Отчёт за период {first.strftime('%d.%m.%Y')} — {today.strftime('%d.%m.%Y')}"), f"{tw[:70]!r}; {tm[:70]!r}")
+        # the day report is as before (the period flag is off)
+        rd = s.B("DayReport", serial_of(today), False, module="WmsDocs")
+        txtd = doc_of(s)
+        s.B("DcDocClose", module="WmsDocs")
+        R.add(c, "отчёт дня после отчётов за период — как прежде: «1. Завершено сегодня», «2. Задачи на …», «4. Контроль данных»", rd.startswith("OK:") and "1. Завершено сегодня:" in txtd and "4. Контроль данных" in txtd, rd)
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "журнал отчётами не менялся; самопроверка — без ошибок", int(s.sysv("LAST_SEQ")) == seq0 and sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), f"{seq0} → {s.sysv('LAST_SEQ')}; {sc[:100]}")
     finally:
         s.close()
 

@@ -660,6 +660,9 @@ def allowed_change(sheet, r, c):
     if sheet == B.GOODS:
         # 1.0.2: the header «В упаковке, шт» (R1) and the hint that stood there (S1)
         return r == 0 and c in (B.GOODS_PACKQ_COL, B.GOODS_PACKQ_COL + 1)
+    if sheet == B.DAYREP:
+        # 1.1: the end of a period (A4, B4) on «Отчёт дня»
+        return (r, c) in ((3, 0), (3, 1))
     if sheet == B.CATS:
         # 1.1: the headers of the columns «Не считать», «Позиций», «ЕИ с остатком» (C1…E1), the hint moved from D1 to G1; the categories and their words are not touched
         return r == 0 and 2 <= c <= B.CATS_HINT_COL

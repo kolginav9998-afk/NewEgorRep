@@ -180,7 +180,7 @@ class Office:
 # «WmsPlus»: their names do not slow the core down. A library sees the other one's procedures, constants and globals once
 # both are loaded (WmsCore.WmsInit loads WmsPlus).
 PLUS_LIB = "WmsPlus"
-PLUS_MODULES = ["WmsLegacy", "WmsPrimeUi", "WmsView", "WmsPack", "WmsDash", "WmsFind", "WmsMap", "WmsAsk", "WmsDaily", "WmsSupply", "WmsPrint", "WmsAudit", "WmsLedger", "WmsKit", "WmsItem", "WmsParts", "WmsDocs", "WmsCat", "WmsNames", "WmsSpec", "WmsSearch", "WmsStockView", "WmsOps", "WmsSettings", "WmsDirs", "WmsGuard", "WmsSafe", "WmsCare", "WmsHelp"]
+PLUS_MODULES = ["WmsLegacy", "WmsPrimeUi", "WmsView", "WmsPack", "WmsDash", "WmsFind", "WmsMap", "WmsAsk", "WmsDaily", "WmsSupply", "WmsPrint", "WmsAudit", "WmsLedger", "WmsKit", "WmsItem", "WmsParts", "WmsDocs", "WmsCat", "WmsNames", "WmsSpec", "WmsSearch", "WmsStockView", "WmsOps", "WmsSettings", "WmsDirs", "WmsPeriod", "WmsGuard", "WmsSafe", "WmsCare", "WmsHelp"]
 
 
 def lib_of(module):
