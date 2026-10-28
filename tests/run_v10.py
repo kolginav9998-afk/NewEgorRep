@@ -4105,8 +4105,21 @@ def v50_fasteners_categories():
         rowsn2 = [list(r) for r in ksh.getCellRangeByPosition(0, 4, 8, 4 + 300).getDataArray() if r[0]]
         R.add(c, "после записи «Шестерня Z-99» исчезла из списка «Без категории» (категория есть в «Номенклатуре»)", "Шестерня Z-99" not in [r[0] for r in rowsn2], str(len(rowsn2)))
         gs.getCellByPosition(4, r_gr).setString("Моё")
-        # a stale list: «Номенклатура» row changed after the list was made → not written
-        ksh.getCellByPosition(6, 4).setString("Что-то")
+        # doubles in the directory «Номенклатура» (1.1): the same article; the same name with the letters that look alike; the same fastener under two names
+        r0 = r_gr + 1
+        for k, (nm_, art_) in enumerate([("Гайка М10 DIN 934", "G-10"), ("Прокладка X-1", "G-10"), ("Лампа Н7", ""), ("Лампа H7", ""), ("Болт М6х20 DIN 933 8.8 цинк", "B-620"),
+                                         ("Болт ISO 4017 M6x20 8.8 оцинкованный", "B-620-2")]):
+            gs.getCellByPosition(1, r0 + k).setString(nm_)
+            gs.getCellByPosition(2, r0 + k).setString(art_)
+        s.B("OnCatsChange", module="WmsCat")
+        nc = s.B("NamesCheck", module="WmsNames")
+        csh = s.doc.Sheets.getByName("Проверка названий")
+        crow = [list(r) for r in csh.getCellRangeByPosition(0, 4, 6, 40).getDataArray() if r[0] == "Номенклатура"]
+        whys = [r[5] for r in crow]
+        R.add(c, "«Проверка названий»: в «Номенклатуре» найдены три пары дублей — тот же артикул G-10, то же название «Лампа Н7» (русская и латинская Н/H), тот же болт под двумя названиями (DIN 933 = ISO 4017)",
+              nc.startswith("OK:") and any("тот же артикул" in w and "G-10" in w for w in whys) and any("то же название" in w for w in whys) and any("похоже на ту же деталь" in w for w in whys),
+              f"{nc}; {whys}")
+        gs.getCellRangeByPosition(1, r0, 2, r0 + 6).clearContents(1 + 2 + 4 + 16)
         # the journal
         sc = s.B("ActionSelfCheck")
         R.add(c, "справочники и списки ничего не проводят: журнал после приходов и выдачи не изменился; самопроверка — без ошибок", int(s.sysv("LAST_SEQ")) == seq1 and ri.startswith("OK")
@@ -4313,6 +4326,45 @@ def v53_special_by_ei():
         sc = s.B("ActionSelfCheck")
         P, inf, _ = s.adjcheck(0)
         R.add(c, "самопроверка — без ошибок; оракул журнала — без расхождений", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0") and not P, f"{' ¶ '.join(x for x in sc.split(chr(10)) if not x.startswith('OK'))[:1200]}; {P[:3]}")
+    finally:
+        s.close()
+
+
+@case
+def v54_past_hints():
+    """1.1: подсказка по прошлому приходу: вписали название, которое уже было в «Наличии», — пустые «Артикул» и «Единица» на «Заказах» заполняются с последнего ЕИ с таким названием
+    (написанным хоть латинскими буквами), в «Контроле» сказано, откуда; в «Ином приходе» — единица и место, артикул не подставляется (он — ключ детали); то, что вписал человек, не
+    заменяется; незнакомое название — ничего"""
+    c = "V54"
+    s = ready(Session(new_wms("v54")))
+    try:
+        order(s, 1, "1", "Болт М8х30 DIN 933", qty="10", art="B-830", unit="шт")
+        receive(s, 1, "10", place="5-1-1", doc="УПД-1")
+        order(s, 2, "2", "Кабель ВВГ 3х2,5", qty="30", unit="м", art="")
+        receive(s, 2, "30", place="3-1-2", doc="УПД-2")
+        e1 = ords(s, 1)[21]
+        osh = s.doc.Sheets.getByName("Заказы")
+        # a name typed (the same as the old one, with the Latin M and x): the article and the unit come
+        s.type_ord("B", 3, "Болт M8x30 DIN 933")
+        art3, unit3, ctl3 = osh.getCellByPosition(4, 3).getString(), osh.getCellByPosition(8, 3).getString(), osh.getCellByPosition(24, 3).getString()
+        R.add(c, "«Заказы»: название «Болт M8x30 DIN 933» (латинские M и x) — артикул «B-830» и единица «шт» подставлены, «Контроль» называет ЕИ-источник",
+              art3 == "B-830" and unit3 == "шт" and e1 in ctl3 and "подставлено" in ctl3.lower(), f"{art3}; {unit3}; {ctl3}")
+        # the user's own values stay
+        s.type_ord("E", 4, "МОЙ-1")
+        s.type_ord("I", 4, "кг")
+        s.type_ord("B", 4, "Болт М8х30 DIN 933")
+        art4, unit4 = osh.getCellByPosition(4, 4).getString(), osh.getCellByPosition(8, 4).getString()
+        R.add(c, "своё: артикул «МОЙ-1» и единица «кг» набраны раньше названия — не заменены", art4 == "МОЙ-1" and unit4 == "кг", f"{art4}; {unit4}")
+        # an unknown name
+        s.type_ord("B", 5, "Совсем новое название")
+        R.add(c, "незнакомое название — ничего не подставлено", osh.getCellByPosition(4, 5).getString() == "" and osh.getCellByPosition(8, 5).getString() == "", "")
+        # «Иной приход»: the unit and the place, not the article
+        spc = s.doc.Sheets.getByName("Иной приход")
+        s.special_input(1, B="Офис", D="Кабель ВВГ 3х2,5")
+        row1 = [spc.getCellByPosition(c_, 1).getString() for c_ in range(0, 18)]
+        R.add(c, "«Иной приход»: название «Кабель ВВГ 3х2,5» — единица «м» и место «3-1-2» подставлены, артикул пуст", row1[6] == "м" and row1[8] == "3-1-2" and row1[4] == "", f"{row1}")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "подсказки ничего не проводят; самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0") and int(s.sysv("LAST_SEQ")) == 2, f"{sc[:100]}; {s.sysv('LAST_SEQ')}")
     finally:
         s.close()
 

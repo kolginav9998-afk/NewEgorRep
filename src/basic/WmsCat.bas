@@ -332,6 +332,70 @@ Sub CategoryHint(sSheet As String, r As Long, nameCol As Integer, catCol As Inte
     If c <> "" Then sh.getCellByPosition(catCol, r).setString(c)
 End Sub
 
+' 1.1: the empty article / unit / place of the row r of sSheet are filled from the last EI of the registry that has the same name (the letters that look alike not told apart): a hint of
+' what was written the last time, never over what the storekeeper typed. artCol / placeCol = -1 — not filled (in «Иной приход» an article is the key of a part: a hint would make a new
+' part an addition to the old one). Returns the note for «Контроль» ("" — nothing found or nothing filled)
+Function PastHint(sSheet As String, r As Long, nameCol As Integer, artCol As Integer, unitCol As Integer, placeCol As Integer) As String
+    Dim sh As Object, st As Object, last As Long, d As Variant, names() As String, i As Long, key As String, found As Long, nm As String, row As Variant, filled As String
+    Dim cEi As Long, cNm As Long, cArt As Long, cUn As Long, cPl As Long, folded As Variant, needArt As Boolean, needPlace As Boolean
+    On Error GoTo EH
+    sh = gDoc.Sheets.getByName(sSheet)
+    nm = Trim(sh.getCellByPosition(nameCol, r).getString())
+    If nm = "" Then Exit Function
+    ' (no short circuit in Basic: a column that is not used is not read)
+    needArt = False
+    needPlace = False
+    If artCol >= 0 Then needArt = (Trim(sh.getCellByPosition(artCol, r).getString()) = "")
+    If placeCol >= 0 Then needPlace = (Trim(sh.getCellByPosition(placeCol, r).getString()) = "")
+    If Not needArt And Not needPlace And Trim(sh.getCellByPosition(unitCol, r).getString()) <> "" Then Exit Function
+    st = WmsIssue.StockSheet()
+    last = WmsOrders.LastRow(st)
+    If last < 1 Then Exit Function
+    cEi = SC_EI
+    cNm = SC_NAME
+    cArt = SC_ART
+    cUn = SC_UNIT
+    cPl = SC_PLACE
+    d = st.getCellRangeByPosition(0, 1, SC_PLACE, last).getDataArray()
+    ReDim names(UBound(d))
+    For i = 0 To UBound(d)
+        names(i) = CStr(d(i)(cNm))
+    Next i
+    folded = WmsNames.FoldAll(names)
+    key = WmsNames.Fold(WmsNames.NormName(nm))
+    found = -1
+    For i = UBound(d) To 0 Step -1
+        If CStr(d(i)(cEi)) <> "" Then
+            If CStr(folded(i)) = key Then
+                found = i
+                Exit For
+            End If
+        End If
+    Next i
+    If found < 0 Then Exit Function
+    row = d(found)
+    If artCol >= 0 Then
+        If Trim(sh.getCellByPosition(artCol, r).getString()) = "" And Trim(CStr(row(cArt))) <> "" Then
+            sh.getCellByPosition(artCol, r).setString(Trim(CStr(row(cArt))))
+            filled = filled & IIf(filled <> "", ", ", "") & "артикул"
+        End If
+    End If
+    If Trim(sh.getCellByPosition(unitCol, r).getString()) = "" And Trim(CStr(row(cUn))) <> "" Then
+        sh.getCellByPosition(unitCol, r).setString(Trim(CStr(row(cUn))))
+        filled = filled & IIf(filled <> "", ", ", "") & "единица"
+    End If
+    If placeCol >= 0 Then
+        If Trim(sh.getCellByPosition(placeCol, r).getString()) = "" And Trim(CStr(row(cPl))) <> "" Then
+            sh.getCellByPosition(placeCol, r).setString(Trim(CStr(row(cPl))))
+            filled = filled & IIf(filled <> "", ", ", "") & "место"
+        End If
+    End If
+    If filled <> "" Then PastHint = "подставлено по прошлому приходу " & CStr(row(cEi)) & ": " & filled & " (можно изменить)"
+    Exit Function
+EH:
+    PastHint = ""
+End Function
+
 ' ================================================================ the registry by names
 
 ' the registry grouped by name and article: gGrp(i) = (name, article, unit, balance, EIs with a balance, places, category of the registry (the first one that is not empty)), gGrpN

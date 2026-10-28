@@ -254,9 +254,82 @@ End Function
 
 ' the names of the registry, of «Заказы», «Иной приход» and «Номенклатура» that were typed in several lines or have a doubled space, a broken size or class;
 ' the list under the header of the sheet. OK:<how many> / ERR:…
+' a value of a Collection by its key ("" — none); an error handler set inside a loop works for the first error only in this Basic, so each lookup is a call of its own
+Private Function CollText(coll As Object, key As String) As String
+    On Error GoTo Miss
+    CollText = CStr(coll.Item(key))
+    Exit Function
+Miss:
+    CollText = ""
+End Function
+
+' The possible doubles in «Номенклатура»: the same article in two rows; the same name (any case, the letters that look alike not told apart) in two rows; the same fastener (type, size,
+' standard or its equivalent, class, coating, head) under two names. A row is added to out(n…) for the second row of each pair, with the first one named. Returns how many.
+Private Function GoodsDoubles(out() As Variant, ByRef n As Long) As Long
+    Dim sh As Object, last As Long, d As Variant, i As Long, nm As String, art As String, kA As String, kN As String, kP As String, first As String, rec As Variant, cc As String, why As String
+    Dim collA As Object, collN As Object, collP As Object, cnt As Long, r As Variant
+    If Not gDoc.Sheets.hasByName("Номенклатура") Then Exit Function
+    sh = gDoc.Sheets.getByName("Номенклатура")
+    last = WmsOrders.LastRow(sh)
+    If last < 1 Then Exit Function
+    d = sh.getCellRangeByPosition(0, 1, 2, last).getDataArray()
+    collA = New Collection
+    collN = New Collection
+    collP = New Collection
+    For i = 0 To UBound(d)
+        r = d(i)
+        nm = Trim(CStr(r(1)))
+        art = Trim(CStr(r(2)))
+        If nm <> "" Then
+            why = ""
+            first = ""
+            If art <> "" Then
+                kA = Fold(art)
+                first = CollText(collA, kA)
+                If first = "" Then
+                    collA.Add(CStr(i + 2), kA)
+                Else
+                    why = "тот же артикул «" & art & "», что в строке " & first
+                End If
+            End If
+            If why = "" Then
+                kN = Fold(NormName(nm))
+                first = CollText(collN, kN)
+                If first = "" Then
+                    collN.Add(CStr(i + 2), kN)
+                Else
+                    why = "то же название, что в строке " & first
+                End If
+            End If
+            If why = "" Then
+                rec = WmsSpec.SpRecordC(NormName(nm))
+                If CStr(rec(0)) <> "" And CStr(rec(2)) <> "" Then
+                    cc = CStr(rec(8))
+                    If cc = "Оцинкованный" Then cc = "Цинк"
+                    kP = rec(0) & "|" & rec(2) & "|" & rec(11) & "|" & rec(7) & "|" & cc & "|" & rec(9)
+                    first = CollText(collP, kP)
+                    If first = "" Then
+                        collP.Add(CStr(i + 2), kP)
+                    Else
+                        why = "похоже на ту же деталь, что в строке " & first & " (тип, размер, стандарт и его аналоги, класс, покрытие совпадают)"
+                    End If
+                End If
+            End If
+            If why <> "" Then
+                cnt = cnt + 1
+                If n < NC_MAX Then
+                    out(n) = IssueRow("Номенклатура", i + 1, "", nm, "возможный дубль: " & why, "справочник: объедините строки или поправьте артикул/название — WMS ничего не меняет сама")
+                    n = n + 1
+                End If
+            End If
+        End If
+    Next i
+    GoodsDoubles = cnt
+End Function
+
 Function NamesCheck() As String
     Dim sh As Object, d As Variant, i As Long, n As Long, out() As Variant, last As Long, nm As String, why As String, kind As String, cName As Long, cEi As Long, nAll As Long
-    Dim sheetName As Variant, cur As Object, e As Long, cSt As Long, cSrc As Long, where As String, ei As String
+    Dim sheetName As Variant, cur As Object, e As Long, cSt As Long, cSrc As Long, where As String, ei As String, nDup As Long
     On Error GoTo EH
     If Not gDoc.Sheets.hasByName(SH_NAMECHK) Then
         NamesCheck = "ERR:в книге нет листа «" & SH_NAMECHK & "» — книга не обновлена до 1.1"
@@ -327,6 +400,9 @@ Function NamesCheck() As String
             End If
         End If
     Next sheetName
+    ' 1.1: doubles in the directory «Номенклатура» (the one place where a double is a mistake: the registry holds one line per receipt on purpose)
+    nDup = GoodsDoubles(out, n)
+    nAll = nAll + nDup
     sh = gDoc.Sheets.getByName(SH_NAMECHK)
     cur = sh.createCursor()
     cur.gotoEndOfUsedArea(False)
@@ -337,7 +413,7 @@ Function NamesCheck() As String
         sh.getCellRangeByPosition(0, NC_ROW0, NC_COLS - 1, NC_ROW0 + n - 1).setDataArray(out)
     End If
     sh.getCellByPosition(0, NC_STAT_ROW).setString(IIf(nAll = 0, "Названия в порядке: разбитых на строки, с лишними пробелами и разорванным размером нет.", _
-        "Названий, которые стоит исправить: " & nAll & IIf(nAll > n, " (показаны первые " & n & ")", "") & ". Проверено " & Format(Now(), "DD.MM.YYYY HH:MM") & ". «¶» — место, где название разбито на строки."))
+        "Названий, которые стоит исправить: " & nAll & IIf(nAll > n, " (показаны первые " & n & ")", "") & IIf(nDup > 0, ", из них возможных дублей в «Номенклатуре»: " & nDup, "") & ". Проверено " & Format(Now(), "DD.MM.YYYY HH:MM") & ". «¶» — место, где название разбито на строки."))
     NamesCheck = "OK:" & nAll
     gUiLastMsg = NamesCheck
     Exit Function

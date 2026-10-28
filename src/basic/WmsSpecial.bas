@@ -1754,7 +1754,7 @@ Sub PreviewSpecialRow(r As Long)
     why = CheckRow(r, False, "")
     If why <> "" Then
         ClearDerived(r, False)
-        If mNameTyped Then WmsCat.CategoryHint(SH_SPECIAL, r, XC_NAME, XC_CAT)
+        If mNameTyped Then SpecialNameHints(r)
         SetCtl(r, "Ошибка: " & why)
         Exit Sub
     End If
@@ -1773,9 +1773,15 @@ Sub PreviewSpecialRow(r As Long)
     Else
         ClearDerived(r, False)
     End If
-    If mNameTyped Then WmsCat.CategoryHint(SH_SPECIAL, r, XC_NAME, XC_CAT)
+    If mNameTyped Then SpecialNameHints(r)
     SetCtl(r, IIf(mMissing = "", "Можно провести: ", "") & DescribeCap() & IIf(mMissing <> "", " — укажите " & mMissing, "") _
         & IIf(mWarn <> "", " · " & mWarn, ""))
+End Sub
+
+' 1.1: a name typed into a row of «Иной приход»: the hint of the category and the unit and place of the last EI with this name (the article is never filled: it is the key of a part)
+Private Sub SpecialNameHints(r As Long)
+    WmsCat.CategoryHint(SH_SPECIAL, r, XC_NAME, XC_CAT)
+    WmsCat.PastHint(SH_SPECIAL, r, XC_NAME, -1, XC_UNIT, XC_PLACE)
 End Sub
 
 ' the WMS-filled cells of an open row (N O P Q, and R when bAll)
