@@ -2631,7 +2631,7 @@ def v35_upgrade_100():
     h0 = run_prime.sha(p)
     j0 = {f: run_prime.sha(f) for f in glob.glob(os.path.join(work, "WMS_Journal", "*.csv"))}
     rc0, o0 = run_prime.upgrade("check", p)
-    new = os.path.join(d, "WMS_RELEASE_1.0.2", "WMS_WORK")
+    new = os.path.join(d, f"WMS_RELEASE_{run_prime.VERS['WMS_PRODUCT_VERSION']}", "WMS_WORK")
     rc1, o1 = run_prime.upgrade("build", p, "--to", new)
     rc2, o2 = run_prime.upgrade("promote", "--to", new)
     rep = open(os.path.join(new, "UPGRADE_REPORT.md"), encoding="utf-8").read() if os.path.exists(os.path.join(new, "UPGRADE_REPORT.md")) else ""
@@ -2654,7 +2654,7 @@ def v35_upgrade_100():
         i2 = issue(s, 2, a, "1", "ива")
         R.add(c, "новая книга — WMS 1.0.2: «работа разрешена», каждый ЕИ тот же, сведения «Наличия» (кому назначено, поставщик, документ), "
                  "сетка видна, состояние WMS (копия на флешку) перенесено, этикетка 40×30, проведение работает",
-              s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == "1.0.2" and before == after and ri.startswith("OK:")
+              s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == run_prime.VERS["WMS_CORE_VERSION"] and before == after and ri.startswith("OK:")
               and info == ["2", "1", "Участок 3", "Ромашка", "УПД-7"] and ctl.ShowGrid and flash.startswith("2026-10-20") and lb.startswith("OK:этикеток 1")
               and i2.startswith("OK"), f"{s.state()}; {s.sysv('CORE_VERSION')}; {before == after}; {ri}; {info}; {ctl.ShowGrid}; {flash}; {lb}; {i2[:40]}")
         P, inf, _ = s.adjcheck(0)
@@ -2750,7 +2750,7 @@ def v36_wizard_072_100_101():
         i2 = issue(s, max(i for i, r in enumerate(col) if any(str(x).strip() for x in r)) + 1, ei, "1", "Петров")
         R.add(c, "новая книга — WMS 1.0.2: «работа разрешена», каждый ЕИ тот же, «Сверка переноса» и «остаток = движения» те же, сведения "
                  "«Наличия», этикетка 40×30 (штрихкод в своей полосе), выдача проводится",
-              s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == "1.0.2" and before == after
+              s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == run_prime.VERS["WMS_CORE_VERSION"] and before == after
               and re.sub(r", строк.*", "", rep1) == re.sub(r", строк.*", "", rep0) and rep1.startswith("OK:")
               and bc1 == bc0 and ri.startswith("OK:") and lb.startswith("OK:этикеток 1") and labels[0]["bars"] > 20 and not probs and i2.startswith("OK"),
               f"{s.sysv('CORE_VERSION')}; {before == after}; {rep0[:120]} / {rep1[:120]}; {bc0[:60]!r} / {bc1[:60]!r}; {ri}; {lb}; "
@@ -3400,7 +3400,7 @@ def v43_upgrade_101_102():
     h0 = run_prime.sha(p)
     j0 = {f: run_prime.sha(f) for f in glob.glob(os.path.join(work, "WMS_Journal", "*.csv"))}
     rc0, o0 = run_prime.upgrade("check", p)
-    new = os.path.join(d, "WMS_RELEASE_1.0.2", "WMS_WORK")
+    new = os.path.join(d, f"WMS_RELEASE_{run_prime.VERS['WMS_PRODUCT_VERSION']}", "WMS_WORK")
     rc1, o1 = run_prime.upgrade("build", p, "--to", new)
     rc2, o2 = run_prime.upgrade("promote", "--to", new)
     rep = open(os.path.join(new, "UPGRADE_REPORT.md"), encoding="utf-8").read() if os.path.exists(os.path.join(new, "UPGRADE_REPORT.md")) else ""
@@ -3427,7 +3427,7 @@ def v43_upgrade_101_102():
 
         R.add(c, "новая книга — WMS 1.0.2: «работа разрешена», тот же журнал и каждый ЕИ; четыре новых листа без защиты; «В упаковке, шт» в R, прежняя "
                  "подсказка «Номенклатуры» в S; список категорий на «Заказах» и «Ином приходе»; кнопки «Серийные…» и «Акт…»",
-              s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == "1.0.2" and before == after and int(s.sysv("LAST_SEQ")) == seq_old
+              s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == run_prime.VERS["WMS_CORE_VERSION"] and before == after and int(s.sysv("LAST_SEQ")) == seq_old
               and all(n in names and not sh.getByName(n).isProtected() for n in own)
               and gs.getCellByPosition(17, 0).getString().startswith("В упаковке") and gs.getCellByPosition(18, 0).getString().startswith("Товар — строка") and "В упаковке, шт" in gs.getCellByPosition(18, 0).getString()
               and v.Type.value == "LIST" and "Категории" in v.getFormula1() and v2.Type.value == "LIST" and btn("Наличие", "btnSerials") and btn("Выдачи", "btnAct"),

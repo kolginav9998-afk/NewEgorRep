@@ -639,8 +639,8 @@ def used(sh):
     return a.EndRow, a.EndColumn
 
 
-def allowed_change(sheet, r, c):
-    """the cells the upgrade itself writes"""
+def allowed_change(sheet, r, c, old=""):
+    """the cells the upgrade itself writes (old: the text of the cell in the old book)"""
     if sheet == "_SYS":
         # the schema, the save stamp of the new file (WMS checks it at its start) and the new key UPGRADE_FROM
         return (r, c) in ((B.SYS_KEYS.index("SCHEMA"), 1), (B.SK_SAVE_STAMP, 1)) or r == B.SYS_KEYS.index("UPGRADE_FROM")
@@ -670,6 +670,9 @@ def allowed_change(sheet, r, c):
     if sheet == B.FAST:
         # 1.1: «Метизы» is a list made from «Наличия» (no data of the storekeeper): the layout is made anew, the list is built at the first opening
         return True
+    if sheet == B.SERVICE:
+        # 1.1: the line of text beside the new button «Справочники из копии…» (column C, a cell that was empty)
+        return c == 2 and old == ""
     return sheet == B.HELP
 
 
@@ -721,7 +724,7 @@ def compare_books(old, new, leg_expected, from10=False):
                         differs = fo[i][c] != fn[i][c]
                     else:
                         differs = vo[i][c] != vn[i][c] or fo[i][c] != fn[i][c]
-                    if differs and not allowed_change(name, r, c):
+                    if differs and not allowed_change(name, r, c, str(fo[i][c])):
                         bad += 1
                         if bad <= 3:
                             P.append(f"«{name}» {col_name(c)}{r + 1}: было «{fo[i][c]}», стало «{fn[i][c]}»")

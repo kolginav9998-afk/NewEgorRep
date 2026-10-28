@@ -59,7 +59,8 @@ Sub SaveGuard()
     If p = "" Then Exit Sub
     ' the first save of a book that is out of order: the file that is about to be overwritten is the last one that was good
     If WmsSafe.StGet("RED") = "" Then
-        r = WmsBackup.BackupNow("good")
+        ' the file on the disk was copied right after its own (good) save: the same copy is not made twice (the few copies of this kind are kept in turn)
+        If WmsSafe.StGet("GOODSIZE") <> CStr(gSfa.getSize(gDoc.getURL())) Then r = WmsBackup.BackupNow("good")
         WmsSafe.StSet("RED", Format(Now(), "YYYY-MM-DD HH:MM"))
     End If
     If gBlock = "" Then WmsCore.SetBlocked(BLK_REGISTRY, p)
@@ -76,6 +77,8 @@ End Sub
 Sub SaveDoneGuard()
     Dim p As String, t As String, d As Double
     On Error GoTo EH
+    ' the size of the file that has a copy of its own ("" — the file saved last has none: the copy of «good» is then made by SaveGuard)
+    If WmsSafe.StGet("GOODSIZE") <> "" Then WmsSafe.StSet("GOODSIZE", "")
     If gState <> "CLEAN" Then Exit Sub
     If WmsSafe.StGet("RED") <> "" Then
         p = RegistryProblem()
@@ -88,7 +91,8 @@ Sub SaveDoneGuard()
         If Now() - d < GOOD_EVERY_MIN / 1440 And Now() >= d Then Exit Sub
     End If
     If RegistryMisplaced() <> 0 Then Exit Sub
-    WmsBackup.BackupNow("good")
+    t = WmsBackup.BackupNow("good")
+    If Left(t, 6) <> "ОШИБКА" And InStr(t, "невозможна") = 0 Then WmsSafe.StSet("GOODSIZE", CStr(gSfa.getSize(gDoc.getURL())))
     WmsSafe.StSet("GOOD", Format(Now(), "YYYY-MM-DD HH:MM"))
     Exit Sub
 EH:
