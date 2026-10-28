@@ -48,6 +48,27 @@ Private Function MemoNote() As String
     If gAskMemoOn Then MemoNote = Chr(10) & Chr(10) & "Ответ будет применён и к остальным строкам этой пачки."
 End Function
 
+' ================================================================ a big operation (1.1)
+
+' An issue or a write-off of a big quantity (from the setting «Большая операция» of the sheet «Настройки», 1000 by default; 0 — never asked) is asked twice, the second time with
+' the quantity written in words of the action: a quantity typed with an extra zero is the mistake that costs the most. 0 — post, 1 — not posted (msg). A block of rows: every
+' big row is asked, the answer of one is not given to the others
+Function BigAsk(sVerb As String, sName As String, dQty As Double, sUnit As String, ByRef msg As String) As Integer
+    Dim thr As Double, t As String
+    thr = WmsSettings.SettingNum(SET_BIG_QTY, 1000)
+    If thr <= 0 Or dQty < thr - 0.0000001 Then Exit Function
+    t = sVerb & " " & WmsIssue.QtyText(dQty) & " " & sUnit & " «" & sName & "»"
+    If Not WmsUi.UiConfirm("Большая операция: " & t & "." & Chr(10) & Chr(10) & "Это не меньше " & WmsIssue.QtyText(thr) & " " & sUnit & " (порог — на листе «" & SH_SET & "»). Количество верное?") Then
+        msg = "большая операция не подтверждена (" & t & ") — проверьте количество в строке"
+        BigAsk = 1
+        Exit Function
+    End If
+    If Not WmsUi.UiConfirm("Ещё раз, чтобы не ошибиться:" & Chr(10) & Chr(10) & t & "." & Chr(10) & Chr(10) & "Провести это количество?") Then
+        msg = "большая операция не подтверждена (" & t & ") — проверьте количество в строке"
+        BigAsk = 1
+    End If
+End Function
+
 ' ================================================================ the date of a movement
 
 ' d — the date of the movement (a Calc date), sWhat — what it is («выдачи», «возврата»), sVerb — the action on the button

@@ -845,7 +845,14 @@ Private Function AskBeforePost(why As String, vEI As Variant, oDate As Object, v
     End If
     ' 1.0: more than is free of the reserves of the others (a correction that keeps the quantity is not asked about)
     If Not (mCn = extraEI And mCqty <= qtyAvailExtra + 0.0000001) Then
-        If WmsItem.ReserveAsk(mCcanon, mCqty, mCavail, mCwho, msg) <> 0 Then AskBeforePost = "SKIP:" & msg
+        If WmsItem.ReserveAsk(mCcanon, mCqty, mCavail, mCwho, msg) <> 0 Then
+            AskBeforePost = "SKIP:" & msg
+            Exit Function
+        End If
+    End If
+    ' 1.1: a big quantity is asked twice (a correction that keeps the quantity is not asked about)
+    If Not (mCn = extraEI And Abs(mCqty - qtyAvailExtra) < 0.0000001) Then
+        If WmsAsk.BigAsk("Выдать", CStr(mCdata(SC_NAME)), mCqty, CStr(mCdata(SC_UNIT)), msg) <> 0 Then AskBeforePost = "SKIP:" & msg
     End If
 End Function
 

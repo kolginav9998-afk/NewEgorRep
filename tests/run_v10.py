@@ -4108,6 +4108,70 @@ def v50_fasteners_categories():
         s.close()
 
 
+@case
+def v51_big_operations():
+    """1.1: лист «Настройки» (порог большой операции 1000), выдача и списание от порога спрашиваются дважды; «нет» на любой вопрос — ничего не проведено; меньше порога — без вопросов;
+    порог 0 — вопросов нет; порог меняется на листе; журнал отказом не меняется"""
+    c = "V51"
+    s = ready(Session(new_wms("v51")))
+    try:
+        st = s.doc.Sheets.getByName("Настройки")
+        thr0 = st.getCellByPosition(1, 1).getValue()
+        order(s, 1, "1", "Гайка М8 DIN 934", qty="5000", art="G-8")
+        receive(s, 1, "5000", place="5-1-1", doc="УПД-1")
+        e = ords(s, 1)[21]
+        stk = s.doc.Sheets.getByName("Наличие")
+        n = int(e[3:])
+        R.add(c, "лист «Настройки»: порог большой операции 1000, код скрыт, лист без защиты", thr0 == 1000 and st.getCellByPosition(3, 1).getString() == "BIG_QTY"
+              and not st.getColumns().getByIndex(3).IsVisible and not st.isProtected(), f"{thr0}")
+        seq0 = int(s.sysv("LAST_SEQ"))
+        # below the threshold: no question
+        c0 = int(s.U("TestUiConfirmCount"))
+        r1 = issue(s, 1, e, "999", "ива")
+        c1 = int(s.U("TestUiConfirmCount"))
+        R.add(c, "выдача 999 (меньше порога) — без вопроса", r1.startswith("OK") and c1 == c0, f"{r1[:30]}; {c0} → {c1}")
+        # the threshold: the answer «no»
+        s.U("TestUiAuto", 2)
+        r2 = issue(s, 2, e, "1000", "ива")
+        s.U("TestUiAuto", 1)
+        bal = stk.getCellByPosition(4, n).getValue()
+        R.add(c, "выдача 1000: ответ «нет» на первый вопрос — SKIP, остаток 4001 (5000 − 999) не изменился; в журнале ничего нового", r2.startswith("SKIP:") and "большая операция" in r2 and bal == 4001
+              and int(s.sysv("LAST_SEQ")) == seq0 + 1, f"{r2[:120]}; {bal}")
+        # the answer «yes» — two questions
+        c2 = int(s.U("TestUiConfirmCount"))
+        r3 = s.I("IssuePostRow", 2)
+        c3 = int(s.U("TestUiConfirmCount"))
+        R.add(c, "тот же ввод, ответ «да»: два вопроса подряд, выдача проведена, остаток 3001", r3.startswith("OK") and c3 == c2 + 2 and stk.getCellByPosition(4, n).getValue() == 3001,
+              f"{r3[:30]}; {c2} → {c3}; {stk.getCellByPosition(4, n).getValue()}")
+        # write-off
+        put(s, "Корректировки", 1, B="Списание", C=e, G="1500", K=serial(), L="брак партии")
+        s.U("TestUiAuto", 2)
+        w1 = s.B("AdjustPostRow", 1, module="WmsAdjust")
+        s.U("TestUiAuto", 1)
+        b1 = stk.getCellByPosition(4, n).getValue()
+        w2 = s.B("AdjustPostRow", 1, module="WmsAdjust")
+        R.add(c, "списание 1500: «нет» — не проведено (остаток 3001); «да» — проведено (1501)", w1.startswith("SKIP:") and b1 == 3001 and w2.startswith("OK") and stk.getCellByPosition(4, n).getValue() == 1501,
+              f"{w1[:100]}; {b1}; {w2[:30]}")
+        # the setting changed: 0 — no questions; 100 — questions from 100
+        st.getCellByPosition(1, 1).setValue(0)
+        c4 = int(s.U("TestUiConfirmCount"))
+        r4 = issue(s, 3, e, "1200", "ива")
+        c5 = int(s.U("TestUiConfirmCount"))
+        st.getCellByPosition(1, 1).setValue(100)
+        r5 = issue(s, 4, e, "100", "ива")
+        c6 = int(s.U("TestUiConfirmCount"))
+        st.getCellByPosition(1, 1).setString("")
+        r6 = issue(s, 5, e, "50", "ива")
+        c7 = int(s.U("TestUiConfirmCount"))
+        R.add(c, "порог 0 — выдача 1200 без вопросов; порог 100 — выдача 100 с двумя вопросами; пустое значение — порог по умолчанию 1000 (выдача 50 без вопросов)",
+              r4.startswith("OK") and c5 == c4 and r5.startswith("OK") and c6 == c5 + 2 and r6.startswith("OK") and c7 == c6, f"{c4},{c5},{c6},{c7}; {r4[:20]} {r5[:20]} {r6[:20]}")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:150])
+        oracle(c, s, "большие операции")
+    finally:
+        s.close()
+
+
 # ================================================================ runner
 
 def main():

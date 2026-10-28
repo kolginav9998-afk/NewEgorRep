@@ -643,6 +643,9 @@ Private Function AskAdjust(why As String, r As Long) As String
         AskAdjust = "ERR:" & msg
     ElseIf WmsAsk.DateAsk(mDate, "корректировки", "Провести", msg) <> 0 Then
         AskAdjust = "SKIP:" & msg
+    ElseIf mKind = "WRITE_OFF" Or mKind = "SUP_RET" Then
+        ' 1.1: a big quantity is asked twice
+        If WmsAsk.BigAsk(IIf(mKind = "SUP_RET", "Вернуть поставщику", "Списать"), nm, mQty, u, msg) <> 0 Then AskAdjust = "SKIP:" & msg
     End If
 End Function
 

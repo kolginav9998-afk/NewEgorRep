@@ -1536,7 +1536,7 @@ FAST_HINT_COL = 18
 # the sheets 1.0.2 adds to a book of 1.0.0 / 1.0.1
 SHEETS_102 = [ACTS, DAYREP, CATS, FAST]
 # the sheets 1.1 adds to a book of 1.0.x (filled in as the release grows)
-SHEETS_110 = ["Наличие по названию", "Остаток деталей", "Операции дня", "Проверка названий", "Стандарты", "Синонимы", "Без категории"]
+SHEETS_110 = ["Наличие по названию", "Остаток деталей", "Операции дня", "Проверка названий", "Стандарты", "Синонимы", "Без категории", "Настройки"]
 FAST_FIND_ROW = 1
 FAST_FILTER_ROW = 2
 FAST_HEAD = 3
@@ -1681,6 +1681,33 @@ def fast_110(doc, sheets):
     for c in range(0, 30):
         sh.getColumns().getByIndex(c).IsVisible = True
     build_fast(doc, sh)
+
+
+# 1.1: «Настройки» (WmsSettings SH_SET) — the settings of the storekeeper: a table «что настроить — значение — пояснение», the code of a setting in the hidden column D
+SETTINGS = "Настройки"
+SETTINGS_HEADERS = ["Что настроить", "Значение", "Пояснение", "(код)"]
+SETTINGS_WIDTHS = [11000, 3200, 24000, 2400]
+SETTINGS_ROWS = [
+    ("Большая операция: спрашивать дважды от количества", 1000,
+     "Выдача или списание от этого количества (в единицах учёта: штуки, метры, килограммы) спрашивается дважды — лишний ноль при вводе обходится дорого. 0 — не спрашивать.", "BIG_QTY"),
+]
+
+
+def build_settings(doc, sh):
+    header(sh, SETTINGS_HEADERS, SETTINGS_WIDTHS, height=900)
+    text = number_format(doc, "@", ("ru", "RU"))
+    sh.getCellRangeByPosition(0, 0, 3, 60).NumberFormat = text
+    sh.getCellRangeByPosition(1, 1, 1, 40).CellBackColor = INPUT_HEAD_10
+    sh.getCellRangeByPosition(1, 1, 1, 40).HoriJustify = 3
+    sh.getCellRangeByPosition(0, 1, 2, 40).IsTextWrapped = True
+    for r, (a, v, e, code) in enumerate(SETTINGS_ROWS, start=1):
+        sh.getCellByPosition(0, r).setString(a)
+        sh.getCellByPosition(1, r).setValue(v)
+        sh.getCellByPosition(1, r).NumberFormat = 0
+        sh.getCellByPosition(2, r).setString(e)
+        sh.getCellByPosition(2, r).CharColor = MUTED
+        sh.getCellByPosition(3, r).setString(code)
+    sh.getColumns().getByIndex(3).IsVisible = False
 
 
 # 1.1: «Без категории» (WmsCat SH_NOCAT) — the names of the registry with no category in the registry nor in «Номенклатура», with the hint; the column «Категория» is filled with the hint and
@@ -1933,6 +1960,10 @@ def views_110(doc, sheets):
     if not sheets.hasByName(NOCAT):
         sheets.insertNewByName(NOCAT, names.index(CATS) + 1 if CATS in names else len(names))
         build_nocat(doc, sheets.getByName(NOCAT))
+    names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+    if not sheets.hasByName(SETTINGS):
+        sheets.insertNewByName(SETTINGS, names.index(NOCAT) + 1 if NOCAT in names else len(names))
+        build_settings(doc, sheets.getByName(SETTINGS))
     # the sheets of 1.0.2 get the layout of 1.1 (a new book has it already)
     cats_110(doc, sheets)
     fast_110(doc, sheets)
