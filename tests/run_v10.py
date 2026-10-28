@@ -2102,10 +2102,10 @@ def v29_help():
         pc = s.B("PcCheck", module="WmsHelp")
         R.add(c, "П1: «Проверить этот ПК» — LibreOffice, макросы, запись, место, Python — с «что сделать»",
               pc.startswith("Проверка этого ПК") and "LibreOffice" in pc and "запись в папку WMS" in pc and "место на диске" in pc and "Python" in pc, pc[:300])
-        choose(s, 4)
+        choose(s, 5)
         wn = s.B("WhatsNew", module="WmsHelp")
         act = s.doc.getCurrentController().getActiveSheet().getName()
-        R.add(c, "П2: «Что нового» — 8 карточек (первая — 1.0.2), «Показать» открывает лист карточки", len(s.B("WhatsNewCards", module="WmsHelp")) == 8 and wn == 4
+        R.add(c, "П2: «Что нового» — 9 карточек (первая — 1.1, вторая — 1.0.2), «Показать» открывает лист карточки", len(s.B("WhatsNewCards", module="WmsHelp")) == 9 and wn == 5
               and act == "Поиск", f"{wn}; {act}")
         col0 = s.B("ButtonModel", "Заказы", "btnReceiveWin", module="WmsHelp").BackgroundColor
         tr = s.B("Tour", module="WmsHelp")

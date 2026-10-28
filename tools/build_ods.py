@@ -2331,10 +2331,12 @@ def colors_10(doc, sheets):
             if sheets.hasByName(name):
                 sheets.getByName(name).TabColor = color
     # «Сверка переноса» is looked at once after the transfer: it goes to the end, before «Справка»
+    # (LibreOffice 24.2 puts a sheet moved forward before the destination, 26.2 after it: the second move is backward, the same in both)
     if sheets.hasByName(LEGREP) and sheets.hasByName(HELP):
-        names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
-        if names.index(LEGREP) != names.index(HELP) - 1:
-            sheets.moveByName(LEGREP, names.index(HELP))
+        for _ in range(2):
+            names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+            if names.index(LEGREP) != names.index(HELP) - 1:
+                sheets.moveByName(LEGREP, names.index(HELP))
 
 
 # 1.0.1: «Наличие» L…V — what is known of the goods of an EI: how much came in and how much is left (side by side), for whom
