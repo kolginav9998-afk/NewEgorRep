@@ -48,6 +48,8 @@ Private mDoc As String
 Private mMark As String
 Private mEvent As String
 Private mMode As String
+' 1.1: the number of the EI as it was typed in the article (E) of the line; "" — the article was typed
+Private mArtTyped As String
 Private mEi As Long
 Private mCanon As String
 Private mSdata As Variant
@@ -494,7 +496,7 @@ End Sub
 ' not agree with the registry), not of the row.
 Private Function CheckRow(r As Long, bNeedAll As Boolean, sJoin As String) As String
     Dim sh As Object, d As Variant, t As String, ti As Integer, num As Long, c As Object, msg As String, st As Integer, why As String
-    Dim aRow As Long, cu As String, cn As String, cp As String, cc As String
+    Dim aRow As Long, nRef As Long
     sh = SpecialSheet()
     mSysProblem = False
     mWarn = ""
@@ -506,6 +508,7 @@ Private Function CheckRow(r As Long, bNeedAll As Boolean, sJoin As String) As St
     mPlaceMove = False
     mStateBack = False
     mArtKey = ""
+    mArtTyped = ""
     mHasQty = False
     mHasDate = False
     d = sh.getCellRangeByPosition(0, r, XC_LAST, r).getDataArray()(0)
@@ -579,6 +582,39 @@ Private Function CheckRow(r As Long, bNeedAll As Boolean, sJoin As String) As St
     mWho = Trim(CStr(d(XC_WHO)))
     mDoc = Trim(CStr(d(XC_DOC)))
     mMark = Trim(CStr(d(XC_MARK)))
+    ' 1.1: «ЕИ-427» in the article (E): the quantity goes to that EI, of whatever type the receipt is (parts are handed in by the number of their EI)
+    nRef = EiRefOf(mArt)
+    If nRef <> 0 Then
+        If nRef < 0 Then
+            CheckRow = "в артикуле (E) «" & mArt & "» — такого ЕИ нет в «" & SH_STOCK & "»"
+            Exit Function
+        End If
+        mEi = nRef
+        mCanon = WmsIssue.EiCanon(nRef)
+        why = WmsIssue.StockRowProblem(nRef, mCanon)
+        If why <> "" Then
+            mSysProblem = True
+            CheckRow = why
+            Exit Function
+        End If
+        ' only a part is added to by its number: the line is of the type «Детали» and the EI was made by such a line (the journal and the self-check know no other refill)
+        If mType <> 2 Then
+            CheckRow = "по номеру ЕИ пополняют только детали: выберите тип «Детали» (B). ЕИ других приходов пополняются приходом по заказу"
+            Exit Function
+        End If
+        If CStr(WmsIssue.StockData(nRef)(SC_STYPE)) <> SrcStype(2) Then
+            CheckRow = mCanon & " — не деталь (тип прихода «" & WmsIssue.StockData(nRef)(SC_STYPE) & "»): по номеру ЕИ пополняются только детали, принятые типом «Детали»"
+            Exit Function
+        End If
+        CheckRow = FillFromEI("Приход по номеру ЕИ: ")
+        If CheckRow = "" Then
+            ' from here the line is the same as a line by the article of this part (the journal, the index, the self-check): the article of the card, its key
+            mArtTyped = mArt
+            mArt = Trim(CStr(mSdata(SC_ART)))
+            mArtKey = ArticleKey(mArt)
+        End If
+        Exit Function
+    End If
     If ByArticle(mType) Then
         ' parts: the article is the key — the same article adds to the same EI (spec §8)
         If mArt = "" Then
@@ -602,39 +638,7 @@ Private Function CheckRow(r As Long, bNeedAll As Boolean, sJoin As String) As St
             Exit Function
         End If
         If st = 1 Then
-            mMode = SR_ADD
-            mSdata = WmsIssue.StockData(mEi)
-            If Not WmsIssue.StockQty(mEi, mBal) Then
-                mSysProblem = True
-                CheckRow = "остаток " & mCanon & " в «" & SH_STOCK & "» не число — реестр повреждён"
-                Exit Function
-            End If
-            cu = Trim(CStr(mSdata(SC_UNIT)))
-            If mUnit <> "" And LCase(mUnit) <> LCase(cu) Then
-                CheckRow = "Для " & mCanon & " используется единица «" & cu & "». Пересчёт единиц не настроен"
-                Exit Function
-            End If
-            mUnit = cu
-            cn = CStr(mSdata(SC_NAME))
-            mName = cn
-            If mNameIn <> "" And NormText(mNameIn) <> NormText(cn) Then
-                AddWarn("Артикул уже существует: " & mCanon & ", название «" & cn & "». Будет использовано существующее наименование")
-            End If
-            cp = CStr(mSdata(SC_PLACE))
-            mPlaceFrom = cp
-            If mPlace = "" Then
-                mPlace = cp
-            ElseIf mPlace <> cp Then
-                mPlaceMove = True
-                AddWarn("место " & mCanon & " изменится: «" & cp & "» → «" & mPlace & "»")
-            End If
-            cc = CStr(mSdata(SC_CAT))
-            If mCat <> "" And LCase(mCat) <> LCase(cc) Then
-                AddWarn("категория карточки " & mCanon & " «" & cc & "» сохраняется (в строке «" & mCat & "»)")
-            End If
-            mCat = cc
-            mStateBack = (CStr(mSdata(SC_STATE)) = EI_ST_STORNO)
-            CheckRow = ""
+            CheckRow = FillFromEI("Артикул уже существует: ")
             Exit Function
         End If
     End If
@@ -662,6 +666,60 @@ Private Function CheckRow(r As Long, bNeedAll As Boolean, sJoin As String) As St
         AddMissing("место хранения (I)")
     End If
     CheckRow = ""
+End Function
+
+' 1.1: the number of the EI in a text of the article (E): «ЕИ-427», «EI-427», «еи 427» → 427; -1 — it is an EI by its writing but there is none; 0 — it is not an EI (an article; a bare
+' number is an article too)
+Private Function EiRefOf(s As String) As Long
+    Dim t As String, n As Long
+    t = UCase(Trim(s))
+    If Len(t) < 3 Then Exit Function
+    If Left(t, 2) <> "ЕИ" And Left(t, 2) <> "EI" And Left(t, 2) <> "ЕI" And Left(t, 2) <> "EИ" Then Exit Function
+    n = WmsView.EiNo(t, CLng(SysNum(SK_NEXT_EI)))
+    If n > 0 Then
+        EiRefOf = n
+    ElseIf IsNumeric(Mid(Replace(Replace(t, "-", ""), " ", ""), 3)) Then
+        EiRefOf = -1
+    End If
+End Function
+
+' The quantity of the row goes to the existing EI mEi/mCanon (a part found by its article, or any EI named by its number): the card of the EI gives the name, the unit and the category;
+' the place of the row, if it differs, is a move (asked before the posting). "" or the reason. sWarn — the beginning of the note about a name that differs
+Private Function FillFromEI(sWarn As String) As String
+    Dim cu As String, cn As String, cp As String, cc As String
+    mMode = SR_ADD
+    mSdata = WmsIssue.StockData(mEi)
+    If Not WmsIssue.StockQty(mEi, mBal) Then
+        mSysProblem = True
+        FillFromEI = "остаток " & mCanon & " в «" & SH_STOCK & "» не число — реестр повреждён"
+        Exit Function
+    End If
+    cu = Trim(CStr(mSdata(SC_UNIT)))
+    If mUnit <> "" And LCase(mUnit) <> LCase(cu) Then
+        FillFromEI = "Для " & mCanon & " используется единица «" & cu & "». Пересчёт единиц не настроен"
+        Exit Function
+    End If
+    mUnit = cu
+    cn = CStr(mSdata(SC_NAME))
+    mName = cn
+    If mNameIn <> "" And NormText(mNameIn) <> NormText(cn) Then
+        AddWarn(sWarn & mCanon & ", название «" & cn & "». Будет использовано существующее наименование")
+    End If
+    cp = CStr(mSdata(SC_PLACE))
+    mPlaceFrom = cp
+    If mPlace = "" Then
+        mPlace = cp
+    ElseIf mPlace <> cp Then
+        mPlaceMove = True
+        AddWarn("место " & mCanon & " изменится: «" & cp & "» → «" & mPlace & "»")
+    End If
+    cc = CStr(mSdata(SC_CAT))
+    If mCat <> "" And LCase(mCat) <> LCase(cc) Then
+        AddWarn("категория карточки " & mCanon & " «" & cc & "» сохраняется (в строке «" & mCat & "»)")
+    End If
+    mCat = cc
+    mStateBack = (CStr(mSdata(SC_STATE)) = EI_ST_STORNO)
+    FillFromEI = ""
 End Function
 
 ' what the row will do (after CheckRow): «новый ЕИ (Офис)», «пополнение ЕИ-… «…»: остаток 100 → 150 шт»
@@ -944,6 +1002,7 @@ Function SpecialPostRow(r As Long, sJoin As String, bPlaceOk As Boolean) As Stri
     If mNameIn <> "" And mNameIn <> mName Then PlanField("NAME_INPUT", mNameIn)
     PlanField("ART", mArt)
     If mArtKey <> "" Then PlanField("ART_KEY", mArtKey)
+    If mArtTyped <> "" Then PlanField("EI_TYPED", mArtTyped)
     PlanField("DATE", Format(mDate, "YYYY-MM-DD"))
     PlanField("PLACE", mPlace)
     If mPlaceMove Then PlanField("PLACE_BEFORE", mPlaceFrom)

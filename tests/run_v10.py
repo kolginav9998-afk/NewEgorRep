@@ -4241,6 +4241,82 @@ def v52_directories_from_book():
         s.close()
 
 
+@case
+def v53_special_by_ei():
+    """1.1: «Иной приход» по номеру ЕИ: в «Артикуле» (E) написано «ЕИ-427» (или «EI-427») — количество пополняет этот ЕИ детали (детали сдают по номеру ЕИ, не только по артикулу):
+    наименование, единица, место и категория — с карточки ЕИ, в «Было / Стало» остаток до и после; чужая единица, несуществующий ЕИ, не деталь, другой тип прихода — отказ с причиной;
+    обычный артикул из цифр — по-прежнему артикул; «Восстановить» довозит такое пополнение по журналу"""
+    c = "V53"
+    p = new_wms("v53")
+    s = ready(Session(p))
+    try:
+        order(s, 1, "1", "Болт М8х30", qty="10", art="B-830")
+        receive(s, 1, "10", place="5-1-1", doc="УПД-1")
+        e_b = ords(s, 1)[21]
+        spc_line(s, 1, "Детали", "Шестерня Z-40", "100", art="GR-40", place="D-1")
+        s.click_spc("BtnSpcPost", 1)
+        stk = s.doc.Sheets.getByName("Наличие")
+        n_b = int(e_b[3:])
+        e_g = [stk.getCellByPosition(0, i).getString() for i in range(1, int(s.sysv("NEXT_EI"))) if stk.getCellByPosition(2, i).getString() == "GR-40"][0]
+        n_g = int(e_g[3:])
+        s.doc.store()
+        seq0 = int(s.sysv("LAST_SEQ"))
+        spc = s.doc.Sheets.getByName("Иной приход")
+        # 1. the part by the number (typed with the Latin letters); nothing else is typed but the quantity and the date
+        spc_line(s, 2, "Детали", None, "5", unit=None, place=None, art=e_g.replace("ЕИ", "EI"))
+        row2 = [spc.getCellByPosition(c_, 2).getString() for c_ in range(0, 18)]
+        R.add(c, "строка «Детали» с «EI-…» в артикуле: предпросмотр — пополнение этого ЕИ: наименование «Шестерня Z-40», единица «шт», место «D-1» с карточки; «Было» 100, «Стало» 105",
+              "пополнение" in row2[17].lower() and row2[3] == "Шестерня Z-40" and row2[6] == "шт" and row2[8] == "D-1" and spc.getCellByPosition(14, 2).getValue() == 100 and spc.getCellByPosition(15, 2).getValue() == 105,
+              f"{row2}")
+        r2 = s.click_spc("BtnSpcPost", 2)
+        R.add(c, "проведено: остаток детали 105, ЕИ тот же, новых ЕИ не появилось", str(r2).startswith("OK") and stk.getCellByPosition(4, n_g).getValue() == 105 and int(s.sysv("NEXT_EI")) == n_g + 1, f"{r2}; {stk.getCellByPosition(4, n_g).getValue()}")
+        # 2. again, the number typed in Russian, the name typed: the card's name is used
+        spc_line(s, 3, "Детали", "Другое название", "7", unit=None, place=None, art=e_g)
+        r3 = s.click_spc("BtnSpcPost", 3)
+        R.add(c, "«ЕИ-…» русскими буквами, название набрано другое — берётся название карточки; деталь пополнена (112)", str(r3).startswith("OK") and stk.getCellByPosition(4, n_g).getValue() == 112
+              and stk.getCellByPosition(1, n_g).getString() == "Шестерня Z-40", f"{r3}; {stk.getCellByPosition(4, n_g).getValue()}")
+        # 3. refusals
+        spc_line(s, 4, "Детали", None, "1", unit="кг", place=None, art=e_g)
+        ctl4 = spc.getCellByPosition(17, 4).getString()
+        spc_line(s, 5, "Детали", None, "1", unit=None, place=None, art="ЕИ-99999")
+        ctl5 = spc.getCellByPosition(17, 5).getString()
+        spc_line(s, 7, "Офис", None, "1", unit=None, place=None, art=e_g)
+        ctl7 = spc.getCellByPosition(17, 7).getString()
+        spc_line(s, 8, "Детали", None, "1", unit=None, place=None, art=e_b)
+        ctl8 = spc.getCellByPosition(17, 8).getString()
+        R.add(c, "отказы с причиной: чужая единица («кг» для «шт»); несуществующий «ЕИ-99999»; тип «Офис» (только «Детали»); ЕИ болта — «не деталь»",
+              "используется единица" in ctl4 and "такого ЕИ нет" in ctl5 and "только детали" in ctl7 and "не деталь" in ctl8, f"{ctl4}; {ctl5}; {ctl7}; {ctl8}")
+        # 4. a plain number is an article, not an EI
+        spc_line(s, 6, "Детали", "Подшипник", "3", unit="шт", place="D-2", art="427")
+        r6 = s.click_spc("BtnSpcPost", 6)
+        R.add(c, "артикул «427» (только цифры) — по-прежнему артикул: создан новый ЕИ детали, ЕИ-427 не трогался", str(r6).startswith("OK") and int(s.sysv("NEXT_EI")) == n_g + 2, f"{r6}; {s.sysv('NEXT_EI')}")
+        # (the two refused rows are only typed: they are not in the journal and not in the saved book — cleared, so the snapshot compares the posted ones)
+        spc.unprotect("wms")
+        spc.getCellRangeByPosition(0, 4, 17, 5).clearContents(1 + 2 + 4 + 16)
+        spc.getCellRangeByPosition(0, 7, 17, 8).clearContents(1 + 2 + 4 + 16)
+        spc.protect("wms")
+        left = [tuple(spc.getCellRangeByPosition(0, k, 17, k).getDataArray()[0]) for k in (4, 5, 7, 8)]
+        seq1 = int(s.sysv("LAST_SEQ"))
+        snap_a = day_snapshot(s)
+    finally:
+        s.kill()
+    s = ready(Session(p))
+    try:
+        unl = s.B("ActionForceUnlock")
+        st0 = s.state()
+        rec = s.B("ActionRecover")
+        snap_b = day_snapshot(s)
+        R.add(c, "сбой после сохранения: «Восстановить» довозит пополнения по номеру ЕИ; реестр, счётчики и строки «Иного прихода» как были",
+              st0.get("BLOCK") == "TAIL" and f"восстановлено операций: {seq1 - seq0}" in rec and "ОСТАНОВКА" not in rec and snap_a == snap_b,
+              f"{st0.get('BLOCK')}; {rec[:60]}; {[(i, x, y) for i, (x, y) in enumerate(zip(snap_a[0], snap_b[0])) if x != y][:2]}; {snap_a[1]} / {snap_b[1]}; "
+              f"{[(i, x, y) for i, (x, y) in enumerate(zip(snap_a[2], snap_b[2])) if x != y][:3]}")
+        sc = s.B("ActionSelfCheck")
+        P, inf, _ = s.adjcheck(0)
+        R.add(c, "самопроверка — без ошибок; оракул журнала — без расхождений", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0") and not P, f"{' ¶ '.join(x for x in sc.split(chr(10)) if not x.startswith('OK'))[:1200]}; {P[:3]}")
+    finally:
+        s.close()
+
+
 # ================================================================ runner
 
 def main():
