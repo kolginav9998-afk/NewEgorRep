@@ -26,6 +26,8 @@ Global gFdSpecial As Boolean
 Global gFdCardEI As Long
 ' 1.0: the regular expression of the place being searched ("" — a plain text search)
 Global gFdPlaceRx As String
+' 1.1: the smart search of the registry (WmsSearch) found its rows first; the old search adds the rest
+Global gFdSmart As Boolean
 ' 1.0 (С7): the search looks 12 months back by default; «Вся история» — the whole book once
 Global gFdAllHist As Boolean
 Global gFdOld As Long
@@ -453,7 +455,7 @@ End Function
 
 ' every working sheet searched for sQuery (what the cells show, any case, part of a cell)
 Function FindList(sQuery As String) As String
-    Dim sh As Object, specs As Variant, i As Integer, out() As Variant, nOut As Long, nAll As Long, totals As String, more As Boolean
+    Dim sh As Object, specs As Variant, i As Integer, out() As Variant, nOut As Long, nAll As Long, totals As String, more As Boolean, sNote As String
     gFdBusy = True
     On Error GoTo EH
     sh = ViewOpen(SH_FIND)
@@ -468,6 +470,10 @@ Function FindList(sQuery As String) As String
     ' 1.0: a place («1-2-3», «Р1-С2-3», «1.2.3») is found as a whole place: «1-2-3» does not find «11-2-3» or «1-2-31»
     gFdPlaceRx = ""
     If PlaceTextKey(sQuery) <> "" Then gFdPlaceRx = PlaceRegex(PlaceTextKey(sQuery))
+    ' 1.1: «Наличие» is searched by the words of the query first (the stem, the letters that look alike, the standards that mean the same, «-слово», filters);
+    ' what the old search finds by the text of the whole query follows, so nothing found before is lost
+    gFdSmart = False
+    If gFdPlaceRx = "" Then gFdSmart = WmsSearch.SmartRun(sQuery, out, nOut, nAll, totals, sNote)
     For i = 0 To UBound(specs)
         ProgressSet(i)
         If gDoc.Sheets.hasByName(specs(i)(0)) Then
@@ -480,7 +486,7 @@ Function FindList(sQuery As String) As String
     sh.getCellByPosition(1, FD_HEAD).setString(IIf(nAll = 0, "Ничего не найдено: «" & sQuery & "»", "Найдено «" & sQuery & "»: " & NumText(nAll) _
         & " " & Plural(nAll, "строка", "строки", "строк") & IIf(nAll > nOut, " (показаны первые " & nOut & " — уточните запрос)", "")) _
         & IIf(gFdAllHist, " · вся история", IIf(gFdOld > 0, " · за 12 месяцев; старше — ещё " & NumText(gFdOld) & ": «Вся история»", "")))
-    sh.getCellByPosition(1, FD_INFO).setString(IIf(totals <> "", "В «" & SH_STOCK & "» по найденному: " & totals, ""))
+    sh.getCellByPosition(1, FD_INFO).setString(IIf(totals <> "", "В «" & SH_STOCK & "» по найденному: " & totals, "") & IIf(sNote <> "", IIf(totals <> "", " · ", "") & sNote, ""))
     ' 1.0 (М6, М12): a place — what lies on it now; the rows below are its history (receipts, issues, moves through it)
     If gFdPlaceRx <> "" Then
         sh.getCellByPosition(1, FD_HEAD).setString("Место " & PlaceTextKey(sQuery) & ": сейчас — " & PlaceNow(PlaceTextKey(sQuery)) _
@@ -512,11 +518,13 @@ Private Function SubArr(a As Variant, n As Long) As Variant
     SubArr = b
 End Function
 
-' the rows of one sheet with sQuery in a cell (native search, values as shown) → out (at most FD_MAX in all)
+' the rows of one sheet with sQuery in a cell (native search, values as shown) → out (at most FD_MAX in all). 1.1: then the rows where every word of the query is found (each
+' in some cell, the letters that look alike not told apart) — the smart search is for the registry, here the same words find the same lines of orders, issues, returns …
 Private Sub SearchSheet(sName As String, r0 As Long, cLast As Integer, sQuery As String, out() As Variant, nOut As Long, nAll As Long, _
     totals As String, cDate As Integer)
-    Dim sh As Object, last As Long, desc As Object, found As Object, addrs As Variant, k As Long, r As Long, seen() As Boolean, d As Variant
+    Dim sh As Object, last As Long, desc As Object, found As Object, addrs As Variant, k As Long, r As Long, seen() As Boolean, d As Variant, c As Long
     Dim sum As Double, nSum As Long, unit As String, sameUnit As Boolean, nRead As Long, dates As Variant, since As Double, useDates As Boolean
+    Dim cand() As Long, candCol() As Long, nCand As Long, nTotal As Long, nRoom As Long
     sh = gDoc.Sheets.getByName(sName)
     last = WmsOrders.LastRow(sh)
     If last < r0 Then Exit Sub
@@ -532,8 +540,36 @@ Private Sub SearchSheet(sName As String, r0 As Long, cLast As Integer, sQuery As
     desc.SearchWords = False
     desc.setPropertyValue("SearchType", 1)
     found = sh.getCellRangeByPosition(0, r0, cLast, last).findAll(desc)
-    If IsNull(found) Then Exit Sub
-    addrs = found.getRangeAddresses()
+    nRoom = IIf(gFdSmart And sName <> SH_STOCK, last + 1, 0)
+    ReDim cand(nRoom)
+    ReDim candCol(nRoom)
+    If Not IsNull(found) Then
+        addrs = found.getRangeAddresses()
+        For k = 0 To UBound(addrs)
+            nTotal = nTotal + addrs(k).EndRow - addrs(k).StartRow + 1
+        Next k
+        ' (room for the rows of the words, too: an array is not made longer inside a procedure that fills it — that loses the rows in this Basic)
+        nRoom = nTotal + IIf(gFdSmart And sName <> SH_STOCK, last + 1, 0)
+        ReDim cand(nRoom)
+        ReDim candCol(nRoom)
+        For k = 0 To UBound(addrs)
+            For r = addrs(k).StartRow To addrs(k).EndRow
+                cand(nCand) = r
+                candCol(nCand) = addrs(k).StartColumn
+                nCand = nCand + 1
+            Next r
+        Next k
+    End If
+    ' 1.1: the words of the query, each in some cell of the row (the registry has its own smart search: WmsSearch)
+    If gFdSmart And sName <> SH_STOCK Then WordRows(sh, desc, r0, cLast, last, cand, candCol, nCand)
+    ' 1.1: the smart search of the registry has shown its rows already: its balance is the start of the sum
+    If sName = SH_STOCK And gFdSmart Then
+        sum = WmsSearch.HitSum()
+        nSum = WmsSearch.HitNSum()
+        unit = WmsSearch.HitUnit()
+        sameUnit = WmsSearch.HitSame()
+    End If
+    If nCand = 0 Then Exit Sub
     ' 1.0 (С7): the dates of the sheet read at once; a row older than 12 months is counted apart (gFdOld)
     If cDate >= 0 And Not gFdAllHist Then
         dates = sh.getCellRangeByPosition(cDate, 0, cDate, last).getDataArray()
@@ -543,46 +579,50 @@ Private Sub SearchSheet(sName As String, r0 As Long, cLast As Integer, sQuery As
     ' 1.0: a row found in several cells counts once — an array of the rows (a text of the rows seen grew with every row
     ' and stopped the count after ~28 000 rows: a frequent word was slow and «найдено» too small)
     ReDim seen(last)
-    For k = 0 To UBound(addrs)
-        For r = addrs(k).StartRow To addrs(k).EndRow
-            If Not seen(r) Then
-                seen(r) = True
-                If useDates Then
-                    If VarType(dates(r)(0)) = 5 Then
-                        If dates(r)(0) > 0 And dates(r)(0) < since Then
-                            gFdOld = gFdOld + 1
-                            GoTo NEXT_ROW
-                        End If
+    If sName = SH_STOCK And gFdSmart Then
+        For r = 0 To last
+            seen(r) = WmsSearch.IsHit(r)
+        Next r
+    End If
+    For c = 0 To nCand - 1
+        r = cand(c)
+        If Not seen(r) Then
+            seen(r) = True
+            If useDates Then
+                If VarType(dates(r)(0)) = 5 Then
+                    If dates(r)(0) > 0 And dates(r)(0) < since Then
+                        gFdOld = gFdOld + 1
+                        GoTo NEXT_ROW
                     End If
-                End If
-                nAll = nAll + 1
-                ' every row is counted; only the rows shown (and of «Наличие» up to 5000 — the sum) are read
-                If nOut >= FD_MAX And (sName <> SH_STOCK Or nRead >= 5000) Then GoTo NEXT_ROW
-                nRead = nRead + 1
-                d = sh.getCellRangeByPosition(0, r, cLast, r).getDataArray()(0)
-                ' (no short circuit in Basic: the columns of «Наличие» are read only for its rows)
-                If sName = SH_STOCK Then
-                    If VarType(d(SC_QTY)) = 5 Then
-                        If CStr(d(SC_STATE)) <> EI_ST_STORNO Then
-                            nSum = nSum + 1
-                            If nSum = 1 Then
-                                unit = CStr(d(SC_UNIT))
-                                sameUnit = True
-                            ElseIf CStr(d(SC_UNIT)) <> unit Then
-                                sameUnit = False
-                            End If
-                            sum = sum + d(SC_QTY)
-                        End If
-                    End If
-                End If
-                If nOut < FD_MAX Then
-                    out(nOut) = RowView(sName, r, d, addrs(k).StartColumn, sh)
-                    nOut = nOut + 1
                 End If
             End If
+            nAll = nAll + 1
+            ' every row is counted; only the rows shown (and of «Наличие» up to 5000 — the sum) are read
+            If nOut >= FD_MAX And (sName <> SH_STOCK Or nRead >= 5000) Then GoTo NEXT_ROW
+            nRead = nRead + 1
+            d = sh.getCellRangeByPosition(0, r, cLast, r).getDataArray()(0)
+            ' (no short circuit in Basic: the columns of «Наличие» are read only for its rows)
+            If sName = SH_STOCK Then
+                If VarType(d(SC_QTY)) = 5 Then
+                    If CStr(d(SC_STATE)) <> EI_ST_STORNO Then
+                        nSum = nSum + 1
+                        If nSum = 1 Then
+                            unit = CStr(d(SC_UNIT))
+                            sameUnit = True
+                        ElseIf CStr(d(SC_UNIT)) <> unit Then
+                            sameUnit = False
+                        End If
+                        sum = sum + d(SC_QTY)
+                    End If
+                End If
+            End If
+            If nOut < FD_MAX Then
+                out(nOut) = RowView(sName, r, d, candCol(c), sh)
+                nOut = nOut + 1
+            End If
+        End If
 NEXT_ROW:
-        Next r
-    Next k
+    Next c
     ' the balance of the found EIs when they have one unit (otherwise the units differ and a sum means nothing)
     If nSum > 0 Then
         If sameUnit Then
@@ -591,6 +631,43 @@ NEXT_ROW:
             totals = "ЕИ " & NumText(nSum) & " (единицы разные — общей суммы нет)"
         End If
     End If
+End Sub
+
+' 1.1: the rows of the sheet where every word (every group) of the query is found, each in some cell: they are put after the rows already in cand (the column of the first word
+' is the column «найдено в»). The engine of the sheet looks for each group once, with the regular expression of WmsSearch.GroupRegex
+Private Sub WordRows(sh As Object, desc As Object, r0 As Long, cLast As Integer, last As Long, cand() As Long, candCol() As Long, ByRef nCand As Long)
+    Dim nG As Long, j As Long, cnt() As Integer, col() As Integer, found As Object, addrs As Variant, k As Long, r As Long, nNew As Long, rng As Object
+    nG = WmsSearch.WordGroups()
+    If nG = 0 Then Exit Sub
+    ReDim cnt(last)
+    ReDim col(last)
+    rng = sh.getCellRangeByPosition(0, r0, cLast, last)
+    desc.SearchRegularExpression = True
+    For j = 0 To nG - 1
+        desc.SearchString = WmsSearch.GroupRegex(j)
+        found = rng.findAll(desc)
+        If IsNull(found) Then Exit Sub
+        addrs = found.getRangeAddresses()
+        For k = 0 To UBound(addrs)
+            For r = addrs(k).StartRow To addrs(k).EndRow
+                If cnt(r) = j Then
+                    cnt(r) = j + 1
+                    If j = 0 Then col(r) = addrs(k).StartColumn
+                End If
+            Next r
+        Next k
+    Next j
+    For r = r0 To last
+        If cnt(r) = nG Then nNew = nNew + 1
+    Next r
+    If nNew = 0 Then Exit Sub
+    For r = r0 To last
+        If cnt(r) = nG Then
+            cand(nCand) = r
+            candCol(nCand) = col(r)
+            nCand = nCand + 1
+        End If
+    Next r
 End Sub
 
 ' one found row as the line of the table: sheet, row, EI, name, quantity, unit, place, details + the hidden source

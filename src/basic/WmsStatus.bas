@@ -254,7 +254,7 @@ Function Protections() As String
         sh = gDoc.Sheets.getByIndex(i)
         ' «Получатели» and «Топология» are the sheets of the user's own input (D-095)
         ' the storekeeper's own sheets (directories): «Получатели», «Топология», «Места», 1.0 «Поставщики», «Номенклатура»
-        If Not sh.isProtected() And InStr("|" & SH_RCPT & "|" & SH_TOPO & "|Места|Поставщики|Номенклатура|Комплекты|Резервы|Акты|Отчёт дня|Категории|Метизы|Наличие по названию|Остаток деталей|Операции дня|Проверка названий|", "|" & sh.Name & "|") = 0 Then p = p & IIf(p <> "", "; ", "") & "лист «" & sh.Name & "» не защищён"
+        If Not sh.isProtected() And InStr("|" & SH_RCPT & "|" & SH_TOPO & "|Места|Поставщики|Номенклатура|Комплекты|Резервы|Акты|Отчёт дня|Категории|Метизы|Наличие по названию|Остаток деталей|Операции дня|Проверка названий|Стандарты|Синонимы|", "|" & sh.Name & "|") = 0 Then p = p & IIf(p <> "", "; ", "") & "лист «" & sh.Name & "» не защищён"
         If InStr(svc, "|" & sh.Name & "|") > 0 And sh.IsVisible Then p = p & IIf(p <> "", "; ", "") & "служебный лист «" & sh.Name & "» не скрыт"
     Next i
     If Not gDoc.isProtected() Then p = p & IIf(p <> "", "; ", "") & "структура книги не защищена"

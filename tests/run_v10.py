@@ -3856,6 +3856,96 @@ def v48_names():
         s.close()
 
 
+@case
+def v49_smart_search():
+    """1.1: умный поиск по «Наличию»: несколько слов (все должны быть), начало слова («болты» → «болт»), латинские буквы, похожие на русские (M8x30), «м8 30» находит «М8х30»,
+    «din 933» находит и «ISO 4017», и «ГОСТ 7805» (лист «Стандарты»), «саморез» находит «шуруп» (лист «Синонимы»), «-слово» исключает, «категория:», «место:», «артикул:»
+    сужают, слово с ошибкой в букве («болд») ищется как «Возможно, вы искали»; найденное прежним поиском (текст запроса целиком) не теряется; страница «Поиск» показывает строки"""
+    c = "V49"
+    s = ready(Session(new_wms("v49")))
+    try:
+        goods = [("Болт М8х30 DIN 933 оцинкованный", "B-830", "5-1-1", "Метизы"), ("Болт ISO 4017 M8x40 нержавеющий A2", "B-840", "5-1-2", "Метизы"),
+                 ("Болт ГОСТ 7805-70 М10х50 класс 8.8", "B-1050", "5-2-1", "Метизы"), ("Гайка М8 DIN 934", "G-8", "5-3-1", "Метизы"),
+                 ("Болт ГОСТ 7798-70 М12х60", "B-1260", "5-2-2", "Метизы"), ("Саморез по металлу 4,2х32 оцинкованный", "S-432", "6-1-1", "Метизы"),
+                 ("Шуруп 4х40 по дереву", "S-440", "6-1-2", "Метизы"), ("Краска белая 0,9 л", "KR-1", "4-1-1", "Химия и краски"),
+                 ("Болты крепёжные M8x30", "B-LAT", "5-4-1", "Метизы")]
+        for k, (nm, art, pl, cat) in enumerate(goods, start=1):
+            order(s, k, str(k), nm, qty="100", art=art, S=cat)
+            rr = receive(s, k, "100", place=pl, doc=f"УПД-{k}")
+            assert rr.startswith("OK"), rr
+        stk = s.doc.Sheets.getByName("Наличие")
+        by_ei = {stk.getCellByPosition(0, i).getString(): stk.getCellByPosition(1, i).getString() for i in range(1, int(s.sysv("NEXT_EI")))}
+
+        def found(q):
+            r = s.B("TestSmart", q, module="WmsSearch")
+            if r == "NONE" or r.startswith("ERR:"):
+                return None, r, 0
+            lst, note, n = r.split("|")[0], r.split("|")[1], r.split("|")[2]
+            # the new book has its own examples (ЕИ up to 200): only the rows of this test are looked at
+            mine = [by_ei[e] for e in lst.split(",") if e and int(e[3:]) > 200]
+            return mine, note, len(mine)
+
+        def has(q, *subs):
+            res, _, _ = found(q)
+            return res is not None and all(any(x in n for n in res) for x in subs)
+
+        def count(q):
+            res, _, n = found(q)
+            return -1 if res is None else n
+
+        # words, stems, letters
+        a, _, _ = found("болт м8 30")
+        R.add(c, "«болт м8 30»: находит «Болт М8х30» и «Болты M8x30» (латинские M, x), не находит М8х40, М10х50, гайку",
+              a is not None and len(a) == 2 and any("Болт М8х30 DIN 933" in n for n in a) and any("Болты крепёжные M8x30" in n for n in a), str(a))
+        R.add(c, "«болты» (основа слова) находит все болты: пять строк с «Болт»/«Болты»", count("болты") == 5, str(found("болты")))
+        R.add(c, "латинские буквы вместо русских: «M8X30» и «болт m8x30» находят то же, что русские", count("M8X30") == 2 and count("болт m8x30") == 2, f"{count('M8X30')} {count('болт m8x30')}")
+        # the standards
+        r33 = found("din 933")[0]
+        R.add(c, "«din 933» находит и «DIN 933», и «ISO 4017», и «ГОСТ 7805» (одна деталь), но не «ГОСТ 7798» и не гайку",
+              r33 is not None and len(r33) == 3 and any("DIN 933" in n for n in r33) and any("ISO 4017" in n for n in r33) and any("ГОСТ 7805" in n for n in r33), str(r33))
+        R.add(c, "«гост 7805», «iso 4017», «din933» находят ту же деталь (три строки)", count("гост 7805") == 3 and count("iso 4017") == 3 and count("din933") == 3,
+              f"{count('гост 7805')} {count('iso 4017')} {count('din933')}")
+        # synonyms
+        R.add(c, "«шуруп» находит и «Саморез», и «Шуруп» (лист «Синонимы»); «саморез» — тоже", has("шуруп", "Саморез", "Шуруп") and has("саморез", "Саморез", "Шуруп") and count("шуруп") == 2, str(found("шуруп")))
+        # exclusion, filters
+        R.add(c, "«болт -оцинк» исключает «оцинкованный»: не находит «Болт М8х30 DIN 933 оцинкованный»", has("болт -оцинк", "Болт ISO 4017") and not has("болт -оцинк", "DIN 933"), str(found("болт -оцинк")[0]))
+        R.add(c, "«категория:химия» — только краска; «место:5-2» — две строки места 5-2-*; «артикул:g-8» — гайка; «болт место:5-1» — два болта",
+              count("категория:химия") == 1 and count("место:5-2") == 2 and count("артикул:g-8") == 1 and count("болт место:5-1") == 2,
+              f"{count('категория:химия')} {count('место:5-2')} {count('артикул:g-8')} {count('болт место:5-1')}")
+        # a phrase in quotes
+        R.add(c, "в кавычках — как одно слово: \"по металлу\" находит саморез, а не шуруп «по дереву»", count('"по металлу"') == 1 and has('"по металлу"', "Саморез"), str(found('"по металлу"')))
+        # a letter wrong
+        r, note, n = found("болд")
+        R.add(c, "«болд» (буква не та): показано по «болт» с пояснением «Возможно, вы искали: «болт»»", r is not None and n == 5 and "Возможно, вы искали" in note and "болт" in note, f"{n}; {note}")
+        R.add(c, "слова, которого нет и близкого тоже нет: ничего, без пояснения", count("квартира") == 0 and found("квартира")[1] == "", str(found("квартира")))
+        # the old search is not lost: a part of an article, a part of a word
+        # (the part of an article is not a whole word for the smart search: the old search by the text of the whole query adds it)
+        s.B("TestFind", "B-10", module="WmsFind")
+        fsh0 = s.doc.Sheets.getByName("Поиск")
+        eis0 = [fsh0.getCellByPosition(3, 10 + k).getString() for k in range(0, 6)]
+        R.add(c, "найденное прежним поиском остаётся: часть артикула «B-10» находит болт ГОСТ 7805 (B-1050) на странице «Поиск»", "ЕИ-00000203" in eis0, str(eis0))
+        # the page «Поиск»
+        fr = s.B("TestFind", "болт м8 30", module="WmsFind")
+        fsh = s.doc.Sheets.getByName("Поиск")
+        head = fsh.getCellByPosition(1, 6).getString()
+        info = fsh.getCellByPosition(1, 7).getString()
+        tab = [list(x) for x in fsh.getCellRangeByPosition(1, 9, 12, 14).getDataArray()]
+        eis = [r[2] for r in tab]
+        R.add(c, "страница «Поиск» по «болт м8 30»: строки «Наличия» (ЕИ-201 и ЕИ-209 среди них, остаток итогом в строке под заголовком), заголовок «Найдено…»",
+              fr.startswith("OK:найдено ") and "ЕИ-00000201" in eis and "ЕИ-00000209" in eis and head.startswith("Найдено «болт м8 30»") and "остаток" in info, f"{fr}; {head}; {info}; {eis}")
+        # the other sheets: the same words find the line of the order (Latin letters too); the words in different cells of one line
+        s.B("TestFind", "болт m8 30 ромашка", module="WmsFind")
+        shs = [fsh.getCellByPosition(1, 10 + k).getString() for k in range(0, 8)]
+        R.add(c, "слова ищутся и на других листах: «болт m8 30 ромашка» (латинские m; поставщик в другой ячейке) находит строку «Заказов» с болтом М8х30", "Заказы" in shs, str(shs))
+        fr2 = s.B("TestFind", "5-1-1", module="WmsFind")
+        R.add(c, "место «5-1-1» ищется как раньше (как место), умный поиск его не трогает", fr2.startswith("OK:") and "Место 5-1-1" in fsh.getCellByPosition(1, 6).getString(), f"{fr2}; {fsh.getCellByPosition(1, 6).getString()[:80]}")
+        # the registry is only read
+        P, inf, _ = s.adjcheck(0)
+        R.add(c, "оракул (журнал воспроизведён независимо) — без расхождений; реестр на месте", not P and s.B("RegistryMisplaced", module="WmsGuard") == 0, f"{inf.get('ops')} операций; {P[:3]}")
+    finally:
+        s.close()
+
+
 # ================================================================ runner
 
 def main():

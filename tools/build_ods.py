@@ -1530,7 +1530,7 @@ FAST_HINT = ("Справочник метизов из «Наличия»: бо�
 # the sheets 1.0.2 adds to a book of 1.0.0 / 1.0.1
 SHEETS_102 = [ACTS, DAYREP, CATS, FAST]
 # the sheets 1.1 adds to a book of 1.0.x (filled in as the release grows)
-SHEETS_110 = ["Наличие по названию", "Остаток деталей", "Операции дня", "Проверка названий"]
+SHEETS_110 = ["Наличие по названию", "Остаток деталей", "Операции дня", "Проверка названий", "Стандарты", "Синонимы"]
 FAST_FIND_ROW = 1
 FAST_HEAD = 3
 
@@ -1644,6 +1644,65 @@ NAMECHK_HINT = ("Проверка названий: названия, разби
                 "на строке-источнике. Новое название, вписанное в «Заказы» или «Иной приход», приводится к одной строке сразу.")
 SHEETS_110_VIEWS = [BYNAME, PARTS, OPSHEET, NAMECHK]
 
+# 1.1: «Стандарты» (WmsSpec SH_STD) — the standards that mean the same part (DIN / ISO / ГОСТ), «Синонимы» (WmsSearch SH_SYN) — the words that mean the same:
+# the directories of the search, the storekeeper's own sheets (not protected, not journaled); the seeds are examples that he edits
+STANDARDS = "Стандарты"
+SYNONYMS = "Синонимы"
+STANDARDS_HEADERS = ["DIN", "ISO", "ГОСТ"]
+STANDARDS_SEED = [
+    ("DIN 931", "ISO 4014", "ГОСТ 7798"), ("DIN 933", "ISO 4017", "ГОСТ 7805"), ("DIN 934", "ISO 4032", "ГОСТ 5915"), ("DIN 439", "ISO 4035", "ГОСТ 5916"),
+    ("DIN 125", "ISO 7089", "ГОСТ 11371"), ("DIN 9021", "ISO 7093", "ГОСТ 6958"), ("DIN 127", "", "ГОСТ 6402"), ("DIN 912", "ISO 4762", "ГОСТ 11738"),
+    ("DIN 7991", "ISO 10642", ""), ("DIN 965", "ISO 7046", "ГОСТ 17475"), ("DIN 603", "ISO 8677", "ГОСТ 7802"), ("DIN 985", "ISO 10511", ""),
+    ("DIN 982", "ISO 7040", ""), ("DIN 1587", "", "ГОСТ 11860"), ("DIN 94", "ISO 1234", "ГОСТ 397"), ("DIN 7", "ISO 2338", "ГОСТ 3128"),
+    ("DIN 471", "", "ГОСТ 13942"), ("DIN 472", "", "ГОСТ 13943"), ("DIN 913", "ISO 4026", ""), ("DIN 914", "ISO 4027", ""), ("DIN 915", "ISO 4028", ""),
+    ("DIN 916", "ISO 4029", ""),
+]
+STANDARDS_HINT = ("Какие стандарты — об одной и той же детали. Поиск «din 933» найдёт и «ISO 4017», и «ГОСТ 7805», если они в одной строке. Строка — одна деталь; пустая "
+                  "клетка допустима (достаточно двух стандартов). Это ориентиры: перед закупкой сверяйтесь с документами — эквивалентность бывает не полной (класс точности, "
+                  "шаг резьбы, размер под ключ). Допишите свои строки; год у ГОСТ («ГОСТ 7805-70») писать не нужно. WMS эту таблицу только читает, учёт она не меняет.")
+SYNONYMS_HEADERS = ["Слова, означающие одно и то же (через запятую)"]
+SYNONYMS_SEED = ["саморез, шуруп", "гровер, пружинная", "акб, аккумулятор", "перчатки, рукавицы", "болгарка, ушм", "стремянка, лестница"]
+SYNONYMS_HINT = ("Слова одной строки поиск считает равными: «саморез» найдёт и «шуруп». Одно слово — одна клетка списка через запятую; по одному слову на деталь, "
+                 "без пробелов внутри. Падежи и числа писать не нужно («болты» найдёт «болт»). Это примеры — меняйте под себя. Учёт эта таблица не меняет.")
+
+
+def build_standards(doc, sh):
+    header(sh, STANDARDS_HEADERS, [4000, 4000, 4500], height=900)
+    text = number_format(doc, "@", ("ru", "RU"))
+    sh.getCellRangeByPosition(0, 0, 2, 400).NumberFormat = text
+    sh.getCellRangeByPosition(0, 1, 2, 400).CellBackColor = INPUT_HEAD_10
+    for r, row in enumerate(STANDARDS_SEED, start=1):
+        for c, v in enumerate(row):
+            if v:
+                sh.getCellByPosition(c, r).setString(v)
+    hint = sh.getCellByPosition(4, 0)
+    hint.setString(STANDARDS_HINT)
+    hint.IsTextWrapped = True
+    hint.VertJustify = 1
+    hint.CharHeight = 9
+    hint.CharColor = MUTED
+    sh.getColumns().getByIndex(3).Width = 600
+    sh.getColumns().getByIndex(4).Width = 12000
+    bind_event(sh.Events, "OnChange", "WmsSpec.OnStdChange")
+
+
+def build_synonyms(doc, sh):
+    header(sh, SYNONYMS_HEADERS, [14000], height=900)
+    text = number_format(doc, "@", ("ru", "RU"))
+    sh.getCellRangeByPosition(0, 0, 0, 300).NumberFormat = text
+    sh.getCellRangeByPosition(0, 1, 0, 300).CellBackColor = INPUT_HEAD_10
+    for r, v in enumerate(SYNONYMS_SEED, start=1):
+        sh.getCellByPosition(0, r).setString(v)
+    hint = sh.getCellByPosition(2, 0)
+    hint.setString(SYNONYMS_HINT)
+    hint.IsTextWrapped = True
+    hint.VertJustify = 1
+    hint.CharHeight = 9
+    hint.CharColor = MUTED
+    sh.getColumns().getByIndex(1).Width = 600
+    sh.getColumns().getByIndex(2).Width = 12000
+    bind_event(sh.Events, "OnChange", "WmsSearch.OnSynChange")
+
 
 def build_view110(doc, sh, headers, widths, hint, find_label, zero_label, merge_find=True):
     header(sh, headers, widths, height=1500)
@@ -1744,6 +1803,16 @@ def views_110(doc, sheets):
     if not sheets.hasByName(NAMECHK):
         sheets.insertNewByName(NAMECHK, names.index(OPSHEET) + 1)
         build_namechk(doc, sheets.getByName(NAMECHK))
+    # the directories of the search follow «Метизы» (or «Категории», or «Номенклатура»)
+    names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+    after = FAST if FAST in names else (CATS if CATS in names else (GOODS if GOODS in names else None))
+    if not sheets.hasByName(STANDARDS):
+        sheets.insertNewByName(STANDARDS, names.index(after) + 1 if after else len(names))
+        build_standards(doc, sheets.getByName(STANDARDS))
+    names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+    if not sheets.hasByName(SYNONYMS):
+        sheets.insertNewByName(SYNONYMS, names.index(STANDARDS) + 1)
+        build_synonyms(doc, sheets.getByName(SYNONYMS))
 
 
 # 1.1: the buttons of «Главная» that 1.1 adds (the free places of the third row of the system buttons)
