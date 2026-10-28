@@ -16,60 +16,60 @@ Public Const OP_MAX = 5000
 Global gOpsBusy As Boolean
 
 ' the name of an operation as the storekeeper says it
-Function OpName(sType As String, sMode As String, sSrc As String) As String
+Function OpsName(sType As String, sMode As String, sSrc As String) As String
     Dim k As Long, codes As Variant, names As Variant
     Select Case sType
-    Case "ISSUE": OpName = "Выдача"
-    Case "ISSUE_FIX": OpName = "Выдача — исправление"
-    Case "ISSUE_DEL": OpName = "Выдача — удалена (сторно)"
-    Case "ISSUE_DOC": OpName = "Номер документа выдачи записан"
-    Case "RECEIPT": OpName = "Приход по заказу"
-    Case "RECEIPT_ADD": OpName = "Приход по заказу (ещё поступление)"
-    Case "RECEIPT_FIX": OpName = "Приход по заказу — исправление"
-    Case "RECEIPT_DEL": OpName = "Приход по заказу — удалён (сторно)"
-    Case "RETURN": OpName = "Возврат"
-    Case "RETURN_FIX": OpName = "Возврат — исправление"
-    Case "RETURN_DEL": OpName = "Возврат — удалён (сторно)"
+    Case "ISSUE": OpsName = "Выдача"
+    Case "ISSUE_FIX": OpsName = "Выдача — исправление"
+    Case "ISSUE_DEL": OpsName = "Выдача — удалена (сторно)"
+    Case "ISSUE_DOC": OpsName = "Номер документа выдачи записан"
+    Case "RECEIPT": OpsName = "Приход по заказу"
+    Case "RECEIPT_ADD": OpsName = "Приход по заказу (ещё поступление)"
+    Case "RECEIPT_FIX": OpsName = "Приход по заказу — исправление"
+    Case "RECEIPT_DEL": OpsName = "Приход по заказу — удалён (сторно)"
+    Case "RETURN": OpsName = "Возврат"
+    Case "RETURN_FIX": OpsName = "Возврат — исправление"
+    Case "RETURN_DEL": OpsName = "Возврат — удалён (сторно)"
     Case "SP_RECEIPT", "SP_REFILL", "SP_FIX", "SP_DEL", "SP_IDENTIFY"
         codes = Split(SRC_CODES, "|")
         names = Split(SRC_NAMES, "|")
         For k = 0 To UBound(codes)
-            If codes(k) = sSrc Then OpName = "Иной приход — " & LCase(names(k))
+            If codes(k) = sSrc Then OpsName = "Иной приход — " & LCase(names(k))
         Next k
-        If OpName = "" Then OpName = "Иной приход"
+        If OpsName = "" Then OpsName = "Иной приход"
         Select Case sType
-        Case "SP_REFILL": OpName = OpName & " (пополнение ЕИ)"
-        Case "SP_FIX": OpName = OpName & " — исправление"
-        Case "SP_DEL": OpName = OpName & " — удалён (сторно)"
-        Case "SP_IDENTIFY": OpName = "Иной приход — деталь опознана"
+        Case "SP_REFILL": OpsName = OpsName & " (пополнение ЕИ)"
+        Case "SP_FIX": OpsName = OpsName & " — исправление"
+        Case "SP_DEL": OpsName = OpsName & " — удалён (сторно)"
+        Case "SP_IDENTIFY": OpsName = "Иной приход — деталь опознана"
         End Select
-    Case "MOVE": OpName = "Перемещение ЕИ"
-    Case "WRITE_OFF": OpName = "Списание"
-    Case "INV_ADJ": OpName = "Инвентаризация (корректировка остатка)"
-    Case "SPLIT": OpName = "Разделение ЕИ"
-    Case "SUP_RET": OpName = "Возврат поставщику"
-    Case "KIT", "KIT_BUILD": OpName = "Сборка комплекта"
-    Case "KIT_DEL": OpName = "Комплект разобран"
-    Case "MOVE_FIX", "WRITE_OFF_FIX", "INV_ADJ_FIX", "SPLIT_FIX", "SUP_RET_FIX", "KIT_FIX": OpName = "Корректировка — исправление"
-    Case "MOVE_DEL", "WRITE_OFF_DEL", "INV_ADJ_DEL", "SPLIT_DEL", "SUP_RET_DEL": OpName = "Корректировка — удалена (сторно)"
-    Case "EI_PROP": OpName = "Свойства ЕИ (серийный номер, срок, примечание)"
-    Case "EI_PACK": OpName = "Фасовка ЕИ"
-    Case "CAR_ARRIVE": OpName = "Машина приехала"
-    Case "CAR_DEPART": OpName = "Машина уехала"
-    Case "CAR_FIX": OpName = "Визит машины — исправление"
-    Case "CAR_CANCEL": OpName = "Визит машины — отменён"
-    Case "ORDER_CANCEL", "ORDER_CANCEL_REST": OpName = "Позиция заказа отменена"
-    Case "ORDER_UNCANCEL": OpName = "Отмена позиции заказа снята"
-    Case "POSITION_FIX": OpName = "Позиция заказа исправлена"
-    Case "MIGRATE", "MIGRATE_FIX": OpName = "Перенос из старой таблицы"
-    Case "LEGACY_RECEIPT", "LEGACY_RECEIPT_ADD", "LEGACY_FIX": OpName = "Перенос из старой таблицы (заказы)"
-    Case "MONTH_CLOSE": OpName = "Месяц закрыт"
-    Case "MONTH_OPEN": OpName = "Месяц открыт"
-    Case "ABANDON": OpName = "Отложенный хвост журнала"
-    Case "START": OpName = "Начало журнала"
-    Case Else: OpName = sType
+    Case "MOVE": OpsName = "Перемещение ЕИ"
+    Case "WRITE_OFF": OpsName = "Списание"
+    Case "INV_ADJ": OpsName = "Инвентаризация (корректировка остатка)"
+    Case "SPLIT": OpsName = "Разделение ЕИ"
+    Case "SUP_RET": OpsName = "Возврат поставщику"
+    Case "KIT", "KIT_BUILD": OpsName = "Сборка комплекта"
+    Case "KIT_DEL": OpsName = "Комплект разобран"
+    Case "MOVE_FIX", "WRITE_OFF_FIX", "INV_ADJ_FIX", "SPLIT_FIX", "SUP_RET_FIX", "KIT_FIX": OpsName = "Корректировка — исправление"
+    Case "MOVE_DEL", "WRITE_OFF_DEL", "INV_ADJ_DEL", "SPLIT_DEL", "SUP_RET_DEL": OpsName = "Корректировка — удалена (сторно)"
+    Case "EI_PROP": OpsName = "Свойства ЕИ (серийный номер, срок, примечание)"
+    Case "EI_PACK": OpsName = "Фасовка ЕИ"
+    Case "CAR_ARRIVE": OpsName = "Машина приехала"
+    Case "CAR_DEPART": OpsName = "Машина уехала"
+    Case "CAR_FIX": OpsName = "Визит машины — исправление"
+    Case "CAR_CANCEL": OpsName = "Визит машины — отменён"
+    Case "ORDER_CANCEL", "ORDER_CANCEL_REST": OpsName = "Позиция заказа отменена"
+    Case "ORDER_UNCANCEL": OpsName = "Отмена позиции заказа снята"
+    Case "POSITION_FIX": OpsName = "Позиция заказа исправлена"
+    Case "MIGRATE", "MIGRATE_FIX": OpsName = "Перенос из старой таблицы"
+    Case "LEGACY_RECEIPT", "LEGACY_RECEIPT_ADD", "LEGACY_FIX": OpsName = "Перенос из старой таблицы (заказы)"
+    Case "MONTH_CLOSE": OpsName = "Месяц закрыт"
+    Case "MONTH_OPEN": OpsName = "Месяц открыт"
+    Case "ABANDON": OpsName = "Отложенный хвост журнала"
+    Case "START": OpsName = "Начало журнала"
+    Case Else: OpsName = sType
     End Select
-    If sMode = "ADD" And sType = "SP_RECEIPT" Then OpName = OpName & " (пополнение)"
+    If sMode = "ADD" And sType = "SP_RECEIPT" Then OpsName = OpsName & " (пополнение)"
 End Function
 
 ' «2026-10-28T10:27:01/111» → «28.10.2026 10:27»
@@ -136,7 +136,7 @@ Private Function OpRow(seq As Long, ts As String, sType As String, fields As Var
     doc = WmsView.JField(fields, "DOC")
     mode = WmsView.JField(fields, "MODE")
     src = WmsView.JField(fields, "SRC")
-    OpRow = Array(seq, TsText(ts), OpName(sType, mode, src), ei, nm, IIf(q <> "", Val(q), ""), WmsView.JField(fields, "UNIT"), sWho, doc, Rest(fields))
+    OpRow = Array(seq, TsText(ts), OpsName(sType, mode, src), ei, nm, IIf(q <> "", Val(q), ""), WmsView.JField(fields, "UNIT"), sWho, doc, Rest(fields))
 End Function
 
 ' the names of the EIs (index = the number of the EI)

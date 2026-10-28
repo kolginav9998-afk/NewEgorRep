@@ -62,8 +62,8 @@ Private Function IsClassTail(t As String) As Boolean
     IsClassTail = (t = "2" Or t = "4" Or Left(t, 2) = "2-" Or Left(t, 2) = "4-")
 End Function
 
-Private Function IsSizeHead(t As String) As Boolean
-    IsSizeHead = (t = "M" Or t = "m" Or t = "М" Or t = "м")
+Private Function NmIsSizeHead(t As String) As Boolean
+    NmIsSizeHead = (t = "M" Or t = "m" Or t = "М" Or t = "м")
 End Function
 
 Private Function IsStandard(t As String) As Boolean
@@ -88,7 +88,7 @@ Function NormName(ByVal s As String) As String
         If n <> "" Then
             If IsClassHead(t) Then
                 If IsClassTail(n) Then bJoin = True
-            ElseIf IsSizeHead(t) Then
+            ElseIf NmIsSizeHead(t) Then
                 c = Asc(Left(n, 1))
                 If c >= 48 And c <= 57 Then bJoin = True
             End If

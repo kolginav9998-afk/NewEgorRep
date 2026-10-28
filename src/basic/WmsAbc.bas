@@ -45,13 +45,13 @@ Miss:
 End Function
 
 ' the date of a text «2026-10-26» as a Calc date; 0 when it is not one
-Private Function IsoDate(s As String) As Double
+Private Function AbIsoDate(s As String) As Double
     On Error GoTo Bad
     If Len(s) < 10 Then Exit Function
-    IsoDate = CDbl(DateSerial(Val(Left(s, 4)), Val(Mid(s, 6, 2)), Val(Mid(s, 9, 2))))
+    AbIsoDate = CDbl(DateSerial(Val(Left(s, 4)), Val(Mid(s, 6, 2)), Val(Mid(s, 9, 2))))
     Exit Function
 Bad:
-    IsoDate = 0
+    AbIsoDate = 0
 End Function
 
 ' The positions of the registry and what the journal says about them: the number and the quantity of the issues since dSince (a Calc date), the last issue, the last return.
@@ -145,7 +145,7 @@ Function Aggregate(dSince As Double) As String
                                             If en >= 1 And en <= UBound(eiG) Then
                                                 g = eiG(en) - 1
                                                 If g >= 0 Then
-                                                    dt = IsoDate(WmsView.JField(fields, "DATE"))
+                                                    dt = AbIsoDate(WmsView.JField(fields, "DATE"))
                                                     If dt > gR(g) Then gR(g) = dt
                                                 End If
                                             End If
@@ -158,7 +158,7 @@ Function Aggregate(dSince As Double) As String
                                             If en >= 1 And en <= UBound(eiG) Then
                                                 g = eiG(en) - 1
                                                 If g >= 0 Then
-                                                    dt = IsoDate(WmsView.JField(fields, "DATE"))
+                                                    dt = AbIsoDate(WmsView.JField(fields, "DATE"))
                                                     If sType = "RETURN" Then
                                                         If dt > gT(g) Then gT(g) = dt
                                                     ElseIf nIss < UBound(iG) Then
@@ -208,7 +208,7 @@ EH:
 End Function
 
 ' the indexes idx(0…n-1) of the positions put in the order of k1 descending, then k2 descending, then the name (a shell sort)
-Private Sub SortIdx(idx() As Long, n As Long, k1 As Variant, k2 As Variant, nm As Variant)
+Private Sub AbSortIdx(idx() As Long, n As Long, k1 As Variant, k2 As Variant, nm As Variant)
     Dim gap As Long, i As Long, j As Long, t As Long, ok As Boolean
     gap = n \ 2
     Do While gap > 0
@@ -326,7 +326,7 @@ Function AbcRefresh() As String
             n = n + 1
         End If
     Next i
-    If n > 1 Then SortIdx(idxAll, n, cnt, qty, nm)
+    If n > 1 Then AbSortIdx(idxAll, n, cnt, qty, nm)
     rows = n
     If rows > AB_MAX Then rows = AB_MAX
     ReDim out(IIf(rows > 0, rows - 1, 0))
@@ -454,7 +454,7 @@ Function IdleRefresh() As String
             End If
         End If
     Next i
-    If n > 1 Then SortIdx(idx, n, ageA, ageB, nm)
+    If n > 1 Then AbSortIdx(idx, n, ageA, ageB, nm)
     k = n
     If k > ID_MAX Then k = ID_MAX
     ReDim out(IIf(k > 0, k - 1, 0))

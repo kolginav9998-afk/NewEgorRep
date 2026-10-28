@@ -71,13 +71,13 @@ Global gGrpN As Long
 Global gGc As Object
 
 ' the value of a key of a Collection; False when it has none (an error handler set inside a loop works for the first error only in this Basic: each lookup is a call of its own)
-Private Function CollGet(coll As Object, key As String, ByRef v As Variant) As Boolean
+Private Function CtCollGet(coll As Object, key As String, ByRef v As Variant) As Boolean
     On Error GoTo Miss
     v = coll.Item(key)
-    CollGet = True
+    CtCollGet = True
     Exit Function
 Miss:
-    CollGet = False
+    CtCollGet = False
 End Function
 
 ' ================================================================ the hints of the categories
@@ -220,11 +220,11 @@ End Function
 
 ' ---------------------------------------------------------------- «Номенклатура»: the category of a goods
 
-Private Function GoodsKey(sName As String, sArt As String) As String
+Private Function CtGoodsKey(sName As String, sArt As String) As String
     If Trim(sArt) <> "" Then
-        GoodsKey = "a:" & WmsNames.Fold(Trim(sArt))
+        CtGoodsKey = "a:" & WmsNames.Fold(Trim(sArt))
     ElseIf Trim(sName) <> "" Then
-        GoodsKey = "n:" & WmsNames.Fold(WmsNames.NormName(sName))
+        CtGoodsKey = "n:" & WmsNames.Fold(WmsNames.NormName(sName))
     End If
 End Function
 
@@ -242,7 +242,7 @@ Private Sub GoodsLoad()
     d = sh.getCellRangeByPosition(0, 1, cC, last).getDataArray()
     For i = 0 To UBound(d)
         r = d(i)
-        k = GoodsKey(CStr(r(cN)), CStr(r(cA)))
+        k = CtGoodsKey(CStr(r(cN)), CStr(r(cA)))
         If k <> "" Then
             On Error Resume Next
             gGc.Add((i + 1) & "|" & Trim(CStr(r(cC))), k)
@@ -255,7 +255,7 @@ End Sub
 Private Function GoodsLookup(sName As String, sArt As String, ByRef nRow As Long) As String
     Dim k As String, v As String, p As Long
     nRow = -1
-    k = GoodsKey(sName, sArt)
+    k = CtGoodsKey(sName, sArt)
     If k = "" Then Exit Function
     On Error GoTo Miss
     v = gGc.Item(k)
@@ -304,7 +304,7 @@ Function EffectiveCats(d As Variant, nRows As Long) As Variant
             Else
                 nm = CStr(r(cNm))
                 key = LCase(nm) & "|" & LCase(Trim(CStr(r(cArt))))
-                If CollGet(cache, key, v) Then
+                If CtCollGet(cache, key, v) Then
                     res(i) = CStr(v)
                 Else
                     c = CategoryOf(nm, Trim(CStr(r(cArt))), "")
@@ -436,7 +436,7 @@ Private Sub StockGroups()
             If InStr(nm, c10) + InStr(nm, c13) + InStr(nm, c9) + InStr(nm, c160) + InStr(nm, "  ") > 0 Then nm = WmsNames.NormName(nm)
             art = Trim(CStr(r(cArt)))
             key = LCase(nm) & "|" & LCase(art)
-            If CollGet(coll, key, kv) Then
+            If CtCollGet(coll, key, kv) Then
                 k = CLng(kv)
             Else
                 k = n
@@ -830,11 +830,11 @@ Private Sub DupMark(coll As Object, key As String, i As Long, notes() As String,
         If CStr(rows(i)(0)(0)) = CStr(rows(j)(0)(0)) And CStr(rows(i)(0)(1)) = CStr(rows(j)(0)(1)) Then Exit Sub
     End If
     If Left(key, 2) = "n|" Then
-        AddNote(notes, i, "возможный дубль: " & why & " (арт. " & rows(j)(0)(1) & ")")
-        AddNote(notes, j, "возможный дубль: " & why & " (арт. " & rows(i)(0)(1) & ")")
+        CtAddNote(notes, i, "возможный дубль: " & why & " (арт. " & rows(j)(0)(1) & ")")
+        CtAddNote(notes, j, "возможный дубль: " & why & " (арт. " & rows(i)(0)(1) & ")")
     Else
-        AddNote(notes, i, "возможный дубль: " & why & rows(j)(0)(0) & IIf(CStr(rows(j)(0)(1)) <> "", " (арт. " & rows(j)(0)(1) & ")", ""))
-        AddNote(notes, j, "возможный дубль: " & why & rows(i)(0)(0) & IIf(CStr(rows(i)(0)(1)) <> "", " (арт. " & rows(i)(0)(1) & ")", ""))
+        CtAddNote(notes, i, "возможный дубль: " & why & rows(j)(0)(0) & IIf(CStr(rows(j)(0)(1)) <> "", " (арт. " & rows(j)(0)(1) & ")", ""))
+        CtAddNote(notes, j, "возможный дубль: " & why & rows(i)(0)(0) & IIf(CStr(rows(i)(0)(1)) <> "", " (арт. " & rows(i)(0)(1) & ")", ""))
     End If
     Exit Sub
 First:
@@ -842,7 +842,7 @@ First:
     coll.Add(i, key)
 End Sub
 
-Private Sub AddNote(notes() As String, i As Long, s As String)
+Private Sub CtAddNote(notes() As String, i As Long, s As String)
     If InStr(notes(i), s) = 0 Then notes(i) = notes(i) & IIf(notes(i) <> "", "; ", "") & s
 End Sub
 
@@ -1036,7 +1036,7 @@ Function NoCatApply() As String
                 nm = Trim(gs.getCellByPosition(gcN, nRow).getString())
                 art = Trim(gs.getCellByPosition(gcA, nRow).getString())
                 cur = Trim(gs.getCellByPosition(gcC, nRow).getString())
-                If GoodsKey(nm, art) <> GoodsKey(CStr(r(0)), CStr(r(1))) Or cur <> "" Then
+                If CtGoodsKey(nm, art) <> CtGoodsKey(CStr(r(0)), CStr(r(1))) Or cur <> "" Then
                     nSkip = nSkip + 1
                 Else
                     gs.getCellByPosition(gcC, nRow).setString(cat)

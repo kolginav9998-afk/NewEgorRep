@@ -20,8 +20,8 @@ Function SpTypes() As Variant
         "дюбел|Дюбель", "анкер|Анкер", "заклепк|Заклёпка", "гвозд|Гвоздь", "хомут|Хомут", "стопорн|Стопорное кольцо", "штифт|Штифт")
 End Function
 
-Private Function IsDigit(c As String) As Boolean
-    IsDigit = (Len(c) = 1 And c >= "0" And c <= "9")
+Private Function SpIsDigit(c As String) As Boolean
+    SpIsDigit = (Len(c) = 1 And c >= "0" And c <= "9")
 End Function
 
 Private Function IsLetter(c As String) As Boolean
@@ -33,11 +33,11 @@ Private Function NumberAt(s As String, ByRef p As Long) As String
     Dim t As String, c As String
     Do While p <= Len(s)
         c = Mid(s, p, 1)
-        If IsDigit(c) Then
+        If SpIsDigit(c) Then
             t = t & c
             p = p + 1
         ElseIf (c = "," Or c = ".") And t <> "" And p < Len(s) Then
-            If IsDigit(Mid(s, p + 1, 1)) Then
+            If SpIsDigit(Mid(s, p + 1, 1)) Then
                 t = t & "."
                 p = p + 1
             Else
@@ -69,7 +69,7 @@ Private Function NextAfterSep(s As String, ByRef q As Long) As String
                 p = p + 1
             Loop
             If p <= n Then
-                If IsDigit(Mid(s, p, 1)) Then
+                If SpIsDigit(Mid(s, p, 1)) Then
                     NextAfterSep = NumberAt(s, p)
                     q = p
                 End If
@@ -93,18 +93,18 @@ Sub SpSize(sName As String, ByRef sSize As String, ByRef dDiam As Double, ByRef 
         hasM = False
         st = i
         If (c = "м" Or c = "m") And i < n Then
-            If IsDigit(Mid(s, i + 1, 1)) Then
+            If SpIsDigit(Mid(s, i + 1, 1)) Then
                 prev = IIf(i > 1, Mid(s, i - 1, 1), " ")
-                If Not IsLetter(prev) And Not IsDigit(prev) Then
+                If Not IsLetter(prev) And Not SpIsDigit(prev) Then
                     hasM = True
                     i = i + 1
                     c = Mid(s, i, 1)
                 End If
             End If
         End If
-        If IsDigit(c) Then
+        If SpIsDigit(c) Then
             prev = IIf(st > 1, Mid(s, st - 1, 1), " ")
-            If hasM Or (Not IsLetter(prev) And Not IsDigit(prev) And prev <> "." And prev <> ",") Then
+            If hasM Or (Not IsLetter(prev) And Not SpIsDigit(prev) And prev <> "." And prev <> ",") Then
                 p = i
                 n1 = NumberAt(s, p)
                 q = p
@@ -150,11 +150,11 @@ Private Function After(s As String, sKey As String) As String
         t = ""
         Do While p <= Len(s)
             c = Mid(s, p, 1)
-            If IsDigit(c) Then
+            If SpIsDigit(c) Then
                 t = t & c
                 p = p + 1
             ElseIf (c = "-" Or c = "–") And t <> "" And p < Len(s) Then
-                If IsDigit(Mid(s, p + 1, 1)) Then
+                If SpIsDigit(Mid(s, p + 1, 1)) Then
                     t = t & "-"
                     p = p + 1
                 Else

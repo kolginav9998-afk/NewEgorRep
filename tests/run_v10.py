@@ -4691,6 +4691,25 @@ def v59_attach():
         s.close()
 
 
+@case
+def v60_unique_names():
+    """1.1: имена процедур в библиотеке WmsPlus не повторяются между модулями (LibreOffice 24.2 и 26.2 по-разному выбирают, чей вызов исполнять, — вызов уходил в чужую процедуру с другими
+    параметрами: «Argument is not optional»). Повторяются только прежние имена из списка — они проверены (одинаковые параметры и смысл); новое повторение — ошибка"""
+    import glob
+    c = "V60"
+    old = ['afteroperation', 'bad', 'btnexport', 'celltext', 'checkrow', 'checkrowinputs', 'clearderived', 'daytext', 'describe', 'esc', 'handlerange', 'handleroff', 'kindname', 'movements', 'notpostedtext', 'payload', 'planrowvalues', 'postedrowproblem', 'refuse', 'setctl', 'setifdiff', 'sheetsproblem', 'sysreason']
+    seen = {}
+    src = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src", "basic")
+    for f in glob.glob(os.path.join(src, "*.bas")):
+        mod = os.path.basename(f)[:-4]
+        for line in open(f, encoding="utf-8"):
+            m = re.match(r"^\s*(?:Public |Private )?(?:Static )?(?:Sub|Function)\s+(\w+)", line, re.I)
+            if m:
+                seen.setdefault(m.group(1).lower(), set()).add(mod)
+    new = sorted(k + ":" + "/".join(sorted(v)) for k, v in seen.items() if len(v) > 1 and k not in old)
+    R.add(c, "в src/basic нет новых повторов имён процедур между модулями (старых %d проверено)" % len(old), not new, "; ".join(new))
+
+
 # ================================================================ runner
 
 def main():
