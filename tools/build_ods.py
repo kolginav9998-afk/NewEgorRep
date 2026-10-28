@@ -2448,11 +2448,20 @@ HOTKEYS_10 = [("P", "WmsDaily.KeyPost", "Провести (лист в рабо�
               ("Q", "WmsMap.BtnWherePut", "Куда положить?")]
 
 
+# 1.1: the shortcuts added by the storekeeper's wish «горячих клавиш побольше»: the jump to every working sheet, «Проверить», «Исправить», «Принять…», «Что делать?» (all Ctrl+Shift + a letter;
+# they work with the Russian layout too: a letter key is told by its place). The list for people is WmsKeys.Hotkeys
+HOTKEYS_11 = [("H", "WmsUi.NavMain", "Главная"), ("D", "WmsUi.NavDash", "Дашборд"), ("M", "WmsUi.NavMap", "Карта склада"), ("O", "WmsUi.NavOrders", "Заказы"),
+              ("N", "WmsUi.NavSpecial", "Иной приход"), ("I", "WmsUi.NavIssues", "Выдачи"), ("R", "WmsUi.NavReturns", "Возврат"), ("A", "WmsUi.NavAdjust", "Корректировки"),
+              ("L", "WmsUi.NavStock", "Наличие"), ("G", "WmsKeys.KeyFasteners", "Метизы"), ("J", "WmsOps.BtnOpsOpen", "Операции дня"), ("X", "WmsSafe.NavService", "Обслуживание"),
+              ("B", "WmsDaily.NavHelp", "Справка"), ("K", "WmsKeys.KeyCheck", "Проверить строку"), ("U", "WmsKeys.KeyFix", "Исправить строку"),
+              ("T", "WmsDaily.BtnReceiveWindow", "Принять…"), ("Y", "WmsGuard.BtnWhatNow", "Что делать?")]
+
+
 def hotkeys_10(doc):
     from com.sun.star.awt import KeyEvent
     sm = doc.getUIConfigurationManager().getShortCutManager()
     mods = uno.getConstantByName("com.sun.star.awt.KeyModifier.SHIFT") | uno.getConstantByName("com.sun.star.awt.KeyModifier.MOD1")
-    for key, macro, _ in HOTKEYS_10:
+    for key, macro, _ in HOTKEYS_10 + HOTKEYS_11:
         ke = KeyEvent()
         ke.KeyCode = uno.getConstantByName(f"com.sun.star.awt.Key.{key}")
         ke.Modifiers = mods
@@ -2952,7 +2961,7 @@ def md_plain(s):
 HELP_TOP = 2                       # 1.0 (П2, П3, П7, П8): the buttons of «Справка» stand in rows 1–2, the text begins under them
 HELP_BUTTONS = [("btnWhatsNew", "Что нового", "WmsHelp.BtnWhatsNew"), ("btnTour", "Первый день", "WmsHelp.BtnTour"),
                 ("btnWhatIf", "Что делать, если…", "WmsHelp.BtnWhatIf"), ("btnCheat", "Шпаргалка A4", "WmsHelp.BtnCheatSheet"),
-                ("btnHelpMain", "Главная", "WmsUi.NavMain")]
+                ("btnHotkeys", "Горячие клавиши", "WmsKeys.BtnHotkeys"), ("btnHelpMain", "Главная", "WmsUi.NavMain")]
 
 
 def build_help(sh):

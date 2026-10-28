@@ -16,6 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from harness import OUT, Results, Session, new_wms  # noqa: E402
+import build_ods as B  # noqa: E402
 from run_prime import T, TODAY, issue, order, put, receive, serial, topology  # noqa: E402
 
 R = Results()
@@ -4524,6 +4525,60 @@ def v56_abc_idle():
         sc = s.B("ActionSelfCheck")
         R.add(c, "листы ничего не проводят: журнал не изменился; самопроверка — без ошибок", int(s.sysv("LAST_SEQ")) == seq0 and sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), f"{seq0}; {sc[:100]}")
         oracle(c, s, "abc и без движения")
+    finally:
+        s.close()
+
+
+@case
+def v57_hotkeys_more():
+    """1.1: горячих клавиш больше — Ctrl+Shift + буква для перехода на каждый рабочий лист и для «Проверить», «Исправить», «Принять…», «Что делать?» (хранятся в книге)"""
+    import uno
+    from com.sun.star.awt import KeyEvent
+    c = "V57"
+    s = ready(Session(new_wms("v57")))
+    try:
+        sm = s.doc.getUIConfigurationManager().getShortCutManager()
+        mods = uno.getConstantByName("com.sun.star.awt.KeyModifier.SHIFT") | uno.getConstantByName("com.sun.star.awt.KeyModifier.MOD1")
+        bad = []
+        for key, macro, _ in B.HOTKEYS_10 + B.HOTKEYS_11:
+            ke = KeyEvent()
+            ke.KeyCode = uno.getConstantByName(f"com.sun.star.awt.Key.{key}")
+            ke.Modifiers = mods
+            try:
+                got = sm.getCommandByKeyEvent(ke)
+            except Exception:
+                got = ""
+            if macro not in got:
+                bad.append(f"{key}: {got}")
+        keys = [k for k, _, _ in B.HOTKEYS_10 + B.HOTKEYS_11]
+        R.add(c, f"все {len(keys)} сочетаний привязаны к своим макросам; буквы не повторяются", not bad and len(set(keys)) == len(keys), "; ".join(bad) or str(len(keys)))
+        # the jumps
+        want = {"NavMain": "Главная", "NavDash": "Дашборд", "NavMap": "Карта склада", "NavOrders": "Заказы", "NavSpecial": "Иной приход", "NavIssues": "Выдачи",
+                "NavReturns": "Возврат", "NavAdjust": "Корректировки", "NavStock": "Наличие"}
+        miss = []
+        for macro, sheet in want.items():
+            s.goto("Наличие" if sheet != "Наличие" else "Главная", "$A$1")
+            s.B(macro, module="WmsUi")
+            if s.active_sheet() != sheet:
+                miss.append(f"{macro}: {s.active_sheet()}")
+        R.add(c, "прыжки Ctrl+Shift+H/D/M/O/N/I/R/A/L приводят на свой лист", not miss, "; ".join(miss))
+        s.goto("Главная", "$A$1")
+        s.B("KeyFasteners", module="WmsKeys")
+        cur = s.doc.getCurrentController().getSelection().getRangeAddress()
+        R.add(c, "Ctrl+Shift+G — «Метизы», курсор в поле «Найти»", s.active_sheet() == "Метизы" and cur.StartColumn == 1, f"{s.active_sheet()} {cur.StartRow},{cur.StartColumn}")
+        s.B("BtnOpsOpen", module="WmsOps")
+        R.add(c, "Ctrl+Shift+J — «Операции дня»", s.active_sheet() == "Операции дня", s.active_sheet())
+        s.B("NavService", module="WmsSafe")
+        R.add(c, "Ctrl+Shift+X — «Обслуживание»", s.active_sheet() == "Обслуживание", s.active_sheet())
+        s.B("NavHelp", module="WmsDaily")
+        R.add(c, "Ctrl+Shift+B — «Справка»", s.active_sheet() == "Справка", s.active_sheet())
+        # «Проверить», «Исправить» on a sheet where they do not apply: a message, nothing is changed
+        seq0 = int(s.sysv("LAST_SEQ"))
+        s.goto("Главная", "$A$1")
+        txt = s.B("Hotkeys", module="WmsKeys")
+        R.add(c, "список для людей: перечислены все сочетания (по одной букве каждое)", all(f"Ctrl+Shift+{k} " in str(txt) for k in keys), f"{[k for k in keys if f'Ctrl+Shift+{k} ' not in str(txt)]}")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "журнал не менялся; самопроверка — без ошибок", int(s.sysv("LAST_SEQ")) == seq0 and sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), f"{seq0}; {sc[:100]}")
     finally:
         s.close()
 
