@@ -776,6 +776,12 @@ Sub AfterRestoreRun()
         & IIf(aside <> "", "Прежняя книга отложена: " & ConvertFromURL(aside) & Chr(10), "") & "Сохраните книгу (Ctrl+S)."
     gUiLastMsg = IIf(gState = "CLEAN", "OK:", "ERR:") & txt
     WmsUi.UiMessage(txt)
+    ' 1.1: the directories (they are not in the journal) of the book put aside may be newer than those of the copy: asked, and written only when the storekeeper agrees
+    If aside <> "" And gState = "CLEAN" Then
+        r1 = WmsDirs.DirsFromBook(aside, True)
+        gUiLastMsg = r1
+        If Left(r1, 3) = "OK:" And InStr(r1, "подставлены") > 0 Then WmsUi.UiMessage(Mid(r1, 4) & "." & Chr(10) & "Сохраните книгу (Ctrl+S).")
+    End If
     Exit Sub
 EH:
     gUiLastMsg = "ERR:после возврата к копии: " & Error$

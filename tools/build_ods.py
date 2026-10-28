@@ -213,6 +213,8 @@ SERVICE_GROUPS = [
          "Журнал испорчен или потерял конец — целые файлы берутся из зеркала, прежние откладываются в «WMS_Backups»."),
         ("btnAbandoned", "Отложенные операции", "WmsSafe.BtnAbandoned",
          "Что ушло в «Отложить хвост журнала» и не попало в книгу; выдачи возвращаются в «Выдачи» одной кнопкой."),
+        ("btnDirsBook", "Справочники из копии…", "WmsDirs.BtnDirsFromBook",
+         "Справочники («Получатели», «Номенклатура», «Акты», «Категории»…) в журнал не пишутся: после возврата к копии они такие, как были в копии. Возьмите их из нужной копии или из отложенной книги."),
     ]),
     ("Проверки", [
         ("btnDailyCheck", "Проверить сейчас", "WmsSafe.BtnDailyCheck",
@@ -1279,6 +1281,30 @@ def service_10(doc, sheets):
         sheets.insertNewByName(SERVICE, names.index(PRINT) if PRINT in names else names.index(FIND) + 1)
         build_service_page(doc, sheets.getByName(SERVICE))
     bind_event(sheets.getByName(SERVICE).Events, "OnFocus", "WmsSafe.OnServiceFocus")
+
+
+def service_110(doc, sheets):
+    """1.1: the button «Справочники из копии…» on «Обслуживание» of a book that was made before it (the page is not built again): after the last button of the page"""
+    if not sheets.hasByName(SERVICE):
+        return
+    sh = sheets.getByName(SERVICE)
+    if has_button(sh, "btnDirsBook"):
+        return
+    desc = [x for x in SERVICE_GROUPS[0][1] if x[0] == "btnDirsBook"][0]
+    # the first free row after the last button of the page: a button's shape position decides
+    form = sh.getDrawPage()
+    maxy = 0
+    for i in range(form.getCount()):
+        shp = form.getByIndex(i)
+        maxy = max(maxy, shp.Position.Y + shp.Size.Height)
+    r = 0
+    while sh.getCellByPosition(1, r).Position.Y < maxy + 100 and r < 400:
+        r += 1
+    sh.getRows().getByIndex(r).Height = 900
+    text_cell(sh, 2, r, desc[3], size=10, color=TEXT, wrap=True, valign=2)
+    y = sh.getCellByPosition(1, r).Position.Y
+    x = sh.getCellByPosition(1, r).Position.X
+    add_button(doc, sh, desc[0], desc[1], desc[2], x, y + 80, 6400, 740, back=0xDDEBF7)
 
 
 def dash_10(doc, sheets):

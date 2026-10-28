@@ -3100,6 +3100,14 @@ def v40_acts():
         s.B("DcDocClose", module="WmsDocs")
         r5 = s.B("ActRepeat", 0, False, module="WmsDocs")
         R.add(c, "«Повторить акт» без строки реестра — понятный отказ", r5.startswith("ERR:") and "строку акта" in r5, r5)
+        # 1.1: the register is the storekeeper's own sheet (a return to a copy brings an older one back): the number of an act never repeats
+        ak.getCellRangeByPosition(0, 1, 6, 30).clearContents(1 + 2 + 4 + 16)
+        s.goto("Выдачи", "$A$5")
+        r6 = s.B("ActFromSelection", module="WmsDocs")
+        reg6 = [list(x) for x in ak.getCellRangeByPosition(0, 1, 0, 3).getDataArray()]
+        R.add(c, "1.1: реестр «Акты» очищен (как после возврата к более старой копии) — следующий акт получает № 4, а не 1: номера «А-…» в «№ документа выдачи» учтены",
+              r6.startswith("OK:4|") and reg6[0][0] == 4.0, f"{r6}; {reg6}")
+        s.B("DcDocClose", module="WmsDocs")
         sc = s.B("ActionSelfCheck")
         R.add(c, "самопроверка — без ошибок («№ документа выдачи» записан прежней операцией)", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:300])
         oracle(c, s, "акты")
@@ -4168,6 +4176,67 @@ def v51_big_operations():
         sc = s.B("ActionSelfCheck")
         R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:150])
         oracle(c, s, "большие операции")
+    finally:
+        s.close()
+
+
+@case
+def v52_directories_from_book():
+    """1.1: справочники («Получатели», «Категории», «Акты», «Номенклатура» …) в журнал не пишутся — их можно взять из другой книги (копии, отложенной книги): WMS открывает книгу
+    для чтения, показывает, какие справочники отличаются, и по согласию подставляет значения; столбцы-подсчёт «Номенклатуры» (M…P), журнал, остатки и защищённые листы не
+    трогаются; «нет» — ничего не меняется"""
+    c = "V52"
+    p = new_wms("v52")
+    s = ready(Session(p))
+    try:
+        rc = s.doc.Sheets.getByName("Получатели")
+        cs = s.doc.Sheets.getByName("Категории")
+        ak = s.doc.Sheets.getByName("Акты")
+        gs = s.doc.Sheets.getByName("Номенклатура")
+        order(s, 1, "1", "Болт М8х30 DIN 933", qty="10", art="B-830")
+        receive(s, 1, "10", place="5-1-1", doc="УПД-1")
+        r_rc = 1
+        while rc.getCellByPosition(0, r_rc).getString():
+            r_rc += 1
+        rc.getCellByPosition(0, r_rc).setString("Тестов Т.Т.")
+        rc.getCellByPosition(1, r_rc).setString("Тестов Тест Тестович")
+        cs.getCellByPosition(0, 15).setString("Моя категория")
+        cs.getCellByPosition(1, 15).setString("моё слово")
+        ak.getCellByPosition(0, 1).setString("А-77")
+        gs.getCellByPosition(1, 3).setString("Тестовый товар")
+        gs.getCellByPosition(12, 3).setValue(555)
+        s.doc.store()
+        src = os.path.join(OUT, "cases", "v52_src.ods")
+        os.makedirs(os.path.dirname(src), exist_ok=True)
+        shutil.copy(p, src)
+        url = "file://" + src
+        # the open book loses the edits (as a copy made before them)
+        rc.getCellByPosition(0, r_rc).setString("")
+        rc.getCellByPosition(1, r_rc).setString("")
+        cs.getCellByPosition(0, 15).setString("")
+        cs.getCellByPosition(1, 15).setString("")
+        ak.getCellByPosition(0, 1).setString("")
+        gs.getCellByPosition(1, 3).setString("")
+        gs.getCellByPosition(12, 3).setValue(777)
+        seq0 = int(s.sysv("LAST_SEQ"))
+        cmp = s.B("TestDirsCompare", url, module="WmsDirs")
+        R.add(c, "сравнение с книгой, в которой правки есть: отличаются «Получатели», «Категории», «Акты», «Номенклатура» (4 листа)", cmp.startswith("4|") and all(x in cmp for x in ("Получатели|DIFF", "Категории|DIFF", "Акты|DIFF", "Номенклатура|DIFF")), cmp)
+        s.U("TestUiAuto", 2)
+        no = s.B("DirsFromBook", url, True, module="WmsDirs")
+        s.U("TestUiAuto", 1)
+        R.add(c, "ответ «Оставить как есть»: ничего не изменено", no.startswith("SKIP:") and rc.getCellByPosition(0, r_rc).getString() == "" and cs.getCellByPosition(0, 15).getString() == "", no)
+        yes = s.B("DirsFromBook", url, True, module="WmsDirs")
+        R.add(c, "ответ «Подставить»: справочники возвращены из книги", yes.startswith("OK:") and rc.getCellByPosition(0, r_rc).getString() == "Тестов Т.Т." and rc.getCellByPosition(1, r_rc).getString() == "Тестов Тест Тестович"
+              and cs.getCellByPosition(0, 15).getString() == "Моя категория" and cs.getCellByPosition(1, 15).getString() == "моё слово" and ak.getCellByPosition(0, 1).getString() == "А-77"
+              and gs.getCellByPosition(1, 3).getString() == "Тестовый товар", yes)
+        R.add(c, "«Номенклатура»: столбец-подсчёт M (остаток) не затронут — 777 (в той книге 555)", gs.getCellByPosition(12, 3).getValue() == 777, str(gs.getCellByPosition(12, 3).getValue()))
+        again = s.B("DirsFromBook", url, True, module="WmsDirs")
+        R.add(c, "повторно: справочники те же — ничего не спрашивается и не пишется", again.startswith("OK:справочники те же") or "те же" in again, again)
+        same = s.B("DirsFromBook", s.doc.getURL(), True, module="WmsDirs")
+        R.add(c, "та же книга — отказ; несуществующий файл — отказ", same.startswith("ERR:") and s.B("DirsFromBook", "file:///tmp/нет-такой-книги.ods", True, module="WmsDirs").startswith("ERR:"), same)
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "журнал не менялся, самопроверка — без ошибок", int(s.sysv("LAST_SEQ")) == seq0 and sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), f"{seq0} → {s.sysv('LAST_SEQ')}; {sc[:100]}")
+        oracle(c, s, "справочники из книги")
     finally:
         s.close()
 

@@ -445,6 +445,7 @@ def step_110(doc, done):
     sheets = doc.Sheets
     B.views_110(doc, sheets)
     B.main_buttons_110(doc, sheets)
+    B.service_110(doc, sheets)
     done.append(f"1.1: листы {', '.join('«' + n + '»' for n in B.SHEETS_110_VIEWS)} (только просмотр: «Наличие по названию» и «Остаток деталей» — копии «Наличия», "
                 "которые можно сортировать; «Операции дня» — журнал простыми словами) и кнопки «Операции дня», «Что делать?» на «Главной»; данные не менялись")
     return []

@@ -167,9 +167,54 @@ Private Function AkLastRow(sh As Object) As Long
     Next i
 End Function
 
-' the next number of an act: the largest number of the register plus one
+' the number of an act in a text «А-12» (a Cyrillic or a Latin A, a dash, digits only); 0 — it is not one
+Private Function ActNoOf(ByVal s As String) As Long
+    Dim t As String, i As Long
+    t = Trim(s)
+    If Len(t) < 3 Or Len(t) > 12 Then Exit Function
+    If Left(t, 2) <> "А-" And Left(t, 2) <> "A-" Then Exit Function
+    t = Mid(t, 3)
+    For i = 1 To Len(t)
+        If Mid(t, i, 1) < "0" Or Mid(t, i, 1) > "9" Then Exit Function
+    Next i
+    ActNoOf = CLng(t)
+End Function
+
+' the largest number of an act the journal knows (the operations ISSUE_DOC, which wrote «А-<№>» into the issues); 0 — none
+Private Function AkJournalMax() As Long
+    Dim fl As Variant, i As Long, j As Long, txt As String, lines As Variant, seq As Long, ts As String, inst As String, sType As String, f As Variant, m As Long, k As Long
+    On Error GoTo EH
+    If gJDir = "" Then Exit Function
+    If Not gSfa.exists(gJDir) Then Exit Function
+    fl = gSfa.getFolderContents(gJDir, False)
+    For i = 0 To UBound(fl)
+        If LCase(Right(CStr(fl(i)), 4)) = ".csv" Then
+            txt = WmsAudit.ReadText(CStr(fl(i)))
+            If InStr(txt, "ISSUE_DOC") > 0 Then
+                lines = Split(txt, Chr(10))
+                For j = 0 To UBound(lines)
+                    If InStr(lines(j), "ISSUE_DOC") > 0 Then
+                        If WmsJournal.ParseLine(CStr(lines(j)), seq, ts, inst, sType, f) Then
+                            If sType = "ISSUE_DOC" Then
+                                k = ActNoOf(WmsView.JField(f, "DOC"))
+                                If k > m Then m = k
+                            End If
+                        End If
+                    End If
+                Next j
+            End If
+        End If
+    Next i
+    AkJournalMax = m
+    Exit Function
+EH:
+    AkJournalMax = m
+End Function
+
+' the next number of an act: the largest of the register, of the «№ документа выдачи» of the issues and of the journal, plus one. The register is the storekeeper's own sheet
+' (a return to a copy brings back an older one; a row can be cleared), so the number is not taken from it alone: an act number never repeats
 Private Function AkNextNo() As Long
-    Dim sh As Object, last As Long, d As Variant, i As Long, m As Double
+    Dim sh As Object, last As Long, d As Variant, i As Long, m As Double, ish As Object, cDoc As Long, k As Long
     sh = AkSheet()
     If IsNull(sh) Then
         AkNextNo = 1
@@ -184,6 +229,19 @@ Private Function AkNextNo() As Long
             End If
         Next i
     End If
+    ' the numbers written into the issues
+    ish = WmsIssue.IssuesSheet()
+    last = WmsOrders.LastRow(ish)
+    cDoc = IC_DOC
+    If last >= 1 Then
+        d = ish.getCellRangeByPosition(cDoc, 1, cDoc, last).getDataArray()
+        For i = 0 To UBound(d)
+            k = ActNoOf(CStr(d(i)(0)))
+            If k > m Then m = k
+        Next i
+    End If
+    k = AkJournalMax()
+    If k > m Then m = k
     AkNextNo = CLng(m) + 1
 End Function
 
