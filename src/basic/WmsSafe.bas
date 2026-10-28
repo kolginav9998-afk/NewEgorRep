@@ -751,7 +751,7 @@ End Function
 
 ' the restored book: the copy closed, the journal replayed, the self-check — and the result said
 Sub AfterRestoreRun()
-    Dim url As String, s As String, copyUrl As String, aside As String, en As Object, comp As Object, r1 As String, r2 As String, txt As String
+    Dim url As String, s As String, copyUrl As String, aside As String, en As Object, comp As Object, r1 As String, r2 As String, txt As String, msg0 As String
     WmsInit()
     On Error GoTo EH
     url = SafeDir() & AFTER_RESTORE
@@ -778,8 +778,10 @@ Sub AfterRestoreRun()
     WmsUi.UiMessage(txt)
     ' 1.1: the directories (they are not in the journal) of the book put aside may be newer than those of the copy: asked, and written only when the storekeeper agrees
     If aside <> "" And gState = "CLEAN" Then
+        msg0 = gUiLastMsg
         r1 = WmsDirs.DirsFromBook(aside, True)
-        gUiLastMsg = r1
+        ' the message of the return stays the last one unless the directories were written or could not be compared
+        gUiLastMsg = IIf(Left(r1, 3) = "OK:" And InStr(r1, "подставлены") = 0, msg0, r1)
         If Left(r1, 3) = "OK:" And InStr(r1, "подставлены") > 0 Then WmsUi.UiMessage(Mid(r1, 4) & "." & Chr(10) & "Сохраните книгу (Ctrl+S).")
     End If
     Exit Sub

@@ -664,9 +664,9 @@ def pr11_upgrade_072():
         fd = s.B("FindRun", "427", module="WmsFind")
         card = page(s, "Поиск", 9, 9)[0][1]
         main_btn = s.doc.Sheets.getByName("Главная").getDrawPage().getCount()
-        R.add(c, "обновлённая книга — с новыми страницами: «Дашборд» первым, «Поиск», «Карта склада», «Топология»; «Главная» 1.0 (25 кнопок над строками состояния, с «Справкой» и «?»); "
+        R.add(c, "обновлённая книга — с новыми страницами: «Дашборд» первым, «Поиск», «Карта склада», «Топология»; «Главная» 1.1 (27 кнопок над строками состояния, с «Справкой» и «?»); "
                  "дашборд считается; карточка ЕИ-00000427 — остаток сходится с движениями переноса и 0.7.2",
-              names[:2] == ["Дашборд", "Главная"] and "Поиск" in names and "Карта склада" in names and "Топология" in names and main_btn == 25
+              names[:2] == ["Дашборд", "Главная"] and "Поиск" in names and "Карта склада" in names and "Топология" in names and main_btn == 27
               and db.startswith("OK") and fd.startswith("OK:ЕИ-00000427") and card.startswith("✓"), f"{names}; {main_btn}; {db}; {fd}; {card}")
         btns = {}
         for n in ("Заказы", "Иной приход", "Выдачи", "Корректировки", "Наличие"):
@@ -785,14 +785,17 @@ def pr12_upgrade_stops():
         s.close()
     h08 = sha(real08)
     outs["real08"] = upgrade("check", real08)
-    want = {"lock": "WMS открыта", "lolock": "открыта в LibreOffice", "foreign": "«Иной приход» защищены не паролем WMS", "tail": "которых нет в книге",
+    # 1.1: a tail of the journal is no longer a stop — the wizard rehearses the catch-up on a copy of the book at the build (tests V44, V45)
+    tail_ok = outs.pop("tail")
+    want = {"lock": "WMS открыта", "lolock": "открыта в LibreOffice", "foreign": "«Иной приход» защищены не паролем WMS",
             "marker": "незавершённая операция", "foreign_journal": "другой WMS", "plain": "не книга WMS", "nofile": "нет файла", "new08": f"уже версии {VERS['WMS_PRODUCT_VERSION']}",
             "real08": "промежуточный выпуск PRIME 0.8"}
     bad = {k: v[1][-160:] for k, v in outs.items() if v[0] != 1 or want[k] not in v[1]}
-    R.add(c, "стоп-проверки с понятной причиной: WMS открыта; книга открыта в LibreOffice; лист с чужим паролем; хвост журнала; незавершённая "
+    R.add(c, "стоп-проверки с понятной причиной: WMS открыта; книга открыта в LibreOffice; лист с чужим паролем; незавершённая "
              "операция; строки другой WMS в журнале; не книга WMS; нет файла; книга уже этой версии; книга промежуточной 0.8 — «мастер переносит "
-             "книгу 0.7, ничего не изменено» — код 1, книги не изменены",
-          not bad and sha(p) == h0 and sha(real08) == h08 and "Ничего не изменено" in outs["real08"][1], str(bad)[:900])
+             "книгу 0.7, ничего не изменено» — код 1, книги не изменены; хвост журнала (1.1) — не остановка: «книгу можно обновить», книга не изменена",
+          not bad and sha(p) == h0 and sha(real08) == h08 and "Ничего не изменено" in outs["real08"][1]
+          and tail_ok[0] == 0 and "можно обновить" in tail_ok[1], str(bad)[:900] + f" | tail: {tail_ok}")
     # the folders
     os.makedirs(os.path.join(d, "BUSY"))
     open(os.path.join(d, "BUSY", "x.txt"), "w").write("x")
