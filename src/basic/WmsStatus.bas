@@ -33,6 +33,11 @@ EH:
     Config = Empty
 End Function
 
+' 1.1: a setting of LibreOffice for the modules that tell about it (Empty — not on this computer)
+Function ConfigGet(sPath As String, sName As String) As Variant
+    ConfigGet = Config(sPath, sName)
+End Function
+
 Function LoVersion() As String
     If gFakeLo <> "" Then
         LoVersion = gFakeLo

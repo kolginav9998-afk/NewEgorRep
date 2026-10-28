@@ -4583,6 +4583,59 @@ def v57_hotkeys_more():
         s.close()
 
 
+@case
+def v58_locality_pc():
+    """1.1: «Проверить локальность» (книга сама читает свои макросы, связи и формулы: сетевых возможностей нет; чужой модуль с почтовым вызовом и формула, открывающая ссылку, находятся)
+    и расширенная «Проверить этот ПК»: принтер этикеток XP-420B среди установленных, какой по умолчанию; «Пробная этикетка» — этикетка первого ЕИ на «Печати», журнал не меняется"""
+    c = "V58"
+    s = ready(Session(new_wms("v58")))
+    try:
+        seq0 = int(s.sysv("LAST_SEQ"))
+        t0 = time.time()
+        rep = s.B("LocalityReport", module="WmsLocal")
+        dt = time.time() - t0
+        R.add(c, "в книге выпуска: «сетевых возможностей в WMS не найдено», все три строки с галочкой (макросы, книга, запуск программ)",
+              rep.startswith("Проверка локальности: сетевых возможностей в WMS не найдено") and rep.count("✓") == 3 and "✗" not in rep and "макросы WMS (" in rep, f"{dt:.1f} с; {rep[-190:]}")
+        # a foreign module with a mail call and a formula that opens a link
+        lib = s.doc.BasicLibraries.getByName("WmsPlus")
+        lib.insertByName("ZzNet", 'Option Explicit\nSub ZzSend()\n    Dim x As Object\n    x = CreateUnoService("com.sun.star.mail." + "MailServiceProvider")\nEnd Sub\n')
+        s.doc.Sheets.insertNewByName("ZzTmp", 99)
+        s.doc.Sheets.getByName("ZzTmp").getCellByPosition(0, 0).setFormula('=HYPERLINK("#Главная.A1")')
+        bad = s.B("LocalityReport", module="WmsLocal")
+        R.add(c, "чужой модуль с вызовом почты и формула HYPERLINK находятся: ✗ у «макросов» (модуль ZzNet) и у «книги» (лист ZzTmp)",
+              bad.count("✗") >= 2 and "ZzNet" in bad and "ZzTmp" in bad and "замечаний" in bad.split(chr(10))[0], bad[:600])
+        lib.removeByName("ZzNet")
+        s.doc.Sheets.removeByName("ZzTmp")
+        again = s.B("LocalityReport", module="WmsLocal")
+        R.add(c, "после удаления лишнего — снова чисто", again.startswith("Проверка локальности: сетевых возможностей в WMS не найдено"), again[:200])
+        # the PC check: the label printer
+        s.B("TestSetPrinters", "Brother HL-L2300|Microsoft Print to PDF", "Brother HL-L2300", module="WmsHelp")
+        p1 = s.B("PcCheck", module="WmsHelp")
+        s.B("TestSetPrinters", "Brother HL-L2300|Xprinter XP-420B", "Brother HL-L2300", module="WmsHelp")
+        p2 = s.B("PcCheck", module="WmsHelp")
+        s.B("TestSetPrinters", "Brother HL-L2300|XP-420B", "XP-420B", module="WmsHelp")
+        p3 = s.B("PcCheck", module="WmsHelp")
+        s.B("TestSetPrinters", "", "", module="WmsHelp")
+        R.add(c, "«Проверить этот ПК»: нет XP-420B — ✗ и что делать; есть, но по умолчанию другой — ✓ с подсказкой выбрать в окне печати; по умолчанию он — ✓",
+              "✗ принтер этикеток" in p1 and "официальный драйвер XP-420B" in p1 and "✓ принтер этикеток: «Xprinter XP-420B» установлен, но по умолчанию стоит «Brother HL-L2300»" in p2
+              and "✓ принтер этикеток: «XP-420B» установлен, выбран по умолчанию" in p3 and "размер этикетки в WMS: 40×30" in p3, f"{p1[-420:]} // {p2[-420:]} // {p3[-300:]}")
+        # the test label
+        s.B("BtnTestLabel", module="WmsHelp")
+        msg = s.U("TestUiLastMessage") or ""
+        ps = s.doc.Sheets.getByName("Печать")
+        txt = " ".join(str(x) for r in ps.getCellRangeByPosition(0, 0, 0, 12).getDataArray() for x in r)
+        R.add(c, "«Пробная этикетка»: этикетка собрана на «Печати» (размер 40×30, ЕИ-…), сообщение говорит про Ctrl+P; сама ничего не печатает, журнал не изменился",
+              "Пробная этикетка (ЕИ-" in msg and "Ctrl+P" in msg and "ЕИ-" in txt and s.active_sheet() == "Печать" and int(s.sysv("LAST_SEQ")) == seq0, f"{msg[:200]}; {s.active_sheet()}; {txt[:120]}")
+        svc = s.doc.Sheets.getByName("Обслуживание")
+        f = svc.getDrawPage().getForms().getByIndex(0)
+        btns = {f.getByIndex(i).Name for i in range(f.getCount())}
+        R.add(c, "на «Обслуживании» есть кнопки «Проверить локальность» и «Пробная этикетка»", {"btnLocality", "btnTestLabel"} <= btns, str(sorted(btns)[:40]))
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:100])
+    finally:
+        s.close()
+
+
 # ================================================================ runner
 
 def main():

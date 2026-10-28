@@ -9,6 +9,9 @@ Public Const ROLE_PROP = "WMS_ROLE"
 Public Const ROLE_TRAINING = "TRAINING"
 Public Const ROLE_ANON = "ANON"
 Global gHpDesktopTest As String
+' test seam for the printers of the computer (1.1): "name|name|…" and the default one; "" — the real ones
+Global gHpPrinters As String
+Global gHpPrinterDef As String
 
 ' ================================================================ П1 «Проверить этот ПК»
 
@@ -23,7 +26,7 @@ Function PcCheck() As String
     Dim s As String, why As String, lvl As Integer, trusted As Boolean, p As String, free As Double, py As String, nBad As Integer, sec As Integer
     WmsInit()
     On Error GoTo EH
-    WmsView.ProgressStart("Проверка этого ПК", 5)
+    WmsView.ProgressStart("Проверка этого ПК", 6)
     lvl = WmsStatus.LoCompat(why)
     s = s & PcLine(lvl = 0, "LibreOffice " & WmsStatus.LoVersion(), IIf(lvl = 0, "проверена с WMS", why), _
         IIf(lvl = 2, "поставьте LibreOffice 24.2 или новее", "работать можно; полная проверка — пакет проверки ПК"), nBad)
@@ -44,6 +47,8 @@ Function PcCheck() As String
     py = PythonVersion()
     s = s & PcLine(py <> "", "Python (для инструментов WMS_TOOLBOX)", IIf(py <> "", py, "не найден"), _
         "нужен только для набора инструментов (этикетки на термопринтер, сверка, закономерности); WMS работает и без него", nBad)
+    WmsView.ProgressSet(5)
+    s = s & PrinterLines(nBad)
     WmsView.ProgressEnd()
     PcCheck = "Проверка этого ПК: " & IIf(nBad = 0, "всё в порядке", "замечаний " & nBad) & Chr(10) & s
     gUiLastMsg = PcCheck
@@ -53,6 +58,85 @@ EH:
     PcCheck = "ERR:проверка не выполнена: " & Error$
     gUiLastMsg = PcCheck
 End Function
+
+' 1.1: the printers LibreOffice sees: the label printer (XP-420B with its official driver) among them or not, and which one is the default
+Private Sub PrinterNames(names As Variant, ByRef sDef As String)
+    Dim ps As Object
+    names = Array()
+    sDef = ""
+    If gHpPrinters <> "" Then
+        names = Split(gHpPrinters, "|")
+        sDef = gHpPrinterDef
+        Exit Sub
+    End If
+    On Error GoTo EH
+    ps = CreateUnoService("com.sun.star.awt.PrinterServer")
+    names = ps.getPrinterNames()
+    sDef = ps.getDefaultPrinterName()
+    Exit Sub
+EH:
+End Sub
+
+Sub TestSetPrinters(sNames As String, sDef As String)
+    gHpPrinters = sNames
+    gHpPrinterDef = sDef
+End Sub
+
+' the name of a printer is of the label printer: «XP-420B», «Xprinter XP420B» …
+Private Function IsLabelPrinter(sName As String) As Boolean
+    Dim s As String
+    s = LCase(Replace(Replace(Replace(sName, "-", ""), " ", ""), "_", ""))
+    IsLabelPrinter = InStr(s, "xp420") > 0
+End Function
+
+Private Function PrinterLines(ByRef nBad As Integer) As String
+    Dim names As Variant, sDef As String, i As Long, found As String, all As String
+    PrinterNames(names, sDef)
+    For i = 0 To UBound(names)
+        all = all & IIf(all <> "", ", ", "") & "«" & names(i) & "»"
+        If found = "" And IsLabelPrinter(CStr(names(i))) Then found = CStr(names(i))
+    Next i
+    If found <> "" Then
+        PrinterLines = PcLine(True, "принтер этикеток", "«" & found & "» установлен" & IIf(sDef = found, ", выбран по умолчанию", _
+            IIf(sDef <> "", ", но по умолчанию стоит «" & sDef & "» — при печати этикеток выберите «" & found & "» в окне печати", "")), "", nBad)
+    Else
+        PrinterLines = PcLine(False, "принтер этикеток", IIf(all = "", "LibreOffice не видит ни одного принтера", "XP-420B среди установленных не найден (" & all & ")"), _
+            "установите официальный драйвер XP-420B (с диска или с сайта производителя принтера) и снова нажмите «Проверить этот ПК»; этикетки можно и сохранить в PDF", nBad)
+    End If
+    PrinterLines = PrinterLines & "  размер этикетки в WMS: " & WmsItem.LabelSize() & " мм (меняется на странице «Печать»); «Пробная этикетка» соберёт её для проверки" & Chr(10)
+End Function
+
+' 1.1: «Пробная этикетка»: the label of the first EI of the registry in the size of the book, built on «Печать» — to be printed by the storekeeper (Ctrl+P) and put to the real label
+Sub BtnTestLabel(Optional oEvent As Variant)
+    Dim st As Object, last As Long, n As Long, row As Variant, r As String
+    WmsInit()
+    On Error GoTo EH
+    st = WmsIssue.StockSheet()
+    last = WmsOrders.LastRow(st)
+    For n = 1 To last
+        row = st.getCellRangeByPosition(0, n, SC_EI, n).getDataArray()(0)
+        If CStr(row(SC_EI)) <> "" Then Exit For
+    Next n
+    If n > last Then
+        gUiLastMsg = "Пробная этикетка: в «" & SH_STOCK & "» ещё нет ни одного ЕИ — она будет после первого прихода."
+        WmsUi.UiMessage(gUiLastMsg)
+        Exit Sub
+    End If
+    r = WmsItem.LabelPrint(Array(n), 1, WmsItem.LabelSize())
+    If Left(r, 3) = "OK:" Then
+        gUiLastMsg = "OK:пробная этикетка " & CStr(row(SC_EI))
+        WmsUi.UiMessage("Пробная этикетка (" & CStr(row(SC_EI)) & ", " & WmsItem.LabelSize() & " мм) собрана на странице «" & SH_PRINT & "»." & Chr(10) & Chr(10) _
+            & "Печать — ваше действие: Ctrl+P, принтер XP-420B, размер этикетки — как в бумаге принтера. Приложите распечатанное к настоящей этикетке: " _
+            & "рамка не режется, штрихкод читается сканером — всё в порядке. Нет — «Печать» → размер этикетки, и снова «Пробная этикетка».")
+    Else
+        gUiLastMsg = r
+        WmsUi.UiMessage(r)
+    End If
+    Exit Sub
+EH:
+    gUiLastMsg = "ERR:пробная этикетка не собрана: " & Error$
+    WmsUi.UiMessage(gUiLastMsg)
+End Sub
 
 Private Function PcLine(ok As Boolean, sWhat As String, sNow As String, sTodo As String, ByRef nBad As Integer) As String
     If Not ok Then nBad = nBad + 1

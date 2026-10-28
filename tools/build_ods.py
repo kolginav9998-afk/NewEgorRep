@@ -223,6 +223,8 @@ SERVICE_GROUPS = [
          "LibreOffice, макросы, запись в папки, копии, свободное место, защита листов."),
         ("btnDrill", "Учебное восстановление", "WmsSafe.BtnRestoreDrill",
          "Раз в месяц: самая свежая копия открывается отдельно, журнал от неё проверяется до последней операции — «восстанавливается»."),
+        ("btnLocality", "Проверить локальность", "WmsLocal.BtnLocality",
+         "Книга читает свои макросы, связи и формулы и говорит, могло ли что-то уйти с компьютера. Ничего не меняет."),
     ]),
     ("Книга и скорость", [
         ("btnSpeedTest", "Замер скорости ПК", "WmsCare.BtnSpeedTest",
@@ -238,7 +240,9 @@ SERVICE_GROUPS = [
     ]),
     ("Этот компьютер и обучение", [
         ("btnPcCheck", "Проверить этот ПК", "WmsHelp.BtnPcCheck",
-         "За секунды, без интернета: LibreOffice, макросы и доверенная папка, запись в папку WMS, место на диске, Python."),
+         "За секунды, без интернета: LibreOffice, макросы и доверенная папка, запись в папку WMS, место на диске, Python, принтер этикеток."),
+        ("btnTestLabel", "Пробная этикетка", "WmsHelp.BtnTestLabel",
+         "Собирает этикетку первого ЕИ на странице «Печать» в размере книги — распечатайте (Ctrl+P) и приложите к настоящей этикетке."),
         ("btnShortcut", "Ярлык на рабочий стол", "WmsHelp.BtnShortcut",
          "Ярлык «WMS склад» открывает именно эту книгу — по привычке не откроется старая."),
         ("btnTraining", "Учебная WMS…", "WmsHelp.BtnTraining",
@@ -1283,28 +1287,33 @@ def service_10(doc, sheets):
     bind_event(sheets.getByName(SERVICE).Events, "OnFocus", "WmsSafe.OnServiceFocus")
 
 
+SERVICE_NEW_110 = ("btnDirsBook", "btnLocality", "btnTestLabel")
+
+
 def service_110(doc, sheets):
-    """1.1: the button «Справочники из копии…» on «Обслуживание» of a book that was made before it (the page is not built again): after the last button of the page"""
+    """1.1: the new buttons on «Обслуживание» of a book that was made before them (the page is not built again): each after the last button of the page"""
     if not sheets.hasByName(SERVICE):
         return
     sh = sheets.getByName(SERVICE)
-    if has_button(sh, "btnDirsBook"):
-        return
-    desc = [x for x in SERVICE_GROUPS[0][1] if x[0] == "btnDirsBook"][0]
-    # the first free row after the last button of the page: a button's shape position decides
-    form = sh.getDrawPage()
-    maxy = 0
-    for i in range(form.getCount()):
-        shp = form.getByIndex(i)
-        maxy = max(maxy, shp.Position.Y + shp.Size.Height)
-    r = 0
-    while sh.getCellByPosition(1, r).Position.Y < maxy + 100 and r < 400:
-        r += 1
-    sh.getRows().getByIndex(r).Height = 900
-    text_cell(sh, 2, r, desc[3], size=10, color=TEXT, wrap=True, valign=2)
-    y = sh.getCellByPosition(1, r).Position.Y
-    x = sh.getCellByPosition(1, r).Position.X
-    add_button(doc, sh, desc[0], desc[1], desc[2], x, y + 80, 6400, 740, back=0xDDEBF7)
+    descs = {x[0]: x for _, g in SERVICE_GROUPS for x in g}
+    for name in SERVICE_NEW_110:
+        if has_button(sh, name):
+            continue
+        desc = descs[name]
+        # the first free row after the last button of the page: a button's shape position decides
+        form = sh.getDrawPage()
+        maxy = 0
+        for i in range(form.getCount()):
+            shp = form.getByIndex(i)
+            maxy = max(maxy, shp.Position.Y + shp.Size.Height)
+        r = 0
+        while sh.getCellByPosition(1, r).Position.Y < maxy + 100 and r < 400:
+            r += 1
+        sh.getRows().getByIndex(r).Height = 900
+        text_cell(sh, 2, r, desc[3], size=10, color=TEXT, wrap=True, valign=2)
+        y = sh.getCellByPosition(1, r).Position.Y
+        x = sh.getCellByPosition(1, r).Position.X
+        add_button(doc, sh, desc[0], desc[1], desc[2], x, y + 80, 6400, 740, back=0xDDEBF7)
 
 
 def dash_10(doc, sheets):
