@@ -1621,7 +1621,7 @@ FAST_HINT_COL = 18
 # the sheets 1.0.2 adds to a book of 1.0.0 / 1.0.1
 SHEETS_102 = [ACTS, DAYREP, CATS, FAST]
 # the sheets 1.1 adds to a book of 1.0.x (filled in as the release grows)
-SHEETS_110 = ["Наличие по названию", "Остаток деталей", "Операции дня", "Проверка названий", "Стандарты", "Синонимы", "Без категории", "Настройки", "Календарь"]
+SHEETS_110 = ["Наличие по названию", "Остаток деталей", "Операции дня", "Проверка названий", "Стандарты", "Синонимы", "Без категории", "Настройки", "Календарь", "ABC-анализ", "Без движения"]
 FAST_FIND_ROW = 1
 FAST_FILTER_ROW = 2
 FAST_HEAD = 3
@@ -2012,6 +2012,55 @@ def build_namechk(doc, sh):
     add_button(doc, sh, "btnNamesFix", "Исправить открытые строки", "WmsNames.BtnNamesFix", 3250, 120, 5400, 650, back=0xDDEBF7)
 
 
+# 1.1: «ABC-анализ» and «Без движения» (WmsAbc): views made from the registry and the journal; the storekeeper changes the parameters in the cells of row 2
+ABC = "ABC-анализ"
+IDLE = "Без движения"
+ABC_HEADERS = ["№", "Класс", "Наименование", "Артикул", "Выдач", "Выдано", "Ед.", "Доля выдач, %", "Накоплено, %", "Остаток сейчас"]
+ABC_WIDTHS = [1200, 1500, 9000, 3200, 1800, 2200, 1500, 2600, 2600, 2400]
+ABC_HINT = ("ABC-анализ: какие позиции выдают чаще всего. Считается по числу выдач за последние месяцы (по умолчанию 12; удалённые выдачи не считаются), позиция — наименование с артикулом. "
+            "Класс A — самые ходовые, на которые приходится первые 80 % всех выдач; B — следующие, до 95 %; C — остальные. Проценты и число месяцев — в клетках второй строки, "
+            "нажмите Enter. Что ни разу не выдавали за период — в листе «Без движения». Только просмотр: ничего не проводится.")
+IDLE_HEADERS = ["Наименование", "Артикул", "Остаток", "Ед.", "Места", "Последнее движение", "Дней без движения", "Что было последним"]
+IDLE_WIDTHS = [9000, 3200, 2200, 1500, 5000, 3200, 2800, 3200]
+IDLE_HINT = ("Без движения: позиции, у которых есть остаток, но уже давно (по умолчанию 90 дней и больше) не было ни прихода, ни выдачи, ни возврата — залежавшееся. Число дней — в клетке "
+             "второй строки, нажмите Enter. Дата последнего движения берётся из «Даты прихода» ЕИ и из журнала (выдачи, возвраты); если дат нет совсем — позиция в начале списка. "
+             "Только просмотр: ничего не проводится.")
+
+
+def build_abc(doc, sh):
+    build_view110(doc, sh, ABC_HEADERS, ABC_WIDTHS, ABC_HINT, None, None)
+    text = number_format(doc, "@", ("ru", "RU"))
+    for c, (label, val) in enumerate((("За сколько месяцев:", 12), ("A — до, %:", 80), ("B — до, %:", 95))):
+        lc = sh.getCellByPosition(c * 2, 1)
+        lc.setString(label)
+        lc.CharWeight = 150
+        lc.HoriJustify = 3
+        vc = sh.getCellByPosition(c * 2 + 1, 1)
+        vc.setValue(val)
+        vc.CellBackColor = INPUT_HEAD_10
+    sh.getCellRangeByPosition(4, 4, 4, 6000).HoriJustify = 3
+    sh.getCellRangeByPosition(0, 4, 1, 6000).HoriJustify = 2
+    add_button(doc, sh, "btnAbcRefresh", "Обновить", "WmsAbc.BtnAbcRefresh", 150, 120, 3000, 650, bold=True, back=0xC6E0B4)
+    bind_event(sh.Events, "OnFocus", "WmsAbc.OnAbcFocus")
+    bind_event(sh.Events, "OnChange", "WmsAbc.OnAbcChange")
+
+
+def build_idle(doc, sh):
+    build_view110(doc, sh, IDLE_HEADERS, IDLE_WIDTHS, IDLE_HINT, None, None)
+    lc = sh.getCellByPosition(0, 1)
+    lc.setString("Дней без движения от:")
+    lc.CharWeight = 150
+    lc.HoriJustify = 3
+    vc = sh.getCellByPosition(1, 1)
+    vc.setValue(90)
+    vc.CellBackColor = INPUT_HEAD_10
+    sh.getCellRangeByPosition(5, 4, 5, 6000).NumberFormat = number_format(doc, "DD.MM.YYYY")
+    sh.getCellRangeByPosition(2, 4, 2, 6000).HoriJustify = 3
+    add_button(doc, sh, "btnIdleRefresh", "Обновить", "WmsAbc.BtnIdleRefresh", 150, 120, 3000, 650, bold=True, back=0xC6E0B4)
+    bind_event(sh.Events, "OnFocus", "WmsAbc.OnIdleFocus")
+    bind_event(sh.Events, "OnChange", "WmsAbc.OnIdleChange")
+
+
 def views_110(doc, sheets):
     """1.1: the three sheets that only show, for a new book and an upgraded one: «Наличие по названию» and «Остаток деталей» after «Наличие», «Операции дня»
     after «Отчёты»; nothing that exists is touched"""
@@ -2051,6 +2100,14 @@ def views_110(doc, sheets):
         build_calendar(doc, sheets.getByName(CALENDAR))
     if sheets.hasByName(DAYREP):
         dayrep_period(doc, sheets.getByName(DAYREP))
+    names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+    if not sheets.hasByName(ABC):
+        sheets.insertNewByName(ABC, names.index(REPORTS) + 1 if REPORTS in names else len(names))
+        build_abc(doc, sheets.getByName(ABC))
+    names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+    if not sheets.hasByName(IDLE):
+        sheets.insertNewByName(IDLE, names.index(ABC) + 1)
+        build_idle(doc, sheets.getByName(IDLE))
     names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
     if not sheets.hasByName(SETTINGS):
         sheets.insertNewByName(SETTINGS, names.index(NOCAT) + 1 if NOCAT in names else len(names))

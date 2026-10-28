@@ -4473,6 +4473,61 @@ def v55_period_report():
         s.close()
 
 
+@case
+def v56_abc_idle():
+    """1.1: «ABC-анализ» (по числу выдач за последние месяцы; класс A — первые 80 % выдач, B — до 95 %, C — остальное; удалённые выдачи не считаются) и «Без движения» (есть остаток, но
+    давно не было прихода, выдачи и возврата; число дней в клетке); оба листа только читают реестр и журнал"""
+    c = "V56"
+    s = ready(Session(new_wms("v56")))
+    try:
+        order(s, 1, "1", "Болт ходовой", qty="100", art="X-A")
+        receive(s, 1, "100", place="5-1-1", doc="УПД-1", k=-200)
+        order(s, 2, "2", "Гайка средняя", qty="100", art="X-B")
+        receive(s, 2, "100", place="5-1-2", doc="УПД-2")
+        order(s, 3, "3", "Шайба редкая", qty="100", art="X-C")
+        receive(s, 3, "100", place="5-1-3", doc="УПД-3")
+        order(s, 4, "4", "Краска залежалая", qty="5", art="X-D")
+        receive(s, 4, "5", place="5-1-4", doc="УПД-4", k=-200)
+        eA, eB, eC, eD = [ords(s, r)[21] for r in (1, 2, 3, 4)]
+        k = 0
+        for ei, n_ in ((eA, 6), (eB, 3), (eC, 1)):
+            for _ in range(n_):
+                k += 1
+                issue(s, k, ei, "1", "ива")
+        seq0 = int(s.sysv("LAST_SEQ"))
+        r1 = s.B("AbcRefresh", module="WmsAbc")
+        sh = s.doc.Sheets.getByName("ABC-анализ")
+        rows = [list(r) for r in sh.getCellRangeByPosition(0, 4, 9, 30).getDataArray() if r[0] != ""]
+        by = {r[3]: r for r in rows}
+        R.add(c, "ABC: три позиции с выдачами, по числу выдач — «Болт ходовой» (6 выдач, 60 %), «Гайка средняя» (3, 30 %), «Шайба редкая» (1, 10 %); краска без выдач в списке нет",
+              r1 == "OK:3" and [r[3] for r in rows] == ["X-A", "X-B", "X-C"] and by["X-A"][4] == 6 and by["X-B"][4] == 3 and by["X-C"][4] == 1 and "X-D" not in by
+              and abs(by["X-A"][7] - 60) < 0.01 and abs(by["X-C"][8] - 100) < 0.01, f"{r1}; {rows}")
+        R.add(c, "классы: A — болт и гайка (к ним приходится первые 80 % выдач: до гайки накоплено 60 %), B — шайба (до неё 90 %); остаток сейчас: болт 94, гайка 97, шайба 99",
+              [by["X-A"][1], by["X-B"][1], by["X-C"][1]] == ["A", "A", "B"] and by["X-A"][9] == 94 and by["X-B"][9] == 97 and by["X-C"][9] == 99, str([r[1] for r in rows]))
+        # the parameters: A up to 50 % → the nut is B, the washer C
+        sh.getCellByPosition(3, 1).setValue(50)
+        sh.getCellByPosition(5, 1).setValue(70)
+        r2 = s.B("AbcRefresh", module="WmsAbc")
+        rows2 = [list(r) for r in sh.getCellRangeByPosition(0, 4, 9, 30).getDataArray() if r[0] != ""]
+        R.add(c, "A до 50 %, B до 70 %: болт A, гайка B (до неё 60 %), шайба C (до неё 90 %)", [r[1] for r in rows2] == ["A", "B", "C"], str([r[1] for r in rows2]))
+        # the idle
+        r3 = s.B("IdleRefresh", module="WmsAbc")
+        ish = s.doc.Sheets.getByName("Без движения")
+        idle = [list(r) for r in ish.getCellRangeByPosition(0, 4, 7, 400).getDataArray() if r[0] != ""]
+        ib = {r[1]: r for r in idle}
+        R.add(c, "«Без движения» (90 дней): «Краска залежалая» — 200 дней, последнее — приход; болт (приход 200 дней назад, но выдавали сегодня), гайка, шайба — в списке нет",
+              r3.startswith("OK:") and "X-D" in ib and 199 <= ib["X-D"][6] <= 201 and ib["X-D"][7] == "приход" and "X-A" not in ib and "X-B" not in ib and "X-C" not in ib, f"{r3}; {ib.get('X-D')}")
+        ish.getCellByPosition(1, 1).setValue(300)
+        s.B("IdleRefresh", module="WmsAbc")
+        idle2 = [list(r) for r in ish.getCellRangeByPosition(0, 4, 7, 400).getDataArray() if r[0] != ""]
+        R.add(c, "порог 300 дней — краска (200) уже не в списке", "X-D" not in {r[1] for r in idle2}, str(len(idle2)))
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "листы ничего не проводят: журнал не изменился; самопроверка — без ошибок", int(s.sysv("LAST_SEQ")) == seq0 and sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), f"{seq0}; {sc[:100]}")
+        oracle(c, s, "abc и без движения")
+    finally:
+        s.close()
+
+
 # ================================================================ runner
 
 def main():
