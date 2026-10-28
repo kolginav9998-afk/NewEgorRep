@@ -6,11 +6,11 @@ Option Explicit
 
 Public Const SH_SUPPLIERS = "Поставщики"
 ' «Поставщики»: A the supplier (one spelling), B phone, C contact, D the usual delivery time in days, E note
-Public Const SU_NAME = 0
-Public Const SU_PHONE = 1
-Public Const SU_CONTACT = 2
-Public Const SU_LEAD = 3
-Public Const SU_NOTE = 4
+Private Const SU_NAME = 0
+Private Const SU_PHONE = 1
+Private Const SU_CONTACT = 2
+Private Const SU_LEAD = 3
+Private Const SU_NOTE = 4
 
 ' the result of the last return window (for the tests): the row of «Корректировки», the row of the replacement in «Заказы»
 Global gSuRetRow As Long
@@ -511,33 +511,33 @@ End Function
 
 Public Const SH_SUPPLY = "Снабжение"
 Public Const SH_GOODS = "Номенклатура"
-Public Const SP_INPUT_ROW = 3
-Public Const SP_INPUT_COL = 2
-Public Const SP_HEAD = 6
-Public Const SP_INFO = 7
-Public Const SP_TABLE_HEAD = 9
-Public Const SP_TABLE = 10
-Public Const SP_MAX = 3000
+Private Const SP_INPUT_ROW = 3
+Private Const SP_INPUT_COL = 2
+Private Const SP_HEAD = 6
+Private Const SP_INFO = 7
+Private Const SP_TABLE_HEAD = 9
+Private Const SP_TABLE = 10
+Private Const SP_MAX = 3000
 ' hidden columns of the table: the sheet and the row of the source, the mark of the row (G — a group, L — late)
 Public Const SP_SRC_SHEET = 12
 Public Const SP_SRC_ROW = 13
 Public Const SP_MARK = 14
 ' «Номенклатура»: B name, C article, D unit, H minimum, I batch, J supplier; M..P written by «Обновить»
-Public Const GD_CODE = 0
+Private Const GD_CODE = 0
 Public Const GD_NAME = 1
 Public Const GD_ART = 2
 Public Const GD_UNIT = 3
 Public Const GD_CAT = 4
 Public Const GD_PACKN = 5
 Public Const GD_PACKU = 6
-Public Const GD_MIN = 7
-Public Const GD_BATCH = 8
-Public Const GD_SUP = 9
+Private Const GD_MIN = 7
+Private Const GD_BATCH = 8
+Private Const GD_SUP = 9
 Public Const GD_PHOTO = 10
-Public Const GD_NOTE = 11
+Private Const GD_NOTE = 11
 Public Const GD_STOCK = 12
-Public Const GD_NEI = 13
-Public Const GD_TRANSIT = 14
+Private Const GD_NEI = 13
+Private Const GD_TRANSIT = 14
 Public Const GD_UPD = 15
 
 ' the mode of the page shown (WAIT / NEED) and the open positions of the last «Ожидаем»: the row of «Заказы», the key of the

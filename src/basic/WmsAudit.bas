@@ -5,7 +5,7 @@ Option Explicit
 
 ' the sheets whose writes the history shows as «было → стало» (the service sheets are left out)
 Private Const AU_SHEETS = "|Заказы|Выдачи|Возврат|Иной приход|Корректировки|Приход авто|Наличие|"
-Public Const AU_MAX = 3000
+Private Const AU_MAX = 3000
 
 Global gAuHead As Object
 Global gAuHeadSheets As String

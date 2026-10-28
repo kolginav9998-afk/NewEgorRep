@@ -7,23 +7,23 @@
 Option Explicit
 
 Public Const MP_TOP = 7
-Public Const MP_INFO_ROW = 4
-Public Const MP_SUM_ROW = 3
-Public Const MP_LEGEND_ROW = 5
-Public Const MP_MAX_PLACES = 20000
+Private Const MP_INFO_ROW = 4
+Private Const MP_SUM_ROW = 3
+Private Const MP_LEGEND_ROW = 5
+Private Const MP_MAX_PLACES = 20000
 ' the hidden sorted table of the texts of the places (MapKeys): text | number of the place (1-based)
-Public Const MP_KEY_COL = 1100
+Private Const MP_KEY_COL = 1100
 ' 1.0 (М2): the directory of the places outside the racks of the map (a floor, the yard, an office): known places, not
 ' «не на карте»; A the place, B its kind, C the zone, D the capacity in cells, E «закрыто», F a note
 Public Const SH_PLACES = "Места"
 ' 1.0: the layout «Топология» had before the last «Сохранить карту» (hidden)
 Public Const SH_TOPO_PREV = "_TOPO_PREV"
-Public Const PD_PLACE = 0
-Public Const PD_KIND = 1
-Public Const PD_ZONE = 2
-Public Const PD_CAP = 3
-Public Const PD_CLOSED = 4
-Public Const PD_NOTE = 5
+Private Const PD_PLACE = 0
+Private Const PD_KIND = 1
+Private Const PD_ZONE = 2
+Private Const PD_CAP = 3
+Private Const PD_CLOSED = 4
+Private Const PD_NOTE = 5
 
 Global gMpLayer As String
 Global gMpN As Long
@@ -37,10 +37,10 @@ Global gMpBusy As Boolean
 ' 1.0: the map is being edited on the map itself (BtnMapEdit … BtnMapSave / BtnMapCancel); a cell of the map keeps the mode
 ' over a save and a reopening of the book
 Global gMpEdit As Boolean
-Public Const MP_EDIT_COL = 1105
+Private Const MP_EDIT_COL = 1105
 ' 1.0 (С5): the stamp of the map saved with the book — «LAST_SEQ|слой|когда»: a map up to date is not counted again at the
 ' next start, only its places are read
-Public Const MP_STAMP_COL = 1109
+Private Const MP_STAMP_COL = 1109
 Global gMpLazyNow As Boolean
 
 Private Function TopoSheet() As Object
@@ -312,7 +312,7 @@ End Function
 ' operation was posted since), MapPaint writes the colour code of every place into a hidden grid right of the map: the
 ' colours themselves are conditional formats over the map (styles MAP_<layer>_0 … 4), so a layer is switched at once.
 
-Public Const MP_GRID_COL = 600
+Private Const MP_GRID_COL = 600
 
 Global gMpSig As String
 Global gMpStatSeq As Double

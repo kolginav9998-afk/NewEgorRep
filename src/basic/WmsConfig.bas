@@ -22,7 +22,7 @@ Public Const BACKUP_DIR = "WMS_Backups"
 Public Const LOCK_FILE = "wms.lock"
 Public Const JOURNAL_PREFIX = "WMS_journal_"
 Public Const JOURNAL_EXT = ".csv"
-Public Const AUTOINPUT_STATE_FILE = "wms_autoinput.state"
+Private Const AUTOINPUT_STATE_FILE = "wms_autoinput.state"
 
 ' Sheet protection guards against accidents, not against a determined user (spec §16: the password is not used in daily work).
 Public Const PROTECT_PWD = "wms"
@@ -61,7 +61,7 @@ Public Const SK_NEXT_CAR = 26
 ' PRIME 0.8 (WMS-SYS-5): where this book was upgraded from — «папка|LAST_SEQ|SHA-256|дата» of the book of 0.7 (empty for a
 ' new book): a start names the operations done in the old book after the upgrade
 Public Const SK_UPGRADE_FROM = 27
-Public Const SYS_ROWS = 28
+Private Const SYS_ROWS = 28
 
 ' transaction marker states
 Public Const TX_NONE = "NONE"
@@ -479,7 +479,7 @@ Public Const SH_CAR = "_CAR"
 Public Const CP_IN_ROW = 1
 Public Const CP_PLATE_COL = 2
 Public Const CP_SUP_COL = 3
-Public Const CP_HINT_ROW = 2
+Private Const CP_HINT_ROW = 2
 Public Const CP_VAL_ROW = 4
 Public Const CP_THR_COL = 11
 ' the header of the table and its first data row: visit n is on row CAR_FIRST + n - 1 (dense, like «Наличие»; the rows
@@ -668,7 +668,7 @@ Public Const PK_EI = 0
 Public Const PK_UNIT = 1
 Public Const PK_N = 2
 Public Const PK_NOTE = 3
-Public Const PK_LAST = 3
+Private Const PK_LAST = 3
 ' at most this many parts in one unit of the document (a profile — in metres, not in millimetres)
 Public Const PACK_MAX_N = 1000
 ' PRIME 0.8 — the view sheets (D-094, D-095): built from the data, never journaled

@@ -3,7 +3,7 @@
 ' the link is the name of the folder. «Документ…» on «Заказы»: add a file / open the folder of the order. Library WmsPlus.
 Option Explicit
 
-Public Const ATTACH_DIR = "WMS_Документы"
+Private Const ATTACH_DIR = "WMS_Документы"
 ' test seam: the file "chosen" in the window of files while a test answers the windows (gUiAuto)
 Global gAtTestSrc As String
 

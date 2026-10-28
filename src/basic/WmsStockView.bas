@@ -5,16 +5,16 @@
 ' EIs, the places, the serial numbers. A view posts nothing and writes nothing to the journal. Library WmsPlus.
 Option Explicit
 
-Public Const SH_BYNAME = "Наличие по названию"
-Public Const SH_PARTS = "Остаток деталей"
-Public Const SV_FIND_ROW = 1
-Public Const SV_ZERO_COL = 5
-Public Const SV_STAT_ROW = 2
-Public Const SV_HEAD = 3
-Public Const SV_ROW0 = 4
-Public Const SV_MAX = 60000
-Public Const SV_BYNAME_COLS = 11
-Public Const SV_PARTS_COLS = 8
+Private Const SH_BYNAME = "Наличие по названию"
+Private Const SH_PARTS = "Остаток деталей"
+Private Const SV_FIND_ROW = 1
+Private Const SV_ZERO_COL = 5
+Private Const SV_STAT_ROW = 2
+Private Const SV_HEAD = 3
+Private Const SV_ROW0 = 4
+Private Const SV_MAX = 60000
+Private Const SV_BYNAME_COLS = 11
+Private Const SV_PARTS_COLS = 8
 
 ' the journal position of the last build of each view (a view is built again when the journal moved)
 Global gSvSeqName As Long

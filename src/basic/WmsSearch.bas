@@ -8,7 +8,7 @@
 Option Explicit
 
 Public Const SH_SYN = "Синонимы"
-Public Const SX_MAX = 500
+Private Const SX_MAX = 500
 
 ' the registry as it was read at the journal position gSxSeq, and the folded text of every row for the search
 Global gSxSeq As Long

@@ -17,7 +17,7 @@ Global gWmsBtnPick As Integer
 ' 1.0: the test seam of UiForm2 — the next form is answered by its second action button
 Global gPrFormNext As Boolean
 
-Public Const FORM_KEEP = "<как предложено>"
+Private Const FORM_KEEP = "<как предложено>"
 
 ' ================================================================ generic windows
 

@@ -6,19 +6,19 @@
 Option Explicit
 
 ' the folder of the state of these functions next to the book (not the journal, not the copies)
-Public Const SAFE_DIR = "WMS_State"
-Public Const SAFE_STATE = "wms_state.txt"
+Private Const SAFE_DIR = "WMS_State"
+Private Const SAFE_STATE = "wms_state.txt"
 ' the copies of the book made by 1.0 — «имя;операций в книге;вид;пометка;когда» (WmsBackup.BackupNow adds a line)
-Public Const SAFE_COPIES = "wms_copies.txt"
-Public Const FLASH_DIR = "WMS_FLASH"
-Public Const FLASH_KEEP = 8
-Public Const FLASH_REMIND_DAYS = 7
+Private Const SAFE_COPIES = "wms_copies.txt"
+Private Const FLASH_DIR = "WMS_FLASH"
+Private Const FLASH_KEEP = 8
+Private Const FLASH_REMIND_DAYS = 7
 ' Н2: the order of a return to a copy (written by the working book, carried out by the copy) and the order after it (the
 ' restored book replays the journal and checks itself)
-Public Const RESTORE_ORDER = "wms_restore_order.txt"
-Public Const AFTER_RESTORE = "wms_after_restore.txt"
+Private Const RESTORE_ORDER = "wms_restore_order.txt"
+Private Const AFTER_RESTORE = "wms_after_restore.txt"
 ' Н9: below this free space (MB) no copy is made; the warning starts at three times the size of the book (at least 1 GB)
-Public Const DISK_MIN_MB = 100
+Private Const DISK_MIN_MB = 100
 Public Const DISK_WARN_MB = 1024
 
 Global gSfState As String
@@ -1153,7 +1153,7 @@ End Sub
 ' the sum of products, the search in a list, the rounding, the text, the error caught, the dates, the remainder, the maximum
 Private Const SF_CALC_BODY = "TEXTJOIN(""|"";0;SUMPRODUCT({1;2;3}*{4;5;6});MATCH(""b"";{""a"";""b"";""c""};0);ROUND(2.5;0);LEFT(""ЕИ-427"";2);LEN(""ЕИ-427"");IFERROR(1/0;""x"");INDEX({5;6;7};2);DATE(2026;10;20)-DATE(2026;1;1);MOD(7;3);SUMPRODUCT(ISNUMBER({1;""a"";3})*1);MAX({4;9;2});ROUND((0.1+0.2)*10;0))"
 Private Const SF_CALC_WANT = "32|2|3|ЕИ|6|x|6|292|1|2|9|3"
-Public Const DRILL_DAYS = 31
+Private Const DRILL_DAYS = 31
 ' test seam (TestCalcWant): the answer the check of Calc expects, replaced
 Global gSfCalcWant As String
 

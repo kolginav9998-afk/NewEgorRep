@@ -10,47 +10,47 @@
 Option Explicit
 
 Public Const SH_CATS = "Категории"
-Public Const CT_NAME = 0
-Public Const CT_WORDS = 1
-Public Const CT_EXCL = 2
-Public Const CT_NPOS = 3
-Public Const CT_NEI = 4
-Public Const CT_MAX = 300
-Public Const CT_FASTENERS = "Метизы"
+Private Const CT_NAME = 0
+Private Const CT_WORDS = 1
+Private Const CT_EXCL = 2
+Private Const CT_NPOS = 3
+Private Const CT_NEI = 4
+Private Const CT_MAX = 300
+Private Const CT_FASTENERS = "Метизы"
 
 Public Const SH_FAST = "Метизы"
 Public Const FS_FIND_ROW = 1
-Public Const FS_FILTER_ROW = 2
-Public Const FS_HEAD = 3
-Public Const FS_ROW0 = 4
-Public Const FS_COLS = 16
-Public Const FS_KEY_COL = 16
-Public Const FS_STAT_COL = 6
-Public Const FS_MAX = 5000
+Private Const FS_FILTER_ROW = 2
+Private Const FS_HEAD = 3
+Private Const FS_ROW0 = 4
+Private Const FS_COLS = 16
+Private Const FS_KEY_COL = 16
+Private Const FS_STAT_COL = 6
+Private Const FS_MAX = 5000
 ' the columns of «Метизы»
-Public Const FC_TYPE = 0
-Public Const FC_SIZE = 1
-Public Const FC_DIAM = 2
-Public Const FC_LEN = 3
-Public Const FC_STD = 4
-Public Const FC_EQ = 5
-Public Const FC_CLASS = 6
-Public Const FC_COAT = 7
-Public Const FC_HEAD = 8
-Public Const FC_NAME = 9
-Public Const FC_ART = 10
-Public Const FC_QTY = 11
-Public Const FC_UNIT = 12
-Public Const FC_PLACES = 13
-Public Const FC_NEI = 14
-Public Const FC_NOTE = 15
+Private Const FC_TYPE = 0
+Private Const FC_SIZE = 1
+Private Const FC_DIAM = 2
+Private Const FC_LEN = 3
+Private Const FC_STD = 4
+Private Const FC_EQ = 5
+Private Const FC_CLASS = 6
+Private Const FC_COAT = 7
+Private Const FC_HEAD = 8
+Private Const FC_NAME = 9
+Private Const FC_ART = 10
+Private Const FC_QTY = 11
+Private Const FC_UNIT = 12
+Private Const FC_PLACES = 13
+Private Const FC_NEI = 14
+Private Const FC_NOTE = 15
 
 Public Const SH_NOCAT = "Без категории"
-Public Const NK_FIND_ROW = 1
-Public Const NK_HEAD = 3
-Public Const NK_ROW0 = 4
-Public Const NK_COLS = 9
-Public Const NK_MAX = 5000
+Private Const NK_FIND_ROW = 1
+Private Const NK_HEAD = 3
+Private Const NK_ROW0 = 4
+Private Const NK_COLS = 9
+Private Const NK_MAX = 5000
 
 ' the categories as the sheet was read (a Global keeps it between the calls; the sheet's own event drops it)
 Global gCtCat As Variant

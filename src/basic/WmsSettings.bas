@@ -3,9 +3,9 @@
 Option Explicit
 
 Public Const SH_SET = "Настройки"
-Public Const ST_CODE_COL = 3
-Public Const ST_VAL_COL = 1
-Public Const ST_ROWS = 40
+Private Const ST_CODE_COL = 3
+Private Const ST_VAL_COL = 1
+Private Const ST_ROWS = 40
 
 ' the codes of the settings
 Public Const SET_BIG_QTY = "BIG_QTY"

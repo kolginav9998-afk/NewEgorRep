@@ -5,10 +5,10 @@
 Option Explicit
 
 Public Const SH_PRINT = "Печать"
-Public Const PR_COLS = 7
+Private Const PR_COLS = 7
 Public Const PR_MAX = 2000
 Public Const DOCS_DIR = "WMS_Документы"
-Public Const RC_MAX = 500
+Private Const RC_MAX = 500
 
 ' the document on the page: the next free row, its name (the file of the PDF), the sheet it was made from («Назад»)
 Global gPrRow As Long

@@ -12,15 +12,15 @@
 '    проведение этих строк (каждая строка — своя операция со всеми проверками). Один пакет загружается один раз.
 Option Explicit
 
-Public Const SNAPSHOT_FORMAT = "WMS-SNAPSHOT-1"
+Private Const SNAPSHOT_FORMAT = "WMS-SNAPSHOT-1"
 ' the minor version of the contract (manifest «contract»): 1.1 (M6) adds cars.csv and service/_CAR.csv — a tool of 1.0 reads
 ' the snapshot as before, a tool of 1.1 reads a snapshot of 1.0 as one without vehicle data
-Public Const CONTRACT_VERSION = "1.1"
-Public Const BATCH_FORMAT = "WMS-BATCH-1"
+Private Const CONTRACT_VERSION = "1.1"
+Private Const BATCH_FORMAT = "WMS-BATCH-1"
 Public Const EXPORT_DIR = "WMS_Export"
 ' 1.0: the snapshots kept in WMS_Export (older ones are removed after a new one)
-Public Const EXPORT_KEEP = 10
-Public Const BATCH_MAX_ROWS = 5000
+Private Const EXPORT_KEEP = 10
+Private Const BATCH_MAX_ROWS = 5000
 
 ' test seam: the file of the next «Загрузить пакет» (the file window is not shown), the answer to «Провести сейчас?»
 Global gBatchFileSet As Boolean

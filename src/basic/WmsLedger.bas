@@ -5,35 +5,35 @@
 ' Отчёты только читают книгу; файлы — в «WMS_Документы» рядом с книгой, без интернета. Library WmsPlus.
 Option Explicit
 
-Public Const SH_REPORTS = "Отчёты"
+Private Const SH_REPORTS = "Отчёты"
 Public Const SH_CLOSE = "_CLOSE"
 ' _CLOSE: one row per closing of a month (written only by MONTH_CLOSE and MONTH_OPEN)
-Public Const CL_MONTH = 0
-Public Const CL_TO = 1
-Public Const CL_TS = 2
-Public Const CL_STATE = 3
-Public Const CL_QTY = 4
-Public Const CL_SUM = 5
-Public Const CL_FILE = 6
-Public Const CL_WHY = 7
-Public Const CL_LAST = 7
-Public Const CL_MAX = 600
-Public Const CL_CLOSED = "CLOSED"
-Public Const CL_OPENED = "OPENED"
+Private Const CL_MONTH = 0
+Private Const CL_TO = 1
+Private Const CL_TS = 2
+Private Const CL_STATE = 3
+Private Const CL_QTY = 4
+Private Const CL_SUM = 5
+Private Const CL_FILE = 6
+Private Const CL_WHY = 7
+Private Const CL_LAST = 7
+Private Const CL_MAX = 600
+Private Const CL_CLOSED = "CLOSED"
+Private Const CL_OPENED = "OPENED"
 ' the scratch columns of «Печать» where Calc sorts for WMS (outside the print area A:G, cleared after each sort)
-Public Const LD_SORT_COL = 29
+Private Const LD_SORT_COL = 29
 ' the kinds of a movement
-Public Const LK_RCV = 1
-Public Const LK_SPEC = 2
-Public Const LK_ISS = 3
-Public Const LK_RET = 4
-Public Const LK_WOFF = 5
-Public Const LK_INV = 6
-Public Const LK_SUP = 7
-Public Const LK_SPLIT = 8
-Public Const LK_LEG = 9
+Private Const LK_RCV = 1
+Private Const LK_SPEC = 2
+Private Const LK_ISS = 3
+Private Const LK_RET = 4
+Private Const LK_WOFF = 5
+Private Const LK_INV = 6
+Private Const LK_SUP = 7
+Private Const LK_SPLIT = 8
+Private Const LK_LEG = 9
 ' 1.0 (Ф8): a kit build — the components out (−), the kit in (+)
-Public Const LK_KIT = 10
+Private Const LK_KIT = 10
 
 ' the movements read by LedgerRead: EI number, date, kind, quantity (+ in, − out), operation, document, counterparty
 Global gLdN As Long

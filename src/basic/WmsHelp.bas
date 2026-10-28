@@ -5,7 +5,7 @@
 Option Explicit
 
 ' П4, П12: the role of a copy made by WMS (a user property of the document): its first start registers it with its own journal
-Public Const ROLE_PROP = "WMS_ROLE"
+Private Const ROLE_PROP = "WMS_ROLE"
 Public Const ROLE_TRAINING = "TRAINING"
 Public Const ROLE_ANON = "ANON"
 Global gHpDesktopTest As String

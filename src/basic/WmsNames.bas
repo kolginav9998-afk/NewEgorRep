@@ -215,13 +215,13 @@ Function FixNameCell(sSheet As String, r As Long, c As Integer) As Boolean
 EH:
 End Function
 
-Public Const SH_NAMECHK = "Проверка названий"
-Public Const NC_FIND_ROW = 1
-Public Const NC_STAT_ROW = 2
-Public Const NC_HEAD = 3
-Public Const NC_ROW0 = 4
-Public Const NC_COLS = 7
-Public Const NC_MAX = 2000
+Private Const SH_NAMECHK = "Проверка названий"
+Private Const NC_FIND_ROW = 1
+Private Const NC_STAT_ROW = 2
+Private Const NC_HEAD = 3
+Private Const NC_ROW0 = 4
+Private Const NC_COLS = 7
+Private Const NC_MAX = 2000
 
 ' the name as the list shows it: a line break is «¶»
 Private Function Shown(s As String) As String

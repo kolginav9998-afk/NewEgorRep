@@ -7,7 +7,7 @@
 ' GOOD_EVERY_MIN minutes. Library WmsPlus.
 Option Explicit
 
-Public Const GOOD_EVERY_MIN = 20
+Private Const GOOD_EVERY_MIN = 20
 
 ' the number of the rows of «Наличие» that hold an EI other than the one their row is for (row n — ЕИ-n); 0 — the registry is in order;
 ' -1 — the formula could not be used (the caller takes the slower check)

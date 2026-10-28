@@ -5,16 +5,16 @@
 Option Explicit
 
 ' С4: the thresholds of the watchdog of the growth (ms)
-Public Const CARE_MAP_SLOW = 5000
-Public Const CARE_SAVE_SLOW = 30000
-Public Const CARE_OPEN_SLOW = 20000
+Private Const CARE_MAP_SLOW = 5000
+Private Const CARE_SAVE_SLOW = 30000
+Private Const CARE_OPEN_SLOW = 20000
 ' С3: the size the book is planned for and the one at which «Закрытие года» is due
-Public Const CARE_PLANNED = 250000
-Public Const CARE_YEAR_CLOSE = 200000
+Private Const CARE_PLANNED = 250000
+Private Const CARE_YEAR_CLOSE = 200000
 ' С2: the reference of the speed test — the computer WMS 1.0 was measured on with 250 000 movements (ms of each part)
-Public Const CARE_REF_BASIC = 260
-Public Const CARE_REF_CALC = 90
-Public Const CARE_REF_DISK = 60
+Private Const CARE_REF_BASIC = 260
+Private Const CARE_REF_CALC = 90
+Private Const CARE_REF_DISK = 60
 Global gCrSaveT0 As Long
 
 ' ================================================================ С4 the times

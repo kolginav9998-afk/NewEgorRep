@@ -3,21 +3,21 @@
 ' article is one position (as in «Метизы»). Library WmsPlus.
 Option Explicit
 
-Public Const SH_ABC = "ABC-анализ"
-Public Const AB_PAR_ROW = 1
-Public Const AB_STAT_ROW = 2
-Public Const AB_HEAD = 3
-Public Const AB_ROW0 = 4
-Public Const AB_COLS = 10
-Public Const AB_MAX = 5000
+Private Const SH_ABC = "ABC-анализ"
+Private Const AB_PAR_ROW = 1
+Private Const AB_STAT_ROW = 2
+Private Const AB_HEAD = 3
+Private Const AB_ROW0 = 4
+Private Const AB_COLS = 10
+Private Const AB_MAX = 5000
 
-Public Const SH_IDLE = "Без движения"
-Public Const ID_PAR_ROW = 1
-Public Const ID_STAT_ROW = 2
-Public Const ID_HEAD = 3
-Public Const ID_ROW0 = 4
-Public Const ID_COLS = 8
-Public Const ID_MAX = 5000
+Private Const SH_IDLE = "Без движения"
+Private Const ID_PAR_ROW = 1
+Private Const ID_STAT_ROW = 2
+Private Const ID_HEAD = 3
+Private Const ID_ROW0 = 4
+Private Const ID_COLS = 8
+Private Const ID_MAX = 5000
 
 ' the positions: name, article, unit, balance, the places, the last receipt / issue / return (a Calc date, 0 — none), the issues of the period (number and quantity)
 Global gAgN As Long

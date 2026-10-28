@@ -5,8 +5,8 @@
 Option Explicit
 
 ' the serials asked in one window, the most one EI is taken apart into at a time
-Public Const SRL_PAGE = 18
-Public Const SRL_MAX = 200
+Private Const SRL_PAGE = 18
+Private Const SRL_MAX = 200
 
 Sub BtnSerials(Optional oEvent As Variant)
     Dim eis As Variant, s As String

@@ -5,9 +5,9 @@ Option Explicit
 
 ' 1.0 (Н6): the mark of the next copy («перед загрузкой топологии»), set by WmsSafe.RestorePoint
 Global gBkLabel As String
-Public Const BACKUP_KEEP_POINT = 10
+Private Const BACKUP_KEEP_POINT = 10
 ' 1.1: «последняя без ошибок» — the last state of the book that was in order (WmsGuard): the two newest are kept
-Public Const BACKUP_KEEP_GOOD = 2
+Private Const BACKUP_KEEP_GOOD = 2
 
 Function BookBaseName() As String
     Dim fn As String

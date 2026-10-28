@@ -4,7 +4,7 @@
 Option Explicit
 
 Public Const SH_CAL = "Календарь"
-Public Const CA_ROWS = 400
+Private Const CA_ROWS = 400
 
 ' the mark of the calendar for day d: 1 — a working day (listed as one), -1 — a day off (listed), 0 — the day is not listed
 Private Function CalMark(d As Double) As Integer

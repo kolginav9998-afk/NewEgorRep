@@ -5,34 +5,34 @@
 Option Explicit
 
 ' the cells of the page (0-based; tools/build_ods.py build_dash draws the same layout)
-Public Const DB_TITLE_ROW = 0
-Public Const DB_TILE_CAP = 3
-Public Const DB_TILE_VAL = 4
-Public Const DB_TILE_SUB = 5
-Public Const DB_LIST1_HEAD = 7
-Public Const DB_LIST1 = 9
-Public Const DB_LIST1_N = 12
-Public Const DB_LIST2_HEAD = 22
-Public Const DB_LIST2 = 24
-Public Const DB_LIST2_N = 10
+Private Const DB_TITLE_ROW = 0
+Private Const DB_TILE_CAP = 3
+Private Const DB_TILE_VAL = 4
+Private Const DB_TILE_SUB = 5
+Private Const DB_LIST1_HEAD = 7
+Private Const DB_LIST1 = 9
+Private Const DB_LIST1_N = 12
+Private Const DB_LIST2_HEAD = 22
+Private Const DB_LIST2 = 24
+Private Const DB_LIST2_N = 10
 ' 1.0: the stale EIs whose last movement is looked up (in groups of 50) to show the ten lying longest (the full list is a page)
-Public Const DB_STALE_CAND = 100
-Public Const DB_DAYS_HEAD = 35
-Public Const DB_DAYS = 37
-Public Const DB_DAYS_N = 14
+Private Const DB_STALE_CAND = 100
+Private Const DB_DAYS_HEAD = 35
+Private Const DB_DAYS = 37
+Private Const DB_DAYS_N = 14
 ' 1.0 (Ч5): the tails — an EI with a balance below one part of its packing (0,01 бут, an offcut of 0,3 м) or, without a
 ' packing, below 0,01 of the unit of its document
 Public Const DB_TAILS_HEAD = 54
-Public Const DB_TAILS = 56
-Public Const DB_TAILS_N = 10
-Public Const DB_FOOT = 67
+Private Const DB_TAILS = 56
+Private Const DB_TAILS_N = 10
+Private Const DB_FOOT = 67
 ' hidden service cells of column O: the state code, the LAST_SEQ, the day and the time (ms) of the last refresh
 Public Const DB_SVC_COL = 14
-Public Const DB_STALE_DAYS = 90
+Private Const DB_STALE_DAYS = 90
 ' a page counted longer than this is not counted again by itself when it is shown (a big book): «Обновить» counts it
-Public Const DB_AUTO_MAX_MS = 5000
+Private Const DB_AUTO_MAX_MS = 5000
 ' 1.0 (А7): the rows of the list «Внимание» (as many as «Поиск» shows)
-Public Const DB_AT_MAX = 500
+Private Const DB_AT_MAX = 500
 
 Global gDbBusy As Boolean
 ' 1.0: the state line of the page while a save writes the file (DashSavedState)

@@ -9,19 +9,19 @@ Option Explicit
 
 ' Ф5: _PROP — one row per EI (row = EI number), written only by EI_PROP
 Public Const SH_PROP = "_PROP"
-Public Const PR_EI = 0
-Public Const PR_SERIAL = 1
-Public Const PR_EXPIRY = 2
-Public Const PR_NOTE = 3
-Public Const PR_LAST = 3
+Private Const PR_EI = 0
+Private Const PR_SERIAL = 1
+Private Const PR_EXPIRY = 2
+Private Const PR_NOTE = 3
+Private Const PR_LAST = 3
 ' Ф7: «Резервы» — the storekeeper's own sheet: EI, quantity, for whom, until, note
 Public Const SH_RESERVES = "Резервы"
-Public Const RS_EI = 0
-Public Const RS_QTY = 1
-Public Const RS_WHO = 2
-Public Const RS_UNTIL = 3
-Public Const RS_NOTE = 4
-Public Const RS_LAST = 4
+Private Const RS_EI = 0
+Private Const RS_QTY = 1
+Private Const RS_WHO = 2
+Private Const RS_UNTIL = 3
+Private Const RS_NOTE = 4
+Private Const RS_LAST = 4
 ' Ф4: «Номенклатура» Q — the days a returnable thing (a tool) may stay on the hands
 Public Const GD_RETDAYS = 16
 ' 1.0.2: «Номенклатура» R — how many pieces come in one pack: the label of such goods says «Выдача по 1 шт · в уп. 10» (one label
@@ -29,22 +29,22 @@ Public Const GD_RETDAYS = 16
 Public Const GD_PACKQ = 17
 ' 1.0.2: the labels of one printing (the page «Печать» holds PR_MAX rows), the labels «по количеству единиц» of one position, and
 ' the positions asked in one window
-Public Const LB_MAX_UNITS = 200
-Public Const LB_PAGE = 18
+Private Const LB_MAX_UNITS = 200
+Private Const LB_PAGE = 18
 ' Ф1: the label — the rows of one label on «Печать» (the EI, the name, the unit, the band of the barcode), the size in a hidden
 ' cell of «Печать» (AH1, «40×30»)
-Public Const LB_ROWS = 4
-Public Const LB_SIZE_COL = 33
-Public Const LB_SHAPE = "wmsbar"
+Private Const LB_ROWS = 4
+Private Const LB_SIZE_COL = 33
+Private Const LB_SHAPE = "wmsbar"
 ' 1.0.1: the margins of the label (1/100 mm — 1 mm, 8 dots of a 203 dpi printer) and a little slack that keeps the rows (rounded
 ' by Calc to its own units) inside one page
 Public Const LB_MARGIN = 100
 Public Const LB_SLACK = 30
 ' Ф10: the folder of the photos next to the book
-Public Const PHOTO_DIR = "WMS_Фото"
+Private Const PHOTO_DIR = "WMS_Фото"
 Global gItPhotoTest As String
 ' Ф5: «годен до» this close (days) is shown in «Внимание» before it passes
-Public Const PR_SOON_DAYS = 7
+Private Const PR_SOON_DAYS = 7
 ' Ф4: the overdue tools of the tile, kept until the next operation or the next day
 Global gItLateOk As Boolean
 Global gItLateSeq As Long
@@ -1046,7 +1046,7 @@ End Function
 ' seconds instead of tenths)
 Public Const SI_COL0 = 11
 Public Const SI_COLS = 11
-Public Const SI_AUTO_MAX = 3000
+Private Const SI_AUTO_MAX = 3000
 ' this session of WMS has filled the whole registry once (later openings take only the rows that moved); the EIs whose
 ' information changed without a movement (SiMark)
 Global gSiSession As Boolean

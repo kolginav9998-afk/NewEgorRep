@@ -6,34 +6,34 @@ Option Explicit
 
 ' «Акты»: the register (A № акта, B дата, C вид, D получатель, E позиций, F выдачи (их №), G заметка) and the settings on the right (J)
 Public Const SH_ACTS = "Акты"
-Public Const AK_NO = 0
-Public Const AK_DATE = 1
-Public Const AK_KIND = 2
-Public Const AK_WHO = 3
-Public Const AK_N = 4
-Public Const AK_ISS = 5
-Public Const AK_NOTE = 6
-Public Const AK_LAST = 6
-Public Const AK_SET_COL = 9
-Public Const AK_SET_CITY = 1
-Public Const AK_SET_OFFICE = 2
-Public Const AK_SET_SIGNER = 3
-Public Const AK_KIND1 = "Приёма-передачи (в офис)"
-Public Const AK_KIND2 = "Выдачи (получателю)"
+Private Const AK_NO = 0
+Private Const AK_DATE = 1
+Private Const AK_KIND = 2
+Private Const AK_WHO = 3
+Private Const AK_N = 4
+Private Const AK_ISS = 5
+Private Const AK_NOTE = 6
+Private Const AK_LAST = 6
+Private Const AK_SET_COL = 9
+Private Const AK_SET_CITY = 1
+Private Const AK_SET_OFFICE = 2
+Private Const AK_SET_SIGNER = 3
+Private Const AK_KIND1 = "Приёма-передачи (в офис)"
+Private Const AK_KIND2 = "Выдачи (получателю)"
 ' the most issues in one act
-Public Const AK_MAX = 60
+Private Const AK_MAX = 60
 
 ' «Отчёт дня»: B2 the date (empty — today), B3 the signature; three lists from row 5: done by hand (A), tasks for the next working
 ' day (C), in progress (E)
 Public Const SH_DAYREP = "Отчёт дня"
-Public Const DR_DATE_ROW = 1
-Public Const DR_SIGN_ROW = 2
-Public Const DR_END_ROW = 3
+Private Const DR_DATE_ROW = 1
+Private Const DR_SIGN_ROW = 2
+Private Const DR_END_ROW = 3
 Public Const DR_ROW0 = 5
-Public Const DR_ROWS = 20
-Public Const DR_COL_DONE = 0
-Public Const DR_COL_TASKS = 2
-Public Const DR_COL_PROG = 4
+Private Const DR_ROWS = 20
+Private Const DR_COL_DONE = 0
+Private Const DR_COL_TASKS = 2
+Private Const DR_COL_PROG = 4
 
 ' the last document built: the tests read it and close it, a person keeps it open
 Global gDcDoc As Object

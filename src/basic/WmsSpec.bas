@@ -5,7 +5,7 @@
 Option Explicit
 
 Public Const SH_STD = "Стандарты"
-Public Const ST_MAX = 400
+Private Const ST_MAX = 400
 
 ' the equivalents of the standards: «din 933» → «iso 4017;гост 7798» (read from the sheet «Стандарты» by the first use; the event of the sheet drops it)
 Global gSpEq As Object

@@ -5,13 +5,13 @@
 ' book too; posts nothing. Library WmsPlus.
 Option Explicit
 
-Public Const SH_OPS = "Операции дня"
-Public Const OP_FROM_ROW = 1
-Public Const OP_STAT_ROW = 2
-Public Const OP_HEAD = 3
-Public Const OP_ROW0 = 4
-Public Const OP_COLS = 10
-Public Const OP_MAX = 5000
+Private Const SH_OPS = "Операции дня"
+Private Const OP_FROM_ROW = 1
+Private Const OP_STAT_ROW = 2
+Private Const OP_HEAD = 3
+Private Const OP_ROW0 = 4
+Private Const OP_COLS = 10
+Private Const OP_MAX = 5000
 
 Global gOpsBusy As Boolean
 

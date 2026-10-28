@@ -9,10 +9,10 @@ Public Const FD_INPUT_ROW = 3
 Public Const FD_INPUT_COL = 2
 Public Const FD_HEAD = 6
 Public Const FD_INFO = 7
-Public Const FD_TABLE_HEAD = 11
+Private Const FD_TABLE_HEAD = 11
 Public Const FD_TABLE = 12
 Public Const FD_MAX = 500
-Public Const FD_CARD_MAX = 3000
+Private Const FD_CARD_MAX = 3000
 ' hidden columns of the table: the sheet and the row of the source, the EI
 Public Const FD_SRC_SHEET = 10
 Public Const FD_SRC_ROW = 11

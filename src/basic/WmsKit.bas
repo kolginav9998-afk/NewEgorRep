@@ -9,16 +9,16 @@
 Option Explicit
 
 Public Const SH_KITS = "Комплекты"
-Public Const KT_KIT = 0
-Public Const KT_NAME = 1
-Public Const KT_ART = 2
-Public Const KT_QTY = 3
-Public Const KT_UNIT = 4
-Public Const KT_NOTE = 5
-Public Const KT_LAST = 5
-Public Const KIT_UNIT = "компл"
-Public Const KIT_KIND_NAME = "Сборка"
-Public Const KIT_MAX_PARTS = 200
+Private Const KT_KIT = 0
+Private Const KT_NAME = 1
+Private Const KT_ART = 2
+Private Const KT_QTY = 3
+Private Const KT_UNIT = 4
+Private Const KT_NOTE = 5
+Private Const KT_LAST = 5
+Private Const KIT_UNIT = "компл"
+Private Const KIT_KIND_NAME = "Сборка"
+Private Const KIT_MAX_PARTS = 200
 
 ' the components of the kit read by KitParts: name, article, unit, quantity for one kit
 Global gKtN As Long
@@ -30,7 +30,7 @@ Global gKtQty() As Double
 ' «Собрать из ЕИ…» instead of the sheet (KitParts keeps them once)
 Global gKtEi() As Long
 Global gKtPreset As Boolean
-Public Const KIT_FROM_EIS_MAX = 12
+Private Const KIT_FROM_EIS_MAX = 12
 ' the EIs picked by KitPick: EI number, quantity, the component it serves
 Global gKpN As Long
 Global gKpEi() As Long
