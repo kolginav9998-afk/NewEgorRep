@@ -6,30 +6,45 @@
 ' «4,2» is «4.2»). Library WmsPlus.
 Option Explicit
 
-' the sign of a line break, a tab, a non-breaking space and the like (code) — a space in a name
-Private Function IsBlankCode(c As Long) As Boolean
-    IsBlankCode = (c < 32 Or c = 127 Or c = 160 Or (c >= 8192 And c <= 8207) Or c = 8232 Or c = 8233 Or c = 8239 Or c = 65279)
-End Function
+' the characters that are a blank in a name (codes): the controls, the non-breaking and the unusual spaces
+Global gNmBl() As String
+Global gNmBlN As Long
+
+Private Sub NmInit()
+    Dim i As Long, n As Long
+    If gNmBlN > 0 Then Exit Sub
+    ReDim gNmBl(70)
+    For i = 1 To 31
+        gNmBl(n) = Chr(i)
+        n = n + 1
+    Next i
+    gNmBl(n) = Chr(127)
+    n = n + 1
+    gNmBl(n) = Chr(160)
+    n = n + 1
+    For i = 8192 To 8207
+        gNmBl(n) = Chr(i)
+        n = n + 1
+    Next i
+    gNmBl(n) = Chr(8232)
+    n = n + 1
+    gNmBl(n) = Chr(8233)
+    n = n + 1
+    gNmBl(n) = Chr(8239)
+    n = n + 1
+    gNmBl(n) = Chr(65279)
+    n = n + 1
+    gNmBlN = n
+End Sub
 
 ' the text with the signs of a line break and the like turned into a space (not yet put in order otherwise)
 Private Function BlankToSpace(ByVal s As String) As String
-    Dim i As Long, ch As String, bad As Boolean
-    For i = 1 To Len(s)
-        If IsBlankCode(Asc(Mid(s, i, 1))) Then
-            bad = True
-            Exit For
-        End If
+    Dim i As Long
+    NmInit()
+    For i = 0 To gNmBlN - 1
+        If InStr(s, gNmBl(i)) > 0 Then s = Replace(s, gNmBl(i), " ")
     Next i
-    If Not bad Then
-        BlankToSpace = s
-        Exit Function
-    End If
-    BlankToSpace = ""
-    For i = 1 To Len(s)
-        ch = Mid(s, i, 1)
-        If IsBlankCode(Asc(ch)) Then ch = " "
-        BlankToSpace = BlankToSpace & ch
-    Next i
+    BlankToSpace = s
 End Function
 
 Private Function OneSpace(ByVal s As String) As String
@@ -59,7 +74,7 @@ End Function
 
 ' the name as it should be written (see the head of the module); "" stays ""
 Function NormName(ByVal s As String) As String
-    Dim a As Variant, out As String, i As Long, t As String, n As String, k As String
+    Dim a As Variant, out As String, i As Long, t As String, n As String, k As String, bJoin As Boolean, c As Long
     s = OneSpace(BlankToSpace(s))
     If s = "" Then Exit Function
     a = Split(s, " ")
@@ -68,12 +83,18 @@ Function NormName(ByVal s As String) As String
         t = CStr(a(i))
         n = ""
         If i < UBound(a) Then n = CStr(a(i + 1))
-        If n <> "" And IsClassHead(t) And IsClassTail(n) Then
-            ' «A 2» → «A2» (the class of the stainless steel fell apart)
-            t = t & n
-            i = i + 1
-        ElseIf n <> "" And IsSizeHead(t) And Asc(Left(n, 1)) >= 48 And Asc(Left(n, 1)) <= 57 Then
-            ' «М 8х30» → «М8х30»
+        ' (And and Or evaluate both parts: the next word is looked at only when there is one)
+        bJoin = False
+        If n <> "" Then
+            If IsClassHead(t) Then
+                If IsClassTail(n) Then bJoin = True
+            ElseIf IsSizeHead(t) Then
+                c = Asc(Left(n, 1))
+                If c >= 48 And c <= 57 Then bJoin = True
+            End If
+        End If
+        If bJoin Then
+            ' «A 2» → «A2» (the class of the stainless steel fell apart), «М 8х30» → «М8х30»
             t = t & n
             i = i + 1
         ElseIf IsStandard(t) Then
@@ -125,6 +146,11 @@ Function Fold(ByVal s As String) As String
     Fold = OneSpace(s)
 End Function
 
+' the texts of an array (0-based, Strings) as Fold makes them, all at once: the engine of the language works on one long text, not on every row
+Function FoldAll(arr As Variant) As Variant
+    FoldAll = Split(Fold(Join(arr, "¦")), "¦")
+End Function
+
 ' the words of a search text (folded), an empty array when there are none
 Function FoldWords(ByVal s As String) As Variant
     s = Fold(s)
@@ -158,4 +184,221 @@ End Function
 
 Function TestFold(s As String) As String
     TestFold = Fold(s)
+End Function
+
+' ================================================================ the name typed in several lines
+
+' NormName for the names that need it at once (a line break, a tab, a non-breaking space, a doubled space); any other name is returned as it is — a list of
+' thousands of names is not put through the whole of the rules
+Function NormNameFast(ByVal s As String) As String
+    If InStr(s, Chr(10)) + InStr(s, Chr(13)) + InStr(s, Chr(9)) + InStr(s, Chr(160)) + InStr(s, "  ") > 0 Then
+        NormNameFast = NormName(s)
+    Else
+        NormNameFast = s
+    End If
+End Function
+
+' the cell of a name of row r of sheet sSheet is put in order (one line): True when it was changed. Used when a name was just typed or pasted
+Function FixNameCell(sSheet As String, r As Long, c As Integer) As Boolean
+    Dim cell As Object, t As String, u As String
+    On Error GoTo EH
+    cell = gDoc.Sheets.getByName(sSheet).getCellByPosition(c, r)
+    If cell.getType() <> com.sun.star.table.CellContentType.TEXT Then Exit Function
+    t = cell.getString()
+    If InStr(t, Chr(10)) + InStr(t, Chr(13)) + InStr(t, Chr(9)) + InStr(t, Chr(160)) + InStr(t, "  ") = 0 Then Exit Function
+    u = NormName(t)
+    If u <> t Then
+        cell.setString(u)
+        FixNameCell = True
+    End If
+    Exit Function
+EH:
+End Function
+
+Public Const SH_NAMECHK = "Проверка названий"
+Public Const NC_FIND_ROW = 1
+Public Const NC_STAT_ROW = 2
+Public Const NC_HEAD = 3
+Public Const NC_ROW0 = 4
+Public Const NC_COLS = 7
+Public Const NC_MAX = 2000
+
+' the name as the list shows it: a line break is «¶»
+Private Function Shown(s As String) As String
+    Shown = Replace(Replace(Replace(s, Chr(13) & Chr(10), "¶"), Chr(10), "¶"), Chr(13), "¶")
+End Function
+
+Sub BtnNamesCheck(Optional oEvent As Variant)
+    Dim s As String
+    WmsInit()
+    s = NamesCheck()
+    If Left(s, 4) = "ERR:" Then WmsUi.UiMessage(Mid(s, 5))
+End Sub
+
+Sub BtnNamesFix(Optional oEvent As Variant)
+    Dim s As String
+    WmsInit()
+    s = NamesFixOpen()
+    If Left(s, 4) = "ERR:" Then
+        WmsUi.UiMessage(Mid(s, 5))
+    Else
+        WmsUi.UiMessage("Названия приведены к одной строке: " & Mid(s, 4) & ". Названия уже проведённых позиций WMS не меняет сама — у них в колонке «Что делать» написано как.")
+        NamesCheck()
+    End If
+End Sub
+
+' one row of the list of the names to look at
+Private Function IssueRow(sWhere As String, r As Long, ei As String, nm As String, why As String, todo As String) As Variant
+    IssueRow = Array(sWhere, r + 1, ei, Shown(nm), Shown(NormName(nm)), why, todo)
+End Function
+
+' the names of the registry, of «Заказы», «Иной приход» and «Номенклатура» that were typed in several lines or have a doubled space, a broken size or class;
+' the list under the header of the sheet. OK:<how many> / ERR:…
+Function NamesCheck() As String
+    Dim sh As Object, d As Variant, i As Long, n As Long, out() As Variant, last As Long, nm As String, why As String, kind As String, cName As Long, cEi As Long, nAll As Long
+    Dim sheetName As Variant, cur As Object, e As Long, cSt As Long, cSrc As Long, where As String, ei As String
+    On Error GoTo EH
+    If Not gDoc.Sheets.hasByName(SH_NAMECHK) Then
+        NamesCheck = "ERR:в книге нет листа «" & SH_NAMECHK & "» — книга не обновлена до 1.1"
+        Exit Function
+    End If
+    ReDim out(NC_MAX - 1)
+    ' the registry
+    sh = WmsIssue.StockSheet()
+    last = WmsOrders.LastRow(sh)
+    cName = SC_NAME
+    cSt = SC_SRC
+    If last >= 1 Then
+        d = sh.getCellRangeByPosition(0, 1, SC_SRC, last).getDataArray()
+        For i = 0 To UBound(d)
+            If CStr(d(i)(0)) <> "" Then
+                nm = CStr(d(i)(cName))
+                why = NameIssues(nm)
+                If why <> "" Then
+                    nAll = nAll + 1
+                    kind = CStr(d(i)(cSt))
+                    If n < NC_MAX Then
+                        out(n) = IssueRow(SH_STOCK, i + 1, CStr(d(i)(0)), nm, why, "проведённая позиция: «Исправить» на строке-источнике (" & IIf(kind <> "", kind, "Заказы или Иной приход") & ")")
+                        n = n + 1
+                    End If
+                End If
+            End If
+        Next i
+    End If
+    ' the rows of the orders and of «Иной приход»
+    For Each sheetName In Array(SH_ORDERS, SH_SPECIAL, "Номенклатура")
+        If gDoc.Sheets.hasByName(CStr(sheetName)) Then
+            sh = gDoc.Sheets.getByName(CStr(sheetName))
+            last = WmsOrders.LastRow(sh)
+            If last >= 1 Then
+                If sheetName = SH_ORDERS Then
+                    cName = OC_NAME
+                    cEi = OC_EI
+                ElseIf sheetName = SH_SPECIAL Then
+                    cName = XC_NAME
+                    cEi = XC_EI
+                Else
+                    cName = 1
+                    cEi = -1
+                End If
+                d = sh.getCellRangeByPosition(0, 1, IIf(cEi > cName, cEi, cName), last).getDataArray()
+                For i = 0 To UBound(d)
+                    nm = CStr(d(i)(cName))
+                    If nm <> "" Then
+                        why = NameIssues(nm)
+                        If why <> "" Then
+                            nAll = nAll + 1
+                            If cEi < 0 Then
+                                where = "справочник: кнопка «Исправить открытые строки»"
+                            ElseIf CStr(d(i)(cEi)) <> "" Then
+                                where = "проведено: «Исправить» на этой строке"
+                            Else
+                                where = "ещё не проведено: кнопка «Исправить открытые строки»"
+                            End If
+                            ei = ""
+                            If cEi >= 0 Then ei = CStr(d(i)(cEi))
+                            If n < NC_MAX Then
+                                out(n) = IssueRow(CStr(sheetName), i + 1, ei, nm, why, where)
+                                n = n + 1
+                            End If
+                        End If
+                    End If
+                Next i
+            End If
+        End If
+    Next sheetName
+    sh = gDoc.Sheets.getByName(SH_NAMECHK)
+    cur = sh.createCursor()
+    cur.gotoEndOfUsedArea(False)
+    e = cur.getRangeAddress().EndRow
+    If e >= NC_ROW0 Then sh.getCellRangeByPosition(0, NC_ROW0, NC_COLS - 1, e).clearContents(1 + 2 + 4 + 16)
+    If n > 0 Then
+        ReDim Preserve out(n - 1)
+        sh.getCellRangeByPosition(0, NC_ROW0, NC_COLS - 1, NC_ROW0 + n - 1).setDataArray(out)
+    End If
+    sh.getCellByPosition(0, NC_STAT_ROW).setString(IIf(nAll = 0, "Названия в порядке: разбитых на строки, с лишними пробелами и разорванным размером нет.", _
+        "Названий, которые стоит исправить: " & nAll & IIf(nAll > n, " (показаны первые " & n & ")", "") & ". Проверено " & Format(Now(), "DD.MM.YYYY HH:MM") & ". «¶» — место, где название разбито на строки."))
+    NamesCheck = "OK:" & nAll
+    gUiLastMsg = NamesCheck
+    Exit Function
+EH:
+    NamesCheck = "ERR:названия не проверены: " & Error$ & " (строка " & Erl & ")"
+    gUiLastMsg = NamesCheck
+End Function
+
+' the names of the rows that are not posted yet («Заказы», «Иной приход») and of «Номенклатура» put in order (one line); OK:<how many>
+Function NamesFixOpen() As String
+    Dim sh As Object, i As Long, last As Long, n As Long, nm As String, u As String, k As String, c As Object
+    On Error GoTo EH
+    If gState <> "CLEAN" Then
+        NamesFixOpen = "ERR:" & IIf(gBlockText <> "", gBlockText, "WMS не готова (" & gState & ")")
+        Exit Function
+    End If
+    sh = gDoc.Sheets.getByName(SH_ORDERS)
+    last = WmsOrders.LastRow(sh)
+    For i = 1 To last
+        k = WmsOrders.OrderRowKind(i)
+        If k = "OPEN" Then
+            c = sh.getCellByPosition(OC_NAME, i)
+            nm = c.getString()
+            u = NormNameFast(nm)
+            If nm <> "" And u <> nm Then
+                c.setString(u)
+                n = n + 1
+            End If
+        End If
+    Next i
+    sh = gDoc.Sheets.getByName(SH_SPECIAL)
+    last = WmsOrders.LastRow(sh)
+    For i = 1 To last
+        k = WmsSpecial.SpecialRowKind(i)
+        If k = "OPEN" Then
+            c = sh.getCellByPosition(XC_NAME, i)
+            nm = c.getString()
+            u = NormNameFast(nm)
+            If nm <> "" And u <> nm Then
+                c.setString(u)
+                n = n + 1
+            End If
+        End If
+    Next i
+    If gDoc.Sheets.hasByName("Номенклатура") Then
+        sh = gDoc.Sheets.getByName("Номенклатура")
+        last = WmsOrders.LastRow(sh)
+        For i = 1 To last
+            c = sh.getCellByPosition(1, i)
+            nm = c.getString()
+            u = NormNameFast(nm)
+            If nm <> "" And u <> nm Then
+                c.setString(u)
+                n = n + 1
+            End If
+        Next i
+    End If
+    NamesFixOpen = "OK:" & n
+    gUiLastMsg = NamesFixOpen
+    Exit Function
+EH:
+    NamesFixOpen = "ERR:названия не исправлены: " & Error$ & " (строка " & Erl & ")"
+    gUiLastMsg = NamesFixOpen
 End Function

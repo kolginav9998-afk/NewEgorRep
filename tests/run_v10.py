@@ -3788,6 +3788,74 @@ def v47_views_ops_whatnow():
         s.close()
 
 
+@case
+def v48_names():
+    """1.1: названия, разбитые на несколько строк («Винт» / «м3х25» / «Din 912» / «A» / «2»): правила (одна строка, A 2 → A2, М 8 → М8, DIN заглавными),
+    «Заказы» и «Иной приход» приводят вписанное название к одной строке сразу (подсказка категории уже по чистому названию), «Проверка названий» находит такие названия
+    в «Наличии», «Заказах», «Иной приходе» и «Номенклатуре» и говорит, как исправить, «Исправить открытые строки» чистит непроведённые строки и справочник (проведённые не
+    трогает); «Метизы» и «Наличие по названию» показывают такое название чисто и находят его по «винт m3x25» (русские и латинские буквы не различаются)"""
+    c = "V48"
+    broken = "Винт\nм3х25\nDin 912\nA\n2"
+    s = ready(Session(new_wms("v48")))
+    try:
+        cases = [(broken, "Винт м3х25 DIN 912 A2"), ("Винт  М 8х30   din 933 ", "Винт М8х30 DIN 933"), ("Шайба А 4", "Шайба А4"), ("Болт М8х30", "Болт М8х30"),
+                 ("Гайка\tm 10\u00a0ГОСТ 5915", "Гайка m10 ГОСТ 5915"), ("Кабель 3х2,5", "Кабель 3х2,5"), ("", "")]
+        bad = [(a, g, w) for a, w in cases for g in [s.B("TestNorm", a, module="WmsNames")] if g != w]
+        iss = [s.B("TestIssues", broken, module="WmsNames"), s.B("TestIssues", "Болт М8х30", module="WmsNames"), s.B("TestIssues", "Винт  М 8", module="WmsNames")]
+        fold = [s.B("TestFold", "M8x30 Болт", module="WmsNames"), s.B("TestFold", "4,2×32 А2", module="WmsNames"), s.B("TestFold", "Ёж  ПЕРЕХОД", module="WmsNames")]
+        R.add(c, "правила: «Винт / м3х25 / Din 912 / A / 2» → «Винт м3х25 DIN 912 A2»; «М 8х30», «А 4», табуляция и неразрывный пробел, DIN строчными; чистое — без изменений; "
+                 "замечания словами; сравнение при поиске без различия M/М, x/х, ×, запятой и точки, ё/е",
+              not bad and "на несколько строк" in iss[0] and iss[1] == "" and "лишние пробелы" in iss[2] and fold == ["м8х30 болт", "4.2х32 а2", "еж переход"], f"{bad}; {iss}; {fold}")
+        # «Заказы»: a name pasted in several lines is one line at once; the category by the clean name
+        osh = s.doc.Sheets.getByName("Заказы")
+        put(s, "Заказы", 1, A="1", B=broken, H="100", I="шт", L="Ромашка", E="V-325")
+        s.B("OnOrdersChange", osh.getCellByPosition(1, 1), module="WmsOrders")
+        nm1 = osh.getCellByPosition(1, 1).getString()
+        ctl1 = osh.getCellByPosition(24, 1).getString()
+        cat1 = osh.getCellByPosition(18, 1).getString()
+        R.add(c, "«Заказы»: название, вставленное в 5 строк, стало «Винт м3х25 DIN 912 A2»; «Контроль» говорит об этом; категория «Метизы» подсказана по чистому названию",
+              nm1 == "Винт м3х25 DIN 912 A2" and ctl1.startswith("Название записано в одну строку") and cat1 == "Метизы", f"{nm1!r}; {ctl1[:80]}; {cat1}")
+        # «Иной приход»
+        ssh = s.doc.Sheets.getByName("Иной приход")
+        put(s, "Иной приход", 1, B="Детали", D="Шестерня\nZ-40", F="3", G="шт", I="D-1", E="GR-40")
+        s.B("OnSpecialChange", ssh.getCellByPosition(3, 1), module="WmsSpecial")
+        R.add(c, "«Иной приход»: «Шестерня / Z-40» стало «Шестерня Z-40»", ssh.getCellByPosition(3, 1).getString() == "Шестерня Z-40", repr(ssh.getCellByPosition(3, 1).getString()))
+        # the posted EI with the name as it was written (an old name: the handler did not run) and an open row with such a name
+        put(s, "Заказы", 2, A="2", B=broken, H="50", I="шт", L="Ромашка", E="V-325")
+        rr = receive(s, 2, "50", place="5-1-2", doc="УПД-2")
+        e_br = ords(s, 2)[21]
+        put(s, "Заказы", 3, A="3", B="Гайка\nМ 8\ndin 934", H="10", I="шт", L="Ромашка")
+        goods = s.doc.Sheets.getByName("Номенклатура")
+        goods.getCellByPosition(1, 5).setString("Шайба\nА 4")
+        r1 = s.B("NamesCheck", module="WmsNames")
+        csh = s.doc.Sheets.getByName("Проверка названий")
+        crow = [list(r) for r in csh.getCellRangeByPosition(0, 4, 6, 14).getDataArray() if r[0] != ""]
+        where = {(r[0], r[2]) for r in crow}
+        R.add(c, "«Проверка названий»: найдены проведённая позиция «Наличия» (ЕИ), её строка в «Заказах», открытая строка «Заказов» и справочник; «как должно быть» и «что делать» заполнены",
+              r1.startswith("OK:") and int(r1[3:]) >= 4 and ("Наличие", e_br) in where and any(r[0] == "Заказы" and r[2] == "" for r in crow) and any(r[0] == "Номенклатура" for r in crow)
+              and all(r[4] and r[6] for r in crow) and any("Исправить" in r[6] for r in crow), f"{r1}; {[(r[0], r[1], r[2], r[3][:20]) for r in crow]}")
+        fx = s.B("NamesFixOpen", module="WmsNames")
+        nm3 = osh.getCellByPosition(1, 3).getString()
+        stk = s.doc.Sheets.getByName("Наличие")
+        n_br = int(e_br[3:])
+        R.add(c, "«Исправить открытые строки»: открытая строка «Заказов» и справочник — одной строкой; проведённая позиция (ЕИ) и её строка не тронуты",
+              fx.startswith("OK:") and nm3 == "Гайка М8 DIN 934" and goods.getCellByPosition(1, 5).getString() == "Шайба А4" and "\n" in stk.getCellByPosition(1, n_br).getString()
+              and "\n" in osh.getCellByPosition(1, 2).getString(), f"{fx}; {nm3!r}; {goods.getCellByPosition(1, 5).getString()!r}; {stk.getCellByPosition(1, n_br).getString()!r}")
+        # the directory «Метизы» and «Наличие по названию»
+        fr = s.B("FastRefresh", "винт m3x25", module="WmsCat")
+        fsh = s.doc.Sheets.getByName("Метизы")
+        f0 = [list(r) for r in fsh.getCellRangeByPosition(0, 4, 10, 4).getDataArray()][0]
+        s.B("ByNameRefresh", "винт m3x25", False, module="WmsStockView")
+        b0 = [list(r) for r in s.doc.Sheets.getByName("Наличие по названию").getCellRangeByPosition(0, 4, 10, 4).getDataArray()][0]
+        R.add(c, "«Метизы»: «Винт М3×25, DIN 912, класс А2», название без разрывов, найдено по «винт m3x25» (латинские m и x); «Наличие по названию» — то же название одной строкой",
+              fr == "OK:1" and f0[0] == "Винт" and f0[1] == "М3×25" and f0[2] == "DIN 912" and f0[3].replace("A", "А") == "А2" and f0[5] == "Винт м3х25 DIN 912 A2" and b0[1] == "Винт м3х25 DIN 912 A2" and b0[0] == e_br,
+              f"{fr}; {f0[:6]}; {b0[:3]}")
+        P, inf, _ = s.adjcheck(0)
+        R.add(c, "оракул (журнал воспроизведён независимо) — без расхождений", not P and rr.startswith("OK"), f"{inf.get('ops')} операций; {P[:3]}")
+    finally:
+        s.close()
+
+
 # ================================================================ runner
 
 def main():

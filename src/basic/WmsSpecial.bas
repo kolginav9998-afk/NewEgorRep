@@ -1687,6 +1687,8 @@ Sub PreviewSpecialRow(r As Long)
         ClearDerived(r, True)
         Exit Sub
     Case "OPEN"
+        ' 1.1: a name typed or pasted in several lines is one line
+        If mNameTyped Then WmsNames.FixNameCell(SH_SPECIAL, r, XC_NAME)
     Case Else
         Exit Sub
     End Select

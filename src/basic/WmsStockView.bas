@@ -20,6 +20,7 @@ Public Const SV_PARTS_COLS = 8
 Global gSvSeqName As Long
 Global gSvSeqPart As Long
 Global gSvBusy As Boolean
+Global gSvTiming As String
 
 Private Function SvSeq() As Long
     SvSeq = CLng(SysNum(SK_LAST_SEQ))
@@ -78,6 +79,10 @@ Private Sub WriteRows(sh As Object, rowsOut As Variant, n As Long, nCols As Inte
     rng.setDataArray(out)
     SvSort(rng, c1, c2)
 End Sub
+
+Function TestTiming() As String
+    TestTiming = gSvTiming
+End Function
 
 Private Sub SvSort(rng As Object, c1 As Integer, c2 As Integer)
     Dim f(1) As New com.sun.star.table.TableSortField, pv(1) As New com.sun.star.beans.PropertyValue, loc As New com.sun.star.lang.Locale
@@ -142,7 +147,8 @@ End Sub
 ' OK:<rows> / ERR:…
 Function ByNameRefresh(sFind As String, bZero As Boolean) As String
     Dim sh As Object, d As Variant, nRows As Long, i As Long, n As Long, q As Double, words As Variant, hay As String, nm As String, out() As Variant
-    Dim ser As String, dt As Variant, ei As String, nAll As Long
+    Dim ser As String, dt As Variant, ei As String, nAll As Long, t0 As Long, hays() As String, pick() As Long, nPick As Long, folded As Variant, bWords As Boolean, k As Long
+    Dim cEi As Long, cNm As Long, cArt As Long, cUn As Long, cQ As Long, cPl As Long, cCat As Long, cSt As Long, cSrc As Long, cSer As Long, cDt As Long
     On Error GoTo EH
     If Not gDoc.Sheets.hasByName(SH_BYNAME) Then
         ByNameRefresh = "ERR:в книге нет листа «" & SH_BYNAME & "» — книга не обновлена до 1.1"
@@ -150,33 +156,60 @@ Function ByNameRefresh(sFind As String, bZero As Boolean) As String
     End If
     gSvBusy = True
     WmsInit()
+    t0 = GetSystemTicks()
     sh = gDoc.Sheets.getByName(SH_BYNAME)
     d = RegistryData(nRows)
+    gSvTiming = "read " & (GetSystemTicks() - t0)
+    ' the columns of the registry as local numbers: a constant of another library costs 30 µs at every use
+    cEi = SC_EI
+    cNm = SC_NAME
+    cArt = SC_ART
+    cUn = SC_UNIT
+    cQ = SC_QTY
+    cPl = SC_PLACE
+    cCat = SC_CAT
+    cSt = SC_STATE
+    cSrc = SC_SRC
+    cSer = SI_COL0 + 8
+    cDt = SI_COL0 + 4
     words = WmsNames.FoldWords(sFind)
-    If nRows > 0 Then ReDim out(UBound(d))
+    bWords = (UBound(words) >= 0)
+    If nRows > 0 Then
+        ReDim out(UBound(d))
+        ReDim hays(UBound(d))
+        ReDim pick(UBound(d))
+    End If
+    ' first the rows that come in (a balance, or all of them), and for a search the text of each
     For i = 0 To nRows - 1
-        ei = CStr(d(i)(SC_EI))
-        If ei <> "" Then
+        If CStr(d(i)(cEi)) <> "" Then
             nAll = nAll + 1
-            q = QtyOf(d(i)(SC_QTY))
+            q = QtyOf(d(i)(cQ))
             If bZero Or q > 0.0000005 Then
-                ser = Trim(CStr(d(i)(SI_COL0 + 8)))
-                nm = CStr(d(i)(SC_NAME))
-                hay = ""
-                If UBound(words) >= 0 Then hay = WmsNames.Fold(ei & " " & nm & " " & d(i)(SC_ART) & " " & d(i)(SC_PLACE) & " " & d(i)(SC_CAT) & " " & ser)
-                If UBound(words) < 0 Or WmsNames.HasWords(hay, words) Then
-                    dt = d(i)(SI_COL0 + 4)
-                    If VarType(dt) <> 5 Then dt = ""
-                    If n < SV_MAX Then
-                        out(n) = Array(ei, nm, CStr(d(i)(SC_ART)), CStr(d(i)(SC_UNIT)), q, CStr(d(i)(SC_PLACE)), CStr(d(i)(SC_CAT)), CStr(d(i)(SC_STATE)), _
-                            CStr(d(i)(SC_SRC)), ser, dt)
-                        n = n + 1
-                    End If
-                End If
+                pick(nPick) = i
+                If bWords Then hays(nPick) = d(i)(cEi) & " " & WmsNames.NormNameFast(CStr(d(i)(cNm))) & " " & d(i)(cArt) & " " & d(i)(cPl) & " " & d(i)(cCat) & " " & d(i)(cSer)
+                nPick = nPick + 1
             End If
         End If
     Next i
+    If bWords And nPick > 0 Then
+        ReDim Preserve hays(nPick - 1)
+        folded = WmsNames.FoldAll(hays)
+    End If
+    For k = 0 To nPick - 1
+        If (Not bWords) Or WmsNames.HasWords(CStr(folded(k)), words) Then
+            i = pick(k)
+            dt = d(i)(cDt)
+            If VarType(dt) <> 5 Then dt = ""
+            If n < SV_MAX Then
+                out(n) = Array(CStr(d(i)(cEi)), WmsNames.NormNameFast(CStr(d(i)(cNm))), CStr(d(i)(cArt)), CStr(d(i)(cUn)), QtyOf(d(i)(cQ)), CStr(d(i)(cPl)), CStr(d(i)(cCat)), CStr(d(i)(cSt)), _
+                    CStr(d(i)(cSrc)), Trim(CStr(d(i)(cSer))), dt)
+                n = n + 1
+            End If
+        End If
+    Next k
+    gSvTiming = gSvTiming & "; loop " & (GetSystemTicks() - t0)
     WriteRows(sh, out, n, SV_BYNAME_COLS, 1, 2)
+    gSvTiming = gSvTiming & "; write+sort " & (GetSystemTicks() - t0)
     PutStat(sh, "ЕИ в списке: " & n & " из " & nAll & IIf(Trim(sFind) <> "", " — по словам «" & Trim(sFind) & "»", "") & IIf(bZero, " (с нулевым остатком)", " (только с остатком)") _
         & ". Построено " & Format(Now(), "DD.MM.YYYY HH:MM") & "; журнал № " & CLng(SysNum(SK_LAST_SEQ)) & ". Это копия «Наличия»: сортируйте и фильтруйте как удобно.")
     gSvSeqName = SvSeq()
@@ -232,7 +265,8 @@ End Function
 Function PartsRefresh(sFind As String, bZero As Boolean) As String
     Dim sh As Object, d As Variant, nRows As Long, i As Long, j As Long, n As Long, q As Double, words As Variant, hay As String, out() As Variant
     Dim keys() As String, nm() As String, art() As String, un() As String, bal() As Double, cnt() As Long, pl() As String, sn() As String, ns() As Long, last() As Double
-    Dim key As String, k As Long, place As String, ser As String, dt As Variant, nOut As Long, sSer As String, idx As Object
+    Dim key As String, k As Long, place As String, ser As String, dt As Variant, nOut As Long, sSer As String, idx As Object, hays() As String, folded As Variant, bWords As Boolean
+    Dim cEi As Long, cNm As Long, cArt As Long, cUn As Long, cQ As Long, cPl As Long, cCat As Long, cSt As Long, cSrc As Long, cSer As Long, cDt As Long
     On Error GoTo EH
     idx = New Collection
     If Not gDoc.Sheets.hasByName(SH_PARTS) Then
@@ -243,6 +277,18 @@ Function PartsRefresh(sFind As String, bZero As Boolean) As String
     WmsInit()
     sh = gDoc.Sheets.getByName(SH_PARTS)
     d = RegistryData(nRows)
+    ' the columns of the registry as local numbers: a constant of another library costs 30 µs at every use
+    cEi = SC_EI
+    cNm = SC_NAME
+    cArt = SC_ART
+    cUn = SC_UNIT
+    cQ = SC_QTY
+    cPl = SC_PLACE
+    cCat = SC_CAT
+    cSt = SC_STATE
+    cSrc = SC_SRC
+    cSer = SI_COL0 + 8
+    cDt = SI_COL0 + 4
     words = WmsNames.FoldWords(sFind)
     If nRows > 0 Then
         ReDim keys(UBound(d))
@@ -257,48 +303,56 @@ Function PartsRefresh(sFind As String, bZero As Boolean) As String
         ReDim last(UBound(d))
     End If
     For i = 0 To nRows - 1
-        If CStr(d(i)(SC_EI)) <> "" Then
-            If IsPart(CStr(d(i)(SC_CAT)), CStr(d(i)(SC_SRC))) Then
-                key = LCase(Trim(CStr(d(i)(SC_ART))))
-                If key = "" Then key = "n:" & LCase(Trim(CStr(d(i)(SC_NAME)))) Else key = "a:" & key
+        If CStr(d(i)(cEi)) <> "" Then
+            If IsPart(CStr(d(i)(cCat)), CStr(d(i)(cSrc))) Then
+                key = LCase(Trim(CStr(d(i)(cArt))))
+                If key = "" Then key = "n:" & LCase(Trim(CStr(d(i)(cNm)))) Else key = "a:" & key
                 k = WmsView.CollGet(idx, key)
                 If k < 0 Then
                     k = n
                     WmsView.CollPut(idx, k, key)
                     keys(k) = key
-                    nm(k) = CStr(d(i)(SC_NAME))
-                    art(k) = Trim(CStr(d(i)(SC_ART)))
-                    un(k) = CStr(d(i)(SC_UNIT))
+                    nm(k) = WmsNames.NormNameFast(CStr(d(i)(cNm)))
+                    art(k) = Trim(CStr(d(i)(cArt)))
+                    un(k) = CStr(d(i)(cUn))
                     n = n + 1
                 End If
-                q = QtyOf(d(i)(SC_QTY))
+                q = QtyOf(d(i)(cQ))
                 bal(k) = bal(k) + q
                 If q > 0.0000005 Then
                     cnt(k) = cnt(k) + 1
-                    place = Trim(CStr(d(i)(SC_PLACE)))
+                    place = Trim(CStr(d(i)(cPl)))
                     If place <> "" Then
                         If InStr("; " & pl(k) & ";", "; " & place & ";") = 0 Then pl(k) = pl(k) & IIf(pl(k) <> "", "; ", "") & place
                     End If
-                    ser = Trim(CStr(d(i)(SI_COL0 + 8)))
+                    ser = Trim(CStr(d(i)(cSer)))
                     If ser <> "" Then
                         ns(k) = ns(k) + 1
                         If ns(k) <= 12 Then sn(k) = sn(k) & IIf(sn(k) <> "", "; ", "") & ser
                     End If
                 End If
-                dt = d(i)(SI_COL0 + 4)
+                dt = d(i)(cDt)
                 If VarType(dt) = 5 Then
                     If dt > last(k) Then last(k) = dt
                 End If
             End If
         End If
     Next i
-    If n > 0 Then ReDim out(n - 1)
+    If n > 0 Then
+        ReDim out(n - 1)
+        ReDim hays(n - 1)
+    End If
+    bWords = (UBound(words) >= 0)
+    If bWords And n > 0 Then
+        For k = 0 To n - 1
+            hays(k) = art(k) & " " & nm(k) & " " & pl(k) & " " & sn(k)
+        Next k
+        folded = WmsNames.FoldAll(hays)
+    End If
     For k = 0 To n - 1
         If bZero Or bal(k) > 0.0000005 Then
-            sSer = sn(k) & IIf(ns(k) > 12, " … и ещё " & (ns(k) - 12), "")
-            hay = ""
-            If UBound(words) >= 0 Then hay = WmsNames.Fold(art(k) & " " & nm(k) & " " & pl(k) & " " & sSer)
-            If UBound(words) < 0 Or WmsNames.HasWords(hay, words) Then
+            If (Not bWords) Or WmsNames.HasWords(CStr(folded(k)), words) Then
+                sSer = sn(k) & IIf(ns(k) > 12, " … и ещё " & (ns(k) - 12), "")
                 out(nOut) = Array(art(k), nm(k), bal(k), un(k), cnt(k), pl(k), sSer, IIf(last(k) > 0, last(k), ""))
                 nOut = nOut + 1
             End If

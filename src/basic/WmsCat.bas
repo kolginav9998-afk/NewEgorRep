@@ -88,7 +88,8 @@ End Sub
 Function CategorySuggest(sName As String) As String
     Dim nm As String, i As Long, w As Variant, j As Long, k As String
     If Not gCtLoaded Then CtLoad()
-    nm = CtName(sName)
+    ' 1.1: a name typed in several lines is one line («Винт» / «м3х25» / «Din 912»)
+    nm = CtName(WmsNames.NormName(sName))
     If nm = "" Then Exit Function
     For i = 0 To gCtN - 1
         w = Split(Mid(gCtWords(i), 2, Len(gCtWords(i)) - 2), ",")
@@ -419,7 +420,7 @@ Function FastRefresh(sFind As String) As String
         ReDim cnt(UBound(d))
         For i = 0 To UBound(d)
             If CStr(d(i)(cEi)) <> "" Then
-                nm = Trim(CStr(d(i)(cNm)))
+                nm = WmsNames.NormName(CStr(d(i)(cNm)))
                 If FsIsFastener(nm, CStr(d(i)(cCat))) Then
                     art = Trim(CStr(d(i)(cArt)))
                     key = LCase(nm) & "|" & LCase(art)
@@ -450,7 +451,7 @@ Function FastRefresh(sFind As String) As String
         Next i
     End If
     ' the words of the search
-    words = Split(CtNorm(sFind), " ")
+    words = WmsNames.FoldWords(sFind)
     ReDim out(IIf(n > 0, n - 1, 0))
     k = 0
     For i = 0 To n - 1
@@ -465,7 +466,7 @@ Function FastRefresh(sFind As String) As String
         End If
         ok = True
         If Trim(sFind) <> "" Then
-            hay = CtNorm(typeName & " " & sSize & " " & std & " " & cl & " " & cov & " " & CStr(rows(i)(0)) & " " & CStr(rows(i)(1)) & " " & places(i))
+            hay = WmsNames.Fold(typeName & " " & sSize & " " & std & " " & cl & " " & cov & " " & CStr(rows(i)(0)) & " " & CStr(rows(i)(1)) & " " & places(i))
             For Each w In words
                 If CStr(w) <> "" Then
                     If InStr(hay, CStr(w)) = 0 Then ok = False

@@ -1530,7 +1530,7 @@ FAST_HINT = ("Справочник метизов из «Наличия»: бо�
 # the sheets 1.0.2 adds to a book of 1.0.0 / 1.0.1
 SHEETS_102 = [ACTS, DAYREP, CATS, FAST]
 # the sheets 1.1 adds to a book of 1.0.x (filled in as the release grows)
-SHEETS_110 = ["Наличие по названию", "Остаток деталей", "Операции дня"]
+SHEETS_110 = ["Наличие по названию", "Остаток деталей", "Операции дня", "Проверка названий"]
 FAST_FIND_ROW = 1
 FAST_HEAD = 3
 
@@ -1635,7 +1635,14 @@ PARTS_HINT = ("Остаток деталей: одна строка на дет�
               "или приход как деталей. Сортируйте и фильтруйте как удобно; «Обновить» строит таблицу заново.")
 OPS_HINT = ("Операции дня: что делала WMS по журналу — простыми словами. «Показать» — операции за дату (пусто — сегодня; «по дату» — несколько дней), «Хвост журнала» — "
             "операции, которых ещё нет в книге (перед «Восстановить» или «Отложить хвост журнала» видно, что это), «Вчера» — прошлый рабочий день. Журнал только читается.")
-SHEETS_110_VIEWS = [BYNAME, PARTS, OPSHEET]
+NAMECHK = "Проверка названий"
+NAMECHK_HEADERS = ["Где", "Строка", "ЕИ", "Как записано (¶ — разрыв строки)", "Как должно быть", "Что не так", "Что делать"]
+NAMECHK_WIDTHS = [2800, 1500, 2800, 9000, 8000, 7000, 9000]
+NAMECHK_HINT = ("Проверка названий: названия, разбитые на несколько строк («Винт» / «м3х25» / «Din 912» / «A» / «2»), с лишними пробелами, с разорванным размером (М 8), "
+                "классом (A 2) и стандартом строчными (din). «Проверить» — найти их в «Наличии», «Заказах», «Ином приходе» и «Номенклатуре»; «Исправить открытые строки» — "
+                "привести к одной строке то, что ещё не проведено, и справочник «Номенклатура». Названия проведённых позиций WMS сама не меняет: исправляйте их кнопкой «Исправить» "
+                "на строке-источнике. Новое название, вписанное в «Заказы» или «Иной приход», приводится к одной строке сразу.")
+SHEETS_110_VIEWS = [BYNAME, PARTS, OPSHEET, NAMECHK]
 
 
 def build_view110(doc, sh, headers, widths, hint, find_label, zero_label, merge_find=True):
@@ -1652,12 +1659,13 @@ def build_view110(doc, sh, headers, widths, hint, find_label, zero_label, merge_
     hd.CellBackColor = 0xE7E6E6
     sh.getCellRangeByPosition(0, 0, n - 1, 0).CellBackColor = 0xFFFFFF
     text = number_format(doc, "@", ("ru", "RU"))
-    sh.getCellByPosition(0, 1).setString(find_label)
-    sh.getCellByPosition(0, 1).CharWeight = 150
-    sh.getCellByPosition(1, 1).CellBackColor = INPUT_HEAD_10
-    sh.getCellByPosition(1, 1).NumberFormat = text
-    if merge_find:
-        merge(sh, 1, 1, 3, 1)
+    if find_label:
+        sh.getCellByPosition(0, 1).setString(find_label)
+        sh.getCellByPosition(0, 1).CharWeight = 150
+        sh.getCellByPosition(1, 1).CellBackColor = INPUT_HEAD_10
+        sh.getCellByPosition(1, 1).NumberFormat = text
+        if merge_find:
+            merge(sh, 1, 1, 3, 1)
     if zero_label:
         sh.getCellByPosition(4, 1).setString(zero_label)
         sh.getCellByPosition(4, 1).CharWeight = 150
@@ -1710,6 +1718,13 @@ def build_ops(doc, sh):
     bind_event(sh.Events, "OnChange", "WmsOps.OnOpsChange")
 
 
+def build_namechk(doc, sh):
+    build_view110(doc, sh, NAMECHK_HEADERS, NAMECHK_WIDTHS, NAMECHK_HINT, None, None)
+    sh.getCellRangeByPosition(0, 4, NAMECHK_HEADERS.__len__() - 1, 3000).IsTextWrapped = True
+    add_button(doc, sh, "btnNamesCheck", "Проверить", "WmsNames.BtnNamesCheck", 150, 120, 3000, 650, bold=True, back=0xC6E0B4)
+    add_button(doc, sh, "btnNamesFix", "Исправить открытые строки", "WmsNames.BtnNamesFix", 3250, 120, 5400, 650, back=0xDDEBF7)
+
+
 def views_110(doc, sheets):
     """1.1: the three sheets that only show, for a new book and an upgraded one: «Наличие по названию» and «Остаток деталей» after «Наличие», «Операции дня»
     after «Отчёты»; nothing that exists is touched"""
@@ -1725,6 +1740,10 @@ def views_110(doc, sheets):
     if not sheets.hasByName(OPSHEET):
         sheets.insertNewByName(OPSHEET, names.index(REPORTS) + 1 if REPORTS in names else len(names))
         build_ops(doc, sheets.getByName(OPSHEET))
+    names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+    if not sheets.hasByName(NAMECHK):
+        sheets.insertNewByName(NAMECHK, names.index(OPSHEET) + 1)
+        build_namechk(doc, sheets.getByName(NAMECHK))
 
 
 # 1.1: the buttons of «Главная» that 1.1 adds (the free places of the third row of the system buttons)
