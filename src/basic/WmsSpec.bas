@@ -10,6 +10,9 @@ Public Const ST_MAX = 400
 ' the equivalents of the standards: «din 933» → «iso 4017;гост 7798» (read from the sheet «Стандарты» by the first use; the event of the sheet drops it)
 Global gSpEq As Object
 Global gSpEqLoaded As Boolean
+' the records of the names read already (a name is read once; the sheet «Стандарты» drops them: the equivalents are in a record)
+Global gSpCache As Object
+Global gSpCacheOn As Boolean
 
 ' the types in the order of the list: (the stem of the word, the name of the type)
 Function SpTypes() As Variant
@@ -347,6 +350,7 @@ End Sub
 ' the sheet «Стандарты» was edited: read again at the next use
 Sub OnStdChange(Optional oTarget As Variant)
     gSpEqLoaded = False
+    gSpCacheOn = False
 End Sub
 
 ' the equivalents of a standard («DIN 933» → «iso 4017;гост 7798»; the keys as the search compares them); "" — none known
@@ -362,6 +366,22 @@ None:
     SpEquiv = ""
 End Function
 
+' the standard that stands for all that mean the same part (the smallest of the standard and its equivalents, as the search compares them): two names with the same part have
+' the same one, whichever standard they name
+Function SpCanon(sStd As String) As String
+    Dim eq As String, a As Variant, i As Long, m As String
+    If sStd = "" Then Exit Function
+    m = StdKey(sStd)
+    eq = SpEquiv(sStd)
+    If eq <> "" Then
+        a = Split(eq, ";")
+        For i = 0 To UBound(a)
+            If CStr(a(i)) < m Then m = CStr(a(i))
+        Next i
+    End If
+    SpCanon = m
+End Function
+
 ' ================================================================ one name, all of it
 
 ' the record of a name: (type, the index of the type, the size, the diameter, the length, the pitch, the standard, the class, the coating, the head, the equivalents of the standard)
@@ -370,7 +390,37 @@ Function SpRecord(sName As String) As Variant
     t = SpType(sName, idx)
     SpSize(sName, sSize, dD, dL, dP)
     std = SpStandard(sName)
-    SpRecord = Array(t, idx, sSize, dD, dL, dP, std, SpClass(sName), SpCoating(sName), SpHead(sName), SpEquiv(std))
+    SpRecord = Array(t, idx, sSize, dD, dL, dP, std, SpClass(sName), SpCoating(sName), SpHead(sName), SpEquiv(std), SpCanon(std))
+End Function
+
+' SpRecord, but a name that was read already is not read again. (A Collection of this Basic keeps text, not an array: the record is kept as one text and made again from it.)
+Function SpRecordC(sName As String) As Variant
+    Dim v As Variant, p As Variant, r As Variant, i As Long, t As String
+    If Not gSpCacheOn Then
+        gSpCache = New Collection
+        gSpCacheOn = True
+    End If
+    If CacheGet(sName, v) Then
+        p = Split(CStr(v), Chr(1))
+        SpRecordC = Array(p(0), CLng(p(1)), p(2), Val(p(3)), Val(p(4)), Val(p(5)), p(6), p(7), p(8), p(9), p(10), p(11))
+        Exit Function
+    End If
+    r = SpRecord(sName)
+    t = r(0) & Chr(1) & r(1) & Chr(1) & r(2) & Chr(1) & Trim(Str(r(3))) & Chr(1) & Trim(Str(r(4))) & Chr(1) & Trim(Str(r(5))) & Chr(1) & r(6) & Chr(1) & r(7) & Chr(1) & r(8) & Chr(1) & r(9) _
+        & Chr(1) & r(10) & Chr(1) & r(11)
+    On Error Resume Next
+    gSpCache.Add(t, sName)
+    On Error GoTo 0
+    SpRecordC = r
+End Function
+
+Private Function CacheGet(sName As String, ByRef v As Variant) As Boolean
+    On Error GoTo Miss
+    v = gSpCache.Item(sName)
+    CacheGet = True
+    Exit Function
+Miss:
+    CacheGet = False
 End Function
 
 ' the words that stand for the parts of a record in the search («м8х30» also as «м8», «30», «8х30»; «din 933» also as «din933», «933» and its equivalents)

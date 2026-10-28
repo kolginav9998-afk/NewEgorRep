@@ -1507,7 +1507,9 @@ def docs_102(doc, sheets):
 # 1.0.2: «Категории» — the hints of the categories by the name (WmsCat SH_CATS): a category and the words that tell it in a name; «Метизы» —
 # the directory of the fasteners made from «Наличие» by the names (WmsCat SH_FAST, FS_*): the storekeeper's own sheets, not protected, not journaled
 CATS = "Категории"
-CATS_HEADERS = ["Категория", "Слова в названии (через запятую; части слова достаточно: «болт» найдёт «болты»)"]
+CATS_HEADERS = ["Категория", "Слова в названии (через запятую; части слова достаточно: «болт» найдёт «болты»; «=болт» — только целое слово)",
+                "Не считать (слова, при которых категория не подходит)", "Позиций", "ЕИ с остатком"]
+CATS_WIDTHS = [6000, 20000, 9000, 2400, 2800]
 CATS_SEED = [
     ("Инструмент", "дрел, перфоратор, шуруповерт, отверт, молоток, ключ, болгарк, болторез, пассатиж, плоскогуб, кусачк, рулетк, уровен, дальномер, лобзик, паяльник, пила"),
     ("Метизы", "болт, гайк, шайб, винт, саморез, шуруп, шпильк, дюбел, анкер, заклепк, гвозд, хомут, шплинт"),
@@ -1521,22 +1523,51 @@ CATS_SEED = [
     ("Офис", "бумаг, картридж, ручка, степлер, папк, скрепк"),
 ]
 FAST = "Метизы"
-FAST_HEADERS = ["Тип", "Размер", "Стандарт", "Класс", "Покрытие / материал", "Наименование (как в учёте)", "Артикул", "Остаток", "Ед.", "Места", "ЕИ с остатком"]
-FAST_WIDTHS = [2800, 2600, 3000, 1800, 4200, 9000, 3200, 2200, 1500, 5000, 2200]
-FAST_HINT = ("Справочник метизов из «Наличия»: болты, гайки, шайбы, винты, саморезы … WMS узнаёт их по названию (и по категории «Метизы» / «Крепёж») и "
-             "разбирает его: размер (М8×20), стандарт (DIN 933, ГОСТ 7798-70), класс прочности (8.8, А2), покрытие. Одна строка — одно наименование с артикулом: "
-             "остаток всех его ЕИ и места. Впишите слова в «Найти» — например «болт м8 цинк» — и нажмите Enter: останутся строки, где есть все слова. "
-             "Список обновляется при открытии листа и кнопкой «Обновить». Только просмотр: ничего не проводится.")
+FAST_HEADERS = ["Тип", "Размер", "Ø", "Длина", "Стандарт", "Аналоги стандарта", "Класс", "Покрытие / материал", "Головка / шлиц", "Наименование (как в учёте)", "Артикул", "Остаток",
+                "Ед.", "Места", "ЕИ с остатком", "Заметка"]
+FAST_WIDTHS = [2600, 2600, 1300, 1600, 2800, 4200, 1800, 4000, 3600, 9000, 3200, 2200, 1500, 5000, 2200, 7000]
+FAST_HINT = ("Справочник метизов из «Наличия»: болты, гайки, шайбы, винты, саморезы … WMS узнаёт их по названию (и по категории «Метизы» / «Крепёж», в том числе из «Номенклатуры») и "
+             "разбирает его: размер (М8×30), диаметр и длина, стандарт (DIN 933) и его аналоги по листу «Стандарты» (ISO 4017, ГОСТ 7805), класс прочности (8.8, А2), покрытие, головка и шлиц. "
+             "Одна строка — одно наименование с артикулом: остаток всех его ЕИ и места. «Найти» понимает слова, как страница «Поиск» («болт м8 30», «din 933», «-нерж»). Строка под ним — "
+             "фильтры столбцов: текст — слова, которые должны быть («оцинк»); числа — «8», «8 10 12» (любое из), «8-12», «>20», «<=40»; нажмите Enter. «Скрыть нулевые» — «да». В "
+             "«Заметке» — возможные дубли (то же самое под другим названием; одно название под разными артикулами). Список обновляется при открытии листа и кнопкой «Обновить». "
+             "Только просмотр: ничего не проводится.")
+FAST_HINT_COL = 18
 # the sheets 1.0.2 adds to a book of 1.0.0 / 1.0.1
 SHEETS_102 = [ACTS, DAYREP, CATS, FAST]
 # the sheets 1.1 adds to a book of 1.0.x (filled in as the release grows)
-SHEETS_110 = ["Наличие по названию", "Остаток деталей", "Операции дня", "Проверка названий", "Стандарты", "Синонимы"]
+SHEETS_110 = ["Наличие по названию", "Остаток деталей", "Операции дня", "Проверка названий", "Стандарты", "Синонимы", "Без категории"]
 FAST_FIND_ROW = 1
+FAST_FILTER_ROW = 2
 FAST_HEAD = 3
+FAST_KEY_COL = 16
+
+
+CATS_HINT = ("Подсказки категорий. Вписали наименование товара на «Заказах» — пустая «Категория» получает подсказку: сначала категорию товара из «Номенклатуры» (если она там есть), "
+             "затем по словам отсюда: выигрывает категория, у которой в названии нашлось больше слов (целое слово весит больше, чем его начало); при равенстве — та, что выше. "
+             "Слово «=болт» — только целое слово; слово «-болторез» (или слова в столбце «Не считать») — категория не подходит, если оно есть в названии. Можно написать свою категорию — "
+             "подсказка её не трогает. Свои строки и слова — добавляйте и меняйте: это ваш справочник, учёт он не меняет. «Позиций» и «ЕИ с остатком» считаются при открытии листа: "
+             "категория берётся из реестра, из «Номенклатуры» или по словам. Список слева — выпадающий список «Категории» на «Заказах» и «Ином приходе». Названия без категории — на листе «Без категории».")
+CATS_HINT_COL = 6
+
+
+def cats_style_new_columns(doc, sh):
+    """the columns of 1.1 of «Категории»: the words to leave out (an input), the two counted columns (grey: not an input)"""
+    text = number_format(doc, "@", ("ru", "RU"))
+    sh.getCellRangeByPosition(2, 0, 2, 300).NumberFormat = text
+    sh.getCellRangeByPosition(2, 1, 2, 300).CellBackColor = INPUT_HEAD_10
+    sh.getCellRangeByPosition(2, 1, 2, 300).IsTextWrapped = True
+    sh.getCellRangeByPosition(3, 1, 4, 300).CellBackColor = 0xF2F2F2
+    sh.getCellRangeByPosition(3, 1, 4, 300).HoriJustify = 3
+    sh.getCellRangeByPosition(3, 1, 4, 300).CharColor = MUTED
+    for c, w in enumerate(CATS_WIDTHS):
+        sh.getColumns().getByIndex(c).Width = w
+    sh.getColumns().getByIndex(5).Width = 600
+    sh.getColumns().getByIndex(CATS_HINT_COL).Width = 12000
 
 
 def build_cats(doc, sh):
-    header(sh, CATS_HEADERS, [6000, 20000], height=900)
+    header(sh, CATS_HEADERS, CATS_WIDTHS, height=900)
     text = number_format(doc, "@", ("ru", "RU"))
     sh.getCellRangeByPosition(0, 0, 1, 300).NumberFormat = text
     sh.getCellRangeByPosition(0, 1, 1, 300).CellBackColor = INPUT_HEAD_10
@@ -1544,53 +1575,138 @@ def build_cats(doc, sh):
         sh.getCellByPosition(0, r).setString(a)
         sh.getCellByPosition(1, r).setString(w)
     sh.getCellRangeByPosition(1, 1, 1, 300).IsTextWrapped = True
-    hint = sh.getCellByPosition(3, 0)
-    hint.setString("Подсказки категорий. Вписали наименование товара на «Заказах» — пустая «Категория» получает подсказку по словам отсюда (первая подходящая "
-                   "строка сверху вниз; поэтому узкие категории — выше). Можно написать свою категорию — подсказка её не трогает. Свои строки и слова — "
-                   "добавляйте и меняйте: это ваш справочник, учёт он не меняет. Список слева — выпадающий список «Категории» на «Заказах» и «Ином приходе».")
+    cats_style_new_columns(doc, sh)
+    hint = sh.getCellByPosition(CATS_HINT_COL, 0)
+    hint.setString(CATS_HINT)
     hint.IsTextWrapped = True
     hint.VertJustify = 1
     hint.CharHeight = 9
     hint.CharColor = MUTED
-    sh.getColumns().getByIndex(2).Width = 600
-    sh.getColumns().getByIndex(3).Width = 12000
     bind_event(sh.Events, "OnChange", "WmsCat.OnCatsChange")
+    bind_event(sh.Events, "OnFocus", "WmsCat.OnCatsFocus")
+
+
+def cats_110(doc, sheets):
+    """1.1: «Категории» of a book of 1.0.2 gets the columns «Не считать», «Позиций», «ЕИ с остатком» (C, D, E) and the hint moves from D1 to G1; the categories and the words (A, B) are
+    not touched. A sheet in which the storekeeper has written something into C…G of his own, or a sheet that has the columns already, is left as it is"""
+    if not sheets.hasByName(CATS):
+        return
+    sh = sheets.getByName(CATS)
+    if sh.getCellByPosition(2, 0).getString().strip() == CATS_HEADERS[2]:
+        return
+    d1 = sh.getCellByPosition(3, 0).getString().strip()
+    busy = any(str(x) != "" for row in sh.getCellRangeByPosition(2, 1, CATS_HINT_COL, 300).getDataArray() for x in row)
+    if busy or any(sh.getCellByPosition(c, 0).getString().strip() != "" for c in (2, 4, 5, CATS_HINT_COL)) or (d1 != "" and not d1.startswith("Подсказки категорий")):
+        return
+    ref = sh.getCellByPosition(0, 0)
+    for c in (2, 3, 4):
+        h = sh.getCellByPosition(c, 0)
+        h.setString(CATS_HEADERS[c])
+        for prop in ("CharWeight", "CellBackColor", "CharColor", "HoriJustify", "CharHeight"):
+            setattr(h, prop, getattr(ref, prop))
+        h.IsTextWrapped = True
+        h.VertJustify = 2
+    cats_style_new_columns(doc, sh)
+    hint = sh.getCellByPosition(CATS_HINT_COL, 0)
+    hint.setString(CATS_HINT)
+    hint.IsTextWrapped = True
+    hint.VertJustify = 1
+    hint.CharHeight = 9
+    hint.CharColor = MUTED
+    bind_event(sh.Events, "OnChange", "WmsCat.OnCatsChange")
+    bind_event(sh.Events, "OnFocus", "WmsCat.OnCatsFocus")
 
 
 def build_fast(doc, sh):
+    """«Метизы» (1.1 layout): the buttons, the search (row 2) and its «Скрыть нулевые», the filters of the columns (row 3), the head of the table (row 4), the list; the key of the sort
+    is hidden, the hint is on the right"""
     header(sh, FAST_HEADERS, FAST_WIDTHS, height=1500)
-    # the head of the table is row 3: above it the buttons, the search, the count
+    n = len(FAST_HEADERS)
     sh.getRows().getByIndex(0).Height = 1500
-    for c in range(FAST_HEADERS.__len__()):
+    for c in range(n):
         sh.getCellByPosition(c, FAST_HEAD).setString(FAST_HEADERS[c])
         sh.getCellByPosition(c, 0).setString("")
-    hd = sh.getCellRangeByPosition(0, FAST_HEAD, len(FAST_HEADERS) - 1, FAST_HEAD)
+    hd = sh.getCellRangeByPosition(0, FAST_HEAD, n - 1, FAST_HEAD)
     hd.CharWeight = 150
     hd.IsTextWrapped = True
     hd.VertJustify = 2
     hd.CellBackColor = 0xE7E6E6
-    sh.getCellRangeByPosition(0, 0, len(FAST_HEADERS) - 1, 0).CellBackColor = 0xFFFFFF
+    sh.getCellRangeByPosition(0, 0, n - 1, 0).CellBackColor = 0xFFFFFF
     text = number_format(doc, "@", ("ru", "RU"))
-    for c in (0, 1, 2, 3, 4, 5, 6, 8, 9):
+    for c in (0, 1, 4, 5, 6, 7, 8, 9, 10, 12, 13, 15):
         sh.getCellRangeByPosition(c, FAST_HEAD + 1, c, 6000).NumberFormat = text
-    sh.getCellByPosition(0, FAST_FIND_ROW).setString("Найти в названии:")
+    # the filters of the columns are texts too («>20», «8-12»)
+    sh.getCellRangeByPosition(0, FAST_FILTER_ROW, n - 1, FAST_FILTER_ROW).NumberFormat = text
+    sh.getCellRangeByPosition(0, FAST_FILTER_ROW, n - 1, FAST_FILTER_ROW).CellBackColor = INPUT_HEAD_10
+    sh.getCellByPosition(0, FAST_FIND_ROW).setString("Найти:")
     sh.getCellByPosition(0, FAST_FIND_ROW).CharWeight = 150
     sh.getCellByPosition(1, FAST_FIND_ROW).CellBackColor = INPUT_HEAD_10
     sh.getCellByPosition(1, FAST_FIND_ROW).NumberFormat = text
-    merge(sh, 1, FAST_FIND_ROW, 4, FAST_FIND_ROW)
+    merge(sh, 1, FAST_FIND_ROW, 3, FAST_FIND_ROW)
+    sh.getCellByPosition(4, FAST_FIND_ROW).setString("Скрыть нулевые:")
+    sh.getCellByPosition(4, FAST_FIND_ROW).CharWeight = 150
+    sh.getCellByPosition(4, FAST_FIND_ROW).HoriJustify = 3
+    sh.getCellByPosition(5, FAST_FIND_ROW).setString("нет")
+    sh.getCellByPosition(5, FAST_FIND_ROW).CellBackColor = INPUT_HEAD_10
+    sh.getCellByPosition(5, FAST_FIND_ROW).NumberFormat = text
     sh.getCellByPosition(0, 2).CharColor = MUTED
-    hint = sh.getCellByPosition(12, 0)
+    hint = sh.getCellByPosition(FAST_HINT_COL, 0)
     hint.setString(FAST_HINT)
     hint.IsTextWrapped = True
     hint.VertJustify = 1
     hint.CharHeight = 9
     hint.CharColor = MUTED
-    sh.getColumns().getByIndex(11).IsVisible = False
-    sh.getColumns().getByIndex(12).Width = 12000
-    sh.getCellRangeByPosition(7, FAST_HEAD + 1, 7, 6000).HoriJustify = 3
-    add_button(doc, sh, "btnFastRefresh", "Обновить", "WmsCat.BtnFastRefresh", 150, 120, 3000, 650, bold=True, back=0xC6E0B4)
+    sh.getColumns().getByIndex(FAST_KEY_COL).IsVisible = False
+    sh.getColumns().getByIndex(FAST_KEY_COL + 1).Width = 600
+    sh.getColumns().getByIndex(FAST_HINT_COL).Width = 12000
+    sh.getCellRangeByPosition(11, FAST_HEAD + 1, 11, 6000).HoriJustify = 3
+    sh.getCellRangeByPosition(2, FAST_HEAD + 1, 3, 6000).HoriJustify = 3
+    if not has_button(sh, "btnFastRefresh"):
+        add_button(doc, sh, "btnFastRefresh", "Обновить", "WmsCat.BtnFastRefresh", 150, 120, 3000, 650, bold=True, back=0xC6E0B4)
     bind_event(sh.Events, "OnFocus", "WmsCat.OnFastFocus")
     bind_event(sh.Events, "OnChange", "WmsCat.OnFastChange")
+
+
+def fast_110(doc, sheets):
+    """1.1: «Метизы» of a book of 1.0.2 is made again in the layout of 1.1 (new columns, filters). The sheet is a view made from «Наличия» — there is no data of the storekeeper in it:
+    it is cleared (cells and formats) and built anew; its button stays; the list appears at the first opening"""
+    if not sheets.hasByName(FAST):
+        return
+    sh = sheets.getByName(FAST)
+    if sh.getCellByPosition(2, FAST_HEAD).getString().strip() == FAST_HEADERS[2]:
+        return
+    rng = sh.getCellRangeByPosition(0, 0, 40, 6200)
+    rng.merge(False)
+    rng.clearContents(1 + 2 + 4 + 8 + 16 + 32 + 64 + 256 + 512)
+    for c in range(0, 30):
+        sh.getColumns().getByIndex(c).IsVisible = True
+    build_fast(doc, sh)
+
+
+# 1.1: «Без категории» (WmsCat SH_NOCAT) — the names of the registry with no category in the registry nor in «Номенклатура», with the hint; the column «Категория» is filled with the hint and
+# goes to «Номенклатура» by the button (an empty category of an existing goods only)
+NOCAT = "Без категории"
+NOCAT_HEADERS = ["Наименование", "Артикул", "ЕИ с остатком", "Остаток", "Ед.", "Подсказка по словам", "Категория (оставьте, измените или очистите)", "В «Номенклатуре»", "(строка)"]
+NOCAT_WIDTHS = [9000, 3200, 2200, 2200, 1500, 4000, 5200, 4400, 1200]
+NOCAT_HINT = ("Названия «Наличия», у которых нет категории ни в реестре, ни в «Номенклатуре». В столбце «Категория» уже стоит подсказка по словам листа «Категории» — исправьте её "
+              "или очистите. «Записать в «Номенклатуру»» вносит категории в пустую клетку «Категория» уже существующего товара (то, что там написано, не заменяется; товаров, "
+              "которых в «Номенклатуре» нет, кнопка не создаёт — добавьте товар и повторите). В учёт и журнал ничего не пишется: категория работает в «Метизах», в подсказках и в поиске "
+              "«категория:…». «Найти» отбирает по словам названия.")
+
+
+def build_nocat(doc, sh):
+    build_view110(doc, sh, NOCAT_HEADERS, NOCAT_WIDTHS, NOCAT_HINT, "Найти:", None)
+    text = number_format(doc, "@", ("ru", "RU"))
+    sh.getCellRangeByPosition(0, 4, 1, 6000).NumberFormat = text
+    sh.getCellRangeByPosition(5, 4, 7, 6000).NumberFormat = text
+    sh.getCellRangeByPosition(6, 4, 6, 6000).CellBackColor = INPUT_HEAD_10
+    sh.getCellRangeByPosition(3, 4, 3, 6000).HoriJustify = 3
+    sh.getColumns().getByIndex(8).IsVisible = False
+    sh.getCellByPosition(0, 2).CharColor = MUTED
+    add_button(doc, sh, "btnNoCatRefresh", "Обновить", "WmsCat.BtnNoCatRefresh", 150, 120, 3000, 650, bold=True, back=0xC6E0B4)
+    add_button(doc, sh, "btnNoCatApply", "Записать в «Номенклатуру»", "WmsCat.BtnNoCatApply", 3250, 120, 5400, 650, back=0xDDEBF7)
+    bind_event(sh.Events, "OnFocus", "WmsCat.OnNoCatFocus")
+    bind_event(sh.Events, "OnChange", "WmsCat.OnNoCatChange")
 
 
 def categories_102(doc, sheets):
@@ -1813,6 +1929,13 @@ def views_110(doc, sheets):
     if not sheets.hasByName(SYNONYMS):
         sheets.insertNewByName(SYNONYMS, names.index(STANDARDS) + 1)
         build_synonyms(doc, sheets.getByName(SYNONYMS))
+    names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+    if not sheets.hasByName(NOCAT):
+        sheets.insertNewByName(NOCAT, names.index(CATS) + 1 if CATS in names else len(names))
+        build_nocat(doc, sheets.getByName(NOCAT))
+    # the sheets of 1.0.2 get the layout of 1.1 (a new book has it already)
+    cats_110(doc, sheets)
+    fast_110(doc, sheets)
 
 
 # 1.1: the buttons of «Главная» that 1.1 adds (the free places of the third row of the system buttons)

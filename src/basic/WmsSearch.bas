@@ -33,6 +33,13 @@ Global gQN As Long
 Global gQNote As String
 ' True when the last query was words only (no «-слово», no filters)
 Global gQWords As Boolean
+' the words that must not be there and the filters of the last query
+Global gQExcl As Variant
+Global gQnX As Long
+Global gQfCat As String
+Global gQfPlace As String
+Global gQfArt As String
+Global gQfSer As String
 ' the hits of the last search
 Global gSxHit As Variant
 Global gSxScore As Variant
@@ -105,6 +112,11 @@ Private Function Spaced(ByVal s As String) As String
         s = Replace(s, CStr(k), " ")
     Next k
     Spaced = s
+End Function
+
+' a text as the search compares it: folded, the signs between the words are spaces (for the callers that build the texts of their own rows)
+Function Prep(ByVal s As String) As String
+    Prep = Spaced(WmsNames.Fold(s))
 End Function
 
 ' ================================================================ the synonyms
@@ -268,7 +280,7 @@ End Sub
 
 ' the folded columns for the filters, once per state of the journal: 0 place, 1 category, 2 article, 3 serial
 Private Sub EnsureCols()
-    Dim k As Long, i As Long, a0() As String, a1() As String, a2() As String, a3() As String, d As Variant, n As Long, r As Variant, res(3) As Variant, c0 As Long, c1 As Long, c2 As Long, c3 As Long
+    Dim k As Long, i As Long, a0() As String, a1() As String, a2() As String, a3() As String, d As Variant, n As Long, r As Variant, res(3) As Variant, c0 As Long, c1 As Long, c2 As Long, c3 As Long, ec As Variant
     If gSxColSeq = gSxSeq Then Exit Sub
     d = gSxData
     n = gSxN
@@ -280,10 +292,12 @@ Private Sub EnsureCols()
     ReDim a1(n - 1)
     ReDim a2(n - 1)
     ReDim a3(n - 1)
+    ' (the category is the effective one: of the registry, else of «Номенклатура», else the hint by the words)
+    ec = WmsCat.EffectiveCats(d, n)
     For i = 0 To n - 1
         r = d(i)
         a0(i) = CStr(r(c0))
-        a1(i) = CStr(r(c1))
+        a1(i) = CStr(ec(i))
         a2(i) = CStr(r(c2))
         a3(i) = CStr(r(c3))
     Next i
@@ -602,21 +616,32 @@ Private Function FitTok(hay As String, w As String, ByVal p As Long) As Long
     Loop
 End Function
 
-' the rows of the registry that fit the query: gSxHit, gSxScore, gSxNHit (the most fitting first). True when the query had something to search by
-Private Function Hits(excl() As String, nX As Long, fCat As String, fPlace As String, fArt As String, fSer As String) As Boolean
-    Dim i As Long, j As Long, k As Long, sc As Long, f As Long, g As Long, ok As Boolean, hay As String, d As Variant, n As Long, qty As Double, cQ As Long, nm As Variant, cols As Variant, hays As Variant
-    Dim hit() As Long, score() As Long, flat() As String, st() As Long, en() As Long, kind() As Long, w As String, p As Long, nF As Long, al As Variant, w0() As String
-    Hits = (gQN > 0 Or nX > 0 Or fCat <> "" Or fPlace <> "" Or fArt <> "" Or fSer <> "")
-    gSxNHit = 0
-    If Not Hits Or gSxN = 0 Then Exit Function
-    d = gSxData
-    nm = gSxNm
-    hays = gSxHay
-    cQ = SC_QTY
-    If fCat <> "" Or fPlace <> "" Or fArt <> "" Or fSer <> "" Then
-        EnsureCols()
-        cols = gSxCol
-    End If
+' The query of the user taken apart once (the words, the words left out, the filters): the groups gQ…, gQExcl, gQf…. True when the query has something to search by
+Private Function QueryPrepare(sQuery As String) As Boolean
+    Dim words() As String, excl() As String, nW As Long, nX As Long, fCat As String, fPlace As String, fArt As String, fSer As String
+    Parse(sQuery, words, nW, excl, nX, fCat, fPlace, fArt, fSer)
+    BuildGroups(words, nW)
+    gQWords = (nW > 0 And nX = 0 And fCat = "" And fPlace = "" And fArt = "" And fSer = "")
+    gQExcl = excl
+    gQnX = nX
+    gQfCat = fCat
+    gQfPlace = fPlace
+    gQfArt = fArt
+    gQfSer = fSer
+    QueryPrepare = (gQN > 0 Or nX > 0 Or fCat <> "" Or fPlace <> "" Or fArt <> "" Or fSer <> "")
+End Function
+
+' the rows (texts hays, the folded names nms — n of them) that fit the prepared query: hit(0..) their indexes, score(0..) how well. cols — the folded place, category, article and serial
+' of the rows when the query has filters (else empty). Returns how many. A row with the text "" is not a row
+Private Function MatchCore(hays As Variant, nms As Variant, n As Long, cols As Variant, hit() As Long, score() As Long) As Long
+    Dim i As Long, j As Long, k As Long, sc As Long, f As Long, g As Long, ok As Boolean, hay As String, nHit As Long, excl As Variant, nX As Long, fCat As String, fPlace As String
+    Dim fArt As String, fSer As String, flat() As String, st() As Long, en() As Long, kind() As Long, w As String, p As Long, nF As Long, al As Variant, w0() As String
+    excl = gQExcl
+    nX = gQnX
+    fCat = gQfCat
+    fPlace = gQfPlace
+    fArt = gQfArt
+    fSer = gQfSer
     ' the alternatives of the groups in one flat list: group j is flat(st(j)) … flat(en(j))
     If gQN > 0 Then
         ReDim st(gQN)
@@ -642,9 +667,7 @@ Private Function Hits(excl() As String, nX As Long, fCat As String, fPlace As St
             w0(j) = CStr(al(0))
         Next j
     End If
-    ReDim hit(gSxN)
-    ReDim score(gSxN)
-    For i = 0 To gSxN - 1
+    For i = 0 To n - 1
         hay = hays(i)
         If hay <> "" Then
             ok = True
@@ -670,12 +693,12 @@ Private Function Hits(excl() As String, nX As Long, fCat As String, fPlace As St
                 End If
                 sc = sc + f
                 If kind(j) = 0 Then
-                    If InStr(nm(i), " " & w0(j)) > 0 Then sc = sc + 1
+                    If InStr(nms(i), " " & w0(j)) > 0 Then sc = sc + 1
                 End If
             Next j
             If ok Then
                 For j = 0 To nX - 1
-                    If Fit(hay, excl(j)) > 0 Then
+                    If Fit(hay, CStr(excl(j))) > 0 Then
                         ok = False
                         Exit For
                     End If
@@ -694,18 +717,69 @@ Private Function Hits(excl() As String, nX As Long, fCat As String, fPlace As St
                 If InStr(cols(3)(i), fSer) = 0 Then ok = False
             End If
             If ok Then
-                qty = 0
-                If VarType(d(i)(cQ)) = 5 Then qty = d(i)(cQ)
-                If qty > 0.0000005 Then sc = sc + 2
-                If sc > 99 Then sc = 99
-                hit(n) = i
-                score(n) = sc
-                n = n + 1
+                hit(nHit) = i
+                score(nHit) = sc
+                nHit = nHit + 1
             End If
         End If
     Next i
+    MatchCore = nHit
+End Function
+
+' the rows of the registry that fit the query: gSxHit, gSxScore, gSxNHit (the most fitting first). True when the query had something to search by
+Private Function Hits() As Boolean
+    Dim i As Long, sc As Long, d As Variant, n As Long, qty As Double, cQ As Long, cols As Variant, hit() As Long, score() As Long
+    Hits = (gQN > 0 Or gQnX > 0 Or gQfCat <> "" Or gQfPlace <> "" Or gQfArt <> "" Or gQfSer <> "")
+    gSxNHit = 0
+    If Not Hits Or gSxN = 0 Then Exit Function
+    d = gSxData
+    cQ = SC_QTY
+    If gQfCat <> "" Or gQfPlace <> "" Or gQfArt <> "" Or gQfSer <> "" Then
+        EnsureCols()
+        cols = gSxCol
+    End If
+    ReDim hit(gSxN)
+    ReDim score(gSxN)
+    n = MatchCore(gSxHay, gSxNm, gSxN, cols, hit, score)
+    ' a row with a balance goes before a row without one
+    For i = 0 To n - 1
+        qty = 0
+        If VarType(d(hit(i))(cQ)) = 5 Then qty = d(hit(i))(cQ)
+        sc = score(i)
+        If qty > 0.0000005 Then sc = sc + 2
+        If sc > 99 Then sc = 99
+        score(i) = sc
+    Next i
     gSxNHit = n
     SortHits(hit, score, n)
+End Function
+
+' How well each of the texts fits the query (the same understanding as the search of «Поиск»): the scores aligned with the texts, 0 — does not fit. The texts are folded
+' (WmsNames.Fold, the signs between the words as spaces, a space before and after); nms — the folded names of the same rows; cols — the folded place, category, article, serial
+' of the rows (or Empty when the query has no filters). An empty query fits everything with the score 1
+Function MatchScores(sQuery As String, hays As Variant, nms As Variant, n As Long, cols As Variant) As Variant
+    Dim hit() As Long, score() As Long, res() As Long, i As Long, k As Long
+    ReDim res(n)
+    If Not QueryPrepare(sQuery) Then
+        For i = 0 To n - 1
+            res(i) = 1
+        Next i
+        MatchScores = res
+        Exit Function
+    End If
+    ReDim hit(n)
+    ReDim score(n)
+    k = MatchCore(hays, nms, n, cols, hit, score)
+    For i = 0 To k - 1
+        res(hit(i)) = IIf(score(i) < 1, 1, score(i))
+    Next i
+    MatchScores = res
+End Function
+
+' which filters the query has (место:, категория:, артикул:, серия: — one digit each, 1 — has): the caller then has to give the columns to MatchScores
+Function QueryNeeds(sQuery As String) As String
+    QueryPrepare(sQuery)
+    QueryNeeds = IIf(gQfPlace <> "", "1", "0") & IIf(gQfCat <> "", "1", "0") & IIf(gQfArt <> "", "1", "0") & IIf(gQfSer <> "", "1", "0")
 End Function
 
 ' the hits from the highest score to the lowest (the same score — the order of the registry): counting by the score, no sort of n·log n steps
@@ -737,15 +811,13 @@ End Sub
 ' The smart search of the registry for the page «Поиск»: the rows found are put into out (the most fitting first), nAll — how many, totals — the balance of the found EIs
 ' when they have one unit; sNote — what to tell under the title (what the words stand for, «Возможно, вы искали»). False — the query has nothing for this search to hold on to.
 Function SmartRun(sQuery As String, out() As Variant, ByRef nOut As Long, ByRef nAll As Long, ByRef totals As String, ByRef sNote As String) As Boolean
-    Dim words() As String, excl() As String, nW As Long, nX As Long, fCat As String, fPlace As String, fArt As String, fSer As String, i As Long, k As Long, sum As Double, nSum As Long
+    Dim i As Long, k As Long, sum As Double, nSum As Long
     Dim unit As String, sameUnit As Boolean, d As Variant, r As Variant, q As Variant, det As String, cEi As Long, cNm As Long, cQ As Long, cSt As Long, cUn As Long, cPl As Long, cSrc As Long, cArt As Long, cCat As Long, sStorno As String, sStock As String, fixed As String, c As String, changed As Boolean, al As Variant, allNm As String, hit() As Boolean, w As String
     On Error GoTo EH
     Ensure()
     If gSxN = 0 Then Exit Function
-    Parse(sQuery, words, nW, excl, nX, fCat, fPlace, fArt, fSer)
-    BuildGroups(words, nW)
-    gQWords = (nW > 0 And nX = 0 And fCat = "" And fPlace = "" And fArt = "" And fSer = "")
-    If Not Hits(excl, nX, fCat, fPlace, fArt, fSer) Then Exit Function
+    If Not QueryPrepare(sQuery) Then Exit Function
+    If Not Hits() Then Exit Function
     SmartRun = True
     sNote = gQNote
     ' nothing found: a word that is not in the registry is looked for with a letter wrong
@@ -766,7 +838,7 @@ Function SmartRun(sQuery As String, out() As Variant, ByRef nOut As Long, ByRef 
             End If
         Next i
         If changed Then
-            Hits(excl, nX, fCat, fPlace, fArt, fSer)
+            Hits()
             If gSxNHit > 0 Then sNote = "Возможно, вы искали: «" & fixed & "» — показано по нему."
         End If
     End If

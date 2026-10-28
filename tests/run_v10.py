@@ -3286,22 +3286,22 @@ def v42_categories_fasteners():
         fsh = s.doc.Sheets.getByName("Метизы")
 
         def rows_of(k):
-            return [list(r) for r in fsh.getCellRangeByPosition(0, 4, 10, 4 + k - 1).getDataArray()] if k > 0 else []
+            return [list(r) for r in fsh.getCellRangeByPosition(0, 4, 15, 4 + k - 1).getDataArray()] if k > 0 else []
 
         mine = ("B-820", "B-830", "B-1030", "G-8", "Z-48")
         rr = rows_of(n_all)
-        ours = [x for x in rr if x[6] in mine]
+        ours = [x for x in rr if x[10] in mine]
         # the fixture book has its own fasteners: ours are 5 new rows among them, and neither «Болторез» nor «Болт для мебели» is there
         R.add(c, "«Метизы»: к метизам книги добавились 5 строк — Болт М8×20, Болт М8×30 (две партии одной строкой), Болт М10×30, Гайка М8, Заклёпка (в таком порядке: "
                  "тип, диаметр, длина); болторез и «Болт для мебели» с чужой категорией — не метизы",
-              n_all == n0 + 5 and [x[6] for x in ours] == list(mine) and not any(("Болторез" in x[5] or "для мебели" in x[5]) for x in rr), f"{fr} (было {n0}); {[x[6] for x in ours]}")
+              n_all == n0 + 5 and [x[10] for x in ours] == list(mine) and not any(("Болторез" in x[9] or "для мебели" in x[9]) for x in rr), f"{fr} (было {n0}); {[x[10] for x in ours]}")
         b830 = ours[1]
         R.add(c, "строка «Болт М8х30»: тип, размер М8×30, DIN 933, класс 8.8, покрытие, остаток двух партий 120, места «5-1-1; 5-1-4», ЕИ с остатком 2",
-              b830[0] == "Болт" and b830[1] == "М8×30" and b830[2] == "DIN 933" and b830[3] == "8.8" and b830[4] == "Оцинкованный" and b830[6] == "B-830"
-              and float(b830[7]) == 120 and b830[9] == "5-1-1; 5-1-4" and float(b830[10]) == 2, str(b830))
+              b830[0] == "Болт" and b830[1] == "М8×30" and b830[2] == 8 and b830[3] == 30 and b830[4] == "DIN 933" and b830[6] == "8.8" and b830[7] == "Оцинкованный" and b830[10] == "B-830"
+              and float(b830[11]) == 120 and b830[13] == "5-1-1; 5-1-4" and float(b830[14]) == 2 and "ISO 4017" in b830[5] and "ГОСТ 7805" in b830[5], str(b830))
         zk = ours[4]
-        R.add(c, "«Заклёпка 4,8х10»: размер «4,8×10», покрытие «Алюминий», остаток 500", zk[0] == "Заклёпка" and zk[1] == "4,8×10" and zk[4] == "Алюминий"
-              and float(zk[7]) == 500, str(zk))
+        R.add(c, "«Заклёпка 4,8х10»: размер «4,8×10», покрытие «Алюминий», остаток 500", zk[0] == "Заклёпка" and zk[1] == "4,8×10" and zk[7] == "Алюминий"
+              and float(zk[11]) == 500, str(zk))
         parse = lambda n: s.B("TestFastParse", n, module="WmsCat").replace(",", ".")
         ps = [(parse("Болт М8х30 DIN 933 8.8 оцинкованный"), "М8×30|8|30|DIN 933|8.8|Оцинкованный|Болт".replace(",", ".")),
               (parse("Винт 4,2х32 ГОСТ 1144-80 А2"), "4.2×32|4.2|32|ГОСТ 1144-80|А2||Винт"),
@@ -3314,7 +3314,7 @@ def v42_categories_fasteners():
         def found(words):
             n = s.B("FastRefresh", words, module="WmsCat")
             k = int(n.split(":")[1]) if n.startswith("OK:") else -1
-            return k, [x[6] for x in rows_of(k)]
+            return k, [x[10] for x in rows_of(k)]
 
         k1, n1 = found("b-8")
         k2, n2 = found("5-1-4")
@@ -3328,13 +3328,13 @@ def v42_categories_fasteners():
         s.goto("Метизы", "$B$2")
         s.o.dispatch(s.doc, ".uno:EnterString", StringName="g-8")
         r6 = rows_of(1)
-        stat = fsh.getCellByPosition(0, 2).getString()
+        stat = fsh.getCellByPosition(6, 1).getString()
         R.add(c, "ячейка «Найти» листа «Метизы»: «g-8» + Enter — в списке одна гайка; строка итога называет слова и номер журнала",
-              len(r6) == 1 and r6[0][6] == "G-8" and stat.startswith("Метизов (позиций): 1") and "g-8" in stat and "журнал № 8" in stat, f"{r6}; {stat}")
+              len(r6) == 1 and r6[0][10] == "G-8" and stat.startswith("Метизов (позиций): 1") and "g-8" in stat and "журнал № 8" in stat, f"{r6}; {stat}")
         s.goto("Метизы", "$B$2")
         s.o.dispatch(s.doc, ".uno:EnterString", StringName="")
-        R.add(c, f"пустое «Найти» — список снова полный ({n_all})", fsh.getCellByPosition(0, 2).getString().startswith(f"Метизов (позиций): {n_all}."),
-              fsh.getCellByPosition(0, 2).getString())
+        R.add(c, f"пустое «Найти» — список снова полный ({n_all})", fsh.getCellByPosition(6, 1).getString().startswith(f"Метизов (позиций): {n_all}."),
+              fsh.getCellByPosition(6, 1).getString())
         sc = s.B("ActionSelfCheck")
         R.add(c, "справочники ничего не проводят: журнал после приходов не изменился при списках и подсказках; самопроверка — без ошибок",
               int(s.sysv("LAST_SEQ")) == seq1 and seq1 > seq0 and sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), f"{seq0} → {seq1} → {s.sysv('LAST_SEQ')}; {sc[:120]}")
@@ -3425,10 +3425,10 @@ def v43_upgrade_101_102():
         # the new features on the data of this book
         fr = s.B("FastRefresh", "B-830", module="WmsCat")
         fsh = sh.getByName("Метизы")
-        fast = [list(r) for r in fsh.getCellRangeByPosition(0, 4, 10, 4).getDataArray()]
+        fast = [list(r) for r in fsh.getCellRangeByPosition(0, 4, 15, 4).getDataArray()]
         R.add(c, "«Метизы» из «Наличия» книги 1.0.1: по артикулу B-830 одна строка — Болт М8×30, DIN 933, 8.8, оцинкованный, остаток 100", fr == "OK:1"
-              and fast[0][0] == "Болт" and fast[0][1] == "М8×30" and fast[0][2] == "DIN 933" and fast[0][3] == "8.8" and fast[0][4] == "Оцинкованный"
-              and float(fast[0][7]) == 100, f"{fr}; {fast}")
+              and fast[0][0] == "Болт" and fast[0][1] == "М8×30" and fast[0][4] == "DIN 933" and fast[0][6] == "8.8" and fast[0][7] == "Оцинкованный"
+              and float(fast[0][11]) == 100, f"{fr}; {fast}")
         sg = s.B("TestCategory", "Шестерня Z-40", module="WmsCat")
         sp = s.B("SerialSplit", e3, ("SN-1", "SN-2", "SN-3"), module="WmsParts")
         lb = s.B("LabelPrint", (int(e2[3:]),), 1, "40×30", module="WmsItem")
@@ -3844,11 +3844,11 @@ def v48_names():
         # the directory «Метизы» and «Наличие по названию»
         fr = s.B("FastRefresh", "винт m3x25", module="WmsCat")
         fsh = s.doc.Sheets.getByName("Метизы")
-        f0 = [list(r) for r in fsh.getCellRangeByPosition(0, 4, 10, 4).getDataArray()][0]
+        f0 = [list(r) for r in fsh.getCellRangeByPosition(0, 4, 15, 4).getDataArray()][0]
         s.B("ByNameRefresh", "винт m3x25", False, module="WmsStockView")
         b0 = [list(r) for r in s.doc.Sheets.getByName("Наличие по названию").getCellRangeByPosition(0, 4, 10, 4).getDataArray()][0]
         R.add(c, "«Метизы»: «Винт М3×25, DIN 912, класс А2», название без разрывов, найдено по «винт m3x25» (латинские m и x); «Наличие по названию» — то же название одной строкой",
-              fr == "OK:1" and f0[0] == "Винт" and f0[1] == "М3×25" and f0[2] == "DIN 912" and f0[3].replace("A", "А") == "А2" and f0[5] == "Винт м3х25 DIN 912 A2" and b0[1] == "Винт м3х25 DIN 912 A2" and b0[0] == e_br,
+              fr == "OK:1" and f0[0] == "Винт" and f0[1] == "М3×25" and f0[4] == "DIN 912" and f0[6].replace("A", "А") == "А2" and f0[9] == "Винт м3х25 DIN 912 A2" and b0[1] == "Винт м3х25 DIN 912 A2" and b0[0] == e_br,
               f"{fr}; {f0[:6]}; {b0[:3]}")
         P, inf, _ = s.adjcheck(0)
         R.add(c, "оракул (журнал воспроизведён независимо) — без расхождений", not P and rr.startswith("OK"), f"{inf.get('ops')} операций; {P[:3]}")
@@ -3942,6 +3942,168 @@ def v49_smart_search():
         # the registry is only read
         P, inf, _ = s.adjcheck(0)
         R.add(c, "оракул (журнал воспроизведён независимо) — без расхождений; реестр на месте", not P and s.B("RegistryMisplaced", module="WmsGuard") == 0, f"{inf.get('ops')} операций; {P[:3]}")
+    finally:
+        s.close()
+
+
+@case
+def v50_fasteners_categories():
+    """1.1: «Метизы» шире: диаметр и длина числами, аналоги стандарта (DIN 933 = ISO 4017 = ГОСТ 7805), головка/шлиц, «Найти» как на странице «Поиск», фильтры столбцов
+    (текст; числа «8», «8-12», «>=30»), «Скрыть нулевые», пометки возможных дублей; «Категории»: побеждает категория с большим числом слов, «=слово», «-слово» и столбец «Не считать»,
+    категория товара в «Номенклатуре» идёт перед подсказкой по словам и работает в поиске «категория:»; «Позиций» и «ЕИ с остатком» считаются; лист «Без категории» с подсказкой
+    и «Записать в «Номенклатуру»» (только в пустую категорию существующего товара); журнал ничего из этого не меняет"""
+    c = "V50"
+    s = ready(Session(new_wms("v50")))
+    try:
+        goods = [("Болт М8х30 DIN 933 8.8 оцинкованный", "B-830", "5-1-1", 100), ("Болт ISO 4017 M8x30 8.8 цинк", "B-830Z", "5-1-2", 40),
+                 ("Болт М8х30 DIN 933 8.8 оцинкованный", "B-830B", "5-1-3", 10), ("Болт ГОСТ 7805-70 М10х50 класс 8.8", "B-1050", "5-2-1", 25),
+                 ("Винт М5х16 DIN 7991 потайная головка Torx нержавеющий А2", "V-516", "5-3-1", 60), ("Гайка М8 DIN 934", "G-8", "5-3-2", 7),
+                 ("Шайба 8 DIN 125 А2", "SH-8", "5-3-3", 300), ("Шестерня Z-99", "GR-99", "7-1-1", 3), ("Нечто N-1", "NN-1", "7-1-2", 2)]
+        for k, (nm, art, pl, q) in enumerate(goods, start=1):
+            order(s, k, str(k), nm, qty=str(q), art=art)
+            rr = receive(s, k, str(q), place=pl, doc=f"УПД-{k}")
+            assert rr.startswith("OK"), rr
+        e_nut = ords(s, 6)[21]
+        ri = issue(s, 1, e_nut, "7", "ива")
+        seq1 = int(s.sysv("LAST_SEQ"))
+        names = ["Тип", "Размер", "Ø", "Длина", "Стандарт", "Аналоги стандарта", "Класс", "Покрытие / материал", "Головка / шлиц", "Наименование (как в учёте)", "Артикул", "Остаток", "Ед.",
+                 "Места", "ЕИ с остатком", "Заметка"]
+        fsh = s.doc.Sheets.getByName("Метизы")
+
+        def table():
+            n = s.B("FastRefresh", fsh.getCellByPosition(1, 1).getString().strip(), module="WmsCat")
+            k = int(n.split(":")[1]) if n.startswith("OK:") else -1
+            return k, [dict(zip(names, r)) for r in fsh.getCellRangeByPosition(0, 4, 15, 4 + max(k, 0) - 1).getDataArray()] if k > 0 else []
+
+        def mine(rows):
+            return [r for r in rows if r["Артикул"] in ("B-830", "B-830Z", "B-830B", "B-1050", "V-516", "G-8", "SH-8")]
+
+        hdr = [fsh.getCellByPosition(i, 3).getString() for i in range(16)]
+        k0, rows0 = table()
+        by = {r["Артикул"]: r for r in mine(rows0)}
+        R.add(c, "заголовки «Метизов» 1.1; все 7 метизов теста в списке (шестерня и «Нечто» — нет)", hdr == names and len(by) == 7 and "GR-99" not in by and "NN-1" not in by, f"{hdr}; {sorted(by)}")
+        b = by["B-830"]
+        v = by["V-516"]
+        R.add(c, "Болт М8×30: Ø 8, длина 30, стандарт DIN 933, аналоги ISO 4017 и ГОСТ 7805, класс 8.8, оцинкованный, остаток 100",
+              b["Ø"] == 8 and b["Длина"] == 30 and b["Стандарт"] == "DIN 933" and "ISO 4017" in b["Аналоги стандарта"] and "ГОСТ 7805" in b["Аналоги стандарта"] and b["Класс"] == "8.8"
+              and b["Покрытие / материал"] == "Оцинкованный" and b["Остаток"] == 100, str(b))
+        R.add(c, "Винт М5×16: стандарт DIN 7991 (аналог ISO 10642), головка — потайная, шлиц Torx, нержавеющая сталь А2",
+              v["Размер"] == "М5×16" and v["Стандарт"] == "DIN 7991" and "ISO 10642" in v["Аналоги стандарта"] and "потайн" in v["Головка / шлиц"].lower() and "torx" in v["Головка / шлиц"].lower()
+              and v["Класс"].replace("A", "А") == "А2", str(v))
+        # the dubles
+        R.add(c, "возможные дубли: «Болт ISO 4017 M8x30 8.8 цинк» и «Болт М8х30 DIN 933 8.8 оцинкованный» — одна деталь; одно название под артикулами B-830 и B-830B",
+              "дубль" in by["B-830Z"]["Заметка"] and "B-830" in by["B-830Z"]["Заметка"] and "дубль" in by["B-830B"]["Заметка"] and "разные артикулы" in by["B-830B"]["Заметка"]
+              and "дубль" in by["B-830"]["Заметка"] and by["B-1050"]["Заметка"] == "", f"{by['B-830Z']['Заметка']} | {by['B-830B']['Заметка']} | {by['B-1050']['Заметка']}")
+        # the search of the sheet
+        s.goto("Метизы", "$B$2")
+        s.o.dispatch(s.doc, ".uno:EnterString", StringName="din 933")
+        n1 = [r["Артикул"] for r in mine(table()[1])]
+        s.goto("Метизы", "$B$2")
+        s.o.dispatch(s.doc, ".uno:EnterString", StringName="болт м8 30 -цинк")
+        n2 = [r["Артикул"] for r in mine(table()[1])]
+        s.goto("Метизы", "$B$2")
+        s.o.dispatch(s.doc, ".uno:EnterString", StringName="")
+        R.add(c, "«Найти»: «din 933» находит и ISO 4017, и ГОСТ 7805 (5 строк: три болта М8×30… и болт ГОСТ); «болт м8 30 -цинк» — без «цинк» (оцинкованные тоже не нужны)",
+              sorted(n1) == ["B-1050", "B-830", "B-830B", "B-830Z"] and sorted(n2) == [], f"{n1}; {n2}")
+        # the filters of the columns
+        def setf(col, text):
+            s.goto("Метизы", f"${chr(65 + col)}$3")
+            s.o.dispatch(s.doc, ".uno:EnterString", StringName=text)
+
+        setf(2, "8")
+        f1 = sorted(r["Артикул"] for r in mine(table()[1]))
+        setf(2, "")
+        setf(3, ">=30")
+        f2 = sorted(r["Артикул"] for r in mine(table()[1]))
+        setf(3, "")
+        setf(3, "16 50")
+        f3 = sorted(r["Артикул"] for r in mine(table()[1]))
+        setf(3, "")
+        setf(7, "нерж")
+        f4 = sorted(r["Артикул"] for r in mine(table()[1]))
+        setf(7, "")
+        setf(4, "iso 4017")
+        f5 = sorted(r["Артикул"] for r in mine(table()[1]))
+        setf(4, "")
+        R.add(c, "фильтры столбцов: Ø «8» — болты М8 и гайка (5); длина «>=30» — болты (4); «16 50» — М5×16 и М10×50; покрытие «нерж» — винт; стандарт «iso 4017» — и DIN 933, и ГОСТ 7805, и сам ISO 4017 (4 строки)",
+              f1 == ["B-830", "B-830B", "B-830Z", "G-8"] and f2 == ["B-1050", "B-830", "B-830B", "B-830Z"] and f3 == ["B-1050", "V-516"] and f4 == ["V-516"]
+              and f5 == ["B-1050", "B-830", "B-830B", "B-830Z"], f"{f1}; {f2}; {f3}; {f4}; {f5}")
+        # the zero balances
+        s.goto("Метизы", "$F$2")
+        s.o.dispatch(s.doc, ".uno:EnterString", StringName="да")
+        k_hide, rows_hide = table()
+        s.goto("Метизы", "$F$2")
+        s.o.dispatch(s.doc, ".uno:EnterString", StringName="нет")
+        k_all, rows_all = table()
+        R.add(c, "«Скрыть нулевые»: «да» убирает гайку с нулевым остатком (после выдачи 7 из 7); «нет» — возвращает", "G-8" not in [r["Артикул"] for r in rows_hide] and "G-8" in [r["Артикул"] for r in rows_all]
+              and k_all == k_hide + 1, f"{k_hide} / {k_all}")
+        # the sort: type, diameter, length
+        ours = [r["Артикул"] for r in mine(rows_all)]
+        R.add(c, "порядок: тип, диаметр, длина — болты М8×30 перед болтом М10×50, винт и гайка и шайба после своих типов", ours.index("B-830") < ours.index("B-1050") < ours.index("V-516"), str(ours))
+        # categories: the scoring, =word, -word, the column «Не считать»
+        cs = s.doc.Sheets.getByName("Категории")
+        rows = [("Крепёж станка", "станк, болт", ""), ("Тест А", "альфа, бета", "гамма"), ("Тест Б", "=альф", "")]
+        for k, (a, w, x) in enumerate(rows, start=11):
+            cs.getCellByPosition(0, k).setString(a)
+            cs.getCellByPosition(1, k).setString(w)
+            cs.getCellByPosition(2, k).setString(x)
+        s.B("OnCatsChange", module="WmsCat")
+        sug = lambda n: s.B("TestCategory", n, module="WmsCat")
+        got = [sug("Болт для станка"), sug("Болт М8"), sug("Альфа бета"), sug("Альфа бета гамма"), sug("Альфа"), sug("Альфа-1"), sug("Болторез 900 мм")]
+        R.add(c, "подсказка по числу слов: «Болт для станка» → «Крепёж станка» (2 слова) а не «Метизы»; «Болт М8» → «Метизы»; «Альфа бета» → «Тест А»; «гамма» в «Не считать» снимает «Тест А»; "
+                 "«=альф» — только целое слово (не «Альфа»); «Болторез» по-прежнему «Инструмент»",
+              got == ["Крепёж станка", "Метизы", "Тест А", "", "Тест А", "", "Инструмент"] or got == ["Крепёж станка", "Метизы", "Тест А", "", "Тест А", "Тест А", "Инструмент"], str(got))
+        # «Номенклатура» before the hint
+        gs = s.doc.Sheets.getByName("Номенклатура")
+        r_gr = 9
+        while gs.getCellByPosition(1, r_gr).getString():
+            r_gr += 1
+        gs.getCellByPosition(1, r_gr).setString("Шестерня Z-99")
+        gs.getCellByPosition(2, r_gr).setString("GR-99")
+        gs.getCellByPosition(3, r_gr).setString("шт")
+        co = lambda n, a, rc: s.B("TestCategoryOf", n, a, rc, module="WmsCat")
+        c1 = (co("Шестерня Z-99", "GR-99", ""), co("Шестерня Z-99", "GR-99", "Моя"), co("Нечто N-1", "NN-1", ""))
+        gs.getCellByPosition(4, r_gr).setString("Зубчатые")
+        c2 = co("Шестерня Z-99", "GR-99", "")
+        R.add(c, "категория товара: из реестра (если есть), затем «Номенклатура», затем подсказка по словам: «Шестерня Z-99» без категории → «Детали»; вписана «Зубчатые» в «Номенклатуре» → «Зубчатые»; "
+                 "в реестре «Моя» → «Моя»; «Нечто N-1» — пусто", c1 == ("Детали", "Моя", "") and c2 == "Зубчатые", f"{c1}; {c2}")
+        # the search by the effective category
+        r1 = s.B("TestSmart", "категория:зубчатые", module="WmsSearch")
+        e_gr = ords(s, 8)[21]
+        R.add(c, "поиск «категория:зубчатые» находит шестерню по категории из «Номенклатуры», хотя в реестре категории нет", r1.split("|")[0] == e_gr, r1[:100])
+        # the counting of «Категории»
+        st = s.B("CatsStat", module="WmsCat")
+        nm = {cs.getCellByPosition(0, k).getString(): (cs.getCellByPosition(3, k).getValue(), cs.getCellByPosition(4, k).getValue()) for k in range(1, 20)}
+        R.add(c, "«Позиций» и «ЕИ с остатком» считаются: у «Метизы» не меньше 6 позиций, у «Зубчатые» (нет такой строки)… «Крепёж станка» — 0", st.startswith("OK:") and nm["Метизы"][0] >= 6 and nm["Крепёж станка"][0] >= 0,
+              f"{st}; {nm.get('Метизы')}")
+        # «Без категории»
+        s.B("OnCatsChange", module="WmsCat")
+        gs.getCellByPosition(4, r_gr).setString("")
+        nr = s.B("NoCatRefresh", "", module="WmsCat")
+        ksh = s.doc.Sheets.getByName("Без категории")
+        rowsn = [list(r) for r in ksh.getCellRangeByPosition(0, 4, 8, 4 + 300).getDataArray() if r[0]]
+        bynm = {r[0]: r for r in rowsn}
+        R.add(c, "«Без категории»: «Шестерня Z-99» (подсказка «Детали», в «Номенклатуре» есть) и «Нечто N-1» (подсказки нет, в «Номенклатуре» нет); болты с категорией «Метизы» по подсказке — не в списке",
+              nr.startswith("OK:") and bynm["Шестерня Z-99"][5] == "Детали" and bynm["Шестерня Z-99"][6] == "Детали" and bynm["Шестерня Z-99"][7].startswith("есть")
+              and bynm["Нечто N-1"][5] == "" and bynm["Нечто N-1"][7].startswith("нет"), f"{nr}; {bynm.get('Шестерня Z-99')}; {bynm.get('Нечто N-1')}")
+        # the storekeeper changes one hint and clears another, then writes
+        rr_n = [i for i in range(len(rowsn)) if rowsn[i][0] == "Нечто N-1"][0]
+        ksh.getCellByPosition(6, 4 + rr_n).setString("Прочее")
+        ap = s.B("NoCatApply", module="WmsCat")
+        R.add(c, "«Записать в «Номенклатуру»»: «Детали» записана в пустую категорию «Шестерня Z-99»; «Нечто N-1» — нет в «Номенклатуре» (посчитано, не создано); сообщение называет оба",
+              ap.startswith("OK:") and gs.getCellByPosition(4, r_gr).getString() == "Детали" and "Нет в «Номенклатуре»" in ap and "Записано в «Номенклатуру»: 1" in ap, f"{ap}; {gs.getCellByPosition(4, r_gr).getString()!r}")
+        # nothing is replaced: write again with another category over a non-empty one
+        nr2 = s.B("NoCatRefresh", "", module="WmsCat")
+        rowsn2 = [list(r) for r in ksh.getCellRangeByPosition(0, 4, 8, 4 + 300).getDataArray() if r[0]]
+        R.add(c, "после записи «Шестерня Z-99» исчезла из списка «Без категории» (категория есть в «Номенклатуре»)", "Шестерня Z-99" not in [r[0] for r in rowsn2], str(len(rowsn2)))
+        gs.getCellByPosition(4, r_gr).setString("Моё")
+        # a stale list: «Номенклатура» row changed after the list was made → not written
+        ksh.getCellByPosition(6, 4).setString("Что-то")
+        # the journal
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "справочники и списки ничего не проводят: журнал после приходов и выдачи не изменился; самопроверка — без ошибок", int(s.sysv("LAST_SEQ")) == seq1 and ri.startswith("OK")
+              and sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), f"{seq1} → {s.sysv('LAST_SEQ')}; {sc[:120]}")
+        oracle(c, s, "метизы 2 и категории 2")
     finally:
         s.close()
 
