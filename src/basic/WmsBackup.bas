@@ -6,6 +6,8 @@ Option Explicit
 ' 1.0 (Н6): the mark of the next copy («перед загрузкой топологии»), set by WmsSafe.RestorePoint
 Global gBkLabel As String
 Public Const BACKUP_KEEP_POINT = 10
+' 1.1: «последняя без ошибок» — the last state of the book that was in order (WmsGuard): the two newest are kept
+Public Const BACKUP_KEEP_GOOD = 2
 
 Function BookBaseName() As String
     Dim fn As String
@@ -24,6 +26,8 @@ Function KeepFor(kind As String) As Integer
         KeepFor = BACKUP_KEEP_MIGRATION
     Case "point"
         KeepFor = BACKUP_KEEP_POINT
+    Case "good"
+        KeepFor = BACKUP_KEEP_GOOD
     Case Else
         KeepFor = BACKUP_KEEP_MANUAL
     End Select
@@ -36,6 +40,7 @@ Private Function KindName(kind As String) As String
     Case "preupgrade": KindName = "перед обновлением"
     Case "premigration": KindName = "перед переносом"
     Case "point": KindName = "точка восстановления" & IIf(gBkLabel <> "", " " & gBkLabel, "")
+    Case "good": KindName = "последняя без ошибок"
     Case Else: KindName = "ручная"
     End Select
 End Function

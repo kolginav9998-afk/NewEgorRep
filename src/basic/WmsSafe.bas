@@ -509,6 +509,7 @@ Private Function KindText(kind As String, sLabel As String) As String
     Case "preupgrade": KindText = "перед обновлением"
     Case "premigration": KindText = "перед переносом"
     Case "point": KindText = "точка восстановления" & IIf(sLabel <> "", " " & sLabel, "")
+    Case "good": KindText = "последняя без ошибок"
     Case Else: KindText = kind
     End Select
 End Function

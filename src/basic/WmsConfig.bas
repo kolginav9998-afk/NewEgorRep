@@ -130,6 +130,8 @@ Public Const SC_SRC = 8
 Public Const SC_STYPE = 9
 Public Const SC_LAST = 9
 
+' 1.1: the code of the block «реестр «Наличие» отсортирован» (WmsGuard)
+Public Const BLK_REGISTRY = "REGISTRY_ORDER"
 Public Const EI_PREFIX = "ЕИ-"
 Public Const EI_DIGITS = 8
 Public Const MAX_SHEET_ROW = 1048575

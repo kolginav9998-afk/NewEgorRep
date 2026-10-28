@@ -158,6 +158,12 @@ Sub Analyze()
         End If
         SysPutNum(SK_SAVE_STAMP, ec)
     End If
+    ' 1.1: the registry «Наличие» in order (row n — ЕИ-n): a sorted one is never worked in — it is said in words and the posting is stopped
+    p = WmsGuard.RegistryProblem()
+    If p <> "" Then
+        SetBlocked(BLK_REGISTRY, p)
+        Exit Sub
+    End If
     ' written only when it changes: an unchanged book must not look modified after a start (LibreOffice would ask to save)
     If SysStr(SK_CORE_VERSION) <> WMS_CORE_VERSION Then SysPutStr(SK_CORE_VERSION, WMS_CORE_VERSION)
     ' PRIME 0.8: the book of 0.7 this one was upgraded from must not be worked in any more — its journal is only looked at

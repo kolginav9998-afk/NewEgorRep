@@ -462,6 +462,8 @@ Sub OnDocSave(Optional oEvent As Variant)
     ' D-041: rows hidden by a filter are unhidden for the save (LibreOffice would open a file with many hidden rows
     ' very slowly, WmsUi.FiltersStash); the filter conditions stay and are applied again after the save
     WmsUi.FiltersStash()
+    ' 1.1: a book whose registry is out of order does not replace the last good file unnoticed
+    WmsGuard.SaveGuard()
     ' 1.0: the file says «WMS не запущена» — opened with the macros off it must not show the last «Работа разрешена»
     WmsUi.UiSavedState(True)
 End Sub
@@ -473,6 +475,8 @@ Sub OnDocSaveDone(Optional oEvent As Variant)
     WmsUi.FiltersRestore()
     WmsUi.UiSavedState(False)
     WmsCare.SaveDone()
+    ' 1.1: a good save — a copy of it as «последняя без ошибок»
+    WmsGuard.SaveDoneGuard()
 End Sub
 
 ' ================================================================ explicit user actions (spec §21)

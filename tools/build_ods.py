@@ -1530,7 +1530,7 @@ FAST_HINT = ("Справочник метизов из «Наличия»: бо�
 # the sheets 1.0.2 adds to a book of 1.0.0 / 1.0.1
 SHEETS_102 = [ACTS, DAYREP, CATS, FAST]
 # the sheets 1.1 adds to a book of 1.0.x (filled in as the release grows)
-SHEETS_110 = []
+SHEETS_110 = ["Наличие по названию", "Остаток деталей", "Операции дня"]
 FAST_FIND_ROW = 1
 FAST_HEAD = 3
 
@@ -1615,6 +1615,128 @@ def categories_102(doc, sheets):
         v.ShowErrorMessage = False
         v.IgnoreBlankCells = True
         rng.Validation = v
+
+
+# 1.1: «Наличие по названию», «Остаток деталей» (WmsStockView) and «Операции дня» (WmsOps): sheets that only show — the storekeeper's own, not protected,
+# not journaled; the data is made again by the buttons and when the sheet is opened after a posting
+BYNAME = "Наличие по названию"
+PARTS = "Остаток деталей"
+OPSHEET = "Операции дня"
+BYNAME_HEADERS = ["ЕИ", "Наименование", "Артикул", "Ед.", "Остаток", "Место", "Категория", "Состояние", "Откуда", "Серийный / инв. №", "Дата прихода"]
+BYNAME_WIDTHS = [2800, 9000, 3200, 1500, 2200, 2600, 3000, 2400, 4500, 3200, 2600]
+PARTS_HEADERS = ["Артикул", "Наименование", "Остаток", "Ед.", "ЕИ с остатком", "Места", "Серийные номера", "Последний приход"]
+PARTS_WIDTHS = [3200, 9000, 2200, 1500, 2200, 5000, 7000, 2800]
+OPS_HEADERS = ["№ журнала", "Дата и время", "Что сделано", "ЕИ", "Наименование", "Количество", "Ед.", "Место / кому", "Документ", "Подробности"]
+OPS_WIDTHS = [1700, 3400, 6500, 2800, 7000, 2000, 1300, 5200, 3400, 9000]
+BYNAME_HINT = ("Наличие по названию: копия «Наличия», по одной строке на ЕИ (по умолчанию только с остатком), в порядке названия. Впишите слова в «Найти» — например "
+               "«болт м8 цинк» — и нажмите Enter: останутся ЕИ, у которых есть все слова (русские и латинские буквы М/M, х/x не различаются). Эту таблицу можно сортировать "
+               "и фильтровать как угодно: «Обновить» (и открытие листа после проведения) строит её заново. Сам реестр «Наличие» сортировать нельзя.")
+PARTS_HINT = ("Остаток деталей: одна строка на деталь (по артикулу): сколько осталось на всех её ЕИ, на скольких ЕИ, где лежит, какие серийные номера. Деталь — категория «Детали» "
+              "или приход как деталей. Сортируйте и фильтруйте как удобно; «Обновить» строит таблицу заново.")
+OPS_HINT = ("Операции дня: что делала WMS по журналу — простыми словами. «Показать» — операции за дату (пусто — сегодня; «по дату» — несколько дней), «Хвост журнала» — "
+            "операции, которых ещё нет в книге (перед «Восстановить» или «Отложить хвост журнала» видно, что это), «Вчера» — прошлый рабочий день. Журнал только читается.")
+SHEETS_110_VIEWS = [BYNAME, PARTS, OPSHEET]
+
+
+def build_view110(doc, sh, headers, widths, hint, find_label, zero_label, merge_find=True):
+    header(sh, headers, widths, height=1500)
+    sh.getRows().getByIndex(0).Height = 1500
+    n = len(headers)
+    for c in range(n):
+        sh.getCellByPosition(c, 3).setString(headers[c])
+        sh.getCellByPosition(c, 0).setString("")
+    hd = sh.getCellRangeByPosition(0, 3, n - 1, 3)
+    hd.CharWeight = 150
+    hd.IsTextWrapped = True
+    hd.VertJustify = 2
+    hd.CellBackColor = 0xE7E6E6
+    sh.getCellRangeByPosition(0, 0, n - 1, 0).CellBackColor = 0xFFFFFF
+    text = number_format(doc, "@", ("ru", "RU"))
+    sh.getCellByPosition(0, 1).setString(find_label)
+    sh.getCellByPosition(0, 1).CharWeight = 150
+    sh.getCellByPosition(1, 1).CellBackColor = INPUT_HEAD_10
+    sh.getCellByPosition(1, 1).NumberFormat = text
+    if merge_find:
+        merge(sh, 1, 1, 3, 1)
+    if zero_label:
+        sh.getCellByPosition(4, 1).setString(zero_label)
+        sh.getCellByPosition(4, 1).CharWeight = 150
+        sh.getCellByPosition(4, 1).HoriJustify = 3
+        sh.getCellByPosition(5, 1).setString("нет")
+        sh.getCellByPosition(5, 1).CellBackColor = INPUT_HEAD_10
+        sh.getCellByPosition(5, 1).NumberFormat = text
+    sh.getCellByPosition(0, 2).CharColor = MUTED
+    h = sh.getCellByPosition(n + 1, 0)
+    h.setString(hint)
+    h.IsTextWrapped = True
+    h.VertJustify = 1
+    h.CharHeight = 9
+    h.CharColor = MUTED
+    sh.getColumns().getByIndex(n).Width = 600
+    sh.getColumns().getByIndex(n + 1).Width = 12000
+    return sh
+
+
+def build_byname(doc, sh):
+    build_view110(doc, sh, BYNAME_HEADERS, BYNAME_WIDTHS, BYNAME_HINT, "Найти:", "С нулевым остатком (да/нет):")
+    sh.getCellRangeByPosition(4, 4, 4, 60000).HoriJustify = 3
+    sh.getCellRangeByPosition(10, 4, 10, 60000).NumberFormat = number_format(doc, "DD.MM.YYYY")
+    add_button(doc, sh, "btnByNameRefresh", "Обновить", "WmsStockView.BtnByNameRefresh", 150, 120, 3000, 650, bold=True, back=0xC6E0B4)
+    bind_event(sh.Events, "OnFocus", "WmsStockView.OnByNameFocus")
+    bind_event(sh.Events, "OnChange", "WmsStockView.OnByNameChange")
+
+
+def build_parts(doc, sh):
+    build_view110(doc, sh, PARTS_HEADERS, PARTS_WIDTHS, PARTS_HINT, "Найти:", "С нулевым остатком (да/нет):")
+    sh.getCellRangeByPosition(2, 4, 2, 60000).HoriJustify = 3
+    sh.getCellRangeByPosition(7, 4, 7, 60000).NumberFormat = number_format(doc, "DD.MM.YYYY")
+    add_button(doc, sh, "btnPartsRefresh", "Обновить", "WmsStockView.BtnPartsRefresh", 150, 120, 3000, 650, bold=True, back=0xC6E0B4)
+    bind_event(sh.Events, "OnFocus", "WmsStockView.OnPartsFocus")
+    bind_event(sh.Events, "OnChange", "WmsStockView.OnPartsChange")
+
+
+def build_ops(doc, sh):
+    build_view110(doc, sh, OPS_HEADERS, OPS_WIDTHS, OPS_HINT, "С даты:", None, merge_find=False)
+    sh.getCellByPosition(2, 1).setString("по дату:")
+    sh.getCellByPosition(2, 1).CharWeight = 150
+    sh.getCellByPosition(2, 1).HoriJustify = 3
+    sh.getCellByPosition(3, 1).CellBackColor = INPUT_HEAD_10
+    sh.getCellRangeByPosition(0, 4, 0, 6000).HoriJustify = 3
+    sh.getCellRangeByPosition(5, 4, 5, 6000).HoriJustify = 3
+    add_button(doc, sh, "btnOpsShow", "Показать", "WmsOps.BtnOpsShow", 150, 120, 2800, 650, bold=True, back=0xC6E0B4)
+    add_button(doc, sh, "btnOpsTail", "Хвост журнала", "WmsOps.BtnOpsTail", 3050, 120, 3400, 650, back=0xF4CCCC)
+    add_button(doc, sh, "btnOpsYest", "Вчера (рабочий день)", "WmsOps.BtnOpsYesterday", 6550, 120, 4200, 650, back=0xDDEBF7)
+    bind_event(sh.Events, "OnFocus", "WmsOps.OnOpsFocus")
+    bind_event(sh.Events, "OnChange", "WmsOps.OnOpsChange")
+
+
+def views_110(doc, sheets):
+    """1.1: the three sheets that only show, for a new book and an upgraded one: «Наличие по названию» and «Остаток деталей» after «Наличие», «Операции дня»
+    after «Отчёты»; nothing that exists is touched"""
+    names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+    if not sheets.hasByName(BYNAME):
+        sheets.insertNewByName(BYNAME, names.index(STOCK) + 1 if STOCK in names else len(names))
+        build_byname(doc, sheets.getByName(BYNAME))
+    names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+    if not sheets.hasByName(PARTS):
+        sheets.insertNewByName(PARTS, names.index(BYNAME) + 1)
+        build_parts(doc, sheets.getByName(PARTS))
+    names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+    if not sheets.hasByName(OPSHEET):
+        sheets.insertNewByName(OPSHEET, names.index(REPORTS) + 1 if REPORTS in names else len(names))
+        build_ops(doc, sheets.getByName(OPSHEET))
+
+
+# 1.1: the buttons of «Главная» that 1.1 adds (the free places of the third row of the system buttons)
+MAIN_BUTTONS_110 = [("btnDayOps", "Операции дня", "WmsOps.BtnOpsOpen", 10), ("btnWhatNow", "Что делать?", "WmsGuard.BtnWhatNow", 11)]
+
+
+def main_buttons_110(doc, sheets):
+    sh = sheets.getByName(MAIN)
+    for name, label, macro, i in MAIN_BUTTONS_110:
+        if not has_button(sh, name):
+            y = sh.getCellByPosition(0, 3 + i // 4).Position.Y
+            add_button(doc, sh, name, label, macro, MAIN_LEFT + 100 + (i % 4) * 5700, y + 50, 5640, 750, back=0xDDEBF7)
 
 
 # 1.0.2: the new buttons — only the missing ones are added (a new book and an upgraded one both)
@@ -2587,6 +2709,8 @@ def build(office, out_path, test=False, instance_id=None):
     docs_102(doc, sheets)
     categories_102(doc, sheets)
     buttons_102(doc, sheets)
+    views_110(doc, sheets)
+    main_buttons_110(doc, sheets)
     hotkeys_10(doc)
     build_service(doc, sheets)
     order = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]

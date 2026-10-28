@@ -3602,6 +3602,192 @@ def v45_upgrade_with_tail():
         s.close()
 
 
+def sort_registry(s):
+    """what the storekeeper did: Data → Sort ascending on the registry «Наличие» (an empty row among the EIs goes to the end)"""
+    import uno
+    from com.sun.star.table import TableSortField
+    from com.sun.star.beans import PropertyValue
+    sh = s.doc.Sheets.getByName("Наличие")
+    sh.unprotect("wms")
+    n = int(s.sysv("NEXT_EI"))
+    rng = sh.getCellRangeByPosition(0, 1, 10, n - 1)
+    f = TableSortField()
+    f.Field = 0
+    f.IsAscending = True
+    pv = PropertyValue()
+    pv.Name = "SortFields"
+    pv.Value = uno.Any("[]com.sun.star.table.TableSortField", (f,))
+    pv2 = PropertyValue()
+    pv2.Name = "ContainsHeader"
+    pv2.Value = False
+    rng.sort((pv, pv2))
+    sh.protect("wms")
+
+
+@case
+def v46_registry_guard():
+    """1.1: реестр «Наличие» отсортирован (в нумерации ЕИ есть пропуск — пустая строка — и она ушла в конец, строки ниже сдвинулись вверх): WMS
+    находит это формулой Calc, при сохранении сохраняет прежний файл как копию «последняя без ошибок» и говорит об этом, при запуске не даёт
+    проводить и объясняет, что делать; «Вернуться к копии» возвращает хорошее состояние, журнал доводит проведённое после него"""
+    c = "V46"
+    p = new_wms("v46")
+    s = ready(Session(p))
+    bdir = os.path.join(s.dir, "WMS_Backups")
+    try:
+        sh = s.doc.Sheets.getByName("Наличие")
+        sh.unprotect("wms")
+        sh.getCellRangeByPosition(0, 100, 10, 100).clearContents(1 + 2 + 4 + 16)
+        sh.protect("wms")
+        ok_before = (s.B("RegistryMisplaced", module="WmsGuard"), s.B("RegistryProblem", module="WmsGuard"))
+        s.doc.store()
+        seq0 = int(s.sysv("LAST_SEQ"))
+        r1 = issue(s, 1, "ЕИ-00000001", "1", "ива")
+        r2 = issue(s, 2, "ЕИ-00000150", "1", "ива")
+        seq1 = int(s.sysv("LAST_SEQ"))
+        q150 = s.stock(150)
+        R.add(c, "реестр с пропуском в нумерации (пустая строка ЕИ-100) — в порядке: формула считает 0, проблемы нет, запуск без блокировки",
+              ok_before == (0, "") and s.state().get("STATE") == "CLEAN" and r1.startswith("OK") and r2.startswith("OK") and seq1 == seq0 + 2, f"{ok_before}; {r1[:30]}")
+        sort_registry(s)
+        n = s.B("RegistryMisplaced", module="WmsGuard")
+        pr = s.B("RegistryProblem", module="WmsGuard")
+        R.add(c, "после сортировки формула находит сдвинутые строки (ЕИ-101 … выше на одну), проблема названа словами: «строка 101: «ЕИ-00000102» вместо "
+                 "ЕИ-00000101», «так бывает, если реестр отсортировали»", n > 90 and "вместо" in pr and "отсортировали" in pr, f"{n}; {pr[:240]}")
+        s.U("TestUiAuto", 1)
+        s.doc.store()
+        msg = s.U("TestUiLastMessage") or ""
+        goods = glob.glob(os.path.join(bdir, "*_good.ods"))
+        st = s.state()
+        blocked = s.B("PostingBlockReason", module="WmsCore")
+        R.add(c, "сохранение такой книги: предупреждение («последняя без ошибок», «Вернуться к копии»), прежний файл сохранён как копия _good, "
+                 "проведение остановлено (REGISTRY_ORDER)",
+              "ВНИМАНИЕ" in msg and "последняя без ошибок" in msg and len(goods) == 1 and st.get("BLOCK") == "REGISTRY_ORDER"
+              and str(blocked).startswith("BLOCKED:"), f"{msg[:160]}; {goods}; {st.get('BLOCK')}; {str(blocked)[:60]}")
+        s.doc.store()
+        goods2 = glob.glob(os.path.join(bdir, "*_good.ods"))
+        R.add(c, "второе сохранение той же книги копию не затирает (хорошая копия — одна, прежняя)", len(goods2) == 1 and goods2 == goods and os.path.getsize(goods[0]) > 0,
+              str(goods2))
+    finally:
+        s.kill()
+    s = ready(Session(p))
+    try:
+        s.B("ActionForceUnlock")
+        st = s.state()
+        sh = s.doc.Sheets.getByName("Главная")
+        panel = [sh.getCellByPosition(1, r).getString() for r in range(6, 12)]
+        R.add(c, "запуск сохранённой отсортированной книги: ЗАБЛОКИРОВАНО (REGISTRY_ORDER), «Причина» называет строку, «Что сделать» — «Вернуться к копии»",
+              st.get("BLOCK") == "REGISTRY_ORDER" and any("вместо" in x for x in panel) and any("Вернуться к копии" in x for x in panel), f"{st.get('STATE')}/{st.get('BLOCK')}; "
+              f"{[x[:70] for x in panel]}")
+        name = [x[0] for x in s.B("CopyList", module="WmsSafe")]
+        good = [x for x in name if x.endswith("_good.ods")]
+        url = s.doc.getURL()
+        old_doc = s.doc
+        rt = s.B("ReturnToCopy", good[0], False, module="WmsSafe") if good else "нет копии"
+        newd = find_doc(s, url, old_doc)
+        msg2 = ""
+        if newd is not None:
+            s.doc = newd
+            t0 = time.time()
+            while time.time() - t0 < 60:
+                msg2 = s.U("TestUiLastMessage") or ""
+                if "возвращена к копии" in msg2 or msg2.startswith("ERR"):
+                    break
+                time.sleep(0.5)
+        R.add(c, "«Вернуться к копии» → «последняя без ошибок»: реестр снова в порядке, два проведённых после копии списания довезены по журналу, "
+                 "остаток тот же, «работа разрешена»",
+              good and rt.startswith("OK") and newd is not None and "возвращена к копии" in msg2 and s.state().get("STATE") == "CLEAN"
+              and s.B("RegistryMisplaced", module="WmsGuard") == 0 and s.sysv("LAST_SEQ") == seq1 and s.stock(150) == q150,
+              f"{rt}; {msg2[:200]}; {s.state()}; {s.sysv('LAST_SEQ')} (было {seq1}); {s.stock(150)} (было {q150})")
+    finally:
+        s.close()
+
+
+@case
+def v47_views_ops_whatnow():
+    """1.1: «Наличие по названию» (копия реестра, по умолчанию с остатком, в порядке названия; слова «болт м8» находят «Болт M8x30» с латинскими буквами; список можно
+    сортировать — «Обновить» строит заново), «Остаток деталей» (одна строка на деталь по артикулу: остаток, число ЕИ, места, серийные номера), «Операции дня» (журнал
+    простыми словами: за дату и хвост журнала до «Восстановить»), «Что делать?» (совет под каждым красным пунктом самопроверки)"""
+    c = "V47"
+    p = new_wms("v47")
+    s = ready(Session(p))
+    try:
+        order(s, 1, "1", "Болт M8x30 DIN 933 оцинкованный", qty="100", art="B-830")
+        receive(s, 1, "100", place="5-1-1", doc="УПД-1")
+        order(s, 2, "2", "Краска белая 0,9 л", qty="10", art="КР-1")
+        receive(s, 2, "10", place="4-1-1", doc="УПД-2")
+        spc_line(s, 1, "Детали", "Шестерня Z-40", "100", art="GR-40", place="D-1")
+        s.click_spc("BtnSpcPost", 1)
+        spc_line(s, 2, "Детали", None, "50", unit=None, place=None, art="GR-40")
+        s.click_spc("BtnSpcPost", 2)
+        e_gear = [i for i in range(1, int(s.sysv("NEXT_EI"))) if s.doc.Sheets.getByName("Наличие").getCellByPosition(2, i).getString() == "GR-40"][0]
+        s.B("PropSet", f"ЕИ-{e_gear:08d}", "SN-7", "", "", module="WmsItem")
+        r1 = s.B("ByNameRefresh", "", False, module="WmsStockView")
+        sh = s.doc.Sheets.getByName("Наличие по названию")
+        rows = [list(r) for r in sh.getCellRangeByPosition(0, 4, 10, 4 + 300).getDataArray()]
+        names = [r[1] for r in rows if r[0]]
+        n_stock = sum(1 for i in range(1, int(s.sysv("NEXT_EI"))) if isinstance(s.doc.Sheets.getByName("Наличие").getCellByPosition(4, i).getValue(), float)
+                      and s.doc.Sheets.getByName("Наличие").getCellByPosition(4, i).getValue() > 0)
+        firsts = [x[0].lower().replace("ё", "е") for x in names]
+        R.add(c, "«Наличие по названию»: все ЕИ с остатком, в порядке названия (А…Я), заголовок и строка итога", r1 == f"OK:{n_stock}" and firsts == sorted(firsts)
+              and "ЕИ в списке:" in sh.getCellByPosition(0, 2).getString(), f"{r1}; {n_stock}; {names[:4]}")
+        r2 = s.B("ByNameRefresh", "болт м8", False, module="WmsStockView")
+        rows2 = [list(r) for r in sh.getCellRangeByPosition(0, 4, 10, 8).getDataArray()]
+        R.add(c, "поиск «болт м8» (русские буквы) находит и «Болт М8х30» книги, и «Болт M8x30» (латинские M и x): две строки", r2 == "OK:2"
+              and sorted(r[1] for r in rows2[:2]) == sorted(["Болт М8х30 оцинкованный", "Болт M8x30 DIN 933 оцинкованный"]), f"{r2}; {[r[1] for r in rows2[:3]]}")
+        s.B("ByNameRefresh", "", True, module="WmsStockView")
+        s.B("StockInfoRefresh", True, module="WmsItem")
+        r3 = s.B("PartsRefresh", "", False, module="WmsStockView")
+        pr = [list(r) for r in s.doc.Sheets.getByName("Остаток деталей").getCellRangeByPosition(0, 4, 7, 6).getDataArray()]
+        R.add(c, "«Остаток деталей»: одна строка на деталь GR-40 — остаток 150 (пополнение того же ЕИ), один ЕИ, место D-1, серийный номер SN-7", r3 == "OK:1" and pr[0][0] == "GR-40"
+              and pr[0][2] == 150 and pr[0][4] == 1 and pr[0][5] == "D-1" and "SN-7" in pr[0][6], f"{r3}; {pr[0]}")
+        # the user sorts the copy as he likes — the registry is the same; the next refresh builds the list again
+        sh.getCellRangeByPosition(0, 4, 10, 8).clearContents(1 + 2 + 4)
+        s.B("ByNameRefresh", "", False, module="WmsStockView")
+        n_again = len([r for r in sh.getCellRangeByPosition(0, 4, 0, 400).getDataArray() if r[0]])
+        R.add(c, "«Обновить» строит список заново после правок пользователя; реестр «Наличие» не тронут (самопроверка без ошибок)",
+              n_again == n_stock and s.B("RegistryMisplaced", module="WmsGuard") == 0 and s.B("ActionSelfCheck").startswith("САМОПРОВЕРКА WMS: ошибок 0"), f"{n_again}; {n_stock}")
+        # the operations of the day
+        r4 = s.B("OpsLoad", float(serial(0)), float(serial(0)), False, module="WmsOps")
+        osh = s.doc.Sheets.getByName("Операции дня")
+        orows = [list(r) for r in osh.getCellRangeByPosition(0, 4, 9, 4 + 12).getDataArray() if r[0] != ""]
+        what = [r[2] for r in orows]
+        R.add(c, "«Операции дня»: операции сегодняшнего дня простыми словами — приходы по заказам, «Иной приход — детали» и его пополнение, с ЕИ, названием, количеством и местом",
+              r4 == f"OK:{len(orows)}" and len(orows) == 5 and what[0] == "Приход по заказу" and "Иной приход — детали" in what[2] and "Иной приход — детали (пополнение ЕИ)" in what[3]
+              and what[4].startswith("Свойства ЕИ")
+              and orows[0][4] == "Болт M8x30 DIN 933 оцинкованный" and orows[0][5] == 100 and orows[0][7] == "5-1-1", f"{r4}; {what}; {orows[0]}")
+        # the tail of the journal (the book is behind): the morning copy and the afternoon in the journal only
+        s.doc.store()
+        order(s, 3, "3", "Скотч", qty="40", art="A-3")
+        receive(s, 3, "40", place="4-1-4", doc="УПД-3")
+        spc_line(s, 3, "Офис", "Стол", "2", place="A-1")
+        s.click_spc("BtnSpcPost", 3)
+    finally:
+        s.kill()
+    s = ready(Session(p))
+    try:
+        s.B("ActionForceUnlock")
+        st = s.state()
+        r5 = s.B("OpsShowTail", module="WmsOps")
+        osh = s.doc.Sheets.getByName("Операции дня")
+        trows = [list(r) for r in osh.getCellRangeByPosition(0, 4, 9, 8).getDataArray() if r[0] != ""]
+        stat = osh.getCellByPosition(0, 2).getString()
+        R.add(c, "хвост журнала в заблокированной книге (TAIL): 2 операции — приход по заказу (ЕИ-204) и «Иной приход — офис»; строка итога объясняет, что это сделает «Восстановить»",
+              st.get("BLOCK") == "TAIL" and r5 == "OK:2" and trows[0][2] == "Приход по заказу" and trows[0][3] == "ЕИ-00000204" and "Иной приход — офис" in trows[1][2]
+              and "Восстановить" in stat,
+              f"{st.get('BLOCK')}; {r5}; {[x[:5] for x in trows]}; {stat[:100]}")
+        s.B("ActionRecover")
+        # «Что делать?»: a registry that is out of order is named, with what to do (a gap in the numbering — an empty row — goes to the end)
+        stk = s.doc.Sheets.getByName("Наличие")
+        stk.unprotect("wms")
+        stk.getCellRangeByPosition(0, 100, 10, 100).clearContents(1 + 2 + 4 + 16)
+        stk.protect("wms")
+        sort_registry(s)
+        txt = s.B("WhatNowText", module="WmsGuard")
+        R.add(c, "«Что делать?» на отсортированном реестре: красный пункт «реестр «Наличие»» и под ним «→ … закройте её БЕЗ сохранения … «Вернуться к копии»»; счёт ошибок",
+              "реестр «Наличие»" in txt and "→" in txt and "БЕЗ сохранения" in txt and "Самопроверка: ошибок" in txt, txt[:500])
+    finally:
+        s.close()
+
+
 # ================================================================ runner
 
 def main():

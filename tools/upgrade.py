@@ -345,10 +345,12 @@ def step_08(doc, leg, from_text, done):
     B.docs_102(doc, sheets)
     B.categories_102(doc, sheets)
     B.buttons_102(doc, sheets)
+    B.views_110(doc, sheets)
     B.hotkeys_10(doc)
     B.rebuild_main(doc, sheets.getByName(B.MAIN))
     # «Главная» of this release is built anew above: its «?» (П6) is put back
     B.help_buttons_10(doc, sheets)
+    B.main_buttons_110(doc, sheets)
     done.append(f"страницы «{B.DASH}», «{B.FIND}», «{B.MAP}» и лист «{B.TOPO}» (вставьте туда схему склада); «{B.MAIN}» этого выпуска (кнопки к страницам)")
     done.append(f"1.0: справочники «{B.SUPPLIERS}» и «{B.GOODS}» (пополняются кнопками из «{B.ORDERS}» и «{B.STOCK}»), страницы «{B.SUPPLY}» и «{B.PRINT}»")
     done.append(f"1.0: справочник «{B.KITS}» (состав комплектов: «Собрать комплект…», «Выдать комплект…»)")
@@ -440,6 +442,11 @@ def step_102(doc, done):
 
 def step_110(doc, done):
     """1.0.x → 1.1.0: the sheets and the buttons of 1.1 (filled in as the release grows); no cell of the data is written"""
+    sheets = doc.Sheets
+    B.views_110(doc, sheets)
+    B.main_buttons_110(doc, sheets)
+    done.append(f"1.1: листы {', '.join('«' + n + '»' for n in B.SHEETS_110_VIEWS)} (только просмотр: «Наличие по названию» и «Остаток деталей» — копии «Наличия», "
+                "которые можно сортировать; «Операции дня» — журнал простыми словами) и кнопки «Операции дня», «Что делать?» на «Главной»; данные не менялись")
     return []
 
 
