@@ -3452,6 +3452,156 @@ def v43_upgrade_101_102():
         s.close()
 
 
+def spc_line(s, r, typ, name=None, qty=None, unit="шт", place="A-1", art=None, who=None):
+    """one row of «Иной приход» typed like a user: the type, the article (a known part fills its card), then the rest"""
+    s.special_input(r, B=typ, E=art, D=name, F=qty, G=unit, H=TODAY, I=place, K=who)
+
+
+def day_snapshot(s):
+    """what the book holds after the operations: the registry of the EIs, the counters, the rows of «Иной приход»"""
+    n = int(s.sysv("NEXT_EI"))
+    stk = [tuple(r[:11]) for r in s.doc.Sheets.getByName("Наличие").getCellRangeByPosition(0, 1, 10, n).getDataArray()]
+    keys = ("LAST_SEQ", "NEXT_EI", "NEXT_NO", "NEXT_RET", "NEXT_SPL", "NEXT_OFF", "NEXT_PROD", "NEXT_DET", "NEXT_OLD", "NEXT_OTH", "NEXT_ADJ", "NEXT_CAR")
+    return stk, [s.sysv(k) for k in keys], [tuple(r[:16]) for r in s.doc.Sheets.getByName("Иной приход").getCellRangeByPosition(0, 1, 15, 12).getDataArray()]
+
+
+def morning_and_day(s):
+    """the morning (an order received, an issue, a part received) saved as the copy, then the day: orders, «Иной приход» (new rows and the
+    part added to by its article), a return, a vehicle, an act — everything only in the journal. (seq of the copy, seq at the end, the answers, the snapshot)"""
+    order(s, 1, "1", "Краска белая", qty="100", art="КР-1")
+    receive(s, 1, "100", place="4-1-1", doc="УПД-1")
+    e1 = ords(s, 1)[21]
+    put(s, "Выдачи", 1, L=e1, E="2", H=serial(), I="ива")
+    i1 = s.I("IssuePostRow", 1)
+    spc_line(s, 1, "Детали", "Шестерня Z-40", "100", art="GR-40", place="D-1")
+    sp0 = s.click_spc("BtnSpcPost", 1)
+    s.doc.store()
+    seq0 = int(s.sysv("LAST_SEQ"))
+    res = [i1, sp0]
+    for r, name, q, pl in ((2, "Кабель ВВГ", "30", "4-1-2"), (3, "Лампа", "12", "4-1-3"), (4, "Скотч", "40", "4-1-4")):
+        order(s, r, str(r), name, qty=q, art=f"A-{r}")
+        res.append(receive(s, r, q, place=pl, doc=f"УПД-{r}"))
+    spc_line(s, 2, "Офис", "Стол", "2", place="A-1")
+    res.append(s.click_spc("BtnSpcPost", 2))
+    spc_line(s, 3, "Производство", "Корпус", "3", place="P-1", who="Цех 2")
+    res.append(s.click_spc("BtnSpcPost", 3))
+    spc_line(s, 4, "Детали", "Втулка", "20", art="BT-20", place="D-2")
+    res.append(s.click_spc("BtnSpcPost", 4))
+    spc_line(s, 5, "Детали", None, "50", unit=None, place=None, art="GR-40")
+    res.append(s.click_spc("BtnSpcPost", 5))
+    spc_line(s, 6, "Детали", None, "5", unit=None, place=None, art="BT-20")
+    res.append(s.click_spc("BtnSpcPost", 6))
+    put(s, "Возврат", 1, B="1", F="1", H=serial(), I="ива")
+    res.append(s.B("ReturnPostRow", 1, module="WmsReturn"))
+    res.append(s.B("CarArrive", "Газель А123ВС", "Петрович", module="WmsCar"))
+    s.goto("Выдачи", "$A$2")
+    res.append(s.B("ActFromSelection", module="WmsDocs"))
+    s.B("DcDocClose", module="WmsDocs")
+    return seq0, int(s.sysv("LAST_SEQ")), res, day_snapshot(s)
+
+
+@case
+def v44_tail_after_return_to_copy():
+    """1.1: копия книги сохранена утром, днём проведены операции всех видов (приходы по заказам, «Иной приход» — новые строки и пополнение
+    детали по известному артикулу, возврат, визит машины, акт); книга снова в состоянии копии, журнал впереди — «Восстановить» довозит все
+    операции с теми же номерами ЕИ (в 1.0.2 оно останавливалось на пополнении: в копии нет строки с её «Внутренним кодом»)"""
+    c = "V44"
+    p = new_wms("v44")
+    s = ready(Session(p))
+    try:
+        seq0, seq1, res, snap_a = morning_and_day(s)
+        R.add(c, "день проведён после копии: 3 прихода по заказам, 5 строк «Иного прихода» (3 новых и 2 пополнения детали), возврат, визит машины, акт",
+              all(str(x).startswith("OK") for x in res) and seq1 - seq0 >= 11, f"{seq0} → {seq1}; {[str(x)[:30] for x in res]}")
+    finally:
+        s.kill()
+    s = ready(Session(p))
+    try:
+        unl = s.B("ActionForceUnlock")
+        st0 = s.state()
+        rec = s.B("ActionRecover")
+        st1 = s.state()
+        snap_b = day_snapshot(s)
+        R.add(c, "книга в состоянии утренней копии: «хвост» журнала (TAIL); «Восстановить» довозит все операции дня",
+              st0.get("BLOCK") == "TAIL" and f"восстановлено операций: {seq1 - seq0}" in rec and "ОСТАНОВКА" not in rec and st1.get("STATE") == "CLEAN",
+              f"{st0.get('STATE')}/{st0.get('BLOCK')}; {rec[:260]}; {st1.get('STATE')}")
+        R.add(c, "после «Восстановить» реестр «Наличие» (все ЕИ с теми же номерами), счётчики и строки «Иного прихода» — как были до сбоя",
+              snap_a[0] == snap_b[0] and snap_a[1] == snap_b[1] and snap_a[2] == snap_b[2],
+              f"{[(i, x, y) for i, (x, y) in enumerate(zip(snap_a[0], snap_b[0])) if x != y][:2]}; {snap_a[1]} / {snap_b[1]}; "
+              f"{[(i, x, y) for i, (x, y) in enumerate(zip(snap_a[2], snap_b[2])) if x != y][:2]}")
+        sc = s.B("ActionSelfCheck")
+        P, inf, _ = s.adjcheck(0)
+        R.add(c, "самопроверка — без ошибок; оракул журнала (независимый повтор всех операций) — без расхождений",
+              sc.startswith("САМОПРОВЕРКА WMS: ошибок 0") and not P, f"{sc[:200]}; {P[:3]}")
+    finally:
+        s.close()
+
+
+@case
+def v45_upgrade_with_tail():
+    """1.1, путь пользователя: рабочая книга 1.0.2 возвращена к утренней копии (журнал впереди на операции дня — те, что 1.0.2 довезти не
+    умела), мастер обновляет её до 1.1: проверка принимает хвост (предупреждение, не стоп), сборка пробно довозит хвост на рабочей копии,
+    «сделать рабочей» довозит его в новой книге — те же номера ЕИ, самопроверка без ошибок; старая книга и журнал побайтно те же"""
+    import run_prime
+    import subprocess
+    from harness import git_sources
+    c = "V45"
+    src = os.path.join(OUT, "src_102")
+    why = "" if os.path.isdir(os.path.join(src, "tools")) else git_sources("86607f3", src)
+    if why:
+        R.add(c, "исходники выпуска 1.0.2", "SKIP", why)
+        return
+    d = os.path.join(OUT, "cases", "v45 Склад")
+    shutil.rmtree(d, ignore_errors=True)
+    work = os.path.join(d, "WMS_RELEASE_1.0.2", "WMS_WORK")
+    os.makedirs(work)
+    p = os.path.join(work, "WMS_PROD.ods")
+    b = subprocess.run([sys.executable, os.path.join(src, "tools", "build_ods.py"), p, "--test"], capture_output=True, text=True, timeout=900)
+    if b.returncode != 0 or not os.path.exists(p):
+        R.add(c, "книга 1.0.2 собрана исходниками 1.0.2", False, (b.stdout + b.stderr)[-300:])
+        return
+    s = ready(Session(p))
+    try:
+        core0 = s.sysv("CORE_VERSION")
+        seq0, seq1, res, snap_a = morning_and_day(s)
+        ok = all(str(x).startswith("OK") for x in res)
+    finally:
+        s.kill()
+    s = ready(Session(p))
+    try:
+        s.B("ActionForceUnlock")
+        st0 = s.state()
+    finally:
+        s.close()
+    R.add(c, "книга 1.0.2 в состоянии утренней копии, журнал впереди (TAIL)", core0 == "1.0.2" and ok and st0.get("BLOCK") == "TAIL" and seq1 > seq0,
+          f"{core0}; {seq0} → {seq1}; {st0.get('BLOCK')}")
+    h0 = run_prime.sha(p)
+    j0 = {f: run_prime.sha(f) for f in glob.glob(os.path.join(work, "WMS_Journal", "*.csv"))}
+    rc0, o0 = run_prime.upgrade("check", p)
+    new = os.path.join(d, "WMS_RELEASE_1.1.0", "WMS_WORK")
+    rc1, o1 = run_prime.upgrade("build", p, "--to", new)
+    rc2, o2 = run_prime.upgrade("promote", "--to", new)
+    rep = open(os.path.join(new, "UPGRADE_REPORT.md"), encoding="utf-8").read() if os.path.exists(os.path.join(new, "UPGRADE_REPORT.md")) else ""
+    R.add(c, "мастер: «проверить» принимает хвост журнала (предупреждение), «собрать и сверить» — 0 расхождений и пробное довезение, «сделать рабочей»; "
+             "старая книга и журнал побайтно те же",
+          rc0 == 0 and "довезёт" in o0 and rc1 == 0 and rc2 == 0 and "расхождений: 0" in rep and "пробного довезения" in rep and run_prime.sha(p) == h0
+          and {f: run_prime.sha(f) for f in glob.glob(os.path.join(work, "WMS_Journal", "*.csv"))} == j0,
+          f"{rc0} {rc1} {rc2}; {o0[-300:]}; {o1[-300:]}; {o2[-300:]}")
+    nb = os.path.join(new, "WMS_PROD.ods")
+    s = ready(Session(nb))
+    try:
+        snap_b = day_snapshot(s)
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "новая книга: «работа разрешена», все операции дня на месте — реестр «Наличие» (те же номера ЕИ), счётчики, строки «Иного прихода»; "
+                 "самопроверка без ошибок",
+              s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == run_prime.VERS["WMS_CORE_VERSION"] and snap_a[0] == snap_b[0]
+              and snap_a[1] == snap_b[1] and snap_a[2] == snap_b[2] and sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"),
+              f"{s.state()}; {[(i, x, y) for i, (x, y) in enumerate(zip(snap_a[0], snap_b[0])) if x != y][:2]}; {snap_a[1]} / {snap_b[1]}; {sc[:120]}")
+        P, inf, _ = s.adjcheck(0)
+        R.add(c, "оракул (журнал воспроизведён независимо): книга 1.0.2 с хвостом, обновлённая до 1.1", not P, f"{inf.get('ops')} операций; {P[:4]}")
+    finally:
+        s.close()
+
+
 # ================================================================ runner
 
 def main():

@@ -57,7 +57,7 @@ import build_ods as B  # noqa: E402
 SCHEMA_06 = "WMS-SYS-3"
 SCHEMA_07 = "WMS-SYS-4"
 # 1.0.1, 1.0.2: the cores of the schema of this release whose books are carried over too (the same data, the modules and the views new)
-CORES_SAME_SCHEMA = ("1.0.0", "1.0.1")
+CORES_SAME_SCHEMA = ("1.0.0", "1.0.1", "1.0.2")
 OLD_SCHEMA = SCHEMA_06                 # the in-place upgrade (release 0.7 called it so)
 JOURNAL_DIR = "WMS_Journal"
 BACKUP_DIR = "WMS_Backups"
@@ -397,10 +397,13 @@ def upgrade_doc(doc, test_book, schema, leg, from_text):
     replace_modules(doc, test_book, done)
     new = []
     if schema == B.SCHEMA:
-        # 1.0.0 / 1.0.1 → this release: the data and the sheets stay, the modules (above) and the views are new
-        if sys_values(doc).get("CORE_VERSION") == "1.0.0":
+        # 1.0.0 / 1.0.1 / 1.0.2 → this release: the data and the sheets stay, the modules (above) and the views are new
+        core = sys_values(doc).get("CORE_VERSION")
+        if core == "1.0.0":
             new += step_101(doc, done)
-        new += step_102(doc, done)
+        if core in ("1.0.0", "1.0.1"):
+            new += step_102(doc, done)
+        new += step_110(doc, done)
     else:
         if schema == SCHEMA_06:
             new += step_07(doc, done)
@@ -432,6 +435,11 @@ def step_102(doc, done):
     B.buttons_102(doc, sheets)
     done.append(f"1.0.2: листы {', '.join('«' + n + '»' for n in B.SHEETS_102)} (ваши, без защиты, в журнал не пишут), выпадающий список категорий на "
                 f"«{B.ORDERS}» и «{B.SPECIAL}», колонка «В упаковке, шт» в «{B.GOODS}», кнопки «Серийные…» и «Акт…»; данные не менялись")
+    return []
+
+
+def step_110(doc, done):
+    """1.0.x → 1.1.0: the sheets and the buttons of 1.1 (filled in as the release grows); no cell of the data is written"""
     return []
 
 
@@ -472,6 +480,15 @@ def open_wms(o, path):
         o.basic(doc, "WmsCore", "ActionRegisterHere", False)
         st = o.wms_state(doc)
     return doc, st
+
+
+def replay_tail(o, doc, tail):
+    """«Восстановить» in an open book that is behind its journal by `tail` operations: the text of the answer, or a RuntimeError when not
+    every operation went in (the book is not saved by this function)"""
+    rec = str(o.basic(doc, "WmsCore", "ActionRecover") or "")
+    if f"восстановлено операций: {tail}" not in rec or "ОСТАНОВКА" in rec:
+        raise RuntimeError(f"операции журнала после книги ({tail}) довезти не удалось: {rec[:400]}")
+    return rec
 
 
 def close_doc(o, doc, save):
@@ -560,9 +577,14 @@ def check_source(o, book):
             stops.append(f"в книге незавершённая операция (маркер {facts['tx']}) — откройте книгу в своей версии WMS: запуск её откатит")
         jmax = journal_max_seq(jdir, facts["instance"] or "")
         facts["journal_max"] = jmax
+        facts["tail"] = 0
         if jmax > facts["last_seq"]:
-            stops.append(f"в журнале {jmax - facts['last_seq']} операций, которых нет в книге (seq {facts['last_seq'] + 1}..{jmax}) — откройте книгу "
-                         "в своей версии WMS и нажмите «Восстановить»")
+            # 1.1: a book that is behind its journal (it was returned to a copy, or not saved) is carried over as it is: the new WMS brings the
+            # operations after it by the journal — first on a working copy at the build (the build is refused when it cannot), then in the
+            # new book at «СДЕЛАТЬ РАБОЧЕЙ»; the old book and its journal are only read
+            facts["tail"] = jmax - facts["last_seq"]
+            warns.append(f"в журнале {facts['tail']} операций, которых нет в книге (seq {facts['last_seq'] + 1}..{jmax}): новая WMS довезёт их по "
+                         "журналу с теми же номерами ЕИ — сначала пробно на копии при сборке, потом в новой книге; старая книга не меняется")
         import journal_oracle
         entries, jinfo = journal_oracle.read_journal(jdir)
         foreign = sum(1 for e in entries if e["inst"] != facts["instance"])
@@ -643,7 +665,9 @@ def compare_books(old, new, leg_expected, from10=False):
     if missing:
         P.append("в новой книге нет листов: " + ", ".join(missing))
     extra = [n for n in new_names if n not in old_names]
-    want_extra = list(B.SHEETS_102) if from10 else [B.LEG, B.LEGREP, B.PACK] + B.VIEW_SHEETS + B.SHEETS_10 + list(B.SHEETS_102) \
+    # the sheets of 1.0.2 and 1.1 that the old book does not have yet (a book of 1.0.2 has those of 1.0.2 already)
+    new_sheets = [n for n in list(B.SHEETS_102) + list(B.SHEETS_110) if n not in old_names]
+    want_extra = new_sheets if from10 else [B.LEG, B.LEGREP, B.PACK] + B.VIEW_SHEETS + B.SHEETS_10 + new_sheets \
         + [x for x in (B.CARS, B.CAR) if x in extra]
     if sorted(extra) != sorted(want_extra):
         P.append("в новой книге лишние листы: " + ", ".join(extra))
@@ -713,10 +737,11 @@ def col_name(c):
     return s
 
 
-def oracle_problems(doc, jdir, initial):
-    """the independent replay of the journal against the book (tests/adjust_oracle.py of this release)"""
+def oracle_problems(doc, jdir, initial, tail=0):
+    """the independent replay of the journal against the book (tests/adjust_oracle.py of this release); tail — the operations of the journal
+    after the last one of the book (a book returned to a copy)"""
     import adjust_oracle
-    P, info, _ = adjust_oracle.check(doc, jdir, initial, 0, legacy_mn_empty=False)
+    P, info, _ = adjust_oracle.check(doc, jdir, initial, tail, legacy_mn_empty=False)
     return P, info
 
 
@@ -891,7 +916,7 @@ def cmd_build(book, to, rehearsal=False, out=print):
         newd = o.load(target, macros=0, hidden=True, ReadOnly=True)
         try:
             P, stat = compare_books(oldd, newd, leg, from10=bool(facts.get("from10")))
-            P0, inf0 = oracle_problems(oldd, os.path.join(os.path.dirname(book), JOURNAL_DIR), {}) if facts.get("mode") != "TEST" else ([], {})
+            P0, inf0 = oracle_problems(oldd, os.path.join(os.path.dirname(book), JOURNAL_DIR), {}, facts.get("tail", 0)) if facts.get("mode") != "TEST" else ([], {})
         finally:
             oldd.close(True)
             newd.close(True)
@@ -908,6 +933,11 @@ def cmd_build(book, to, rehearsal=False, out=print):
         shutil.copy2(target, vbook)
         copy_journal(jdst, os.path.join(vdir, JOURNAL_DIR))
         doc, stl = open_wms(o, vbook)
+        tail, replay = facts.get("tail", 0), ""
+        if tail and doc is not None and "BLOCK=TAIL" in stl:
+            # the tail of the journal brought into the working copy — the build is accepted only when every operation goes in
+            replay = replay_tail(o, doc, tail)
+            stl = o.wms_state(doc)
         if doc is None or "STATE=CLEAN" not in stl:
             raise RuntimeError(f"WMS {B.core_versions()['WMS_PRODUCT_VERSION']} не открыла новую книгу в рабочем состоянии: {stl[:300]}")
         try:
@@ -919,7 +949,8 @@ def cmd_build(book, to, rehearsal=False, out=print):
             close_doc(o, doc, save=False)
         shutil.rmtree(vdir, ignore_errors=True)
         new_oracle = [x for x in P1 if x not in P0]
-        rep += [f"## 5. WMS {B.core_versions()['WMS_PRODUCT_VERSION']} на новой книге", "", f"- запуск: работа разрешена", f"- самопроверка: {sc.splitlines()[0] if sc else '—'}",
+        rep += [f"## 5. WMS {B.core_versions()['WMS_PRODUCT_VERSION']} на новой книге", "", f"- запуск: работа разрешена"
+                + (f" (после пробного довезения хвоста журнала на копии: {replay})" if tail else ""), f"- самопроверка: {sc.splitlines()[0] if sc else '—'}",
                 f"- «остаток = сумма движений»: {'все ЕИ сходятся' if not bc else bc}", f"- сверка переноса: {lr}",
                 f"- независимый оракул журнала: в старой книге расхождений {len(P0)}, в новой {len(P1)}, новых {len(new_oracle)} "
                 f"(операций {inf1.get('ops', '—')})"] + [f"  - уже было в старой книге: {x}" for x in P0[:10]] + [""]
@@ -934,7 +965,7 @@ def cmd_build(book, to, rehearsal=False, out=print):
             raise RuntimeError("старая книга или её журнал изменились во время обновления — в ней работали? Обновление не принято")
         rh = sha256(target)
         state.d["build"] = dict(ok=True, time=now(), source_hash=facts["book_hash"], source_journal=facts["journal_hashes"], result=target,
-                                result_hash=rh, last_seq=facts["last_seq"], instance=facts["instance"], rehearsal=rehearsal)
+                                result_hash=rh, last_seq=facts["last_seq"], instance=facts["instance"], rehearsal=rehearsal, tail=facts.get("tail", 0))
         state.save()
         secs = round(time.time() - t0)
         rep += ["## Итог", "", f"**{'РЕПЕТИЦИЯ ПРОШЛА' if rehearsal else 'НОВАЯ КНИГА ГОТОВА'}** ({now()}, {secs} с). Старая книга не изменена "
@@ -1001,7 +1032,18 @@ def cmd_promote(to, out=print):
     o = Office(f"upgprom{os.getpid()}", prof)
     try:
         doc, stl = open_wms(o, target)
+        if doc is not None and b.get("tail") and "BLOCK=TAIL" in stl:
+            # a book carried over with the tail of its journal (it was returned to a copy): the operations come in now, in the new book
+            try:
+                replay_tail(o, doc, b["tail"])
+            except RuntimeError as e:
+                close_doc(o, doc, save=False)
+                out(f"ОШИБКА: {e}")
+                return 2
+            stl = o.wms_state(doc)
         if doc is None or "STATE=CLEAN" not in stl:
+            if doc is not None:
+                close_doc(o, doc, save=False)
             out(f"ОШИБКА: новая книга не открылась в рабочем состоянии: {stl[:300]}")
             return 2
         sc = o.basic(doc, "WmsCore", "ActionSelfCheck") or ""

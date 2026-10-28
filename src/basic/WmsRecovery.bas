@@ -239,6 +239,11 @@ Private Function ColLetter(c As Integer) As String
     End If
 End Function
 
+' 1.1: a cell of «Иной приход» that the preview of a row writes (N «Внутренний код», O «Было», P «Стало»): empty in a book saved before the row was typed
+Private Function ReplayPreviewCell(sSheet As String, c As Integer) As Boolean
+    ReplayPreviewCell = (sSheet = SH_SPECIAL And (c = XC_EI Or c = XC_BEFORE Or c = XC_AFTER))
+End Function
+
 ' APPLY — the book is in the state before the operation (inputs may be missing and are restored);
 ' ALREADY — every write is already in the book; otherwise CONFLICT:<details>
 Private Function ClassifyReplay() As String
@@ -251,7 +256,10 @@ Private Function ClassifyReplay() As String
             If gPW_Kind(i) = "V" And SameEnc(gPW_Before(i), gPW_After(i)) Then
                 ' a write that leaves the cell as it was tells nothing about whether the operation ran (e.g. a preview
                 ' already showing the registry value); only a third value is a conflict
-                If Not (SameEnc(cur, gPW_After(i)) Or (gPW_Restorable(i) And cur = "E")) Then
+                ' 1.1: the cells that «Иной приход» shows by itself while a row is typed (the code, the balance before and after of a part
+                ' that is added to) are in the journal as non-restorable writes that leave the cell as it was; a book of the morning,
+                ' saved before the row was typed, has them empty: the operation restores them (journals of 1.0.x hold this flag as 0)
+                If Not (SameEnc(cur, gPW_After(i)) Or (cur = "E" And (gPW_Restorable(i) Or ReplayPreviewCell(gPW_Sheet(i), CInt(gPW_Col(i)))))) Then
                     ClassifyReplay = "CONFLICT:" & gPW_Sheet(i) & "!" & ColLetter(CInt(gPW_Col(i))) & (gPW_Row(i) + 1) _
                         & " — в книге «" & Left(cur, 40) & "», ожидалось «" & Left(gPW_After(i), 40) & "»"
                     Exit Function
@@ -259,7 +267,7 @@ Private Function ClassifyReplay() As String
             ElseIf gPW_Kind(i) = "V" Then
                 If SameEnc(cur, gPW_After(i)) Then
                     nAlready = nAlready + 1
-                ElseIf SameEnc(cur, gPW_Before(i)) Or (gPW_Restorable(i) And cur = "E") Then
+                ElseIf SameEnc(cur, gPW_Before(i)) Or (cur = "E" And (gPW_Restorable(i) Or ReplayPreviewCell(gPW_Sheet(i), CInt(gPW_Col(i))))) Then
                     nApply = nApply + 1
                 Else
                     ClassifyReplay = "CONFLICT:" & gPW_Sheet(i) & "!" & ColLetter(CInt(gPW_Col(i))) & (gPW_Row(i) + 1) _

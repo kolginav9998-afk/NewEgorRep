@@ -781,13 +781,15 @@ Private Sub PlanRowValues(r As Long, n As Long, evId As String, canon As String,
     For c = XC_WHO To XC_MARK
         If sh.getCellByPosition(c, r).getType() <> com.sun.star.table.CellContentType.EMPTY Then PlanInput(SH_SPECIAL, r, c)
     Next c
-    PlanSetValue(SH_SPECIAL, r, XC_EI, canon, False)
+    ' 1.1: the code, «Было» and «Стало» are shown by the preview of the row (a part that is added to has them before the operation): empty in a book
+    ' saved earlier, so the replay of the journal may restore them
+    PlanSetValue(SH_SPECIAL, r, XC_EI, canon, True)
     If bHasBefore Then
-        PlanSetValue(SH_SPECIAL, r, XC_BEFORE, before, False)
+        PlanSetValue(SH_SPECIAL, r, XC_BEFORE, before, True)
     ElseIf sh.getCellByPosition(XC_BEFORE, r).getType() <> com.sun.star.table.CellContentType.EMPTY Then
-        PlanSetValue(SH_SPECIAL, r, XC_BEFORE, "", False)
+        PlanSetValue(SH_SPECIAL, r, XC_BEFORE, "", True)
     End If
-    PlanSetValue(SH_SPECIAL, r, XC_AFTER, after, False)
+    PlanSetValue(SH_SPECIAL, r, XC_AFTER, after, True)
     PlanSetValue(SH_SPECIAL, r, XC_STATUS, status, False)
     PlanDerived(SH_SPECIAL, r, XC_CTL, ctl)
 End Sub

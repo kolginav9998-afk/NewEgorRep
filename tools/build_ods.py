@@ -1529,6 +1529,8 @@ FAST_HINT = ("Справочник метизов из «Наличия»: бо�
              "Список обновляется при открытии листа и кнопкой «Обновить». Только просмотр: ничего не проводится.")
 # the sheets 1.0.2 adds to a book of 1.0.0 / 1.0.1
 SHEETS_102 = [ACTS, DAYREP, CATS, FAST]
+# the sheets 1.1 adds to a book of 1.0.x (filled in as the release grows)
+SHEETS_110 = []
 FAST_FIND_ROW = 1
 FAST_HEAD = 3
 
