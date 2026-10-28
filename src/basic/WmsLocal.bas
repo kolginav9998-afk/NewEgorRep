@@ -5,9 +5,9 @@
 Option Explicit
 
 ' how many places of each kind WMS has, by design (a place that is not in this list is shown as new): the version of Python and the free space (a command of the
-' system, the answer goes to a file in the folder of WMS), the shortcut on the desktop, the opening of the PDF of the labels by the program of the computer
+' system, the answer goes to a file in the folder of WMS), the shortcut on the desktop, the opening of a photo or of the folder of the documents by the program of the computer
 Private Const EXPECT_SHELL = 3
-Private Const EXPECT_EXEC = 1
+Private Const EXPECT_EXEC = 2
 Private Const EXPECT_WSH = 1
 Private Const EXPECT_FSO = 1
 
@@ -177,7 +177,7 @@ Function LocalityReport() As String
     For i = 0 To 3
         If nSys(i) <> nm(i) Then extra = extra & "    " & SysName(i) & ": " & nSys(i) & " (по замыслу " & nm(i) & ")" & Chr(10)
     Next i
-    s = s & LcLine(extra = "", "запуск программ этого компьютера", IIf(extra = "", "только по замыслу: версия Python и свободное место (ответ — в файл в папке WMS), ярлык на рабочий стол, открытие PDF этикеток вашей программой", _
+    s = s & LcLine(extra = "", "запуск программ этого компьютера", IIf(extra = "", "только по замыслу: версия Python и свободное место (ответ — в файл в папке WMS), ярлык на рабочий стол, открытие фото позиции и папки документов вашей программой", _
         "число мест изменилось:" & Chr(10) & extra & "    покажите разработчику"), nBad)
     own = LoOwn()
     WmsView.ProgressEnd()

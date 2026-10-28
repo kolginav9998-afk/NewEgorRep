@@ -4636,6 +4636,61 @@ def v58_locality_pc():
         s.close()
 
 
+@case
+def v59_attach():
+    """1.1: документ прихода (необязательно) — «Документ…» на «Заказах»: файл копируется в «WMS_Документы/Заказ <№>» рядом с книгой (оригинал остаётся, одинаковые имена не затирают друг друга),
+    приход без документа проводится как раньше; в реестр и журнал ничего не пишется"""
+    import pathlib
+    c = "V59"
+    s = ready(Session(new_wms("v59")))
+    try:
+        src = os.path.join(s.dir, "scan_УПД.jpg")
+        open(src, "wb").write(b"\xff\xd8\xff\xe0" + b"x" * 5000)
+        url = pathlib.Path(src).as_uri()
+        order(s, 1, "17", "Болт ходовой", qty="10", art="X-A")
+        order(s, 2, "18", "Гайка", qty="5", art="X-B")
+        s.goto("Заказы", "$A$2")
+        seq0 = int(s.sysv("LAST_SEQ"))
+        key = s.B("AttachKey", 1, module="WmsAttach")
+        r1 = s.B("AttachAdd", key, url, module="WmsAttach")
+        r2 = s.B("AttachAdd", key, url, module="WmsAttach")
+        folder = os.path.join(s.dir, "WMS_Документы", "Заказ 17")
+        files = sorted(os.listdir(folder)) if os.path.isdir(folder) else []
+        R.add(c, "ключ строки — «Заказ 17»; файл скопирован в «WMS_Документы/Заказ 17», второй с тем же именем получил «(2)»; оригинал на месте, размеры те же",
+              key == "Заказ 17" and r1.startswith("OK:scan_УПД.jpg|") and r2.startswith("OK:scan_УПД (2).jpg|") and files == ["scan_УПД (2).jpg", "scan_УПД.jpg"]
+              and os.path.exists(src) and all(os.path.getsize(os.path.join(folder, f)) == os.path.getsize(src) for f in files), f"{key}; {r1}; {r2}; {files}")
+        # the button: «Добавить файл…» (the file of the test seam), then «Открыть папку» (nothing is opened in a test)
+        s.B("TestSetAttachSrc", url, module="WmsAttach")
+        choose(s, 0)
+        s.B("BtnAttach", module="WmsAttach")
+        msg1 = s.U("TestUiLastMessage") or ""
+        lst = s.B("AttachList", key, module="WmsAttach")
+        choose(s, 1)
+        s.B("BtnAttach", module="WmsAttach")
+        R.add(c, "кнопка «Документ…»: «Добавить файл…» кладёт третий файл «(3)» и называет список; «Открыть папку» ошибок не даёт",
+              "scan_УПД (3).jpg" in lst and lst.count(chr(10)) == 2 and "Документ добавлен" in msg1, f"{lst!r}; {msg1[:160]}")
+        # a row with neither an order nor a document number
+        s.goto("Заказы", "$A$5")
+        msg2 = s.B("AttachAdd", s.B("AttachKey", 4, module="WmsAttach"), url, module="WmsAttach")
+        R.add(c, "у строки без номера заказа и документа — понятный отказ, файл никуда не копируется", msg2.startswith("ERR:у строки нет ни номера заказа"), msg2[:120])
+        # another sheet
+        s.goto("Выдачи", "$A$2")
+        s.B("BtnAttach", module="WmsAttach")
+        msg3 = s.U("TestUiLastMessage") or ""
+        R.add(c, "на другом листе кнопка говорит, где она работает", "работает на листе «Заказы»" in msg3, msg3[:120])
+        # the receipt without a document is posted as before; the journal got the receipt only
+        receive(s, 2, "5", place="5-1-1", doc="УПД-9")
+        sh = s.doc.Sheets.getByName("Заказы")
+        f = sh.getDrawPage().getForms().getByIndex(0)
+        btns = {f.getByIndex(i).Name for i in range(f.getCount())}
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "приход без документа проведён (журнал +1), кнопка btnAttach есть на «Заказах», самопроверка — без ошибок",
+              int(s.sysv("LAST_SEQ")) == seq0 + 1 and "btnAttach" in btns and sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), f"{seq0} → {s.sysv('LAST_SEQ')}; {sorted(btns)}; {sc[:100]}")
+        oracle(c, s, "документ прихода")
+    finally:
+        s.close()
+
+
 # ================================================================ runner
 
 def main():

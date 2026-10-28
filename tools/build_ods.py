@@ -2153,6 +2153,20 @@ def buttons_102(doc, sheets):
                 add_button(doc, sh, name, label, macro, x, y, w, h, back=back)
 
 
+# 1.1: the new buttons of the sheets (only the missing ones are added: a new book and an upgraded one both): «Документ…» on «Заказы» (a scan or a photo of the document of a receipt)
+BUTTONS_110 = [
+    (ORDERS, "btnAttach", "Документ…", "WmsAttach.BtnAttach", 150 + 4 * 3050, 120 + 760, 2900, 650, 0xDDEBF7),
+]
+
+
+def buttons_110(doc, sheets):
+    for sheet, name, label, macro, x, y, w, h, back in BUTTONS_110:
+        if sheets.hasByName(sheet):
+            sh = sheets.getByName(sheet)
+            if not has_button(sh, name):
+                add_button(doc, sh, name, label, macro, x, y, w, h, back=back)
+
+
 def ledger_10(doc, sheets):
     """1.0 (этап G): what a new book and an upgraded one both get — the hidden _CLOSE (the closed months) and the page «Отчёты»"""
     if not sheets.hasByName(CLOSE):
@@ -3117,6 +3131,7 @@ def build(office, out_path, test=False, instance_id=None):
     docs_102(doc, sheets)
     categories_102(doc, sheets)
     buttons_102(doc, sheets)
+    buttons_110(doc, sheets)
     views_110(doc, sheets)
     main_buttons_110(doc, sheets)
     hotkeys_10(doc)

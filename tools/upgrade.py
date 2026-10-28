@@ -351,6 +351,7 @@ def step_08(doc, leg, from_text, done):
     # «Главная» of this release is built anew above: its «?» (П6) is put back
     B.help_buttons_10(doc, sheets)
     B.main_buttons_110(doc, sheets)
+    B.buttons_110(doc, sheets)
     done.append(f"страницы «{B.DASH}», «{B.FIND}», «{B.MAP}» и лист «{B.TOPO}» (вставьте туда схему склада); «{B.MAIN}» этого выпуска (кнопки к страницам)")
     done.append(f"1.0: справочники «{B.SUPPLIERS}» и «{B.GOODS}» (пополняются кнопками из «{B.ORDERS}» и «{B.STOCK}»), страницы «{B.SUPPLY}» и «{B.PRINT}»")
     done.append(f"1.0: справочник «{B.KITS}» (состав комплектов: «Собрать комплект…», «Выдать комплект…»)")
@@ -445,6 +446,7 @@ def step_110(doc, done):
     sheets = doc.Sheets
     B.views_110(doc, sheets)
     B.main_buttons_110(doc, sheets)
+    B.buttons_110(doc, sheets)
     B.service_110(doc, sheets)
     B.hotkeys_10(doc)
     done.append(f"1.1: листы {', '.join('«' + n + '»' for n in B.SHEETS_110_VIEWS)} (только просмотр: «Наличие по названию» и «Остаток деталей» — копии «Наличия», "
