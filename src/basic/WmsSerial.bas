@@ -29,6 +29,10 @@ Global gSzBusy As Boolean
 Function SerialsParse(ByVal sText As String, ByRef sers As Variant, ByRef why As String) As Boolean
     Dim a As Variant, i As Long, j As Long, n As Long, s As String, out() As String, other As Long
     sText = Replace(Replace(Replace(Replace(Replace(sText, Chr(13), Chr(10)), Chr(9), Chr(10)), ";", Chr(10)), ",", Chr(10)), Chr(160), " ")
+    If Trim(Replace(sText, Chr(10), "")) = "" Then
+        why = "не указан ни один серийный номер"
+        Exit Function
+    End If
     a = Split(sText, Chr(10))
     ReDim out(UBound(a))
     For i = 0 To UBound(a)
@@ -538,4 +542,19 @@ Function SerialsLabels() As String
     Exit Function
 EH:
     SerialsLabels = "ERR:этикетки не собраны: " & Error$ & " (строка " & Erl & ")"
+End Function
+
+' test seams: the text of the serial numbers as the window gave it; the text the window opens with (the tests of the real window press its buttons only)
+Function TestSerialText() As String
+    TestSerialText = gSzText
+End Function
+
+Function TestSerialSetText(s As String) As String
+    WmsInit()
+    If SysStr(SK_MODE) <> "TEST" Then
+        TestSerialSetText = "REFUSED:не тестовая книга"
+        Exit Function
+    End If
+    gSzText = s
+    TestSerialSetText = "OK"
 End Function

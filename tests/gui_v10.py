@@ -95,6 +95,68 @@ def press(o, ut, doc, module, macro, args, title_start, pick):
     return labels or [], res.get("r"), o.basic(doc, "WmsUi", "TestUiLastMessage")
 
 
+def drive(o, doc, module, macro, args, steps):
+    """runs module.macro(*args) in a thread and goes through the windows one by one: steps — (the beginning of the title, act(window context) → bool);
+    returns (the steps done, the macro's result)"""
+    res = {}
+    th = threading.Thread(target=lambda: res.setdefault("r", o.basic(doc, module, macro, *args)), daemon=True)
+    th.start()
+    done = []
+    tk = o.smgr.createInstanceWithContext("com.sun.star.awt.Toolkit", o.ctx)
+    for title, act in steps:
+        ok = False
+        for _ in range(160):
+            time.sleep(0.25)
+            try:
+                for k in range(tk.getTopWindowCount()):
+                    ctx = tk.getTopWindow(k).getAccessibleContext()
+                    if ctx is not None and ctx.getAccessibleName().startswith(title) and act(ctx):
+                        ok = True
+                        break
+            except Exception:
+                pass
+            if ok:
+                break
+        done.append(ok)
+        if not ok:
+            break
+    th.join(60)
+    return done, res.get("r")
+
+
+def descendants(ctx):
+    todo, out = [ctx], []
+    while todo:
+        c = todo.pop()
+        out.append(c)
+        todo += [c.getAccessibleChild(i).getAccessibleContext() for i in range(c.getAccessibleChildCount())]
+    return out
+
+
+def press_memo(expect):
+    """the window with the big field: the field shows the text it was opened with; presses «Дальше»"""
+    def act(ctx):
+        ds = descendants(ctx)
+        edit = [c for c in ds if c.getAccessibleRole() == uno.getConstantByName("com.sun.star.accessibility.AccessibleRole.TEXT")]
+        if not edit or edit[0].getText() != expect:
+            return False
+        [c for c in ds if c.getAccessibleRole() == uno.getConstantByName("com.sun.star.accessibility.AccessibleRole.PUSH_BUTTON")
+         and c.getAccessibleName() == "Дальше"][0].doAccessibleAction(0)
+        return True
+    return act
+
+
+def pick_button(label):
+    def act(ctx):
+        b = [c for c in descendants(ctx) if c.getAccessibleRole() == uno.getConstantByName("com.sun.star.accessibility.AccessibleRole.PUSH_BUTTON")
+             and c.getAccessibleName() == label]
+        if not b:
+            return False
+        b[0].doAccessibleAction(0)
+        return True
+    return act
+
+
 def goto(o, doc, sheet, ref):
     doc.getCurrentController().setActiveSheet(doc.Sheets.getByName(sheet))
     o.dispatch(doc, ".uno:GoToCell", ToPoint=f"${sheet}.{ref}")
@@ -196,6 +258,23 @@ def main():
         h1 = hashlib.sha256(open(p, "rb").read()).hexdigest()
         step("Т7: «Учебное восстановление» — «Проверить», ответ «восстанавливается» (закрыт «OK»); рабочая книга не изменилась",
              lab == ["Отмена", "Проверить"] and "восстанавливается" in msg and h0 == h1, f"{lab}; {msg[:200]}; {h0 == h1}")
+        # ---------------------------------------------------------------- 6. «Серийные детали…» — the real window with the big field
+        o.basic(doc, "WmsUi", "TestUiAuto", 1)
+        sp = doc.Sheets.getByName("Иной приход")
+        for col, v in (("B", "Детали"), ("D", "Шестерня Z-40"), ("E", "GR-40"), ("G", "шт"), ("I", "A-1")):
+            sp.getCellByPosition(col_ix(col), 1).setString(v)
+        sp.getCellByPosition(col_ix("H"), 1).setValue(TODAY)
+        goto(o, doc, "Иной приход", "$B$2")
+        o.basic(doc, "WmsUi", "TestUiAuto", 0)
+        # the window opens with the numbers already in its big field (the field shows them and gives them back); the keys of the field itself are LibreOffice's
+        o.basic(doc, "WmsSerial", "TestSerialSetText", "SN-1\nSN-2\nSN-3")
+        done, rs = drive(o, doc, "WmsSerial", "BtnSerialSpecial", (),
+                         [("Серийные детали — приход", press_memo("SN-1\nSN-2\nSN-3")), ("Серийные детали", pick_button("Провести приход и записать номера")),
+                          ("Серийные детали", pick_button("Не сейчас"))])
+        o.basic(doc, "WmsUi", "TestUiAuto", 1)
+        ser = [int(o.basic(doc, "WmsItem", "SerialEI", x)) for x in ("SN-1", "SN-2", "SN-3")]
+        step("1.1.1: «Серийные детали…» — настоящее окно с большим полем (номера по строкам), подтверждение «Деталей: 3» и вопрос про этикетки; в «Наличии» три ЕИ по 1 шт",
+             done == [True, True, True] and len(set(ser)) == 3 and min(ser) > 0 and all(stock(doc, n) == 1.0 for n in ser), f"{done}; {rs}; {ser}")
         o.basic(doc, "WmsUi", "TestUiAuto", 1)
         doc.setModified(False)
         o.dispatch(doc, ".uno:CloseDoc")
