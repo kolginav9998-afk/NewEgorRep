@@ -33,6 +33,12 @@ def main():
     ap.add_argument("--display", default=os.environ.get("DISPLAY", ":99"))
     a = ap.parse_args()
     p = new_wms("gui_candidate", kind="PROD", book_name="WMS_PROD_CANDIDATE.ods")
+    # the window «Что нового» comes once a version to a person at the first start of a book (WmsHelp.WhatsNewAtStart) and holds the start until he closes it: this check is about the
+    # other things, so the book is told that the card was seen (the file of the state next to the book, as WMS writes it)
+    state_dir = os.path.join(os.path.dirname(p), "WMS_State")
+    os.makedirs(state_dir, exist_ok=True)
+    with open(os.path.join(state_dir, "wms_state.txt"), "w", encoding="utf-8") as f:
+        f.write("WHATSNEW=" + wms_versions()["WMS_PRODUCT_VERSION"] + "\n")
     o = Office(unique("guicand"), PROFILES, headless=False, display=a.display)
     try:
         ut = o.smgr.createInstanceWithContext("com.sun.star.ui.test.UITest", o.ctx)

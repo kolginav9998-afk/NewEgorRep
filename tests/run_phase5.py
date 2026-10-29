@@ -1093,8 +1093,10 @@ def x26_protection_buttons_panel():
                 # 1.0 (Ф1): the label of the EI of the row
                 "Этикетка": "WmsItem.BtnLabel",
                 # 1.0 (П6): the section of «Справка» of the sheet
-                "?": "WmsHelp.BtnHelpHere"}
-        R.add(c, "6 кнопок листа «Иной приход» привязаны к макросам (и кнопки «Куда положить?» 0.8, «Почему?», «Этикетка» и «?» 1.0)", names == want,
+                "?": "WmsHelp.BtnHelpHere",
+                # 1.1.1: the receipt of a part with its serial numbers
+                "Серийные детали…": "WmsSerial.BtnSerialSpecial"}
+        R.add(c, "6 кнопок листа «Иной приход» привязаны к макросам (и кнопки «Куда положить?» 0.8, «Почему?», «Этикетка», «?» 1.0 и «Серийные детали…» 1.1.1)", names == want,
               str(names))
         line(s, 1, "Офис", "Стол", "2")
         post(s, 1)
