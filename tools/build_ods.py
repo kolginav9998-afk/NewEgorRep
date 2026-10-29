@@ -2311,9 +2311,10 @@ def build_tool(doc, sh):
     sh.getCellByPosition(4, TOOL_FIND_ROW).setString("Скрыть нулевые:")
     sh.getCellByPosition(4, TOOL_FIND_ROW).CharWeight = 150
     sh.getCellByPosition(4, TOOL_FIND_ROW).HoriJustify = 3
-    sh.getCellByPosition(5, TOOL_FIND_ROW).setString("нет")
-    sh.getCellByPosition(5, TOOL_FIND_ROW).CellBackColor = INPUT_HEAD_10
-    sh.getCellByPosition(5, TOOL_FIND_ROW).NumberFormat = text
+    merge(sh, 4, TOOL_FIND_ROW, 5, TOOL_FIND_ROW)
+    sh.getCellByPosition(6, TOOL_FIND_ROW).setString("нет")
+    sh.getCellByPosition(6, TOOL_FIND_ROW).CellBackColor = INPUT_HEAD_10
+    sh.getCellByPosition(6, TOOL_FIND_ROW).NumberFormat = text
     sh.getCellByPosition(0, 2).CharColor = MUTED
     hint = sh.getCellByPosition(TOOL_HINT_COL, 0)
     hint.setString(TOOL_HINT)

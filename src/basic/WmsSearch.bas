@@ -119,6 +119,11 @@ Function Prep(ByVal s As String) As String
     Prep = Spaced(WmsNames.Fold(s))
 End Function
 
+' the texts of an array (0-based, Strings) as Prep makes them, all at once: the engine of the language works on one long text, not on every row (1.2.0: a list of thousands of names)
+Function PrepAll(arr As Variant) As Variant
+    PrepAll = Split(Spaced(WmsNames.Fold(Join(arr, "¦"))), "¦")
+End Function
+
 ' ================================================================ the synonyms
 
 Private Sub SynLoad()

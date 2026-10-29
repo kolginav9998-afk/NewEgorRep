@@ -6,7 +6,7 @@
 ' результаты шагов (файлы UPGRADE_* новой папки).
 Option Explicit
 
-Public Const UP_VERSION = "1.1.1"
+Public Const UP_VERSION = "1.2.0"
 Public Const UP_MAIN = "ОБНОВЛЕНИЕ"
 Public Const UP_REPORT = "Отчёт"
 ' «ОБНОВЛЕНИЕ»: rows (0-based) of the paths (column C), the steps (status in column C), the state line

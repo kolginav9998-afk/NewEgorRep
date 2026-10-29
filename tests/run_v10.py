@@ -2109,10 +2109,10 @@ def v29_help():
         pc = s.B("PcCheck", module="WmsHelp")
         R.add(c, "П1: «Проверить этот ПК» — LibreOffice, макросы, запись, место, Python — с «что сделать»",
               pc.startswith("Проверка этого ПК") and "LibreOffice" in pc and "запись в папку WMS" in pc and "место на диске" in pc and "Python" in pc, pc[:300])
-        choose(s, 5)
+        choose(s, 6)
         wn = s.B("WhatsNew", module="WmsHelp")
         act = s.doc.getCurrentController().getActiveSheet().getName()
-        R.add(c, "П2: «Что нового» — 9 карточек (первая — 1.1, вторая — 1.0.2), «Показать» открывает лист карточки", len(s.B("WhatsNewCards", module="WmsHelp")) == 9 and wn == 5
+        R.add(c, "П2: «Что нового» — 10 карточек (первая — 1.2.0, вторая — 1.1, третья — 1.0.2), «Показать» открывает лист карточки", len(s.B("WhatsNewCards", module="WmsHelp")) == 10 and wn == 6
               and act == "Поиск", f"{wn}; {act}")
         col0 = s.B("ButtonModel", "Заказы", "btnReceiveWin", module="WmsHelp").BackgroundColor
         tr = s.B("Tour", module="WmsHelp")
@@ -5131,7 +5131,7 @@ def v66_assembly_views():
                             left.append((nme, x_[:30]))
             # one value — one substitute in the whole book: the part of the sheet is the part of the registry
             asm_name = a.doc.Sheets.getByName("Сборка деталей").getCellByPosition(0, 1).getString()
-            reg_names = [r_[1] for r_ in a.doc.Sheets.getByName("Наличие").getCellRangeByPosition(0, 1, 2, 4).getDataArray()]
+            reg_names = [a.doc.Sheets.getByName("Наличие").getCellByPosition(1, nxt).getString()]
         R.add(c, "обезличенная копия: на «Сборке деталей» и «Инструменте ЧПУ» нет прежних названий; название детали заменено так же, как в «Наличии» (артикулы — коды товара, как в других справочниках — остаются)",
               bool(a) and not left and asm_name != "" and asm_name in reg_names, f"{ma[:80]}; {left[:5]}; {asm_name}; {reg_names}")
     finally:
@@ -5259,16 +5259,16 @@ def v69_tool_sheet():
         zz = [x for x in rr if x[12] == "ZZ-1"]
         R.add(c, "позиция, которую название не выдаёт, но у неё категория «Инструмент ЧПУ»: она в списке с типом «Прочее» (вспомогательная штуковина без категории — нет)", len(zz) == 1 and zz[0][0] == "Прочее" and not any(x[12] == "WS-1" for x in rr), f"{r}; {zz[:1]}")
         # «Скрыть нулевые»
-        sh.getCellByPosition(5, 1).setString("да")
+        sh.getCellByPosition(6, 1).setString("да")
         r, k, rr = run("")
-        sh.getCellByPosition(5, 1).setString("нет")
+        sh.getCellByPosition(6, 1).setString("нет")
         R.add(c, "«Скрыть нулевые: да» — без остатка наименований нет, список тот же", k == 12, r)
         # the event: the cell «Найти» typed like a user
         s.goto("Инструмент ЧПУ", "$B$2")
         s.o.dispatch(s.doc, ".uno:EnterString", StringName="цанга")
         k_ev = len([x for x in sh.getCellRangeByPosition(0, 4, 0, 40).getDataArray() if x[0] != ""])
-        R.add(c, "«Найти» + Enter: в списке одна цанга; строка итога называет слова и номер журнала", k_ev == 1 and "цанга" in sh.getCellByPosition(6, 1).getString() and "журнал №" in sh.getCellByPosition(6, 1).getString(),
-              f"{k_ev}; {sh.getCellByPosition(6, 1).getString()[:140]}")
+        R.add(c, "«Найти» + Enter: в списке одна цанга; строка итога называет слова и номер журнала", k_ev == 1 and "цанга" in sh.getCellByPosition(7, 1).getString() and "журнал №" in sh.getCellByPosition(7, 1).getString(),
+              f"{k_ev}; {sh.getCellByPosition(7, 1).getString()[:140]}")
         sh.getCellByPosition(1, 1).setString("")
         sc = s.B("ActionSelfCheck")
         R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:160])
@@ -5324,19 +5324,19 @@ def v70_tool_speed():
         t0 = time.time()
         r2 = s.B("ToolRefresh", "", module="WmsTool")
         t_warm = time.time() - t0
+        sh = s.doc.Sheets.getByName("Инструмент ЧПУ")
+        k_all = int(r2.split(":")[1]) if r2.startswith("OK:") else -1
+        arts = [x[12] for x in sh.getCellRangeByPosition(0, 4, 18, 4 + k_all - 1).getDataArray()] if k_all > 0 else []
         t0 = time.time()
         r3 = s.B("ToolRefresh", "фреза 12 z4", module="WmsTool")
         t_find = time.time() - t0
         t0 = time.time()
         rf = s.B("FastRefresh", "", module="WmsCat")
         t_fast = time.time() - t0
-        sh = s.doc.Sheets.getByName("Инструмент ЧПУ")
-        k_all = int(r2.split(":")[1]) if r2.startswith("OK:") else -1
-        arts = [x[12] for x in sh.getCellRangeByPosition(0, 4, 18, 4 + k_all - 1).getDataArray()] if k_all > 0 else []
         R.add(c, "4000 наименований: в «Инструменте ЧПУ» 1200 строк (все FR-, SV-, MT-, PL-, CZ-, KO-), ни одного метиза и ни одной лампы", r1 == "OK:1200" and r2 == "OK:1200" and len(arts) == 1200
               and all(a[:3] in ("FR-", "SV-", "MT-", "PL-", "CZ-", "KO-") for a in arts), f"{r1}; {r2}; {arts[:3]}")
         R.add(c, "скорость: первый список (разбор 4000 названий) и повторный (в памяти), поиск; «Метизы» на тех же данных — для сравнения",
-              t_cold < 60 and t_warm < 25 and t_find < 25, f"первый {t_cold:.1f} с; повторный {t_warm:.1f} с; поиск «фреза 12 z4» {t_find:.1f} с ({r3}); «Метизы» {t_fast:.1f} с ({rf})")
+              t_cold < 40 and t_warm < 12 and t_find < 12, f"первый {t_cold:.1f} с; повторный {t_warm:.1f} с; поиск «фреза 12 z4» {t_find:.1f} с ({r3}); «Метизы» {t_fast:.1f} с ({rf}); шаги: {s.B('TestToolProf', module='WmsTool')}")
     finally:
         s.close()
 

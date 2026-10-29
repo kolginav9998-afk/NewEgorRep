@@ -12,7 +12,7 @@ Private Const TL_HEAD = 3
 Private Const TL_ROW0 = 4
 Private Const TL_COLS = 18
 Private Const TL_KEY_COL = 18
-Private Const TL_STAT_COL = 6
+Private Const TL_STAT_COL = 7
 Private Const TL_MAX = 5000
 
 ' the columns of the sheet
@@ -58,6 +58,10 @@ Global gTlCache As Object
 Global gTlCacheOn As Boolean
 Global gTlSeq As Long
 Global gTlBusy As Boolean
+' the constants of the rules in the folded form, made once each: «Chr(1) key Chr(2) folded Chr(1) key Chr(2) folded Chr(1)» (a Fold costs about 1.5 ms: not for every name)
+Global gTlKTab As String
+' the milliseconds of the steps of the last list (a line for the tests and for a talk about the speed)
+Global gTlProf As String
 
 ' ================================================================ the tables
 
@@ -131,6 +135,22 @@ Private Function TlEnglish(sType As String) As String
     End Select
 End Function
 
+' the constant sKey as WmsNames.Fold makes it (read from the memo; the first time it is folded and put there)
+Private Function TlK(sKey As String) As String
+    Dim p As Long, q As Long, t As String
+    If gTlKTab = "" Then gTlKTab = Chr(1)
+    t = Chr(1) & sKey & Chr(2)
+    p = InStr(gTlKTab, t)
+    If p > 0 Then
+        p = p + Len(t)
+        q = InStr(p, gTlKTab, Chr(1))
+        TlK = Mid(gTlKTab, p, q - p)
+        Exit Function
+    End If
+    TlK = WmsNames.Fold(sKey)
+    gTlKTab = gTlKTab & sKey & Chr(2) & TlK & Chr(1)
+End Function
+
 ' the tables folded once
 Private Sub TlLoad()
     Dim d As Variant, i As Long, p As Variant, k As Variant, j As Long, a As Variant
@@ -156,13 +176,13 @@ Private Sub TlLoad()
     ReDim mats(UBound(d))
     For i = 0 To UBound(d)
         p = Split(CStr(d(i)), "|")
-        mats(i) = Array(WmsNames.Fold(CStr(p(0))), CStr(p(1)))
+        mats(i) = Array(WmsNames.Fold(CStr(p(0))), CStr(p(1)), TlIsStemKey(WmsNames.Fold(CStr(p(0)))))
     Next i
     d = TlCoatDefs()
     ReDim coats(UBound(d))
     For i = 0 To UBound(d)
         p = Split(CStr(d(i)), "|")
-        coats(i) = Array(WmsNames.Fold(CStr(p(0))), CStr(p(1)))
+        coats(i) = Array(WmsNames.Fold(CStr(p(0))), CStr(p(1)), TlIsStemKey(WmsNames.Fold(CStr(p(0)))))
     Next i
     d = TlHolderDefs()
     ReDim hold(UBound(d))
@@ -280,10 +300,12 @@ End Function
 ' a standard: «DIN 338», «ГОСТ 10902-77», «ISO 1832»; the span is taken
 Private Function TlStandard(s As String, orig As String, ByRef mask As String) As String
     Dim k As Variant, keys As Variant, p As Long, q As Long, t As String, c As String, nm As String
+    If InStr(s, TlK("din")) + InStr(s, TlK("гост")) + InStr(s, TlK("iso")) + InStr(s, TlK("исо")) + InStr(s, TlK("ту")) + InStr(s, TlK("ansi")) + InStr(s, TlK("jis")) = 0 Then Exit Function
     keys = Array("din|DIN", "гост|ГОСТ", "iso|ISO", "исо|ISO", "ту|ТУ", "ansi|ANSI", "jis|JIS")
     For Each k In keys
-        nm = WmsNames.Fold(Split(CStr(k), "|")(0))
-        p = TlWord(s, nm, 1)
+        nm = TlK(Split(CStr(k), "|")(0))
+        p = 0
+        If InStr(s, nm) > 0 Then p = TlWord(s, nm, 1)
         Do While p > 0
             q = p + Len(nm)
             If Not TlIsLetter(TlCh(s, q)) Then
@@ -377,8 +399,9 @@ Private Function TlHolders(s As String, orig As String, ByRef mask As String) As
     hd = gTlTab(4)
     For i = 0 To UBound(hd)
         pre = CStr(hd(i)(0))
-        isHsk = (pre = WmsNames.Fold("hsk"))
-        p = TlWord(s, pre, 1)
+        isHsk = (pre = TlK("hsk"))
+        p = 0
+        If InStr(s, pre) > 0 Then p = TlWord(s, pre, 1)
         Do While p > 0
             q = p + Len(pre)
             ' the prefix must not go on with other letters (only the letter of an HSK after a dash: «hsk-a63»)
@@ -416,8 +439,8 @@ Private Function TlHolders(s As String, orig As String, ByRef mask As String) As
         Loop
     Next i
     ' «конус Морзе 2», «Morse taper 2»
-    p = TlWord(s, WmsNames.Fold("морзе"), 1)
-    If p = 0 Then p = TlWord(s, WmsNames.Fold("morse"), 1)
+    p = TlWord(s, TlK("морзе"), 1)
+    If p = 0 Then p = TlWord(s, TlK("morse"), 1)
     If p > 0 Then
         q = TlWordEnd(s, p) + 1
         Do While q <= Len(s) And InStr(" №", Mid(s, q, 1)) > 0
@@ -433,13 +456,13 @@ Private Function TlHolders(s As String, orig As String, ByRef mask As String) As
         End If
     End If
     ' SDS
-    p = TlWord(s, WmsNames.Fold("sds"), 1)
+    p = TlWord(s, TlK("sds"), 1)
     If p > 0 And n < 20 Then
         c = Mid(s, p, 12)
         cp(n) = p
-        If InStr(c, WmsNames.Fold("max")) > 0 Then
+        If InStr(c, TlK("max")) > 0 Then
             cc(n) = "SDS-max"
-        ElseIf InStr(c, "+") > 0 Or InStr(c, WmsNames.Fold("plus")) > 0 Or InStr(c, WmsNames.Fold("плюс")) > 0 Then
+        ElseIf InStr(c, "+") > 0 Or InStr(c, TlK("plus")) > 0 Or InStr(c, TlK("плюс")) > 0 Then
             cc(n) = "SDS-plus"
         Else
             cc(n) = "SDS"
@@ -479,7 +502,7 @@ Private Function TlThread(s As String, orig As String, ByRef mask As String, ByR
     TlLoad()
     dThread = 0
     dLen = 0
-    mk = WmsNames.Fold("м")
+    mk = TlK("м")
     ' metric: «м» at the beginning of a word, then a digit
     p = TlWord(s, mk, 1)
     Do While p > 0
@@ -523,7 +546,8 @@ Private Function TlThread(s As String, orig As String, ByRef mask As String, ByR
     th = gTlTab(5)
     For i = 0 To UBound(th)
         pre = CStr(th(i)(0))
-        p = TlWord(s, pre, 1)
+        p = 0
+        If InStr(s, pre) > 0 Then p = TlWord(s, pre, 1)
         Do While p > 0
             q = p + Len(pre)
             If TlCh(s, q) = " " Then q = q + 1
@@ -539,11 +563,11 @@ Private Function TlThread(s As String, orig As String, ByRef mask As String, ByR
                     TlTake(mask, p, q - 1)
                     TlThread = CStr(th(i)(1)) & " " & t
                     Exit Function
-                ElseIf pre = WmsNames.Fold("g") And Not TlIsLetter(TlCh(s, q)) Then
+                ElseIf pre = TlK("g") And Not TlIsLetter(TlCh(s, q)) Then
                     TlTake(mask, p, q - 1)
                     TlThread = "G " & t
                     Exit Function
-                ElseIf pre <> WmsNames.Fold("g") And pre <> WmsNames.Fold("r") And pre <> WmsNames.Fold("rc") And pre <> WmsNames.Fold("rp") And Not TlIsLetter(TlCh(s, q)) Then
+                ElseIf pre <> TlK("g") And pre <> TlK("r") And pre <> TlK("rc") And pre <> TlK("rp") And Not TlIsLetter(TlCh(s, q)) Then
                     TlTake(mask, p, q - 1)
                     TlThread = CStr(th(i)(1)) & " " & t
                     Exit Function
@@ -557,9 +581,10 @@ End Function
 ' the shank in words: «хвостовик 6», «ц/х», «к/х», «цилиндрический хвостовик»; the text ("" — none)
 Private Function TlShank(s As String, ByRef mask As String) As String
     Dim p As Long, q As Long, num As String, out As String
-    p = TlWord(s, WmsNames.Fold("хвост"), 1)
-    If p = 0 Then p = TlWord(s, WmsNames.Fold("хв."), 1)
-    If p = 0 Then p = TlWord(s, WmsNames.Fold("shank"), 1)
+    If InStr(s, TlK("хвост")) + InStr(s, TlK("хв.")) + InStr(s, "shank") + InStr(s, TlK("ц/х")) + InStr(s, TlK("к/х")) = 0 Then Exit Function
+    p = TlWord(s, TlK("хвост"), 1)
+    If p = 0 Then p = TlWord(s, TlK("хв."), 1)
+    If p = 0 Then p = TlWord(s, TlK("shank"), 1)
     If p > 0 Then
         q = TlWordEnd(s, p) + 1
         Do While q <= Len(s) And InStr(" =.:", Mid(s, q, 1)) > 0
@@ -572,8 +597,8 @@ Private Function TlShank(s As String, ByRef mask As String) As String
             out = "хв. Ø" & TlShow(num)
         End If
     End If
-    If InStr(s, WmsNames.Fold("ц/х")) > 0 Or (InStr(s, WmsNames.Fold("цилиндрическ")) > 0 And InStr(s, WmsNames.Fold("хвост")) > 0) Then out = out & IIf(out <> "", ", ", "") & "цилиндрический хвостовик"
-    If InStr(s, WmsNames.Fold("к/х")) > 0 Or (InStr(s, WmsNames.Fold("коническ")) > 0 And InStr(s, WmsNames.Fold("хвост")) > 0) Then out = out & IIf(out <> "", ", ", "") & "конический хвостовик"
+    If InStr(s, TlK("ц/х")) > 0 Or (InStr(s, TlK("цилиндрическ")) > 0 And InStr(s, TlK("хвост")) > 0) Then out = out & IIf(out <> "", ", ", "") & "цилиндрический хвостовик"
+    If InStr(s, TlK("к/х")) > 0 Or (InStr(s, TlK("коническ")) > 0 And InStr(s, TlK("хвост")) > 0) Then out = out & IIf(out <> "", ", ", "") & "конический хвостовик"
     TlShank = out
 End Function
 
@@ -617,7 +642,7 @@ Private Function TlZ(s As String, ByRef mask As String) As Long
     Loop
     ' the words «зуб», «флейт», «канав»: the number before them («4 зуба», «4-х зубая», «4зуб»), or a word of a count («двухзубая», «трёхзаходная»)
     For Each w In Array("зуб", "флейт", "flute", "канав")
-        st = WmsNames.Fold(CStr(w))
+        st = TlK(CStr(w))
         p = InStr(s, st)
         Do While p > 0
             q = p - 1
@@ -652,10 +677,10 @@ Private Function TlZ(s As String, ByRef mask As String) As Long
     Next w
     For Each k In Array("одно|1", "двух|2", "трех|3", "четыр|4", "пяти|5", "шести|6", "восьми|8")
         w = Split(CStr(k), "|")
-        p = InStr(s, WmsNames.Fold(CStr(w(0))))
+        p = InStr(s, TlK(CStr(w(0))))
         If p > 0 Then
             q = p + Len(CStr(w(0)))
-            If Mid(s, q, 3) = WmsNames.Fold("зуб") Or Mid(s, q, 3) = WmsNames.Fold("заход") Or Mid(s, q, 5) = WmsNames.Fold("флейт") Or Mid(s, q, 4) = WmsNames.Fold("канав") Then
+            If Mid(s, q, 3) = TlK("зуб") Or Mid(s, q, 3) = TlK("заход") Or Mid(s, q, 5) = TlK("флейт") Or Mid(s, q, 4) = TlK("канав") Then
                 TlZ = CLng(Val(w(1)))
                 Exit Function
             End If
@@ -669,19 +694,26 @@ Private Function TlTable(s As String, tab As Variant, ByRef mask As String) As S
     Dim i As Long, p As Long, k As String, stem As Boolean, e As Long
     For i = 0 To UBound(tab)
         k = CStr(tab(i)(0))
-        stem = (Len(k) >= 5 And TlDigits(k) = 0)
         p = InStr(s, k)
-        Do While p > 0
-            e = p + Len(k)
-            If (p = 1 Or Not TlIsAlnum(TlCh(s, p - 1))) And (stem Or Not TlIsAlnum(TlCh(s, e))) Then
-                If stem Then e = TlWordEnd(s, p) + 1
-                TlTake(mask, p, e - 1)
-                TlTable = CStr(tab(i)(1))
-                Exit Function
-            End If
-            p = InStr(p + 1, s, k)
-        Loop
+        If p > 0 Then
+            stem = tab(i)(2)
+            Do While p > 0
+                e = p + Len(k)
+                If (p = 1 Or Not TlIsAlnum(TlCh(s, p - 1))) And (stem Or Not TlIsAlnum(TlCh(s, e))) Then
+                    If stem Then e = TlWordEnd(s, p) + 1
+                    TlTake(mask, p, e - 1)
+                    TlTable = CStr(tab(i)(1))
+                    Exit Function
+                End If
+                p = InStr(p + 1, s, k)
+            Loop
+        End If
     Next i
+End Function
+
+' a key of a long word (five letters and more, no digits: «твердосплав», «карбид») is a stem; a code («р6м5», «вк8», «hss», «tin») has to be a whole token
+Private Function TlIsStemKey(k As String) As Boolean
+    TlIsStemKey = (Len(k) >= 5 And TlDigits(k) = 0)
 End Function
 
 ' ================================================================ one name, all of it
@@ -689,16 +721,27 @@ End Function
 ' the record of a name: (type, the index of the type, the group, the kind, the size, the diameter, the length, Z, the material, the coating, the standard, the equivalents of the standard,
 ' the shank / thread / code). An empty type — a name that is not read as a tool.
 Function TlRecord(sName As String) As Variant
+    TlRecord = TlRecordF(sName, "")
+End Function
+
+' TlRecord with the folded name given (sFold; "" — made here). The folded name is taken as it is when it is as long as the name (nothing was joined or dropped in it: the positions of the two agree)
+' and has no «М 8» that NormName joins; otherwise the name is put through NormName and Fold
+Function TlRecordF(sName As String, sFold As String) As Variant
     Dim orig As String, s As String, mask As String, i As Long, j As Long, p As Long, best As Long, tIdx As Long, tName As String, tGrp As String, tEnd As Long, need As String
     Dim ty As Variant, stems As Variant, ok As Boolean, ins As String, hold As String, thread As String, std As String, shank As String, des As String, z As Long, mat As String, coat As String
     Dim dThread As Double, dThLen As Double, kinds As Variant, kind As String, q As Long, w As Variant, kEnd As Long, tStart As Long, kw As String
     Dim gs() As Long, ge() As Long, gv() As String, ng As Long, dDiam As Double, dLen As Double, sSize As String, g As Long, vals As Variant, pre As String, post As String, dRad As Double, dSign As String
     TlLoad()
-    orig = WmsNames.NormName(sName)
-    s = WmsNames.Fold(orig)
+    If sFold <> "" And Len(sFold) = Len(sName) And Not (sFold Like "*м #*") Then
+        orig = sName
+        s = sFold
+    Else
+        orig = WmsNames.NormName(sName)
+        s = WmsNames.Fold(orig)
+    End If
     ' a name with no word of a type and with no room for the code of an insert is not read any further (most of the names of a warehouse)
-    If Not TlHasType(s) And TlDigits(s) < 4 Then
-        TlRecord = Array("", 99, "O", "", "", 0#, 0#, 0, "", "", "", "", "")
+    If Not TlHasType(s) And Not (s Like "*#*#*#*#*") Then
+        TlRecordF = Array("", 99, "O", "", "", 0#, 0#, 0, "", "", "", "", "")
         Exit Function
     End If
     mask = Space(Len(s))
@@ -713,7 +756,8 @@ Function TlRecord(sName As String) As Variant
     For i = 0 To UBound(ty)
         stems = ty(i)(0)
         For j = 0 To UBound(stems)
-            p = TlWord(s, CStr(stems(j)), 1)
+            p = 0
+            If InStr(s, CStr(stems(j))) > 0 Then p = TlWord(s, CStr(stems(j)), 1)
             If p > 0 And p < best Then
                 ok = True
                 need = CStr(ty(i)(3))
@@ -745,7 +789,7 @@ Function TlRecord(sName As String) As Variant
         End If
     End If
     If tIdx < 0 Then
-        TlRecord = Array("", 99, "O", "", "", 0#, 0#, 0, "", "", "", "", "")
+        TlRecordF = Array("", 99, "O", "", "", 0#, 0#, 0, "", "", "", "", "")
         Exit Function
     End If
     tStart = best
@@ -762,7 +806,8 @@ Function TlRecord(sName As String) As Variant
     kinds = gTlTab(1)
     best = 100000
     For i = 0 To UBound(kinds)
-        p = TlWord(s, CStr(kinds(i)), 1)
+        p = 0
+        If InStr(s, CStr(kinds(i))) > 0 Then p = TlWord(s, CStr(kinds(i)), 1)
         If p > 0 And p < best Then
             If TlFree(mask, p, p + 1) Or (p >= tStart And p <= tEnd) Then
                 kEnd = TlWordEnd(s, p + Len(CStr(kinds(i))) - 1)
@@ -777,7 +822,7 @@ Function TlRecord(sName As String) As Variant
     Next i
     ' «м/р»: a tap for the machine and the hand
     If kind = "" And tGrp = "T" Then
-        If InStr(s, WmsNames.Fold("м/р")) > 0 Or TlWord(s, WmsNames.Fold("мр"), 1) > 0 Then kind = "машинно-ручной"
+        If InStr(s, TlK("м/р")) > 0 Or TlWord(s, TlK("мр"), 1) > 0 Then kind = "машинно-ручной"
     End If
     dSign = TlSign(tGrp)
     ' the numbers that are left: the marks first (the diameter «ø10», «d=10», «диам. 10»; the length «l=100», «длина 100»; the radius «r3»)
@@ -792,12 +837,12 @@ Function TlRecord(sName As String) As Variant
                 sSize = "Ø" & TlShow(CStr(vals(0))) & TlRest(vals)
                 TlTake(mask, gs(g), ge(g))
             End If
-        ElseIf pre = "l" Or pre = WmsNames.Fold("длина") Or pre = WmsNames.Fold("длин") Or pre = WmsNames.Fold("дл") Then
+        ElseIf pre = "l" Or pre = TlK("длина") Or pre = TlK("длин") Or pre = TlK("дл") Then
             If dLen = 0 Then
                 dLen = Val(vals(0))
                 TlTake(mask, gs(g), ge(g))
             End If
-        ElseIf pre = "r" Or pre = WmsNames.Fold("радиус") Then
+        ElseIf pre = "r" Or pre = TlK("радиус") Then
             If dRad = 0 Then
                 dRad = Val(vals(0))
                 TlTake(mask, gs(g), ge(g))
@@ -815,7 +860,7 @@ Function TlRecord(sName As String) As Variant
                 post = TlAfter(s, ge(g))
                 vals = Split(gv(g), Chr(1))
                 If Not TlSkipGroup(s, gs(g), ge(g), post) Then
-                    ok = (UBound(vals) >= 1 Or post = WmsNames.Fold("мм") Or post = "mm" Or post = WmsNames.Fold("мм."))
+                    ok = (UBound(vals) >= 1 Or post = TlK("мм") Or post = "mm" Or post = TlK("мм."))
                     If Not ok Then ok = (tGrp = "M" Or tGrp = "D" Or tGrp = "R" Or tGrp = "T" Or tGrp = "L" Or tGrp = "H")
                     If ok And InStr(gv(g), "/") = 0 Then
                         If Val(vals(0)) > 0 And Val(vals(0)) <= 5000 Then
@@ -853,12 +898,13 @@ Function TlRecord(sName As String) As Variant
     Next w
     If thread <> "" And thread <> sSize Then des = des & IIf(des <> "", ", ", "") & thread
     If shank <> "" Then des = des & IIf(des <> "", ", ", "") & shank
-    TlRecord = Array(tName, tIdx, tGrp, kind, sSize, dDiam, dLen, z, mat, coat, std, WmsSpec.SpEquiv(std), des)
+    TlRecordF = Array(tName, tIdx, tGrp, kind, sSize, dDiam, dLen, z, mat, coat, std, WmsSpec.SpEquiv(std), des)
 End Function
 
 ' True when the folded name holds the stem of any type
 Private Function TlHasType(s As String) As Boolean
     Dim ty As Variant, stems As Variant, i As Long, j As Long
+    TlLoad()
     ty = gTlTab(0)
     For i = 0 To UBound(ty)
         stems = ty(i)(0)
@@ -880,7 +926,7 @@ End Function
 Private Function TlHasAny(s As String, words As Variant) As Boolean
     Dim w As Variant
     For Each w In words
-        If InStr(s, WmsNames.Fold(CStr(w))) > 0 Then
+        If InStr(s, TlK(CStr(w))) > 0 Then
             TlHasAny = True
             Exit Function
         End If
@@ -889,7 +935,7 @@ End Function
 
 ' the mark of a diameter before a number: «ø», «d», «диам», «диаметр», «dia»
 Private Function TlIsDiamMark(pre As String) As Boolean
-    TlIsDiamMark = (pre = "ø" Or pre = "⌀" Or pre = "∅" Or pre = "d" Or pre = "dia" Or pre = WmsNames.Fold("диам") Or pre = WmsNames.Fold("диаметр"))
+    TlIsDiamMark = (pre = "ø" Or pre = "⌀" Or pre = "∅" Or pre = "d" Or pre = "dia" Or pre = TlK("диам") Or pre = TlK("диаметр"))
 End Function
 
 ' the text of the numbers of a group after the first: "×22×72" for 10,22,72
@@ -955,17 +1001,17 @@ Private Function TlSkipGroup(s As String, a As Long, b As Long, post As String) 
         TlSkipGroup = True
         Exit Function
     End If
-    If Left(post, 1) = "°" Or Left(post, 4) = WmsNames.Fold("град") Or Left(post, 2) = WmsNames.Fold("шт") Or Left(post, 1) = "%" Or Left(post, 2) = WmsNames.Fold("кг") Then
+    If Left(post, 1) = "°" Or Left(post, 4) = TlK("град") Or Left(post, 2) = TlK("шт") Or Left(post, 1) = "%" Or Left(post, 2) = TlK("кг") Then
         TlSkipGroup = True
         Exit Function
     End If
     ' a hardness: «45 HRC»; in «8 HRC55» the number after the letters is the hardness, not the one before
-    If Left(post, 3) = WmsNames.Fold("hrc") And Not TlIsDigit(Mid(post, 4, 1)) Then
+    If Left(post, 3) = TlK("hrc") And Not TlIsDigit(Mid(post, 4, 1)) Then
         TlSkipGroup = True
         Exit Function
     End If
     pre = TlBefore(s, a)
-    If pre = WmsNames.Fold("модуль") Or pre = WmsNames.Fold("шаг") Or pre = WmsNames.Fold("угол") Or pre = "n" Or pre = "no" Or pre = WmsNames.Fold("набор") Or pre = WmsNames.Fold("комплект") Or pre = WmsNames.Fold("уп") Or pre = WmsNames.Fold("партия") Then TlSkipGroup = True
+    If pre = TlK("модуль") Or pre = TlK("шаг") Or pre = TlK("угол") Or pre = "n" Or pre = "no" Or pre = TlK("набор") Or pre = TlK("комплект") Or pre = TlK("уп") Or pre = TlK("партия") Then TlSkipGroup = True
     If TlCh(s, a - 1) = "№" Then TlSkipGroup = True
 End Function
 
@@ -1032,9 +1078,11 @@ Private Function TlGroups(s As String, mask As String, gs() As Long, ge() As Lon
     TlGroups = cnt
 End Function
 
-' TlRecord, but a name that was read already is not read again (a Collection of this Basic keeps text, not an array: the record is kept as one text and made again from it)
-Function TlRecordC(sName As String) As Variant
-    Dim v As Variant, p As Variant, r As Variant, t As String, i As Long
+' TlRecord, but a name that was read already is not read again (a Collection of this Basic keeps text, not an array: the record is kept as one text and made again from it). sFold — the
+' folded name when the caller has it made (a list of names is folded at once): a name with no word of a type and no room for the code of an insert is answered by an empty record without
+' being read; the answer is kept too
+Function TlRecordC(sName As String, Optional vFold As Variant) As Variant
+    Dim v As Variant, p As Variant, r As Variant, t As String, i As Long, sFold As String
     If Not gTlCacheOn Then
         gTlCache = New Collection
         gTlCacheOn = True
@@ -1045,7 +1093,12 @@ Function TlRecordC(sName As String) As Variant
         TlRecordC = Array(p(0), CLng(p(1)), p(2), p(3), p(4), Val(p(5)), Val(p(6)), CLng(p(7)), p(8), p(9), p(10), WmsSpec.SpEquiv(CStr(p(10))), p(11))
         Exit Function
     End If
-    r = TlRecord(sName)
+    If Not IsMissing(vFold) Then sFold = CStr(vFold)
+    If sFold <> "" And Not TlHasType(sFold) And Not (sFold Like "*#*#*#*#*") Then
+        r = Array("", 99, "O", "", "", 0#, 0#, 0, "", "", "", "", "")
+    Else
+        r = TlRecordF(sName, sFold)
+    End If
     t = r(0) & Chr(1) & r(1) & Chr(1) & r(2) & Chr(1) & r(3) & Chr(1) & r(4) & Chr(1) & Trim(Str(r(5))) & Chr(1) & Trim(Str(r(6))) & Chr(1) & r(7) & Chr(1) & r(8) & Chr(1) & r(9) & Chr(1) & r(10) _
         & Chr(1) & r(12)
     On Error Resume Next
@@ -1107,31 +1160,38 @@ Private Function TlCatSays(sCat As String) As Boolean
     TlCatSays = (InStr(c, "чпу") > 0 Or InStr(c, "режущ") > 0)
 End Function
 
-' True when some category says so: in «Категории», in the registry (the groups), in «Номенклатура». Without one a name that is not read as a tool is not a tool, and its category is not looked for
-Private Function TlCatsMatter() As Boolean
-    Dim i As Long, v As Variant, g As Variant
-    If Not gCtLoaded Then WmsCat.CtLoad()
-    For i = 0 To gCtN - 1
-        If TlCatSays(CStr(gCtCat(i))) Then
-            TlCatsMatter = True
-            Exit Function
-        End If
-    Next i
-    For i = 0 To gGrpN - 1
-        g = gGrp(i)
-        If CStr(g(6)) <> "" Then
-            If TlCatSays(CStr(g(6))) Then
-                TlCatsMatter = True
-                Exit Function
+' the keys of the goods of «Номенклатура» whose category says «ЧПУ» or «режущий» («a:article» / «n:name» folded, each between two Chr(1)); "" — there are none, then «Номенклатура» is not looked at
+Private Function TlGoodsToolKeys() As String
+    Dim sh As Object, last As Long, d As Variant, i As Long, art As String, out As String
+    If Not gDoc.Sheets.hasByName(SH_GOODS) Then Exit Function
+    sh = gDoc.Sheets.getByName(SH_GOODS)
+    last = WmsOrders.LastRow(sh)
+    If last < 1 Then Exit Function
+    d = sh.getCellRangeByPosition(0, 1, GD_CAT, last).getDataArray()
+    For i = 0 To UBound(d)
+        If TlCatSays(Trim(CStr(d(i)(GD_CAT)))) Then
+            art = Trim(CStr(d(i)(GD_ART)))
+            If art <> "" Then
+                out = out & Chr(1) & "a:" & WmsNames.Fold(art) & Chr(1)
+            ElseIf Trim(CStr(d(i)(GD_NAME))) <> "" Then
+                out = out & Chr(1) & "n:" & WmsNames.Fold(WmsNames.NormName(CStr(d(i)(GD_NAME)))) & Chr(1)
             End If
         End If
     Next i
-    For Each v In gGc
-        If TlCatSays(Mid(CStr(v), InStr(CStr(v), "|") + 1)) Then
-            TlCatsMatter = True
+    TlGoodsToolKeys = out
+End Function
+
+' True when the name begins with the word of a fastener («Болт крепления фрезы», «Винт для пластины»): that is a fastener, not a tool
+Private Function TlFastenerFirst(sName As String) As Boolean
+    Dim h As String, a As Variant, k As Variant
+    h = LCase(Trim(sName))
+    a = Array("болт", "гайк", "шайб", "винт", "саморез", "шуруп", "шпильк", "дюбел", "анкер", "заклепк", "заклёпк", "гвозд", "хомут", "шплинт", "крепеж", "крепёж")
+    For Each k In a
+        If Left(h, Len(CStr(k))) = CStr(k) Then
+            TlFastenerFirst = True
             Exit Function
         End If
-    Next v
+    Next k
 End Function
 
 ' True when the category (folded here) is the one of the fasteners («Метизы», «Крепёж»): those are the business of «Метизы»
@@ -1167,7 +1227,7 @@ Sub OnToolChange(Optional oTarget As Variant)
     On Error GoTo EH
     If Not oTarget.supportsService("com.sun.star.sheet.SheetCell") Then Exit Sub
     ra = oTarget.getCellAddress()
-    If Not ((ra.Row = TL_FIND_ROW And (ra.Column = 1 Or ra.Column = 5)) Or (ra.Row = TL_FILTER_ROW And ra.Column < TL_COLS)) Then Exit Sub
+    If Not ((ra.Row = TL_FIND_ROW And (ra.Column = 1 Or ra.Column = 6)) Or (ra.Row = TL_FILTER_ROW And ra.Column < TL_COLS)) Then Exit Sub
     WmsInit()
     ToolRefresh(ToolFind())
     Exit Sub
@@ -1192,11 +1252,13 @@ End Sub
 ' with no balance. Only shows: nothing is posted, nothing is written but the cells of this sheet. OK:<rows> / ERR:…
 Function ToolRefresh(sFind As String) As String
     Dim sh As Object, i As Long, j As Long, k As Long, n As Long, g As Variant, rec As Variant, rows() As Variant, hays() As String, nms() As String, cols As Variant, notes() As String
-    Dim filt As Variant, fTxt(17) As String, hide As Boolean, scores As Variant, ok As Boolean, out() As Variant, nAllF As Long, q As Double, bCats As Boolean, cat As String
+    Dim filt As Variant, fTxt(17) As String, hide As Boolean, scores As Variant, ok As Boolean, out() As Variant, nAllF As Long, q As Double, cat As String
     Dim eqShow As String, key As String, descr As String, typeName As String, coll As Object, wordsOld As Variant, cc As String
-    Dim aPl() As String, aCt() As String, aAr() As String, aSr() As String
+    Dim aPl() As String, aCt() As String, aAr() As String, aSr() As String, t0 As Long, tp As String, nmAll() As String, arAll() As String, folds As Variant, arF As Variant, tgood As String
+    Dim sF As String, rawH() As String, rawN() As String, hP As Variant, nP As Variant, nCold As Long, bProg As Boolean, rawO() As String, oldF As Variant
     On Error GoTo EH
     gTlBusy = True
+    t0 = GetSystemTicks()
     WmsInit()
     If Not gDoc.Sheets.hasByName(TL_SHEET) Then
         ToolRefresh = "ERR:в книге нет листа «" & TL_SHEET & "» — книга не обновлена до 1.2.0"
@@ -1207,41 +1269,95 @@ Function ToolRefresh(sFind As String) As String
     If Not gCtLoaded Then WmsCat.CtLoad()
     WmsCat.GoodsLoad()
     WmsCat.StockGroups()
-    bCats = TlCatsMatter()
-    ' the tools among the groups: the name is read as one, or its category says so
+    tp = "реестр " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
+    ' the tools among the groups: the name is read as one (a name with no word of a type and no room for the code of an insert is not read at all), or the category that the storekeeper wrote says so
+    ' (in the registry, in «Номенклатура»); the fasteners are the business of «Метизы». The names are folded all at once
+    ReDim nmAll(IIf(gGrpN > 0, gGrpN - 1, 0))
+    For i = 0 To gGrpN - 1
+        nmAll(i) = CStr(gGrp(i)(0))
+    Next i
+    folds = WmsNames.FoldAll(nmAll)
+    tgood = TlGoodsToolKeys()
+    If tgood <> "" Then
+        ReDim arAll(IIf(gGrpN > 0, gGrpN - 1, 0))
+        For i = 0 To gGrpN - 1
+            arAll(i) = Trim(CStr(gGrp(i)(1)))
+        Next i
+        arF = WmsNames.FoldAll(arAll)
+    End If
+    tp = tp & ", свёртка имён " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
+    ' the names that were not read yet are read now (about 15 ms a tool name): many — the bar of the status line tells that the sheet is at work
+    nCold = gGrpN
+    If gTlCacheOn Then nCold = gGrpN - gTlCache.Count
+    If nCold > 300 Then
+        WmsView.ProgressStart("Инструмент ЧПУ: читаю названия…", gGrpN)
+        bProg = True
+    End If
     n = 0
     ReDim rows(IIf(gGrpN > 0, gGrpN - 1, 0))
     For i = 0 To gGrpN - 1
+        If bProg Then
+            If (i Mod 40) = 0 Then WmsView.ProgressSet(i)
+        End If
         g = gGrp(i)
-        rec = TlRecordC(CStr(g(0)))
+        sF = CStr(folds(i))
+        rec = TlRecordC(CStr(g(0)), sF)
+        cat = Trim(CStr(g(6)))
         ok = False
         If CStr(rec(RC_TYPE)) <> "" Then
-            ok = Not TlFastenerCat(WmsCat.CategoryOf(CStr(g(0)), CStr(g(1)), CStr(g(6))))
-        ElseIf bCats Then
-            ok = TlCatSays(WmsCat.CategoryOf(CStr(g(0)), CStr(g(1)), CStr(g(6))))
+            If cat <> "" Then
+                ok = Not TlFastenerCat(cat)
+            Else
+                ok = Not TlFastenerFirst(CStr(g(0)))
+            End If
+        ElseIf cat <> "" Then
+            ok = TlCatSays(cat)
+        ElseIf tgood <> "" Then
+            key = IIf(CStr(arAll(i)) <> "", "a:" & CStr(arF(i)), "n:" & sF)
+            ok = (InStr(tgood, Chr(1) & key & Chr(1)) > 0)
         End If
         If ok Then
-            rows(n) = Array(g, rec)
+            rows(n) = Array(g, rec, sF)
             n = n + 1
         End If
     Next i
+    If bProg Then
+        WmsView.ProgressEnd()
+        bProg = False
+    End If
+    tp = tp & ", отбор " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
     ' the search and the filters of the sheet
     filt = sh.getCellRangeByPosition(0, TL_FILTER_ROW, TL_COLS - 1, TL_FILTER_ROW).getDataArray()(0)
     For j = 0 To TL_COLS - 1
         fTxt(j) = Trim(CStr(filt(j)))
     Next j
-    hide = (WmsNames.Fold(Trim(sh.getCellByPosition(5, TL_FIND_ROW).getString())) = "да")
+    hide = (WmsNames.Fold(Trim(sh.getCellByPosition(6, TL_FIND_ROW).getString())) = "да")
     ReDim hays(IIf(n > 0, n - 1, 0))
     ReDim nms(IIf(n > 0, n - 1, 0))
     ReDim notes(IIf(n > 0, n - 1, 0))
+    ReDim rawH(IIf(n > 0, n - 1, 0))
+    ReDim rawN(IIf(n > 0, n - 1, 0))
     For i = 0 To n - 1
         g = rows(i)(0)
         rec = rows(i)(1)
         typeName = CStr(rec(RC_TYPE))
         If typeName = "" Then typeName = "Прочее"
-        hays(i) = " " & Trim(WmsSearch.Prep(typeName & " " & TlTokens(rec) & " " & g(0) & " " & g(1) & " " & g(5))) & " "
-        nms(i) = " " & Trim(WmsSearch.Prep(CStr(g(0)) & " " & g(1))) & " "
+        rawH(i) = typeName & " " & TlTokens(rec) & " " & g(0) & " " & g(1) & " " & g(5)
+        rawN(i) = CStr(g(0)) & " " & g(1)
     Next i
+    If n > 0 Then
+        hP = WmsSearch.PrepAll(rawH)
+        nP = WmsSearch.PrepAll(rawN)
+        For i = 0 To n - 1
+            hays(i) = " " & Trim(CStr(hP(i))) & " "
+            nms(i) = " " & Trim(CStr(nP(i))) & " "
+        Next i
+    End If
+    tp = tp & ", тексты поиска " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
     ' the possible doubles: the same type, kind, size, teeth, material, coating, designation and standard (or its equivalent) — under different names; or the same name — under different articles
     coll = New Collection
     For i = 0 To n - 1
@@ -1251,9 +1367,11 @@ Function ToolRefresh(sFind As String) As String
             key = "p|" & rec(RC_TYPE) & "|" & rec(RC_KIND) & "|" & rec(RC_SIZE) & "|" & rec(RC_Z) & "|" & rec(RC_MAT) & "|" & rec(RC_COAT) & "|" & rec(RC_DES) & "|" & WmsSpec.SpCanon(CStr(rec(RC_STD)))
             WmsCat.DupMark(coll, key, i, notes, rows)
         End If
-        key = "n|" & WmsNames.Fold(CStr(g(0)))
+        key = "n|" & rows(i)(2)
         WmsCat.DupMark(coll, key, i, notes, rows)
     Next i
+    tp = tp & ", дубли " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
     ' the search with the understanding of «Поиск»; the filters «место:», «категория:», «артикул:» of the query need the columns of the rows
     cols = Empty
     If Mid(WmsSearch.QueryNeeds(sFind), 1, 4) <> "0000" Then
@@ -1271,6 +1389,18 @@ Function ToolRefresh(sFind As String) As String
     End If
     scores = WmsSearch.MatchScores(sFind, hays, nms, n, cols)
     wordsOld = WmsNames.FoldWords(sFind)
+    ' the old way too: every word of the search as a part of the text of the row (a part of an article, of a place: «b-8», «5-1»); the texts folded at once
+    If Trim(sFind) <> "" And n > 0 Then
+        ReDim rawO(n - 1)
+        For i = 0 To n - 1
+            g = rows(i)(0)
+            rec = rows(i)(1)
+            rawO(i) = CStr(g(0)) & " " & g(1) & " " & g(5) & " " & rec(RC_TYPE) & " " & rec(RC_SIZE) & " " & rec(RC_KIND) & " " & rec(RC_MAT) & " " & rec(RC_COAT)
+        Next i
+        oldF = WmsNames.FoldAll(rawO)
+    End If
+    tp = tp & ", поиск " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
     ReDim out(IIf(n > 0, n - 1, 0))
     k = 0
     For i = 0 To n - 1
@@ -1279,7 +1409,7 @@ Function ToolRefresh(sFind As String) As String
         q = g(3)
         ok = (scores(i) > 0)
         ' the old way too: every word of the search as a part of the text of the row (a part of an article, of a place: «b-8», «5-1»)
-        If Not ok And Trim(sFind) <> "" Then ok = WmsNames.HasWords(WmsNames.Fold(CStr(g(0)) & " " & g(1) & " " & g(5) & " " & rec(RC_TYPE) & " " & rec(RC_SIZE) & " " & rec(RC_KIND) & " " & rec(RC_MAT) & " " & rec(RC_COAT)), wordsOld)
+        If Not ok And Trim(sFind) <> "" Then ok = WmsNames.HasWords(CStr(oldF(i)), wordsOld)
         If ok And hide And q < 0.0000005 Then ok = False
         If ok Then
             typeName = CStr(rec(RC_TYPE))
@@ -1312,6 +1442,8 @@ Function ToolRefresh(sFind As String) As String
             k = k + 1
         End If
     Next i
+    tp = tp & ", фильтры " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
     ' the old list out, the new one in
     sh.getCellRangeByPosition(0, TL_ROW0, TL_KEY_COL, TL_ROW0 + TL_MAX).clearContents(1 + 2 + 4 + 16)
     nAllF = n
@@ -1322,6 +1454,8 @@ Function ToolRefresh(sFind As String) As String
         TlSort(sh.getCellRangeByPosition(0, TL_ROW0, TL_KEY_COL, TL_ROW0 + k - 1))
         sh.getCellRangeByPosition(0, TL_ROW0, TL_COLS - 1, TL_ROW0 + k - 1).CharColor = RGB(38, 50, 56)
     End If
+    tp = tp & ", запись " & (GetSystemTicks() - t0)
+    gTlProf = tp & " (групп " & gGrpN & ", инструмента " & n & ")"
     descr = ""
     If Trim(sFind) <> "" Then descr = " — по словам «" & Trim(sFind) & "»"
     For j = 0 To TL_COLS - 1
@@ -1339,6 +1473,7 @@ Function ToolRefresh(sFind As String) As String
     gUiLastMsg = ToolRefresh
     Exit Function
 EH:
+    If bProg Then WmsView.ProgressEnd()
     gTlBusy = False
     ToolRefresh = "ERR:список инструмента не построен: " & Error$ & " (строка " & Erl & ")"
     gUiLastMsg = ToolRefresh
@@ -1366,6 +1501,124 @@ Private Sub TlSort(rng As Object)
 End Sub
 
 ' test seams
+Function TestToolProf() As String
+    TestToolProf = gTlProf
+End Function
+
+Function TestToolParts(sName As String, nRep As Long) As String
+    Dim orig As String, s As String, mask As String, i As Long, t0 As Long, out As String, d1 As Double, d2 As Double, ga As Variant, gs() As Long, ge() As Long, gv() As String, ng As Long, x As String
+    TlLoad()
+    orig = WmsNames.NormName(sName)
+    s = WmsNames.Fold(orig)
+    mask = Space(Len(s))
+    t0 = GetSystemTicks()
+    For i = 1 To nRep
+        x = WmsNames.NormName(sName)
+    Next i
+    out = out & "NormName " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
+    For i = 1 To nRep
+        x = WmsNames.Fold(orig)
+    Next i
+    out = out & ", Fold " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
+    For i = 1 To nRep
+        mask = Space(Len(s))
+        x = TlStandard(s, orig, mask)
+    Next i
+    out = out & ", Standard " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
+    For i = 1 To nRep
+        mask = Space(Len(s))
+        x = TlHolders(s, orig, mask)
+    Next i
+    out = out & ", Holders " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
+    For i = 1 To nRep
+        mask = Space(Len(s))
+        x = TlInsert(s, orig, mask)
+    Next i
+    out = out & ", Insert " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
+    For i = 1 To nRep
+        d1 = 0
+        d2 = 0
+        mask = Space(Len(s))
+        x = TlThread(s, orig, mask, d1, d2)
+    Next i
+    out = out & ", Thread " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
+    For i = 1 To nRep
+        mask = Space(Len(s))
+        x = TlShank(s, mask)
+    Next i
+    out = out & ", Shank " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
+    For i = 1 To nRep
+        mask = Space(Len(s))
+        x = TlTable(s, gTlTab(2), mask)
+        x = TlTable(s, gTlTab(3), mask)
+    Next i
+    out = out & ", Mat+Coat " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
+    For i = 1 To nRep
+        mask = Space(Len(s))
+        d1 = TlZ(s, mask)
+    Next i
+    out = out & ", Z " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
+    For i = 1 To nRep
+        mask = Space(Len(s))
+        ng = TlGroups(s, mask, gs, ge, gv)
+    Next i
+    out = out & ", Groups " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
+    For i = 1 To nRep
+        d1 = TlHasType(s)
+    Next i
+    out = out & ", HasType " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
+    For i = 1 To nRep
+        ga = TlRecord(sName)
+    Next i
+    out = out & ", ВСЁ TlRecord " & (GetSystemTicks() - t0) & " мс на " & nRep
+    TestToolParts = out
+End Function
+
+Function TestToolSteps() As String
+    Dim i As Long, g As Variant, rec As Variant, t0 As Long, ta As Long, tb As Long, tc As Long, td As Long, n As Long, c As String, f As String
+    WmsInit()
+    If Not gCtLoaded Then WmsCat.CtLoad()
+    WmsCat.GoodsLoad()
+    WmsCat.StockGroups()
+    t0 = GetSystemTicks()
+    For i = 0 To gGrpN - 1
+        g = gGrp(i)
+        rec = TlRecordC(CStr(g(0)))
+        If CStr(rec(RC_TYPE)) <> "" Then n = n + 1
+    Next i
+    ta = GetSystemTicks() - t0
+    t0 = GetSystemTicks()
+    For i = 0 To gGrpN - 1
+        g = gGrp(i)
+        rec = TlRecordC(CStr(g(0)))
+    Next i
+    tb = GetSystemTicks() - t0
+    t0 = GetSystemTicks()
+    For i = 0 To gGrpN - 1 Step 3
+        g = gGrp(i)
+        c = WmsCat.CategoryOf(CStr(g(0)), CStr(g(1)), CStr(g(6)))
+    Next i
+    tc = GetSystemTicks() - t0
+    t0 = GetSystemTicks()
+    For i = 0 To gGrpN - 1
+        g = gGrp(i)
+        f = WmsNames.Fold(CStr(g(0)))
+    Next i
+    td = GetSystemTicks() - t0
+    TestToolSteps = "TlRecordC холодный " & ta & ", тёплый " & tb & "; CategoryOf (1/3 групп) " & tc & "; Fold всех " & td & "; инструмента " & n
+End Function
+
 Function TestToolParse(sName As String) As String
     Dim r As Variant
     TlLoad()
