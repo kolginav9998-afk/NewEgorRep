@@ -326,8 +326,9 @@ Private Function LbExtra(n As Long, row As Variant, goods As Variant) As Variant
     art = Trim(CStr(row(SC_ART)))
     nm = LCase(Trim(CStr(row(SC_NAME))))
     unit = Trim(CStr(row(SC_UNIT)))
-    If LCase(Trim(CStr(row(SC_CAT)))) = "детали" And art <> "" Then l1 = "Арт.: " & art
     p = PropOf(n)
+    ' 1.1.1: the article stands on the label of a part (the category «Детали») and of anything that has a serial number
+    If (LCase(Trim(CStr(row(SC_CAT)))) = "детали" Or CStr(p(0)) <> "") And art <> "" Then l1 = "Арт.: " & art
     If CStr(p(0)) <> "" Then l1 = l1 & IIf(l1 <> "", " · ", "") & "S/N: " & p(0)
     If WmsPack.PackOf(n, pu, pn) Then
         l2 = "Выдача по 1 " & pu & " · в 1 " & unit & " — " & WmsIssue.QtyText(pn) & " " & pu

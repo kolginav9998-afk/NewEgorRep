@@ -2167,6 +2167,53 @@ def buttons_110(doc, sheets):
                 add_button(doc, sh, name, label, macro, x, y, w, h, back=back)
 
 
+# 1.1.1: «Серийные детали» (WmsSerial) — the directory of the parts that have a serial number, one row per number: it only shows (built from «Наличия», its properties and «Выдач»);
+# «Серийные детали…» on «Иной приход» and «Заказы» — the receipt of such parts with the numbers in one action
+SERIALS = "Серийные детали"
+SERIALS_HEADERS = ["Серийный №", "Артикул", "Наименование", "ЕИ", "Место", "Остаток", "Состояние", "Кому выдана", "Дата выдачи", "Откуда / примечание"]
+SERIALS_WIDTHS = [4200, 3200, 8000, 2800, 2600, 1800, 3000, 4000, 2600, 9000]
+SERIALS_HINT = ("Серийные детали: справочник деталей с серийным номером — одна строка на номер: артикул, наименование, ЕИ, место, остаток, состояние (на складе / выдана — кому и когда / заменён), откуда пришла. "
+                "Впишите в «Найти» часть номера, артикул, место или фамилию — останутся строки, где есть все слова; «Показывать выданные» — «нет» скрывает выданные. Строки можно сортировать и фильтровать; «Обновить» строит список заново. "
+                "«Этикетки выбранных» — этикетки (ЕИ, артикул, серийный номер) для выделенных строк. Принять детали с номерами: на «Ином приходе» или «Заказах» заполните строку (артикул, наименование, место, документ) и нажмите «Серийные детали…». "
+                "Лист только показывает: ничего не проводит и в журнал не пишет.")
+SHEETS_111 = [SERIALS]
+
+
+def build_serials(doc, sh):
+    build_view110(doc, sh, SERIALS_HEADERS, SERIALS_WIDTHS, SERIALS_HINT, "Найти:", "Показывать выданные (да/нет):")
+    sh.getCellByPosition(5, 1).setString("да")
+    sh.getCellRangeByPosition(5, 4, 5, 60000).HoriJustify = 3
+    sh.getCellRangeByPosition(8, 4, 8, 60000).NumberFormat = number_format(doc, "DD.MM.YYYY")
+    add_button(doc, sh, "btnSerialsRefresh", "Обновить", "WmsSerial.BtnSerialsRefresh", 150, 120, 3000, 650, bold=True, back=0xC6E0B4)
+    add_button(doc, sh, "btnSerialsLabels", "Этикетки выбранных", "WmsSerial.BtnSerialsLabels", 3300, 120, 4200, 650, back=0xDDEBF7)
+    bind_event(sh.Events, "OnFocus", "WmsSerial.OnSerialsFocus")
+    bind_event(sh.Events, "OnChange", "WmsSerial.OnSerialsChange")
+
+
+def views_111(doc, sheets):
+    """1.1.1: «Серийные детали» after «Остаток деталей», for a new book and an upgraded one; nothing that exists is touched"""
+    names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+    if not sheets.hasByName(SERIALS):
+        sheets.insertNewByName(SERIALS, names.index(PARTS) + 1 if PARTS in names else (names.index(STOCK) + 1 if STOCK in names else len(names)))
+        build_serials(doc, sheets.getByName(SERIALS))
+
+
+# 1.1.1: the buttons «Серийные детали…» (the receipt with the serial numbers) of «Иной приход» and «Заказы»; only the missing ones are added
+BUTTONS_111 = [
+    (SPECIAL, "btnSerialRcv", "Серийные детали…", "WmsSerial.BtnSerialSpecial", 150, 880, 3800, 650, 0xC6E0B4),
+    (ORDERS, "btnSerialRcv", "Серийные детали…", "WmsSerial.BtnSerialOrder", 150 + 5 * 3050, 880, 3800, 650, 0xC6E0B4),
+]
+
+
+def buttons_111(doc, sheets):
+    for sheet, name, label, macro, x, y, w, h, back in BUTTONS_111:
+        if sheets.hasByName(sheet):
+            sh = sheets.getByName(sheet)
+            if not has_button(sh, name):
+                add_button(doc, sh, name, label, macro, x, y, w, h, back=back)
+
+
+
 def ledger_10(doc, sheets):
     """1.0 (этап G): what a new book and an upgraded one both get — the hidden _CLOSE (the closed months) and the page «Отчёты»"""
     if not sheets.hasByName(CLOSE):
@@ -2479,7 +2526,8 @@ HOTKEYS_11 = [("H", "WmsUi.NavMain", "Главная"), ("D", "WmsUi.NavDash", "
               ("N", "WmsUi.NavSpecial", "Иной приход"), ("I", "WmsUi.NavIssues", "Выдачи"), ("R", "WmsUi.NavReturns", "Возврат"), ("A", "WmsUi.NavAdjust", "Корректировки"),
               ("L", "WmsUi.NavStock", "Наличие"), ("G", "WmsKeys.KeyFasteners", "Метизы"), ("J", "WmsOps.BtnOpsOpen", "Операции дня"), ("X", "WmsSafe.NavService", "Обслуживание"),
               ("B", "WmsDaily.NavHelp", "Справка"), ("K", "WmsKeys.KeyCheck", "Проверить строку"), ("U", "WmsKeys.KeyFix", "Исправить строку"),
-              ("T", "WmsDaily.BtnReceiveWindow", "Принять…"), ("Y", "WmsGuard.BtnWhatNow", "Что делать?")]
+              ("T", "WmsDaily.BtnReceiveWindow", "Принять…"), ("Y", "WmsGuard.BtnWhatNow", "Что делать?"),
+              ("S", "WmsSerial.NavSerials", "Серийные детали")]
 
 
 def hotkeys_10(doc):
@@ -3134,7 +3182,9 @@ def build(office, out_path, test=False, instance_id=None):
     categories_102(doc, sheets)
     buttons_102(doc, sheets)
     buttons_110(doc, sheets)
+    buttons_111(doc, sheets)
     views_110(doc, sheets)
+    views_111(doc, sheets)
     main_buttons_110(doc, sheets)
     hotkeys_10(doc)
     build_service(doc, sheets)

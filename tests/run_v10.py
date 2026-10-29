@@ -3595,7 +3595,7 @@ def v45_upgrade_with_tail():
     h0 = run_prime.sha(p)
     j0 = {f: run_prime.sha(f) for f in glob.glob(os.path.join(work, "WMS_Journal", "*.csv"))}
     rc0, o0 = run_prime.upgrade("check", p)
-    new = os.path.join(d, "WMS_RELEASE_1.1.0", "WMS_WORK")
+    new = os.path.join(d, f"WMS_RELEASE_{run_prime.VERS['WMS_PRODUCT_VERSION']}", "WMS_WORK")
     rc1, o1 = run_prime.upgrade("build", p, "--to", new)
     rc2, o2 = run_prime.upgrade("promote", "--to", new)
     rep = open(os.path.join(new, "UPGRADE_REPORT.md"), encoding="utf-8").read() if os.path.exists(os.path.join(new, "UPGRADE_REPORT.md")) else ""
@@ -4715,6 +4715,228 @@ def v60_unique_names():
                 seen.setdefault(m.group(1).lower(), set()).add(mod)
     new = sorted(k + ":" + "/".join(sorted(v)) for k, v in seen.items() if len(v) > 1 and k not in old)
     R.add(c, "в src/basic нет новых повторов имён процедур между модулями (старых %d проверено)" % len(old), not new, "; ".join(new))
+
+
+@case
+def v61_serial_receipt():
+    """1.1.1: «Серийные детали…» на «Ином приходе» — деталь приходит сразу с серийными номерами: количество = число номеров, каждая деталь — свой ЕИ (тот же артикул, свой номер),
+    этикетки с «Арт.» и «S/N»; повторный приход того же артикула не трогает номер прежнего ЕИ; если ЕИ был пуст и нёс номер выданной детали — тот пишется в примечание («ранее №»);
+    лист «Серийные детали» показывает состояние каждого номера; повтор номера — отказ до записи; обезличенная копия очищает лист"""
+    c = "V61"
+    s = ready(Session(new_wms("v61")))
+    try:
+        seq0 = int(s.sysv("LAST_SEQ"))
+        spc_line(s, 1, "Детали", name="Шестерня Z-40", qty=None, art="GR-40", place="A-1")
+        s.goto("Иной приход", "$B$2")
+        s.B("TestPrimeForm", "SN-101\nSN-102\nsn-103", module="WmsPrimeUi")
+        s.B("BtnSerialSpecial", module="WmsSerial")
+        n101, n102, n103 = [int(s.B("SerialEI", x, module="WmsItem")) for x in ("SN-101", "SN-102", "SN-103")]
+        rows = [list(s.doc.Sheets.getByName("Наличие").getCellRangeByPosition(0, n, 12, n).getDataArray()[0]) for n in (n101, n102, n103)]
+        spc = s.doc.Sheets.getByName("Иной приход")
+        seq1 = int(s.sysv("LAST_SEQ"))
+        pr = " ".join(str(x) for r in s.doc.Sheets.getByName("Печать").getCellRangeByPosition(0, 0, 0, 40).getDataArray() for x in r)
+        R.add(c, "три номера на «Ином приходе»: количество в строке 3, приход проведён и разделён — три разных ЕИ по 1 шт, у всех артикул GR-40 и наименование «Шестерня Z-40»; в журнале 6 операций (приход, 2 × разделение + номер, номер последней)",
+              len({n101, n102, n103}) == 3 and min(n101, n102, n103) > 0 and all(s.stock(n) == 1.0 for n in (n101, n102, n103)) and all("GR-40" in r and "Шестерня Z-40" in r for r in rows)
+              and spc.getCellByPosition(5, 1).getString() == "3" and spc.getCellByPosition(13, 1).getString().startswith("ЕИ-") and seq1 == seq0 + 6, f"{n101} {n102} {n103}; {rows[0][:6]}; {spc.getCellByPosition(5, 1).getString()}; {seq0}->{seq1}")
+        R.add(c, "этикетки напечатаны на «Печати»: у каждой «Арт.: GR-40» и «S/N: SN-101…»", "S/N: SN-101" in pr and "S/N: SN-102" in pr and "S/N: sn-103" in pr and pr.count("Арт.: GR-40") >= 3, pr[:200])
+        # the same article again: the numbers of the EI that is there stay
+        spc_line(s, 2, "Детали", name="Шестерня Z-40", qty=None, art="GR-40", place="A-1")
+        s.goto("Иной приход", "$B$3")
+        s.B("TestPrimeForm", "SN-104; SN-105", module="WmsPrimeUi")
+        s.B("BtnSerialSpecial", module="WmsSerial")
+        n104, n105 = [int(s.B("SerialEI", x, module="WmsItem")) for x in ("SN-104", "SN-105")]
+        p103 = s.B("PropOf", n103, module="WmsItem")
+        R.add(c, "тот же артикул ещё раз (2 номера): два новых ЕИ, номер «sn-103» у прежнего ЕИ на месте, его остаток 1",
+              n104 > 0 and n105 > 0 and len({n101, n102, n103, n104, n105}) == 5 and p103[0] == "sn-103" and s.stock(n103) == 1.0 and s.stock(n104) == 1.0 and s.stock(n105) == 1.0, f"{n104} {n105}; {p103}")
+        # a number that is there already: refused before anything is written
+        seq2 = int(s.sysv("LAST_SEQ"))
+        spc_line(s, 3, "Детали", name="Шестерня Z-40", qty=None, art="GR-40", place="A-1")
+        s.goto("Иной приход", "$B$4")
+        s.B("TestPrimeForm", "SN-200\nSN-101", module="WmsPrimeUi")
+        s.B("BtnSerialSpecial", module="WmsSerial")
+        msg = s.U("TestUiLastMessage") or ""
+        R.add(c, "номер SN-101 уже есть: отказ до записи, журнал не изменился, количество в строке не поставлено",
+              "уже записан" in msg and int(s.sysv("LAST_SEQ")) == seq2 and spc.getCellByPosition(5, 3).getString() == "", f"{msg[:120]}; {s.sysv('LAST_SEQ')}")
+        # the EI of the article is given out whole, then a new part comes: the old number goes to the note
+        issue(s, 1, f"ЕИ-{n103:08d}", "1", "ива")
+        issue(s, 2, f"ЕИ-{n101:08d}", "1", "Секретов")
+        s.goto("Иной приход", "$B$4")
+        s.B("TestPrimeForm", "SN-106", module="WmsPrimeUi")
+        s.B("BtnSerialSpecial", module="WmsSerial")
+        n106 = int(s.B("SerialEI", "SN-106", module="WmsItem"))
+        pb = s.B("PropOf", n106, module="WmsItem")
+        R.add(c, "ЕИ с выданной деталью (SN-103, остаток 0) принял новую: у ЕИ теперь SN-106, а «ранее № sn-103» записано в его примечание; остаток 1",
+              n106 == n103 and pb[0] == "SN-106" and "ранее № sn-103" in pb[2] and s.stock(n106) == 1.0, f"{n106} {pb}")
+        # the sheet
+        r1 = s.B("SerialsRefresh", "", True, module="WmsSerial")
+        sh = s.doc.Sheets.getByName("Серийные детали")
+        rows_ = [list(r) for r in sh.getCellRangeByPosition(0, 4, 9, 30).getDataArray() if r[0] != ""]
+        by = {r[0]: r for r in rows_}
+        R.add(c, "лист «Серийные детали»: 6 строк (5 действующих номеров и заменённый sn-103); SN-102 на складе, SN-101 выдана Секретову, sn-103 заменён в ЕИ",
+              r1 == "OK:6" and len(rows_) == 6 and by["SN-102"][6] == "на складе" and by["SN-101"][6] == "выдана" and by["SN-101"][7] == "Секретов" and by["sn-103"][6] == "заменён в ЕИ"
+              and by["SN-104"][1] == "GR-40" and by["SN-104"][2] == "Шестерня Z-40", f"{r1}; {[(r[0], r[6], r[7]) for r in rows_]}")
+        r2 = s.B("SerialsRefresh", "sn-105", True, module="WmsSerial")
+        rows2 = [r[0] for r in sh.getCellRangeByPosition(0, 4, 9, 30).getDataArray() if r[0] != ""]
+        r3 = s.B("SerialsRefresh", "", False, module="WmsSerial")
+        rows3 = [r[0] for r in sh.getCellRangeByPosition(0, 4, 9, 30).getDataArray() if r[0] != ""]
+        R.add(c, "поиск «sn-105» — одна строка; «показывать выданные: нет» — только те, что на складе (SN-102, SN-104, SN-105, SN-106)",
+              r2 == "OK:1" and rows2 == ["SN-105"] and r3 == "OK:4" and sorted(rows3) == ["SN-102", "SN-104", "SN-105", "SN-106"], f"{r2} {rows2}; {r3} {rows3}")
+        s.B("SerialsRefresh", "", True, module="WmsSerial")
+        s.goto("Серийные детали", "$A$5:$J$6")
+        lb = s.B("SerialsLabels", module="WmsSerial")
+        R.add(c, "«Этикетки выбранных» на двух строках — этикетки для их ЕИ", lb.startswith("OK:этикеток 2"), lb)
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:100])
+        oracle(c, s, "серийный приход")
+        s.B("ByNameRefresh", "", True, module="WmsStockView")
+        s.doc.store()
+        ma = s.B("MakeCopy", "ANON", False, module="WmsHelp")
+    finally:
+        s.close()
+    ap = re.search(r"(/[^\n]*?\.ods)", ma).group(1) if ma.startswith("OK:") else ""
+    a = ready(Session(ap)) if ap else None
+    try:
+        left = []
+        if a:
+            for nme in ("Серийные детали", "Наличие по названию", "Остаток деталей", "Операции дня"):
+                sh_ = a.doc.Sheets.getByName(nme)
+                for row_ in sh_.getCellRangeByPosition(0, 0, 12, 60).getDataArray():
+                    for x_ in row_:
+                        if isinstance(x_, str) and ("Секретов" in x_ or "SN-10" in x_ or "sn-10" in x_):
+                            left.append((nme, x_[:30]))
+        R.add(c, "обезличенная копия: листы-просмотры (в том числе «Серийные детали») очищены — ни фамилии, ни серийных номеров", bool(a) and not left, f"{ma[:80]}; {left[:5]}")
+    finally:
+        if a:
+            a.close()
+
+
+@case
+def v62_serial_receipt_orders():
+    """1.1.1: «Серийные детали…» на «Заказах» — приход по заказу сразу с серийными номерами: факт F = число номеров (не задан) или не меньше него (остаток деталей без номера остаётся в ЕИ);
+    номеров больше факта — отказ до записи"""
+    c = "V62"
+    s = ready(Session(new_wms("v62")))
+    try:
+        order(s, 1, "7", "Подшипник 6204", qty="10", art="BR-6204")
+        put(s, "Заказы", 1, C="УПД-5", O=serial(), N=serial(), U="B-1")
+        s.goto("Заказы", "$A$2")
+        seq0 = int(s.sysv("LAST_SEQ"))
+        s.B("TestPrimeForm", "BR-1\nBR-2\nBR-3", module="WmsPrimeUi")
+        s.B("BtnSerialOrder", module="WmsSerial")
+        ns = [int(s.B("SerialEI", x, module="WmsItem")) for x in ("BR-1", "BR-2", "BR-3")]
+        sh = s.doc.Sheets.getByName("Заказы")
+        row = ords(s, 1)
+        R.add(c, "факт не задан: 3 номера → F=3, три ЕИ по 1 шт с артикулом BR-6204 (порядок: ЕИ строки — последний), заказ «Частично получено»; журнал +6",
+              len(set(ns)) == 3 and min(ns) > 0 and all(s.stock(n) == 1.0 for n in ns) and str(row[5]) in ("3", "3.0") and "Частично" in str(row[22]) and int(s.sysv("LAST_SEQ")) == seq0 + 6,
+              f"{ns}; F={row[5]}; {row[22]}; {seq0}->{s.sysv('LAST_SEQ')}")
+        order(s, 2, "8", "Втулка", qty="10", art="BS-1")
+        put(s, "Заказы", 2, F="5", C="УПД-6", O=serial(), N=serial(), U="B-2")
+        s.goto("Заказы", "$A$3")
+        s.B("TestPrimeForm", "BS-1\nBS-2\nBS-3", module="WmsPrimeUi")
+        s.B("BtnSerialOrder", module="WmsSerial")
+        ms = [int(s.B("SerialEI", x, module="WmsItem")) for x in ("BS-1", "BS-2", "BS-3")]
+        base = ords(s, 2)[21]
+        nb = int(base[3:]) if base else 0
+        R.add(c, "факт 5, номеров 3: три ЕИ с номерами, а в ЕИ строки остаётся 2 шт без номера", min(ms) > 0 and nb not in ms and s.stock(nb) == 2.0 and all(s.stock(n) == 1.0 for n in ms)
+              and s.B("PropOf", nb, module="WmsItem")[0] == "", f"{ms}; {base} {s.stock(nb) if nb else ''}")
+        order(s, 3, "9", "Кольцо", qty="10", art="KL-1")
+        put(s, "Заказы", 3, F="2", C="УПД-7", O=serial(), N=serial(), U="B-3")
+        s.goto("Заказы", "$A$4")
+        seq1 = int(s.sysv("LAST_SEQ"))
+        s.B("TestPrimeForm", "KL-1\nKL-2\nKL-3", module="WmsPrimeUi")
+        s.B("BtnSerialOrder", module="WmsSerial")
+        msg = s.U("TestUiLastMessage") or ""
+        R.add(c, "факт 2, номеров 3: отказ («номеров не может быть больше деталей»), журнал не изменился, факт остался 2",
+              "не может быть больше" in msg and int(s.sysv("LAST_SEQ")) == seq1 and str(ords(s, 3)[5]) in ("2", "2.0"), f"{msg[:140]}; {ords(s, 3)[5]}")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:100])
+        oracle(c, s, "серийный приход по заказу")
+    finally:
+        s.close()
+
+
+@case
+def v63_upgrade_110_111():
+    """1.1.1 для пользователя, уже работающего в 1.1.0: рабочая книга 1.1.0 (собрана исходниками выпуска 1.1.0, детали с серийными номерами, выдача) обновляется мастером — проверка, сборка
+    (сверка каждой ячейки), «сделать рабочей»; данные те же, старая книга и журнал побайтно те же; в новой — лист «Серийные детали» (без защиты) и кнопки «Серийные детали…»;
+    на данных книги работают справочник и серийный приход"""
+    import run_prime
+    import subprocess
+    from harness import git_sources
+    c = "V63"
+    src = os.path.join(OUT, "src_110")
+    why = "" if os.path.isdir(os.path.join(src, "tools")) else git_sources("c0e041f", src)
+    if why:
+        R.add(c, "исходники выпуска 1.1.0", "SKIP", why)
+        return
+    d = os.path.join(OUT, "cases", "v63 Склад")
+    shutil.rmtree(d, ignore_errors=True)
+    work = os.path.join(d, "WMS_RELEASE_1.1.0", "WMS_WORK")
+    os.makedirs(work)
+    p = os.path.join(work, "WMS_PROD.ods")
+    b = subprocess.run([sys.executable, os.path.join(src, "tools", "build_ods.py"), p, "--test"], capture_output=True, text=True, timeout=900)
+    if b.returncode != 0 or not os.path.exists(p):
+        R.add(c, "книга 1.1.0 собрана исходниками 1.1.0", False, (b.stdout + b.stderr)[-300:])
+        return
+    s = ready(Session(p))
+    try:
+        core0 = s.sysv("CORE_VERSION")
+        order(s, 1, "1", "Шестерня Z-40", qty="3", art="GR-40", T="Участок 3")
+        put(s, "Заказы", 1, S="Детали")
+        receive(s, 1, "3", place="4-1-2", doc="УПД-3")
+        e1 = ords(s, 1)[21]
+        sp = s.B("SerialSplit", e1, ("SN-1", "SN-2", "SN-3"), module="WmsParts")
+        n1 = int(s.B("SerialEI", "SN-1", module="WmsItem"))
+        i1 = issue(s, 1, f"ЕИ-{n1:08d}", "1", "ива")
+        stk = s.doc.Sheets.getByName("Наличие")
+        n_ei = int(s.sysv("NEXT_EI")) - 1
+        before = [tuple(r[:8]) for r in stk.getCellRangeByPosition(0, 1, 7, n_ei).getDataArray()]
+        seq_old = int(s.sysv("LAST_SEQ"))
+    finally:
+        s.close(save=True)
+    h0 = run_prime.sha(p)
+    j0 = {f: run_prime.sha(f) for f in glob.glob(os.path.join(work, "WMS_Journal", "*.csv"))}
+    rc0, o0 = run_prime.upgrade("check", p)
+    new = os.path.join(d, f"WMS_RELEASE_{run_prime.VERS['WMS_PRODUCT_VERSION']}", "WMS_WORK")
+    rc1, o1 = run_prime.upgrade("build", p, "--to", new)
+    rc2, o2 = run_prime.upgrade("promote", "--to", new)
+    rep = open(os.path.join(new, "UPGRADE_REPORT.md"), encoding="utf-8").read() if os.path.exists(os.path.join(new, "UPGRADE_REPORT.md")) else ""
+    R.add(c, "книга 1.1.0: проверка «можно обновить», сборка — 0 расхождений ячеек (нового только лист «Серийные детали»), «сделать рабочей»; старая книга и журнал побайтно те же, старая заперта",
+          core0 == "1.1.0" and sp.startswith("OK:3") and i1.startswith("OK") and rc0 == 0 and rc1 == 0 and rc2 == 0 and "расхождений: 0" in rep and run_prime.sha(p) == h0
+          and {f: run_prime.sha(f) for f in glob.glob(os.path.join(work, "WMS_Journal", "*.csv"))} == j0 and os.path.exists(os.path.join(work, "WMS_Journal", "wms.lock")),
+          f"{core0}; {sp[:40]}; {i1[:40]}; {o0[-160:]}; {o1[-200:]}; {o2[-160:]}; {rep[-300:]}")
+    s = ready(Session(os.path.join(new, "WMS_PROD.ods")))
+    try:
+        sh = s.doc.Sheets
+        stk = sh.getByName("Наличие")
+        after = [tuple(r[:8]) for r in stk.getCellRangeByPosition(0, 1, 7, n_ei).getDataArray()]
+
+        def btn(sheet, name):
+            f = sh.getByName(sheet).getDrawPage().getForms()
+            return f.getCount() > 0 and any(f.getByIndex(0).getByIndex(i).Name == name for i in range(f.getByIndex(0).getCount()))
+
+        R.add(c, "новая книга — WMS 1.1.1: «работа разрешена», тот же журнал и каждый ЕИ; лист «Серийные детали» без защиты; кнопки «Серийные детали…» на «Заказах» и «Ином приходе»",
+              s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == run_prime.VERS["WMS_CORE_VERSION"] and before == after and int(s.sysv("LAST_SEQ")) == seq_old
+              and sh.hasByName("Серийные детали") and not sh.getByName("Серийные детали").isProtected() and btn("Иной приход", "btnSerialRcv") and btn("Заказы", "btnSerialRcv"),
+              f"{s.state()}; {s.sysv('CORE_VERSION')}; {before == after}; {sh.hasByName('Серийные детали')}")
+        r1 = s.B("SerialsRefresh", "", True, module="WmsSerial")
+        rows_ = [list(r) for r in sh.getByName("Серийные детали").getCellRangeByPosition(0, 4, 9, 20).getDataArray() if r[0] != ""]
+        by = {r[0]: r for r in rows_}
+        R.add(c, "справочник на данных книги 1.1.0: SN-1 выдана Иве.., SN-2 на складе, SN-3 на складе (последняя осталась в исходном ЕИ)",
+              r1 == "OK:3" and by["SN-1"][6] == "выдана" and by["SN-2"][6] == "на складе" and by["SN-3"][6] == "на складе" and by["SN-2"][1] == "GR-40", f"{r1}; {[(r[0], r[6], r[7]) for r in rows_]}")
+        spc_line(s, 1, "Детали", name="Шестерня Z-40", qty=None, art="GR-40", place="4-1-2")
+        s.goto("Иной приход", "$B$2")
+        s.B("TestPrimeForm", "SN-4\nSN-5", module="WmsPrimeUi")
+        s.B("BtnSerialSpecial", module="WmsSerial")
+        n4, n5 = [int(s.B("SerialEI", x, module="WmsItem")) for x in ("SN-4", "SN-5")]
+        p3 = s.B("PropOf", int(s.B("SerialEI", "SN-3", module="WmsItem")), module="WmsItem")
+        R.add(c, "серийный приход в обновлённой книге: тот же артикул GR-40 принят в прежний ЕИ, два новых ЕИ SN-4 и SN-5, номер SN-3 у прежнего ЕИ на месте", n4 > 0 and n5 > 0 and p3[0] == "SN-3", f"{n4} {n5} {p3}")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:200])
+        P, inf, _ = s.adjcheck(0)
+        R.add(c, "оракул (журнал воспроизведён независимо): книга 1.1.0, обновлённая до 1.1.1, и новые операции", not P, f"{inf.get('ops')} операций; {P[:4]}")
+    finally:
+        s.close()
 
 
 # ================================================================ runner

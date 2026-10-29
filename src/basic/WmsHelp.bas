@@ -371,7 +371,7 @@ Function CheatSheet() As String
         "#Если красное", "Строка не провелась — колонка «Контроль» и кнопка «Почему?». «1 кан» не принимается — задайте «Фасовку ЕИ».", _
         "Не знаете, что делать — «Справка» → «Что делать, если…».", _
         "#Конец дня", "Сохраните книгу (Ctrl+S). Раз в неделю — «Обслуживание» → «Копия на флешку…».", _
-        "#Горячие клавиши (Ctrl+Shift + буква; не сработало — английская раскладка)", "Листы: H Главная · D Дашборд · F Поиск · M Карта · O Заказы · N Иной приход · I Выдачи · R Возврат · A Корректировки · L Наличие · G Метизы · J Операции дня · X Обслуживание · B Справка", _
+        "#Горячие клавиши (Ctrl+Shift + буква; не сработало — английская раскладка)", "Листы: H Главная · D Дашборд · F Поиск · M Карта · O Заказы · N Иной приход · I Выдачи · R Возврат · A Корректировки · L Наличие · S Серийные детали · G Метизы · J Операции дня · X Обслуживание · B Справка", _
         "На листе: P Провести · K Проверить · U Исправить · W Выдать… · T Принять… · E Подобрать ЕИ · Q Куда положить? · Y Что делать?")
     For i = 0 To UBound(a)
         If Left(a(i), 1) = "#" Then
@@ -675,6 +675,16 @@ Private Function Anonymize(hd As Object) As Long
             sh = hd.Sheets.getByName(a)
             If sh.isProtected() Then sh.unprotect(PROTECT_PWD)
             sh.getCellRangeByPosition(0, IIf(a = "Дашборд", 5, 6), 15, 3000).clearContents(1 + 2 + 4)
+        End If
+    Next a
+    ' 1.1.1: the views of 1.1 (made from the registry, the issues and the journal) hold names, recipients and the words that were searched for — emptied, their buttons make them again
+    For Each a In Array("Наличие по названию", "Остаток деталей", "Операции дня", "Проверка названий", "Без категории", "ABC-анализ", "Без движения", "Серийные детали")
+        If hd.Sheets.hasByName(a) Then
+            sh = hd.Sheets.getByName(a)
+            If sh.isProtected() Then sh.unprotect(PROTECT_PWD)
+            sh.getCellRangeByPosition(0, 4, 25, 60000).clearContents(1 + 2 + 4)
+            sh.getCellByPosition(0, 2).setString("")
+            If a <> "Операции дня" And a <> "ABC-анализ" And a <> "Без движения" And a <> "Проверка названий" Then sh.getCellByPosition(1, 1).setString("")
         End If
     Next a
     Anonymize = n

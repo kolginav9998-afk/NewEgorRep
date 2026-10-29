@@ -166,6 +166,68 @@ Function UiAsk3b(s As String, sYes As String, sNo As String, sCancel As String) 
     UiAsk3b = k
 End Function
 
+' 1.1.1: a window with one big field (a list typed or pasted, one item to a line): sText — the text proposed (in) and entered (out). True when «OK» was pressed.
+' In the tests: the text set by TestPrimeForm (the first field) answers it; without it the window is "closed".
+Function UiMemo(sTitle As String, sInfo As String, ByRef sText As String, sOk As String) As Boolean
+    Dim dm As Object, dlg As Object, m As Object, infoH As Integer
+    gPrShown = sTitle & Chr(10) & sInfo & Chr(10) & sText
+    If gUiAuto <> 0 Then
+        If gPrFormSet Then
+            If gPrFormIn(0) <> FORM_KEEP Then sText = gPrFormIn(0)
+            gPrFormSet = False
+            UiMemo = True
+        End If
+        Exit Function
+    End If
+    infoH = 12 * (1 + Len(sInfo) \ 70) + 4
+    dm = CreateUnoService("com.sun.star.awt.UnoControlDialogModel")
+    dm.Title = sTitle
+    dm.Width = 300
+    dm.Height = infoH + 190
+    m = dm.createInstance("com.sun.star.awt.UnoControlFixedTextModel")
+    m.PositionX = 8
+    m.PositionY = 6
+    m.Width = 284
+    m.Height = infoH
+    m.MultiLine = True
+    m.Label = sInfo
+    dm.insertByName("lInfo", m)
+    m = dm.createInstance("com.sun.star.awt.UnoControlEditModel")
+    m.PositionX = 8
+    m.PositionY = infoH + 10
+    m.Width = 284
+    m.Height = 150
+    m.MultiLine = True
+    m.VScroll = True
+    m.Text = sText
+    dm.insertByName("eMemo", m)
+    m = dm.createInstance("com.sun.star.awt.UnoControlButtonModel")
+    m.PositionX = 168
+    m.PositionY = infoH + 168
+    m.Width = 60
+    m.Height = 15
+    m.Label = sOk
+    m.PushButtonType = 1
+    m.DefaultButton = False
+    dm.insertByName("bOK", m)
+    m = dm.createInstance("com.sun.star.awt.UnoControlButtonModel")
+    m.PositionX = 232
+    m.PositionY = infoH + 168
+    m.Width = 60
+    m.Height = 15
+    m.Label = "Отмена"
+    m.PushButtonType = 2
+    dm.insertByName("bCancel", m)
+    dlg = CreateUnoService("com.sun.star.awt.UnoControlDialog")
+    dlg.setModel(dm)
+    dlg.createPeer(CreateUnoService("com.sun.star.awt.Toolkit"), Null)
+    If dlg.execute() = 1 Then
+        sText = dlg.getControl("eMemo").getText()
+        UiMemo = True
+    End If
+    dlg.dispose()
+End Function
+
 ' a form of labelled fields: v() — the values proposed (in) and entered (out); lists(i) — "" for a text field or the choices
 ' «a|b|c» of a drop-down field; sInfo — a line of explanation above the fields. True when «OK» was pressed.
 Function UiForm(sTitle As String, sInfo As String, labels As Variant, v() As String, lists As Variant, sOk As String) As Boolean
