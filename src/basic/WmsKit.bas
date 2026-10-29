@@ -127,7 +127,7 @@ Function KitParts(sKit As String) As String
 End Function
 
 ' a text as Calc compares it: lower case, single spaces
-Private Function KtKey(ByVal s As String) As String
+Function KtKey(ByVal s As String) As String
     s = LCase(Trim(s))
     Do While InStr(s, "  ") > 0
         s = Replace(s, "  ", " ")
@@ -137,7 +137,7 @@ End Function
 
 ' 1.0.1: the EI named by s («ЕИ-427», «ЕИ-00000427», «EI 427» — always with «ЕИ» / «EI»: a bare number is an article): its
 ' number; 0 — s does not name an EI; -1 — it names an EI that WMS does not have
-Private Function KtEiRef(ByVal s As String) As Long
+Function KtEiRef(ByVal s As String) As Long
     Dim t As String
     s = Trim(s)
     t = UCase(Left(s, 2))
@@ -152,7 +152,7 @@ End Function
 
 ' the EIs for nNeed of component j, the oldest first (by the article when the component has one, otherwise by the name; the
 ' unit when it is given), what an earlier component already took counted out. Appended to gKp*; the quantity taken
-Private Function KitPick(j As Long, nNeed As Double) As Double
+Function KitPick(j As Long, nNeed As Double) As Double
     Dim last As Long, cond As String, key As String, items As Variant, nItems As Long, i As Long, n As Long, st As Object, q As Double, used As Double
     Dim k As Long, take As Double, rest As Double, d As Variant
     rest = WmsIssue.Round3(nNeed)
@@ -208,7 +208,7 @@ Private Function KitPick(j As Long, nNeed As Double) As Double
 End Function
 
 ' every component of the kit for nKits kits picked (gKp*); the shortages as text («Кабель ВВГ: нужно 10 м, есть 4 м»), "" — all
-Private Function KitPickAll(nKits As Double) As String
+Function KitPickAll(nKits As Double) As String
     Dim j As Long, need As Double, got As Double, s As String
     gKpN = 0
     ReDim gKpEi(31)
@@ -242,7 +242,7 @@ Sub BtnKitIssue(Optional oEvent As Variant)
     v(1) = "1"
     v(3) = Format(WmsOrders.Today(), "DD.MM.YYYY")
     If Not WmsPrimeUi.UiForm("Выдать комплект", "WMS заполнит строки «Выдач» нужными ЕИ (старые первыми) и выделит их — проверьте и нажмите «Провести».", _
-        Array("Комплект", "Сколько комплектов", "Кому", "Дата"), v, Array(Join(names, ";"), "", "", ""), "Заполнить строки") Then Exit Sub
+        Array("Комплект", "Сколько комплектов", "Кому", "Дата"), v, Array(Join(names, "|"), "", "", ""), "Заполнить строки") Then Exit Sub
     If Not IsNumeric(Replace(Trim(v(1)), ",", ".")) Then
         WmsUi.UiMessage("Сколько комплектов — число, например 2.")
         Exit Sub
@@ -325,7 +325,7 @@ Sub BtnKitBuild(Optional oEvent As Variant)
     v(4) = "сборка комплекта"
     If Not WmsPrimeUi.UiForm("Собрать комплект", "Позиции снимутся с их ЕИ (старые первыми), готовые комплекты станут новым ЕИ с единицей «" & KIT_UNIT & "». " _
         & "Одна операция журнала; «Удалить» любой её строки на «Корректировках» разберёт комплект.", Array("Комплект", "Сколько собрать", "Место готовых", _
-        "Дата", "Основание"), v, Array(Join(names, ";"), "", "", "", ""), "Собрать") Then Exit Sub
+        "Дата", "Основание"), v, Array(Join(names, "|"), "", "", "", ""), "Собрать") Then Exit Sub
     If Not IsNumeric(Replace(Trim(v(1)), ",", ".")) Then
         WmsUi.UiMessage("Сколько собрать — число, например 2.")
         Exit Sub
@@ -651,7 +651,7 @@ EH:
 End Function
 
 ' the record n of _ADJ of a build: kind KIT, the EI, the change, LIVE, the row, the places, the date, the EI of the kit
-Private Sub KtAdjRow(n As Long, canon As String, delta As Double, r As Long, sFrom As String, sTo As String, dt As Double, canonK As String)
+Sub KtAdjRow(n As Long, canon As String, delta As Double, r As Long, sFrom As String, sTo As String, dt As Double, canonK As String)
     PlanSetValue(SH_ADJ, n, AJ_NO, n, False)
     PlanSetValue(SH_ADJ, n, AJ_KIND, "KIT", False)
     PlanSetValue(SH_ADJ, n, AJ_EI, canon, False)
@@ -665,7 +665,7 @@ Private Sub KtAdjRow(n As Long, canon As String, delta As Double, r As Long, sFr
 End Sub
 
 ' a posted row «Сборка» of «Корректировки»: A … S as a posted correction has them
-Private Sub KtSheetRow(r As Long, n As Long, canon As String, sName As String, sArt As String, sUnit As String, q As Double, sTo As String, dt As Double, _
+Sub KtSheetRow(r As Long, n As Long, canon As String, sName As String, sArt As String, sUnit As String, q As Double, sTo As String, dt As Double, _
     sReason As String, sFrom As String, b0 As Double, b1 As Double, sCtl As String, sBatch As String)
     PlanSetValue(SH_ADJUST, r, AC_NO, n, False)
     PlanSetValue(SH_ADJUST, r, AC_KIND, KIT_KIND_NAME, True)
@@ -706,7 +706,7 @@ Private Function KtGroup(canonK As String, nums() As Long, ByRef nKit As Long) A
     For k = 0 To UBound(a)
         For r = a(k).StartRow To a(k).EndRow
             d = sh.getCellRangeByPosition(0, r, AJ_LAST, r).getDataArray()(0)
-            If CStr(d(AJ_KIND)) = "KIT" And CStr(d(AJ_STATE)) = RV_LIVE And cnt <= KIT_MAX_PARTS + 1 Then
+            If CStr(d(AJ_KIND)) = "KIT" And CStr(d(AJ_STATE)) = RV_LIVE And VarType(d(AJ_FACT)) <> 5 And cnt <= KIT_MAX_PARTS + 1 Then
                 nums(cnt) = r
                 cnt = cnt + 1
                 If CStr(d(AJ_EI)) = canonK Then nKit = r
@@ -719,6 +719,11 @@ End Function
 ' "" when the kit of the build record rd may be taken apart now: its EI as the build made it — the whole quantity, no movement
 Function KitDeleteProblem(rd As Variant) As String
     Dim canonK As String, m As Long, nums() As Long, nKit As Long, cnt As Long, bk As Double, d As Variant, nIss As Long, nRet As Long, nAdj As Long, nLive As Long
+    ' 1.2.0: the build of a part (WmsAsm) is cancelled by its own rules
+    If WmsAsm.AsmIsBuild(rd) Then
+        KitDeleteProblem = WmsAsm.AsmDeleteProblem(rd)
+        Exit Function
+    End If
     canonK = CStr(rd(AJ_NEW))
     If Not WmsOrders.StrictEI(canonK, m) Then
         KitDeleteProblem = "ERR-SYS:у сборки № " & rd(AJ_NO) & " неверный ЕИ комплекта «" & canonK & "»"
@@ -756,6 +761,10 @@ End Function
 Function KitDelete(rd As Variant) As String
     Dim canonK As String, m As Long, nums() As Long, nKit As Long, cnt As Long, i As Long, ad As Object, ash As Object, d As Variant, n As Long, e As Long
     Dim b0 As Double, b1 As Double, comps As String, r As Long, s As String, why As String
+    If WmsAsm.AsmIsBuild(rd) Then
+        KitDelete = WmsAsm.AsmDelete(rd)
+        Exit Function
+    End If
     why = KitDeleteProblem(rd)
     If why <> "" Then
         KitDelete = why

@@ -50,9 +50,11 @@ LEGACY_RECEIPTS = ("LEGACY_RECEIPT", "LEGACY_RECEIPT_ADD")
 ISSUE_TYPES = ("ISSUE", "ISSUE_FIX", "ISSUE_DEL")
 RETURN_TYPES = ("RETURN", "RETURN_FIX", "RETURN_DEL")
 SPECIAL_TYPES = ("SP_RECEIPT", "SP_REFILL", "SP_FIX", "SP_DEL", "SP_IDENTIFY")
+ASM_TYPES = ("ASM_BUILD", "ASM_DEL")
 ADJUST_TYPES = ("MOVE", "MOVE_FIX", "MOVE_DEL", "WRITE_OFF", "WRITE_OFF_FIX", "WRITE_OFF_DEL", "INV_ADJ", "INV_ADJ_FIX", "INV_ADJ_DEL",
                 "SPLIT", "SPLIT_DEL",       # 1.0 (М1): the split of an EI and its storno (a split is never corrected)
                 "KIT_BUILD", "KIT_DEL",     # 1.0 (Ф8): the build of a kit (several corrections in one operation) and its storno
+                "ASM_BUILD", "ASM_DEL",     # 1.2.0: the build of a part into the permanent EI of its article and its storno
                 "SUP_RET", "SUP_RET_FIX", "SUP_RET_DEL")    # 1.0 (З1): the return to the supplier — as a write-off, never below 0
 MIGRATE_TYPES = ("MIGRATE", "MIGRATE_FIX")
 MIGRATE_STYPES = ("Поставщик", "Офис", "Производство", "Детали", "Старый склад", "Иной приход")
@@ -473,6 +475,8 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
             replay_return(t, f, sq, bal, issues, returns, ret_sum, ret_cnt, place, touched_place, bad)
         elif t in SPECIAL_TYPES:
             replay_special(t, f, sq, bal, sp, place, issues, returns, created, receipts, bad, adjs)
+        elif t in ASM_TYPES:
+            replay_asm(t, f, sq, bal, adjs, place, touched_place, sp, bad, created)
         elif t in ADJUST_TYPES:
             replay_adjust(t, f, sq, bal, adjs, place, touched_place, bad, created)
         elif t == "MIGRATE_FIX":
@@ -1164,7 +1168,7 @@ def replay_special(t, f, sq, bal, sp, place, issues, returns, created, receipts,
             bad(f"seq {sq} SP_DEL № {n}: QTY {q} ≠ приход строки {L['qty']}")
         others = [k for k, x in lines.items() if x["ei"] == ei and x["state"] == "LIVE" and k != n]
         # a migrated EI keeps its transferred stock: a line of it is never «the last receipt»
-        last = not others and not (card or {}).get("migrated")
+        last = not others and not (card or {}).get("migrated") and not (card or {}).get("asm")
         if (f.get("LAST") == "1") != last:
             bad(f"seq {sq} SP_DEL № {n}: LAST {f.get('LAST')} ≠ расчётному ({'последняя' if last else 'есть другие'} строка ЕИ)", "S6")
         if last:
@@ -1272,6 +1276,123 @@ def replay_kit(t, f, sq, bal, adjs, place, touched_place, bad, created=None):
         else:
             bal[a["ei"]] -= a["delta"]
         a["state"] = "STORNO"
+
+
+def replay_asm(t, f, sq, bal, adjs, place, touched_place, sp, bad, created=None):
+    """1.2.0: ASM_BUILD — a part put together from other parts of the warehouse. The components (COMPS «EI:quantity:balance before;…») leave their EIs as corrections № ADJ, ADJ+1, …, the N pieces
+    go to the PERMANENT EI of the article of the part (NEW_EI) as correction № ADJ_KIT = ADJ + the number of components. MODE NEW: the build makes that EI and enters it in the index of the articles
+    (one article — one EI); MODE ADD: the EI is there (BAL_BEFORE is its balance), the pieces are added. ASM_DEL — the build cancelled whole: the components come back; MODE NEW closes the EI (the index
+    entry stays), MODE ADD takes the pieces back while the EI holds exactly what the build left. Reported as "A"."""
+    new, n0, mode = f.get("NEW_EI", ""), int(f.get("ADJ", "0") or 0), f.get("MODE", "")
+    index, cards = sp["index"], sp["eis"]
+    try:
+        nk, nq = int(f.get("ADJ_KIT", "0")), float(f.get("N", "nan"))
+        b_before, b_after = float(f.get("BAL_BEFORE", "nan")), float(f.get("BAL_AFTER", "nan"))
+        comps = [(c.split(":")[0], float(c.split(":")[1]), float(c.split(":")[2])) for c in f.get("COMPS", "").split(";") if c]
+    except (ValueError, IndexError):
+        bad(f"seq {sq} {t}: поля сборки детали не читаются ({f.get('COMPS')!r}, {f.get('N')!r})", "A")
+        return
+    if mode not in ("NEW", "ADD"):
+        bad(f"seq {sq} {t}: режим {mode!r} (ожидалось NEW или ADD)", "A")
+        return
+    if t == "ASM_BUILD":
+        key = article_key(f.get("ART", ""))
+        if not key or f.get("ART_KEY") != key:
+            bad(f"seq {sq} ASM_BUILD: ключ артикула {f.get('ART_KEY')!r} ≠ «{key}»", "S1")
+            return
+        if not comps or nk != n0 + len(comps) or not nq > 0 or nq != int(nq):
+            bad(f"seq {sq} ASM_BUILD: позиций {len(comps)}, № {n0}…{nk}, деталей {nq} — не сходится", "A")
+            return
+        if any(n in adjs for n in range(n0, nk + 1)) or (adjs and n0 <= max(adjs)):
+            bad(f"seq {sq} ASM_BUILD: № {n0}…{nk} не новые", "A")
+            return
+        if not f.get("REASON"):
+            bad(f"seq {sq} ASM_BUILD: нет основания", "A")
+        if not f.get("PLACE"):
+            bad(f"seq {sq} ASM_BUILD: нет места ЕИ детали", "A")
+        if mode == "NEW":
+            if not new or new in bal or new in cards or (created is not None and new in created) or ei_num(new) is None:
+                bad(f"seq {sq} ASM_BUILD: ЕИ детали «{new}» уже существует", "A")
+                return
+            if key in index:
+                bad(f"seq {sq} ASM_BUILD: артикул «{key}» уже у {index[key]} — второй ЕИ для одного артикула", "S1")
+                return
+            if abs(b_before) > EPS or abs(b_after - nq) > EPS:
+                bad(f"seq {sq} ASM_BUILD: остаток до/после {f.get('BAL_BEFORE')}/{f.get('BAL_AFTER')} ≠ 0/{nq}", 3)
+        else:
+            card = cards.get(new)
+            if card is None or index.get(key) != new or new not in bal:
+                bad(f"seq {sq} ASM_BUILD: {new} — не ЕИ детали с артикулом «{key}» по индексу ({index.get(key)})", "S1")
+                return
+            if card["state"] not in (EI_ACTIVE, EI_STORNO):
+                bad(f"seq {sq} ASM_BUILD: добавление в {new} в состоянии «{card['state']}»", "A")
+            if f.get("UNIT", "").replace(".", "").lower() != card["unit"].replace(".", "").lower():
+                bad(f"seq {sq} ASM_BUILD: единица «{f.get('UNIT')}» ≠ единица ЕИ «{card['unit']}» (пересчёта нет)", "S7")
+            if abs(b_before - bal[new]) > EPS:
+                bad(f"seq {sq} ASM_BUILD: BAL_BEFORE {b_before} ≠ расчётный {bal[new]}", 3)
+            if abs(b_after - (bal[new] + nq)) > EPS:
+                bad(f"seq {sq} ASM_BUILD: BAL_AFTER {b_after} ≠ {bal[new] + nq}", 3)
+        common = dict(kind="KIT", state="LIVE", to=None, book=None, fact=None, date=f.get("DATE"), reason=f.get("REASON"), batch=f.get("BATCH", ""),
+                      fixes=0, row=0, new=new, asm=True, mode=mode, name=f.get("NAME", ""))
+        for i, (ei, q, before) in enumerate(comps):
+            if ei not in bal or ei == new:
+                bad(f"seq {sq} ASM_BUILD: позиция {ei} не существует или это сама деталь", "A")
+                return
+            if abs(before - bal[ei]) > EPS:
+                bad(f"seq {sq} ASM_BUILD: у {ei} остаток до {before} ≠ {bal[ei]}", 3)
+            if q <= 0 or q > bal[ei] + EPS:
+                bad(f"seq {sq} ASM_BUILD: с {ei} снято {q} при остатке {bal[ei]}", 6)
+            bal[ei] -= q
+            adjs[n0 + i] = dict(common, ei=ei, delta=-q, frm=place.get(ei), kitrow=False, bk=before, fct=bal[ei])
+        if mode == "NEW":
+            bal[new] = nq
+            place[new] = f.get("PLACE", "")
+            touched_place.add(new)
+            if created is not None:
+                created.append(new)
+            index[key] = new
+            cards[new] = dict(code="ASM", stype="Детали", name=f.get("NAME", ""), art=f.get("ART", ""), unit=f.get("UNIT", ""), cat=f.get("CAT", ""), state=EI_ACTIVE,
+                              src=f"Сборка: корректировки № {n0}–{nk}", artkey=key, part=True, first=None, asm=True)
+            bk = None
+        else:
+            bk = bal[new]
+            bal[new] += nq
+            if cards[new]["state"] == EI_STORNO:
+                cards[new]["state"] = EI_ACTIVE
+        adjs[nk] = dict(common, ei=new, delta=nq, frm="", to=f.get("PLACE", ""), kitrow=True, parts=len(comps), bk=bk, fct=bal[new])
+        return
+    # ASM_DEL
+    group = sorted(n for n, a in adjs.items() if a.get("asm") and a["new"] == new and a["state"] == "LIVE" and n0 <= n <= nk)
+    a_k = adjs.get(nk)
+    if a_k is None or not a_k.get("kitrow") or group != list(range(n0, nk + 1)):
+        bad(f"seq {sq} ASM_DEL {new}: нет действующей сборки детали № {n0}…{nk} ({group})", "A")
+        return
+    if a_k["mode"] != mode:
+        bad(f"seq {sq} ASM_DEL {new}: режим {mode} ≠ режиму сборки {a_k['mode']}", "A")
+    if abs(bal.get(new, 0.0) - a_k["fct"]) > EPS or abs(nq - a_k["delta"]) > EPS:
+        bad(f"seq {sq} ASM_DEL {new}: остаток {bal.get(new)} ≠ оставленному сборкой {a_k['fct']} (или N {nq} ≠ {a_k['delta']})", "A")
+    if abs(b_before - bal.get(new, 0.0)) > EPS:
+        bad(f"seq {sq} ASM_DEL {new}: BAL_BEFORE {b_before} ≠ {bal.get(new)}", 3)
+    want = [(adjs[n]["ei"], -adjs[n]["delta"]) for n in group if n != nk]
+    if [(c[0], c[1]) for c in comps] != want:
+        bad(f"seq {sq} ASM_DEL {new}: COMPS {comps} ≠ позициям сборки {want}", "A")
+    if mode == "NEW":
+        la = [k for k, v in adjs.items() if v["state"] == "LIVE" and v["ei"] == new and k != nk]
+        if la:
+            bad(f"seq {sq} ASM_DEL {new}: сборка, создавшая ЕИ, отменена при действующих корректировках {la[:5]}", "A")
+        after = 0.0
+    else:
+        after = bal[new] - nq
+    if abs(b_after - after) > EPS:
+        bad(f"seq {sq} ASM_DEL {new}: BAL_AFTER {b_after} ≠ {after}", 3)
+    for n in group:
+        a = adjs[n]
+        if n != nk:
+            bal[a["ei"]] -= a["delta"]
+        a["state"] = "STORNO"
+    bal[new] = after
+    if mode == "NEW":
+        cards[new]["state"] = EI_STORNO
 
 
 def replay_adjust(t, f, sq, bal, adjs, place, touched_place, bad, created=None):

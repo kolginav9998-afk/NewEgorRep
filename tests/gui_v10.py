@@ -275,6 +275,39 @@ def main():
         ser = [int(o.basic(doc, "WmsItem", "SerialEI", x)) for x in ("SN-1", "SN-2", "SN-3")]
         step("1.1.1: «Серийные детали…» — настоящее окно с большим полем (номера по строкам), подтверждение «Деталей: 3» и вопрос про этикетки; в «Наличии» три ЕИ по 1 шт",
              done == [True, True, True] and len(set(ser)) == 3 and min(ser) > 0 and all(stock(doc, n) == 1.0 for n in ser), f"{done}; {rs}; {ser}")
+        # ---------------------------------------------------------------- 7. «Собрать деталь…» — the real windows (1.2.0)
+        o.basic(doc, "WmsUi", "TestUiAuto", 1)
+        for r, (nm_, art_, q_) in enumerate((("Болт М8", "B-8", "40"), ("Гайка М8", "N-8", "40")), start=2):
+            for col, v in (("A", str(r)), ("B", nm_), ("H", q_), ("I", "шт"), ("L", "Ромашка"), ("E", art_), ("F", q_), ("C", f"УПД-{r}"), ("U", "2-1-1")):
+                zk.getCellByPosition(col_ix(col), r).setString(v)
+            for col in ("N", "O"):
+                zk.getCellByPosition(col_ix(col), r).setValue(TODAY)
+            o.basic(doc, "WmsReceipt", "ReceiptPostRow", r)
+        asm = doc.Sheets.getByName("Сборка деталей")
+        for i, row in enumerate((("Фара FAR", "FAR-100", "Болт М8", "B-8", 4.0, "шт"), ("", "", "Гайка М8", "N-8", 4.0, "шт")), start=1):
+            for j, v in enumerate(row):
+                cell = asm.getCellByPosition(j, i)
+                cell.setValue(v) if isinstance(v, float) else cell.setString(v)
+        first = o.basic(doc, "WmsAsm", "AsmBuild", "Фара FAR", 1.0, "C-1", TODAY, "")
+        far_n = int(str(first)[3 + 3:].split("|")[0]) if str(first).startswith("OK:ЕИ-") else 0
+        goto(o, doc, "Сборка деталей", "$C$2")
+        o.basic(doc, "WmsUi", "TestUiAuto", 0)
+
+        def pick_any(labels):
+            def act(ctx):
+                b = [c for c in descendants(ctx) if c.getAccessibleRole() == uno.getConstantByName("com.sun.star.accessibility.AccessibleRole.PUSH_BUTTON")
+                     and c.getAccessibleName().replace("~", "").replace("&", "") in labels]
+                if not b:
+                    return False
+                b[0].doAccessibleAction(0)
+                return True
+            return act
+        done, rs = drive(o, doc, "WmsAsm", "BtnAsmBuild", (),
+                         [("Собрать деталь — Фара FAR", pick_button("Собрать")), ("WMS", pick_any(("Yes", "Да"))), ("Сборка детали", pick_button("Не сейчас"))])
+        o.basic(doc, "WmsUi", "TestUiAuto", 1)
+        step("1.2.0: «Собрать деталь…» — настоящие окна: форма (деталь под курсором, число 1, место постоянного ЕИ подставлено), вопрос «Собрать?» с перечнем снимаемых ЕИ, итог и вопрос про этикетки; "
+             "постоянный ЕИ детали 1 → 2, болты и гайки сняты (40 → 36)",
+             done == [True, True, True] and far_n > 0 and stock(doc, far_n) == 2.0, f"{done}; {first}; {rs}; {far_n and stock(doc, far_n)}")
         o.basic(doc, "WmsUi", "TestUiAuto", 1)
         doc.setModified(False)
         o.dispatch(doc, ".uno:CloseDoc")

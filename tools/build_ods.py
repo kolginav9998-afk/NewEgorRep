@@ -1612,6 +1612,7 @@ CATS_SEED = [
     ("СИЗ", "перчатк, каск, очки, респиратор, наушник, жилет, комбинезон, ботинк, сапог, щиток, маска"),
     ("Металл", "труб, уголок, швеллер, арматур, двутавр, полоса, пруток, профиль, лист стал, лист оцинк"),
     ("Химия и краски", "краск, эмаль, растворител, клей, герметик, смазк, масло, очистител, грунт, ацетон"),
+    ("Инструмент ЧПУ", "фрез, сверл, метчик, плашк, развертк, зенковк, зенкер, цековк, резец, державк, оправк, цанг, борфрез, коронк, напильник, надфил, пильный диск, чпу"),
     ("Расходники", "диск отрез, диск шлиф, электрод, сверло, лента, скотч, изолент, ветош, салфетк, пленк"),
     ("Детали", "шестерн, подшипник, втулк, кронштейн, фланец, муфт, звездочк, ремень, редуктор, датчик"),
     ("Офис", "бумаг, картридж, ручка, степлер, папк, скрепк"),
@@ -2214,6 +2215,147 @@ def buttons_111(doc, sheets):
 
 
 
+# 1.2.0: «Сборка деталей» (WmsAsm) — the storekeeper's own directory of the parts that he puts together from other parts of the warehouse (a headlight from its parts): a block of rows per
+# part — its name and permanent code (article) and, row by row, what goes into ONE piece. «Собрать деталь…» takes the parts from their EIs and adds the pieces to the permanent EI of the part.
+# Not protected, not journaled (like «Комплекты»)
+ASM = "Сборка деталей"
+ASM_HEADERS = ["Деталь (что собирается)", "Артикул детали (постоянный код)", "Что входит (наименование)", "Артикул (или номер ЕИ)", "Количество на 1 шт", "Ед.", "Примечание",
+               "Категория (необязательно, по умолчанию «Детали»)", "Ед. детали (необязательно, по умолчанию «шт»)", "Серийные номера (да/нет)"]
+ASM_WIDTHS = [5200, 3800, 6500, 3400, 2600, 1800, 5000, 3800, 3200, 3000]
+ASM_HINT = ("Одна строка — одна позиция детали: деталь (название в первой строке блока), её артикул — постоянный код, по нему WMS находит ЕИ детали (в первой строке), что входит (наименование), "
+            "артикул — или номер ЕИ (ЕИ-427: позиция берётся только с этого ЕИ), сколько на 1 шт, единица. «Собрать деталь…» — позиции снимаются с их ЕИ (старые первыми), собранные "
+            "детали добавляются в ПОСТОЯННЫЙ ЕИ детали (первая сборка заводит его, дальше сборки и приход готовой детали «Иным приходом», тип «Детали», идут в него же). "
+            "Первый раз можно собрать без описания: выделите нужные ЕИ на «Наличии» и нажмите «Собрать деталь из ЕИ…» — описание запишется здесь само. "
+            "«Что можно собрать» — сколько чего можно собрать из того, что есть сейчас. «Серийные номера: да» — при сборке WMS спросит номера собранных деталей.")
+
+
+def build_asm(doc, sh):
+    """«Сборка деталей» (WmsAsm): a part — its rows (the name in A of the first row is enough, an empty A continues the part above); the buttons over the header; the sheet stays open for the storekeeper"""
+    header(sh, ASM_HEADERS, ASM_WIDTHS, height=1700)
+    text = number_format(doc, "@", ("ru", "RU"))
+    for c in (0, 1, 2, 3, 5, 6, 7, 8, 9):
+        sh.getCellRangeByPosition(c, 1, c, LAST_ROW).NumberFormat = text
+    hint = sh.getCellByPosition(11, 0)
+    hint.setString(ASM_HINT)
+    hint.IsTextWrapped = True
+    hint.VertJustify = 1
+    hint.CharHeight = 9
+    hint.CharColor = MUTED
+    sh.getColumns().getByIndex(10).Width = 400
+    sh.getColumns().getByIndex(11).Width = 12000
+    add_button(doc, sh, "btnAsmBuild", "Собрать деталь…", "WmsAsm.BtnAsmBuild", 150, 120, 4400, 650, bold=True, back=0xC6E0B4)
+    add_button(doc, sh, "btnAsmFromEis", "Собрать деталь из ЕИ…", "WmsAsm.BtnAsmFromEis", 4700, 120, 4600, 650, back=0xC6E0B4)
+    add_button(doc, sh, "btnAsmCan", "Что можно собрать", "WmsAsm.BtnAsmCan", 9450, 120, 4400, 650, back=0xDDEBF7)
+
+
+def asm_120(doc, sheets):
+    """1.2.0: «Сборка деталей» after «Комплекты», for a new book and an upgraded one; nothing that exists is touched"""
+    if not sheets.hasByName(ASM):
+        names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+        at = names.index(KITS) + 1 if KITS in names else (names.index(GOODS) + 1 if GOODS in names else len(names))
+        sheets.insertNewByName(ASM, at)
+        build_asm(doc, sheets.getByName(ASM))
+        sheets.getByName(ASM).TabColor = 0xED7D31
+
+
+# 1.2.0: «Инструмент ЧПУ» (WmsTool) — the directory of the cutting tools and the consumables of the machines (milling cutters, drills, taps, inserts, collets, holders, abrasives, saw blades …) made from
+# «Наличия» by the names, like «Метизы»: the type, the kind, the size, the diameter, the length, the teeth, the material, the coating, the standard and its equivalents, the designation (ER32, BT40, CNMG 120408)
+# and the balance; the search of «Поиск», the filters of the columns, the possible doubles. Only shows (the storekeeper's own sheet, not protected, not journaled)
+TOOL = "Инструмент ЧПУ"
+TOOL_HEADERS = ["Тип", "Вид", "Размер", "Ø", "Длина", "Z", "Материал", "Покрытие", "Стандарт", "Аналоги стандарта", "Обозначение, хвостовик, резьба", "Наименование (как в учёте)", "Артикул", "Остаток",
+                "Ед.", "Места", "ЕИ с остатком", "Заметка"]
+TOOL_WIDTHS = [2800, 3200, 3400, 1300, 1600, 1000, 3000, 2400, 3000, 4200, 4600, 9000, 3200, 2200, 1500, 5000, 2200, 7000]
+TOOL_HINT = ("Справочник режущего инструмента и расходников станков с ЧПУ из «Наличия»: фрезы, свёрла, метчики, плашки, развёртки, зенковки, резцы и пластины, державки, цанги и оправки, патроны, "
+             "абразив, пильные диски и полотна, напильники, расходники плазмы и лазера. WMS узнаёт их по названию (и по категории, в названии которой есть «ЧПУ» или «режущий») и разбирает его: "
+             "тип и вид («концевая», «спиральное»), диаметр и длина (Ø10×50; «10х50» тоже), число зубьев (Z4, «4 зуба»), материал (Р6М5, ВК8, HSS-Co, твёрдый сплав), покрытие (TiN, TiAlN), стандарт "
+             "(DIN 338, ГОСТ 10902) и его аналоги по листу «Стандарты», хвостовик, резьба (М8×1,25) и обозначение (ER32, BT40, МК2, CNMG 120408). Что не нашлось — остаётся пустым (поиск по словам "
+             "названия работает всегда). Метизы здесь не показываются — они на листе «Метизы». Одна строка — одно наименование с артикулом: остаток всех его ЕИ и места. «Найти» понимает слова, как "
+             "страница «Поиск» («фреза 10», «ø12», «er32», «din 338», «сверло по металлу», «-ВК8»). Строка под ним — фильтры столбцов: текст — слова, которые должны быть («tin»); числа — «10», "
+             "«8 10 12» (любое из), «8-12», «>20», «<=40»; нажмите Enter. «Скрыть нулевые» — «да». В «Заметке» — возможные дубли (то же самое под другим названием; одно название под разными "
+             "артикулами). Если позиция не узнана, впишите ей категорию с «ЧПУ» в названии (в «Номенклатуре» или в «Наличии»): она появится здесь. Список обновляется при открытии листа и кнопкой "
+             "«Обновить». Только просмотр: ничего не проводится.")
+TOOL_FIND_ROW = 1
+TOOL_FILTER_ROW = 2
+TOOL_HEAD = 3
+TOOL_KEY_COL = 18
+TOOL_HINT_COL = 20
+SHEETS_120 = [ASM, TOOL]
+
+
+def build_tool(doc, sh):
+    """«Инструмент ЧПУ» (the layout of «Метизы» 1.1): the button, the search (row 2) and its «Скрыть нулевые», the filters of the columns (row 3), the head of the table (row 4), the list; the key of the sort
+    is hidden, the hint is on the right"""
+    header(sh, TOOL_HEADERS, TOOL_WIDTHS, height=1500)
+    n = len(TOOL_HEADERS)
+    sh.getRows().getByIndex(0).Height = 1500
+    for c in range(n):
+        sh.getCellByPosition(c, TOOL_HEAD).setString(TOOL_HEADERS[c])
+        sh.getCellByPosition(c, 0).setString("")
+    hd = sh.getCellRangeByPosition(0, TOOL_HEAD, n - 1, TOOL_HEAD)
+    hd.CharWeight = 150
+    hd.IsTextWrapped = True
+    hd.VertJustify = 2
+    hd.CellBackColor = 0xE7E6E6
+    sh.getCellRangeByPosition(0, 0, n - 1, 0).CellBackColor = 0xFFFFFF
+    text = number_format(doc, "@", ("ru", "RU"))
+    for c in (0, 1, 2, 6, 7, 8, 9, 10, 11, 12, 14, 15, 17):
+        sh.getCellRangeByPosition(c, TOOL_HEAD + 1, c, 6000).NumberFormat = text
+    # the filters of the columns are texts too («>20», «8-12»)
+    sh.getCellRangeByPosition(0, TOOL_FILTER_ROW, n - 1, TOOL_FILTER_ROW).NumberFormat = text
+    sh.getCellRangeByPosition(0, TOOL_FILTER_ROW, n - 1, TOOL_FILTER_ROW).CellBackColor = INPUT_HEAD_10
+    sh.getCellByPosition(0, TOOL_FIND_ROW).setString("Найти:")
+    sh.getCellByPosition(0, TOOL_FIND_ROW).CharWeight = 150
+    sh.getCellByPosition(1, TOOL_FIND_ROW).CellBackColor = INPUT_HEAD_10
+    sh.getCellByPosition(1, TOOL_FIND_ROW).NumberFormat = text
+    merge(sh, 1, TOOL_FIND_ROW, 3, TOOL_FIND_ROW)
+    sh.getCellByPosition(4, TOOL_FIND_ROW).setString("Скрыть нулевые:")
+    sh.getCellByPosition(4, TOOL_FIND_ROW).CharWeight = 150
+    sh.getCellByPosition(4, TOOL_FIND_ROW).HoriJustify = 3
+    sh.getCellByPosition(5, TOOL_FIND_ROW).setString("нет")
+    sh.getCellByPosition(5, TOOL_FIND_ROW).CellBackColor = INPUT_HEAD_10
+    sh.getCellByPosition(5, TOOL_FIND_ROW).NumberFormat = text
+    sh.getCellByPosition(0, 2).CharColor = MUTED
+    hint = sh.getCellByPosition(TOOL_HINT_COL, 0)
+    hint.setString(TOOL_HINT)
+    hint.IsTextWrapped = True
+    hint.VertJustify = 1
+    hint.CharHeight = 9
+    hint.CharColor = MUTED
+    sh.getColumns().getByIndex(TOOL_KEY_COL).IsVisible = False
+    sh.getColumns().getByIndex(TOOL_KEY_COL + 1).Width = 600
+    sh.getColumns().getByIndex(TOOL_HINT_COL).Width = 12000
+    sh.getCellRangeByPosition(13, TOOL_HEAD + 1, 13, 6000).HoriJustify = 3
+    sh.getCellRangeByPosition(3, TOOL_HEAD + 1, 5, 6000).HoriJustify = 3
+    if not has_button(sh, "btnToolRefresh"):
+        add_button(doc, sh, "btnToolRefresh", "Обновить", "WmsTool.BtnToolRefresh", 150, 120, 3000, 650, bold=True, back=0xC6E0B4)
+    bind_event(sh.Events, "OnFocus", "WmsTool.OnToolFocus")
+    bind_event(sh.Events, "OnChange", "WmsTool.OnToolChange")
+
+
+def tool_120(doc, sheets):
+    """1.2.0: «Инструмент ЧПУ» right after «Метизы» (or «Категории»), for a new book and an upgraded one; nothing that exists is touched, the list is built at the first opening"""
+    if not sheets.hasByName(TOOL):
+        names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+        at = names.index(FAST) + 1 if FAST in names else (names.index(CATS) + 1 if CATS in names else (names.index(GOODS) + 1 if GOODS in names else len(names)))
+        sheets.insertNewByName(TOOL, at)
+        build_tool(doc, sheets.getByName(TOOL))
+
+
+# 1.2.0: «Собрать деталь из ЕИ…» on «Наличие» (next to «Собрать из ЕИ…»); only the missing button is added
+BUTTONS_120 = [
+    (STOCK, "btnAsmFromEis", "Собрать деталь из ЕИ…", "WmsAsm.BtnAsmFromEis", 26050, 120, 4400, 650, 0xC6E0B4),
+]
+
+
+def buttons_120(doc, sheets):
+    for sheet, name, label, macro, x, y, w, h, back in BUTTONS_120:
+        if sheets.hasByName(sheet):
+            sh = sheets.getByName(sheet)
+            if not has_button(sh, name):
+                add_button(doc, sh, name, label, macro, x, y, w, h, back=back)
+    help_buttons_10(doc, sheets)
+
+
 def ledger_10(doc, sheets):
     """1.0 (этап G): what a new book and an upgraded one both get — the hidden _CLOSE (the closed months) and the page «Отчёты»"""
     if not sheets.hasByName(CLOSE):
@@ -2527,7 +2669,7 @@ HOTKEYS_11 = [("H", "WmsUi.NavMain", "Главная"), ("D", "WmsUi.NavDash", "
               ("L", "WmsUi.NavStock", "Наличие"), ("G", "WmsKeys.KeyFasteners", "Метизы"), ("J", "WmsOps.BtnOpsOpen", "Операции дня"), ("X", "WmsSafe.NavService", "Обслуживание"),
               ("B", "WmsDaily.NavHelp", "Справка"), ("K", "WmsKeys.KeyCheck", "Проверить строку"), ("U", "WmsKeys.KeyFix", "Исправить строку"),
               ("T", "WmsDaily.BtnReceiveWindow", "Принять…"), ("Y", "WmsGuard.BtnWhatNow", "Что делать?"),
-              ("S", "WmsSerial.NavSerials", "Серийные детали")]
+              ("S", "WmsSerial.NavSerials", "Серийные детали"), ("C", "WmsTool.NavTool", "Инструмент ЧПУ")]
 
 
 def hotkeys_10(doc):
@@ -2653,7 +2795,7 @@ def buttons_10(doc, sheets):
 
 # 1.0 (П6): «?» — the section of «Справка» of the sheet, right of the first row of its buttons
 HELP_MARK_SHEETS = (ORDERS, SPECIAL, CARS, ISSUES, RETURNS, ADJUST, STOCK, FIND, MAP, DASH, SUPPLY, REPORTS, SERVICE, KITS, RESERVES, GOODS,
-                    SUPPLIERS, PLACES, MAIN)
+                    SUPPLIERS, PLACES, MAIN, "Сборка деталей", "Инструмент ЧПУ")
 
 
 def help_buttons_10(doc, sheets):
@@ -3185,6 +3327,9 @@ def build(office, out_path, test=False, instance_id=None):
     buttons_111(doc, sheets)
     views_110(doc, sheets)
     views_111(doc, sheets)
+    asm_120(doc, sheets)
+    tool_120(doc, sheets)
+    buttons_120(doc, sheets)
     main_buttons_110(doc, sheets)
     hotkeys_10(doc)
     build_service(doc, sheets)

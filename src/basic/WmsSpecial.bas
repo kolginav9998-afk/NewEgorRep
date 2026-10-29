@@ -1440,7 +1440,8 @@ Private Function SpDelete(r As Long, checkOnly As Boolean) As String
         Exit Function
     End If
     ' a migrated EI (source «Перенос…») existed before its receipt lines: cancelling the last of them keeps the EI
-    bLast = (nLive <= 1) And Left(CStr(WmsIssue.StockData(n)(SC_SRC)), 7) <> "Перенос"
+    ' 1.2.0: nor does an EI that a build of a part made («Сборка: …», WmsAsm): the pieces it holds do not come from the lines
+    bLast = (nLive <= 1) And Left(CStr(WmsIssue.StockData(n)(SC_SRC)), 7) <> "Перенос" And Left(CStr(WmsIssue.StockData(n)(SC_SRC)), 6) <> "Сборка"
     If bLast Then
         ' D-069: no live chain «issue → return» may refer to a cancelled receipt
         If Not WmsReturn.LiveDependents(canon, nIss, nRet) Then
@@ -2064,7 +2065,7 @@ Function SpecialCheck() As String
                     Else
                         ' a migrated part (source «Перенос…», MIGRATE) existed before its refills: no line created it, and its balance
                         ' includes the transferred quantity (in the journal) — only the kind and the number are checked here
-                        migrated = (Left(CStr(sd(SC_SRC)), 7) = "Перенос")
+                        migrated = (Left(CStr(sd(SC_SRC)), 7) = "Перенос" Or Left(CStr(sd(SC_SRC)), 6) = "Сборка")
                         If touched(n) And migrated And nNew(n) = 0 Then
                             nEI = nEI + 1
                             nParts = nParts + 1

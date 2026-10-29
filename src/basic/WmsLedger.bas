@@ -291,7 +291,7 @@ Private Sub LdSplits()
     ' 1.0 (Ф8): the price of a kit — the money of its components ÷ the kits (the rows of a build come before its kit row, a
     ' kit built of kits finds their prices already known)
     For i = 0 To last - 1
-        If CStr(a(i)(AJ_KIND)) = "KIT" And CStr(a(i)(AJ_STATE)) = RV_LIVE And VarType(a(i)(AJ_QTY)) = 5 Then
+        If CStr(a(i)(AJ_KIND)) = "KIT" And CStr(a(i)(AJ_STATE)) = RV_LIVE And VarType(a(i)(AJ_QTY)) = 5 And VarType(a(i)(AJ_FACT)) <> 5 Then
             m = WmsView.EiNo(CStr(a(i)(AJ_NEW)), gLdMax + 1)
             e = WmsView.EiNo(CStr(a(i)(AJ_EI)), gLdMax + 1)
             If m >= 1 And e >= 1 Then

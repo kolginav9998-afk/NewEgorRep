@@ -50,6 +50,8 @@ Function OpsName(sType As String, sMode As String, sSrc As String) As String
     Case "SUP_RET": OpsName = "Возврат поставщику"
     Case "KIT", "KIT_BUILD": OpsName = "Сборка комплекта"
     Case "KIT_DEL": OpsName = "Комплект разобран"
+    Case "ASM_BUILD": OpsName = "Сборка детали"
+    Case "ASM_DEL": OpsName = "Сборка детали отменена"
     Case "MOVE_FIX", "WRITE_OFF_FIX", "INV_ADJ_FIX", "SPLIT_FIX", "SUP_RET_FIX", "KIT_FIX": OpsName = "Корректировка — исправление"
     Case "MOVE_DEL", "WRITE_OFF_DEL", "INV_ADJ_DEL", "SPLIT_DEL", "SUP_RET_DEL": OpsName = "Корректировка — удалена (сторно)"
     Case "EI_PROP": OpsName = "Свойства ЕИ (серийный номер, срок, примечание)"
@@ -120,11 +122,14 @@ End Function
 Private Function OpRow(seq As Long, ts As String, sType As String, fields As Variant, names As Variant, nextEI As Long) As Variant
     Dim ei As String, n As Long, nm As String, q As String, sWho As String, sDate As String, doc As String, mode As String, src As String
     ei = WmsView.JField(fields, "EI")
+    ' 1.2.0: the build of a part names the permanent EI of the part (NEW_EI) and the number of pieces (N)
+    If sType = "ASM_BUILD" Or sType = "ASM_DEL" Then ei = WmsView.JField(fields, "NEW_EI")
     If ei <> "" Then
         n = WmsView.EiFast(ei, nextEI)
         If n >= 1 And n <= UBound(names) Then nm = CStr(names(n))
     End If
     q = WmsView.JField(fields, "QTY")
+    If sType = "ASM_BUILD" Or sType = "ASM_DEL" Then q = WmsView.JField(fields, "N")
     sWho = WmsView.JField(fields, "WHO")
     If sWho = "" Then sWho = WmsView.JField(fields, "PLACE")
     If sType = "ISSUE" Or sType = "ISSUE_FIX" Then

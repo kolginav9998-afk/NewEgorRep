@@ -310,6 +310,8 @@ Function HelpTopic(sSheet As String) As String
     Case SH_STOCK, "Резервы": HelpTopic = "6в. "
     Case "Снабжение", "Поставщики", "Номенклатура": HelpTopic = "6г. "
     Case "Комплекты": HelpTopic = "6д. "
+    Case "Сборка деталей": HelpTopic = "6т. "
+    Case "Инструмент ЧПУ": HelpTopic = "6у. "
     Case "Отчёты", SH_PRINT: HelpTopic = "6е. "
     Case WmsSafe.SH_SERVICE: HelpTopic = "8а. "
     Case Else: HelpTopic = ""
@@ -606,7 +608,7 @@ Private Function Anonymize(hd As Object) As Long
         Array(SH_ADJUST, "3:0", "11:5", "18:5"), _
         Array(SH_CARS, CC_PLATE & ":6", CC_SUP & ":3", CC_NOTE & ":5"), _
         Array(SH_RCPT, "0:2", "1:2"), Array("Поставщики", "0:3", "1:5", "2:2", "4:5"), _
-        Array("Номенклатура", "1:0", "9:3", "10:5", "11:5"), Array("Комплекты", "0:0", "1:0", "5:5"), _
+        Array("Номенклатура", "1:0", "9:3", "10:5", "11:5"), Array("Комплекты", "0:0", "1:0", "5:5"), Array("Сборка деталей", "0:0", "2:0", "6:5"), _
         Array("Резервы", "2:2", "4:5"), Array("_PROP", "3:5"), Array("Акты", "3:2", "6:5"))
     For i = 0 To UBound(spec)
         If hd.Sheets.hasByName(spec(i)(0)) Then
@@ -678,7 +680,7 @@ Private Function Anonymize(hd As Object) As Long
         End If
     Next a
     ' 1.1.1: the views of 1.1 (made from the registry, the issues and the journal) hold names, recipients and the words that were searched for — emptied, their buttons make them again
-    For Each a In Array("Наличие по названию", "Остаток деталей", "Операции дня", "Проверка названий", "Без категории", "ABC-анализ", "Без движения", "Серийные детали")
+    For Each a In Array("Наличие по названию", "Остаток деталей", "Операции дня", "Проверка названий", "Без категории", "ABC-анализ", "Без движения", "Серийные детали", "Инструмент ЧПУ")
         If hd.Sheets.hasByName(a) Then
             sh = hd.Sheets.getByName(a)
             If sh.isProtected() Then sh.unprotect(PROTECT_PWD)

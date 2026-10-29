@@ -332,7 +332,7 @@ Private Function CheckRowInputs(r As Long, bNeedAll As Boolean) As String
     End If
     ' 1.0 (Ф8): the rows «Сборка» are written by «Собрать комплект…» as one operation, never typed
     If mKind = "KIT" Then
-        CheckRowInputs = "строки «Сборка» пишет кнопка «Собрать комплект…» (лист «Комплекты») — одной операцией для всех позиций; вручную не проводятся"
+        CheckRowInputs = "строки «Сборка» пишут кнопки «Собрать комплект…» (лист «Комплекты») и «Собрать деталь…» (лист «Сборка деталей») — одной операцией для всех позиций; вручную не проводятся"
         Exit Function
     End If
     If IsBlank(sh.getCellByPosition(AC_EI, r)) Then
@@ -950,8 +950,8 @@ Function AdjustFixRow(r As Long, vMain As Variant, vDate As Variant, vReason As 
     End If
     ' 1.0 (Ф8): a kit build is not corrected either — it is taken apart («Удалить») and built again
     If mKind = "KIT" Then
-        AdjustFixRow = "ERR:сборка комплекта " & rd(AJ_NEW) & " не исправляется — удалите её («Удалить» разберёт комплект целиком, пока у него не было " _
-            & "движений) и соберите заново"
+        AdjustFixRow = "ERR:сборка " & rd(AJ_NEW) & " не исправляется — удалите её («Удалить» отменит сборку целиком, пока у ЕИ не было движений после неё) " _
+            & "и соберите заново"
         Exit Function
     End If
     ' 1.0 (М1): a split is not corrected — its new EI has its own card and label; cancel it and split again
@@ -1602,7 +1602,9 @@ Function PlusByEI(nextEI As Long) As Variant
     If last >= 1 Then
         d = AdjSheet().getCellRangeByPosition(0, 1, AJ_LAST, last).getDataArray()
         For i = 0 To UBound(d)
-            If CStr(d(i)(AJ_KIND)) = "INV_ADJ" And CStr(d(i)(AJ_STATE)) = RV_LIVE And VarType(d(i)(AJ_QTY)) = 5 Then
+            ' 1.2.0: the pieces that a build of a part (WmsAsm) added to the EI of the part are such an addition too
+            If (CStr(d(i)(AJ_KIND)) = "INV_ADJ" Or (CStr(d(i)(AJ_KIND)) = "KIT" And VarType(d(i)(AJ_FACT)) = 5 And CStr(d(i)(AJ_EI)) = CStr(d(i)(AJ_NEW)))) _
+                And CStr(d(i)(AJ_STATE)) = RV_LIVE And VarType(d(i)(AJ_QTY)) = 5 Then
                 If d(i)(AJ_QTY) > 0 And WmsOrders.StrictEI(CStr(d(i)(AJ_EI)), n) Then
                     If n >= 1 And n <= nextEI Then out(n) = out(n) + d(i)(AJ_QTY)
                 End If
@@ -1680,6 +1682,20 @@ Function AdjustCheck() As String
                             Bad(nBad, first, "сборка № " & (r0 + i) & ": неверный ЕИ комплекта «" & d(i)(AJ_NEW) & "»")
                         ElseIf ei >= SysNum(SK_NEXT_EI) Then
                             Bad(nBad, first, "сборка № " & (r0 + i) & ": ЕИ комплекта " & d(i)(AJ_NEW) & " не выдавался")
+                        End If
+                        ' 1.2.0: a record of a build of a part carries the balance of its EI after (AJ_FACT) and before (AJ_BOOK; none for the build that made the EI of the part)
+                        If VarType(d(i)(AJ_FACT)) = 5 Then
+                            If VarType(d(i)(AJ_QTY)) = 5 Then
+                                If VarType(d(i)(AJ_BOOK)) = 5 Then
+                                    If Abs(d(i)(AJ_BOOK) + d(i)(AJ_QTY) - d(i)(AJ_FACT)) > 0.0000005 Then Bad(nBad, first, "сборка детали № " & (r0 + i) & ": остаток до " & d(i)(AJ_BOOK) & " и изменение " & d(i)(AJ_QTY) & " не дают остаток после " & d(i)(AJ_FACT))
+                                ElseIf CStr(d(i)(AJ_EI)) <> CStr(d(i)(AJ_NEW)) Then
+                                    Bad(nBad, first, "сборка детали № " & (r0 + i) & ": у позиции нет остатка до сборки")
+                                ElseIf Abs(d(i)(AJ_QTY) - d(i)(AJ_FACT)) > 0.0000005 Then
+                                    Bad(nBad, first, "сборка детали № " & (r0 + i) & ": ЕИ заведён сборкой на " & d(i)(AJ_QTY) & ", а остаток после " & d(i)(AJ_FACT))
+                                End If
+                            End If
+                        ElseIf VarType(d(i)(AJ_BOOK)) = 5 Then
+                            Bad(nBad, first, "сборка № " & (r0 + i) & ": есть остаток до сборки, а остатка после нет")
                         End If
                     ElseIf k = "SPLIT" Then
                         nKind(3) = nKind(3) + 1

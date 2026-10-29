@@ -56,8 +56,8 @@ import build_ods as B  # noqa: E402
 
 SCHEMA_06 = "WMS-SYS-3"
 SCHEMA_07 = "WMS-SYS-4"
-# 1.0.1, 1.0.2, 1.1.0: the cores of the schema of this release whose books are carried over too (the same data, the modules and the views new)
-CORES_SAME_SCHEMA = ("1.0.0", "1.0.1", "1.0.2", "1.1.0")
+# 1.0.1, 1.0.2, 1.1.0, 1.1.1: the cores of the schema of this release whose books are carried over too (the same data, the modules and the views new)
+CORES_SAME_SCHEMA = ("1.0.0", "1.0.1", "1.0.2", "1.1.0", "1.1.1")
 OLD_SCHEMA = SCHEMA_06                 # the in-place upgrade (release 0.7 called it so)
 JOURNAL_DIR = "WMS_Journal"
 BACKUP_DIR = "WMS_Backups"
@@ -354,6 +354,9 @@ def step_08(doc, leg, from_text, done):
     B.buttons_110(doc, sheets)
     B.views_111(doc, sheets)
     B.buttons_111(doc, sheets)
+    B.asm_120(doc, sheets)
+    B.tool_120(doc, sheets)
+    B.buttons_120(doc, sheets)
     done.append(f"страницы «{B.DASH}», «{B.FIND}», «{B.MAP}» и лист «{B.TOPO}» (вставьте туда схему склада); «{B.MAIN}» этого выпуска (кнопки к страницам)")
     done.append(f"1.0: справочники «{B.SUPPLIERS}» и «{B.GOODS}» (пополняются кнопками из «{B.ORDERS}» и «{B.STOCK}»), страницы «{B.SUPPLY}» и «{B.PRINT}»")
     done.append(f"1.0: справочник «{B.KITS}» (состав комплектов: «Собрать комплект…», «Выдать комплект…»)")
@@ -410,6 +413,7 @@ def upgrade_doc(doc, test_book, schema, leg, from_text):
             new += step_102(doc, done)
         new += step_110(doc, done)
         new += step_111(doc, done)
+        new += step_120(doc, done)
     else:
         if schema == SCHEMA_06:
             new += step_07(doc, done)
@@ -465,6 +469,19 @@ def step_111(doc, done):
     B.hotkeys_10(doc)
     done.append(f"1.1.1: лист «{B.SERIALS}» (справочник деталей с серийным номером, только просмотр) и кнопки «Серийные детали…» на «{B.SPECIAL}» и «{B.ORDERS}» "
                 "(приход детали сразу с серийными номерами); данные не менялись")
+    return []
+
+
+def step_120(doc, done):
+    """1.1.1 → 1.2.0 (and 1.0.x, 1.1.x on their way): «Сборка деталей» after «Комплекты», «Инструмент ЧПУ» after «Метизы», the button «Собрать деталь из ЕИ…» on «Наличие»; no cell of the data is written"""
+    sheets = doc.Sheets
+    B.asm_120(doc, sheets)
+    B.tool_120(doc, sheets)
+    B.buttons_120(doc, sheets)
+    B.hotkeys_10(doc)
+    done.append(f"1.2.0: лист «{B.ASM}» (описание деталей, которые вы собираете из других деталей; кнопки «Собрать деталь…», «Собрать деталь из ЕИ…», «Что можно собрать») и кнопка "
+                f"«Собрать деталь из ЕИ…» на «{B.STOCK}»; данные не менялись")
+    done.append(f"1.2.0: лист «{B.TOOL}» (справочник фрез, свёрл, метчиков, пластин, цанг и других расходников станков с ЧПУ из «{B.STOCK}», только просмотр; Ctrl+Shift+C); данные не менялись")
     return []
 
 
@@ -703,7 +720,7 @@ def compare_books(old, new, leg_expected, from10=False):
         P.append("в новой книге нет листов: " + ", ".join(missing))
     extra = [n for n in new_names if n not in old_names]
     # the sheets of 1.0.2 and 1.1 that the old book does not have yet (a book of 1.0.2 has those of 1.0.2 already)
-    new_sheets = [n for n in list(B.SHEETS_102) + list(B.SHEETS_110) + list(B.SHEETS_111) if n not in old_names]
+    new_sheets = [n for n in list(B.SHEETS_102) + list(B.SHEETS_110) + list(B.SHEETS_111) + list(B.SHEETS_120) if n not in old_names]
     want_extra = new_sheets if from10 else [B.LEG, B.LEGREP, B.PACK] + B.VIEW_SHEETS + B.SHEETS_10 + new_sheets \
         + [x for x in (B.CARS, B.CAR) if x in extra]
     if sorted(extra) != sorted(want_extra):

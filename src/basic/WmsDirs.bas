@@ -8,7 +8,7 @@ Option Explicit
 ' the directories: sheet | first column | last column | columns not copied from | to (the counting of WMS, not the input) ; -1 — none
 Private Function Specs() As Variant
     Specs = Array(Array(SH_RCPT, 0, 12, -1, -1), Array(SH_TOPO, 0, 40, -1, -1), Array(SH_PLACES, 0, 12, -1, -1), Array(SH_SUPPLIERS, 0, 20, -1, -1), _
-        Array(SH_GOODS, 0, 24, GD_STOCK, GD_UPD), Array(SH_KITS, 0, 12, -1, -1), Array(SH_RESERVES, 0, 12, -1, -1), Array(WmsDocs.SH_ACTS, 0, 12, -1, -1), _
+        Array(SH_GOODS, 0, 24, GD_STOCK, GD_UPD), Array(SH_KITS, 0, 12, -1, -1), Array("Сборка деталей", 0, 12, -1, -1), Array(SH_RESERVES, 0, 12, -1, -1), Array(WmsDocs.SH_ACTS, 0, 12, -1, -1), _
         Array(WmsDocs.SH_DAYREP, 0, 12, -1, -1), Array(WmsCat.SH_CATS, 0, 2, -1, -1), Array(WmsSpec.SH_STD, 0, 4, -1, -1), Array(WmsSearch.SH_SYN, 0, 2, -1, -1), _
         Array(WmsSettings.SH_SET, 0, 3, -1, -1))
 End Function

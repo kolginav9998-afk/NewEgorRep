@@ -108,7 +108,7 @@ Function PeriodTotals(d0 As Double, d1 As Double, ByRef nDays As Long) As String
     Dim d As Double, files As String, f As Variant, url As String, txt As String, a As Variant, i As Long, seq As Long, ts As String, inst As String, sType As String, fields As Variant
     Dim lo As String, hi As String, day As String, days As String, q As Double, un As String, w As String, nOps As Long, seqFirst As Long, seqLast As Long
     Dim nRcv As Long, rcvU As String, nSp As Long, nIss As Long, issU As String, nRet As Long, retU As String, nCars As Long, nMove As Long, nWo As Long, woU As String, nInv As Long
-    Dim nSplit As Long, nSup As Long, nKit As Long, nFix As Long, nDel As Long, nCancel As Long, whoAcc As String, delNos As String, nDoc As Long, docs As String, nIssDel As Long
+    Dim nSplit As Long, nSup As Long, nKit As Long, nAsm As Long, nFix As Long, nDel As Long, nCancel As Long, whoAcc As String, delNos As String, nDoc As Long, docs As String, nIssDel As Long
     Dim iNo() As String, iWho() As String, iQty() As Double, iUn() As String, n2 As Long, k As Long, out As String, nNew As Long
     On Error GoTo EH
     ReDim iNo(20000)
@@ -186,6 +186,8 @@ Function PeriodTotals(d0 As Double, d1 As Double, ByRef nDays As Long) As String
                                     nSup = nSup + 1
                                 Case "KIT_BUILD"
                                     nKit = nKit + 1
+                                Case "ASM_BUILD"
+                                    nAsm = nAsm + 1
                                 Case "ORDER_CANCEL", "ORDER_CANCEL_REST"
                                     nCancel = nCancel + 1
                                 End Select
@@ -218,7 +220,7 @@ Function PeriodTotals(d0 As Double, d1 As Double, ByRef nDays As Long) As String
         If whoAcc <> "" Then out = out & Chr(10) & "• Кому выдавали чаще всего (по числу выдач): " & TopText(whoAcc, 5)
     End If
     If nRet > 0 Then out = out & Chr(10) & "• Возвраты: " & nRet & "; количество: " & SumText(retU)
-    k = nMove + nWo + nInv + nSplit + nSup + nKit
+    k = nMove + nWo + nInv + nSplit + nSup + nKit + nAsm
     If k > 0 Then
         w = ""
         If nMove > 0 Then w = w & IIf(w <> "", ", ", "") & "перемещений — " & nMove
@@ -227,6 +229,7 @@ Function PeriodTotals(d0 As Double, d1 As Double, ByRef nDays As Long) As String
         If nSplit > 0 Then w = w & IIf(w <> "", ", ", "") & "разделений ЕИ — " & nSplit
         If nSup > 0 Then w = w & IIf(w <> "", ", ", "") & "возвратов поставщику — " & nSup
         If nKit > 0 Then w = w & IIf(w <> "", ", ", "") & "сборок комплектов — " & nKit
+        If nAsm > 0 Then w = w & IIf(w <> "", ", ", "") & "сборок деталей — " & nAsm
         out = out & Chr(10) & "• Корректировки склада: " & w
     End If
     If nDoc > 0 Then out = out & Chr(10) & "• Оформлено документов выдачи / актов: " & nDoc

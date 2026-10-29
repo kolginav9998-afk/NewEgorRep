@@ -56,7 +56,7 @@ Function Hotkeys() As String
     Dim a As Variant, i As Long, s As String
     a = Array("#Перейти на лист", "Ctrl+Shift+H — «Главная»", "Ctrl+Shift+D — «Дашборд»", "Ctrl+Shift+F — «Поиск» (курсор в «Что найти»)", "Ctrl+Shift+M — «Карта склада»", _
         "Ctrl+Shift+O — «Заказы» (приход по заказу)", "Ctrl+Shift+N — «Иной приход»", "Ctrl+Shift+I — «Выдачи»", "Ctrl+Shift+R — «Возврат»", "Ctrl+Shift+A — «Корректировки»", _
-        "Ctrl+Shift+L — «Наличие»", "Ctrl+Shift+S — «Серийные детали» (курсор в «Найти»)", "Ctrl+Shift+G — «Метизы» (курсор в «Найти»)", "Ctrl+Shift+J — «Операции дня»", "Ctrl+Shift+X — «Обслуживание»", "Ctrl+Shift+B — «Справка»", _
+        "Ctrl+Shift+L — «Наличие»", "Ctrl+Shift+S — «Серийные детали» (курсор в «Найти»)", "Ctrl+Shift+G — «Метизы» (курсор в «Найти»)", "Ctrl+Shift+C — «Инструмент ЧПУ» (курсор в «Найти»)", "Ctrl+Shift+J — «Операции дня»", "Ctrl+Shift+X — «Обслуживание»", "Ctrl+Shift+B — «Справка»", _
         "#Сделать на листе", "Ctrl+Shift+P — «Провести» строку (лист в работе)", "Ctrl+Shift+K — «Проверить» строку", "Ctrl+Shift+U — «Исправить» проведённую строку", _
         "Ctrl+Shift+W — «Выдать…» (окно)", "Ctrl+Shift+T — «Принять…» (окно, на «Заказах»)", "Ctrl+Shift+E — «Подобрать ЕИ»", "Ctrl+Shift+Q — «Куда положить?»", _
         "#Если что-то не так", "Ctrl+Shift+Y — «Что делать?» (совет под красными пунктами самопроверки)")

@@ -58,6 +58,14 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, legacy_mn_em
             bad(f"корректировка № {n}: _ADJ дата {row[10]!r} ≠ {a['date']}")
         if a["kind"] == "KIT" and row[11] != a["new"]:
             bad(f"сборка № {n}: _ADJ ЕИ комплекта {row[11]!r} ≠ {a['new']!r}")
+        # 1.2.0: a build of a part carries the balances before and after in every record (before: empty for the build that made the EI of the part)
+        if a["kind"] == "KIT" and a.get("asm"):
+            want_b = a["bk"] if a["bk"] is not None else ""
+            if (row[8] != want_b and not (isinstance(want_b, float) and isinstance(row[8], float) and abs(row[8] - want_b) <= EPS)) \
+                    or not isinstance(row[9], float) or abs(row[9] - a["fct"]) > EPS:
+                bad(f"сборка детали № {n}: _ADJ до/после {row[8]!r}/{row[9]!r} ≠ {want_b!r}/{a['fct']!r}")
+        elif a["kind"] == "KIT" and (row[8] != "" or row[9] != ""):
+            bad(f"сборка комплекта № {n}: _ADJ до/после {row[8]!r}/{row[9]!r} — у комплекта их нет")
         if a["kind"] == "SPLIT" and (row[11], row[6], row[7]) != (a["new"], a["frm"] or "", a["to"] or ""):
             bad(f"разделение № {n}: _ADJ новый ЕИ / места {(row[11], row[6], row[7])} ≠ {(a['new'], a['frm'], a['to'])}")
     for n in book:
@@ -97,9 +105,11 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, legacy_mn_em
             want_st = f"{ST_POSTED} · новый {a['new']}"
         if a["kind"] == "KIT" and a["state"] != "STORNO":
             want_st = f"{ST_POSTED} · комплект из {a['parts']} поз." if a.get("kitrow") else f"{ST_POSTED} · в комплект {a['new']}"
+            if a.get("asm"):
+                want_st = f"{ST_POSTED} · деталь из {a['parts']} поз." if a.get("kitrow") else f"{ST_POSTED} · в сборку {a['new']} ({a['name']})"
         if a["kind"] == "SUP_RET" and a["state"] != "STORNO" and not a["fixes"] and a.get("supplier"):
             want_st = f"{ST_POSTED} · поставщику {a['supplier']}"
-        if ctl != want_st:
+        if ctl != want_st and not (a.get("asm") and a.get("kitrow") and a["state"] != "STORNO" and ctl.startswith(want_st)):
             bad(f"корректировка № {n}: статус «{ctl}», ожидался «{want_st}»")
         if (row[1], row[2]) != (KIND_NAME[a["kind"]], a["ei"]):
             bad(f"корректировка № {n}: B C {(row[1], row[2])} ≠ {(KIND_NAME[a['kind']], a['ei'])}")

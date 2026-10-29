@@ -10,6 +10,8 @@ Global gPrChoiceSet As Boolean
 Global gPrChoice As Integer
 Global gPrFormSet As Boolean
 Global gPrFormIn(23) As String
+' 1.2.0: the forms that follow the one set by TestPrimeForm (Chr(2) between them): a button that shows several windows in a row is answered window by window
+Global gPrQueue As String
 Global gPrShown As String
 ' UiButtons: the window being shown and the button pressed (Global: the button listener is a call of its own)
 Global gWmsBtnDlg As Object
@@ -174,7 +176,7 @@ Function UiMemo(sTitle As String, sInfo As String, ByRef sText As String, sOk As
     If gUiAuto <> 0 Then
         If gPrFormSet Then
             If gPrFormIn(0) <> FORM_KEEP Then sText = gPrFormIn(0)
-            gPrFormSet = False
+            PrNextForm()
             UiMemo = True
         End If
         Exit Function
@@ -239,7 +241,7 @@ Function UiForm(sTitle As String, sInfo As String, labels As Variant, v() As Str
             For i = 0 To n - 1
                 If gPrFormIn(i) <> FORM_KEEP Then v(i) = gPrFormIn(i)
             Next i
-            gPrFormSet = False
+            PrNextForm()
             UiForm = True
         End If
         Exit Function
@@ -324,7 +326,7 @@ Function ReasonAsk(sTitle As String, sText As String, sOk As String, ByRef sReas
     If gUiAuto <> 0 Then
         If gPrFormSet Then
             If gPrFormIn(0) <> FORM_KEEP Then sReason = Trim(gPrFormIn(0))
-            gPrFormSet = False
+            PrNextForm()
             ReasonAsk = True
         Else
             ReasonAsk = (gUiAuto = 1)
@@ -400,7 +402,7 @@ Function UiForm2(sTitle As String, sInfo As String, labels As Variant, v() As St
             For i = 0 To n - 1
                 If gPrFormIn(i) <> FORM_KEEP Then v(i) = gPrFormIn(i)
             Next i
-            gPrFormSet = False
+            PrNextForm()
             UiForm2 = IIf(gPrFormNext, 2, 1)
             gPrFormNext = False
         End If
@@ -750,18 +752,53 @@ End Function
 
 ' the values of the next form, separated by Tab (FORM_KEEP keeps the proposed value)
 Function TestPrimeForm(sValues As String) As String
-    Dim a As Variant, i As Integer
+    Dim p As Long
     WmsInit()
     If SysStr(SK_MODE) <> "TEST" Then
         TestPrimeForm = "REFUSED:не тестовая книга"
         Exit Function
     End If
+    ' 1.2.0: «form 1» & Chr(2) & «form 2» … — the windows of one button are answered in this order
+    p = InStr(sValues, Chr(2))
+    If p = 0 Then
+        gPrQueue = ""
+        PrSetForm(sValues)
+    Else
+        gPrQueue = Mid(sValues, p + 1)
+        PrSetForm(Left(sValues, p - 1))
+    End If
+    TestPrimeForm = "OK"
+End Function
+
+' the values of a form (Tab between them) become the answer of the next window
+Private Sub PrSetForm(sValues As String)
+    Dim a As Variant, i As Integer
     a = Split(sValues, Chr(9))
     For i = 0 To 23
         If i <= UBound(a) Then gPrFormIn(i) = a(i) Else gPrFormIn(i) = FORM_KEEP
     Next i
     gPrFormSet = True
-    TestPrimeForm = "OK"
+End Sub
+
+' the window that took the answer is done: the next form of the queue (if there is one) answers the next window
+Private Sub PrNextForm()
+    Dim p As Long, f As String
+    gPrFormSet = False
+    If gPrQueue = "" Then Exit Sub
+    p = InStr(gPrQueue, Chr(2))
+    If p = 0 Then
+        f = gPrQueue
+        gPrQueue = ""
+    Else
+        f = Left(gPrQueue, p - 1)
+        gPrQueue = Mid(gPrQueue, p + 1)
+    End If
+    PrSetForm(f)
+End Sub
+
+' 1.2.0: the same as TestPrimeForm with several forms for one button: «form 1» & Chr(2) & «form 2» … (Chr(2) is written \x02 by a test)
+Function TestPrimeFormQueue(sForms As String) As String
+    TestPrimeFormQueue = TestPrimeForm(sForms)
 End Function
 
 Function TestPrimeShown() As String

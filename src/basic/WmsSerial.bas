@@ -80,7 +80,7 @@ End Function
 ' then the cells that were changed are put back
 Function ReceiveSerial(bOrders As Boolean, r As Long, sers As Variant) As String
     Dim sh As Object, qc As Long, ec As Long, cc As Long, ac As Long, nc As Long, n As Long, kind As String, qOld As String, qNow As Double, catOld As String
-    Dim res As String, r2 As String, canon As String, nEI As Long, nextEI0 As Long, bal0 As Double, old As Variant, p As Variant, sNote As String, sExp As String
+    Dim res As String, canon As String, nEI As Long
     WmsInit()
     On Error GoTo EH
     gSzReplaced = ""
@@ -132,7 +132,6 @@ Function ReceiveSerial(bOrders As Boolean, r As Long, sers As Variant) As String
     catOld = sh.getCellByPosition(cc, r).getString()
     If qOld = "" Or Not bOrders Then sh.getCellByPosition(qc, r).setString(CStr(n))
     If catOld = "" Then sh.getCellByPosition(cc, r).setString("Детали")
-    nextEI0 = CLng(SysNum(SK_NEXT_EI))
     If bOrders Then
         res = WmsReceipt.ReceiptPostRow(r)
     Else
@@ -150,12 +149,24 @@ Function ReceiveSerial(bOrders As Boolean, r As Long, sers As Variant) As String
         ReceiveSerial = "PARTIAL:" & canon & "|приход проведён, но ЕИ строки не определён"
         Exit Function
     End If
-    ' the article came to an EI that was there already (a receipt of «Детали» goes to the EI of the article): what it held before and the number it carried
-    If Not bOrders And nEI < nextEI0 Then bal0 = Val(Replace(sh.getCellByPosition(XC_BEFORE, r).getString(), ",", "."))
+    ReceiveSerial = SerialApply(canon, nEI, sers)
+    gUiLastMsg = ReceiveSerial
+    Exit Function
+EH:
+    ReceiveSerial = "ERR-SYS:серийный приход не выполнен: " & Error$ & " (строка " & Erl & ")"
+    gUiLastMsg = ReceiveSerial
+End Function
+
+' 1.2.0: the EI canon (number nEI) holds the parts that came (a receipt, a build of a part) and the serial numbers sers are written to them: the parts with a number are taken apart by
+' WmsParts.SerialSplit. OK:<how many>|ЕИ-…,ЕИ-… / PARTIAL:<EI>|<why the numbers are not written>. An EI that was empty and carried the number of a part given out keeps its old number in the
+' note («ранее № …»), the pair «EI|old number» goes to gSzReplaced
+Function SerialApply(canon As String, nEI As Long, sers As Variant) As String
+    Dim old As Variant, p As Variant, r2 As String, sNote As String, sExp As String
+    gSzReplaced = ""
     old = WmsItem.PropOf(nEI)
     r2 = WmsParts.SerialSplit(canon, sers)
     If Left(r2, 3) <> "OK:" Then
-        ReceiveSerial = "PARTIAL:" & canon & "|" & Mid(r2, InStr(r2, ":") + 1)
+        SerialApply = "PARTIAL:" & canon & "|" & Mid(r2, InStr(r2, ":") + 1)
         Exit Function
     End If
     ' the EI was empty and carried the number of a part given out: the last part stays in it with its own number — the old number is not lost, it goes to the note of the EI
@@ -167,12 +178,7 @@ Function ReceiveSerial(bOrders As Boolean, r As Long, sers As Variant) As String
         WmsItem.PropSet(canon, CStr(p(0)), sExp, sNote)
         gSzReplaced = canon & "|" & CStr(old(0))
     End If
-    ReceiveSerial = r2
-    gUiLastMsg = ReceiveSerial
-    Exit Function
-EH:
-    ReceiveSerial = "ERR-SYS:серийный приход не выполнен: " & Error$ & " (строка " & Erl & ")"
-    gUiLastMsg = ReceiveSerial
+    SerialApply = r2
 End Function
 
 Sub BtnSerialSpecial(Optional oEvent As Variant)

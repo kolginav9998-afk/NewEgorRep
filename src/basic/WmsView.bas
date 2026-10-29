@@ -517,6 +517,8 @@ Function OpName(sType As String) As String
     Case "EI_PACK": OpName = "Фасовка ЕИ"
     Case "KIT_BUILD": OpName = "Сборка комплекта"
     Case "KIT_DEL": OpName = "Разборка комплекта"
+    Case "ASM_BUILD": OpName = "Сборка детали"
+    Case "ASM_DEL": OpName = "Отмена сборки детали"
     Case "MONTH_CLOSE": OpName = "Закрытие месяца"
     Case "MONTH_OPEN": OpName = "Месяц открыт снова"
     Case "EI_PROP": OpName = "Свойства ЕИ"

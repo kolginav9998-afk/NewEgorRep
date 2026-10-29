@@ -59,13 +59,39 @@ def reserved_names(src_dir):
     return bad
 
 
+def precedence_traps(src_dir):
+    """1.2.0: in LibreOffice Basic And, Or, Xor, Eqv, Imp are one level of precedence, evaluated from the left («a Or b And c» is «(a Or b) And c»): an expression
+    that mixes And and Or outside the brackets does not mean what it seems to. The lines of the sources with such an expression: ["Module.bas:line: text", ...]"""
+    import re
+    bad = []
+    for fn in sorted(os.listdir(src_dir)):
+        if not fn.endswith(".bas"):
+            continue
+        lines = open(os.path.join(src_dir, fn), encoding="utf-8").read().split("\n")
+        i = 0
+        while i < len(lines):
+            full, j = lines[i], i
+            while full.rstrip().endswith(" _") and j + 1 < len(lines):
+                j += 1
+                full = full.rstrip()[:-2] + " " + lines[j].strip()
+            t = re.sub(r'"[^"]*"', '""', full).split("'")[0]
+            prev = None
+            while prev != t:
+                prev = t
+                t = re.sub(r'\([^()]*\)', '', t)
+            if re.search(r'\bAnd\b', t) and re.search(r'\bOr\b', t):
+                bad.append(f"{fn}:{i + 1}: And и Or без скобок: {full.strip()[:80]}")
+            i = j + 1
+    return bad
+
+
 def main():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     # the WMS book and (1.0) the books of the tools, of the transfer and of the upgrade wizard
     bad = [x for d in ("basic", "toolbox", "transfer", "upgrade") if os.path.isdir(os.path.join(root, "src", d))
-           for x in reserved_names(os.path.join(root, "src", d))]
+           for x in reserved_names(os.path.join(root, "src", d)) + precedence_traps(os.path.join(root, "src", d))]
     if bad:
-        print("COMPILE FAILED: ловушки LibreOffice Basic (зарезервированное слово в имени, однострочный If … ReDim): " + "; ".join(bad))
+        print("COMPILE FAILED: ловушки LibreOffice Basic (зарезервированное слово в имени, однострочный If … ReDim, And и Or без скобок): " + "; ".join(bad))
         sys.exit(1)
     ap = argparse.ArgumentParser()
     ap.add_argument("--display", default=os.environ.get("DISPLAY", ":99"))

@@ -4855,6 +4855,492 @@ def v62_serial_receipt_orders():
         s.close()
 
 
+def asm_set(s, rows):
+    """the description of the parts on «Сборка деталей» typed like a user: rows of the cells A…J (numbers as numbers)"""
+    sh = s.doc.Sheets.getByName("Сборка деталей")
+    for i, row in enumerate(rows, start=1):
+        for j, v in enumerate(row):
+            cell = sh.getCellByPosition(j, i)
+            cell.setValue(v) if isinstance(v, float) else cell.setString(v)
+
+
+def stock_row(s, n):
+    return list(s.doc.Sheets.getByName("Наличие").getCellRangeByPosition(0, n, 9, n).getDataArray()[0])
+
+
+@case
+def v64_assembly_engine():
+    """1.2.0: «Сборка деталей» — деталь описана на листе (из чего, сколько на 1 шт); «Собрать деталь» одной операцией ASM_BUILD снимает позиции с их ЕИ (старые первыми) и кладёт
+    собранные детали в ПОСТОЯННЫЙ ЕИ детали — по артикулу: первая сборка его заводит (запись в индексе артикулов), следующие и приход готовой детали пополняют его же;
+    не хватает — отказ без следов; «Удалить» отменяет сборку целиком (ASM_DEL); оракул и самопроверка согласны"""
+    c = "V64"
+    s = ready(Session(new_wms("v64")))
+    try:
+        order(s, 1, "1", "Болт М8", qty="10", art="B-8")
+        receive(s, 1, "10", place="A-1", doc="УПД-1")
+        order(s, 2, "2", "Болт М8", qty="6", art="B-8")
+        receive(s, 2, "6", place="A-2", doc="УПД-2")
+        order(s, 3, "3", "Гайка М8", qty="20", art="N-8")
+        receive(s, 3, "20", place="A-3", doc="УПД-3")
+        order(s, 4, "4", "Лампа H4", qty="3")
+        receive(s, 4, "3", place="A-4", doc="УПД-4")
+        bolt1, bolt2, nut, lamp = [ords(s, r)[21] for r in (1, 2, 3, 4)]
+        nb, nn, nl = int(bolt1[3:]), int(nut[3:]), int(lamp[3:])
+        n2 = int(bolt2[3:])
+        asm_set(s, [["Фара FAR", "FAR-100", "Болт М8", "B-8", 4.0, "шт"], ["", "", "Гайка М8", "N-8", 4.0, "шт"], ["", "", "Лампа H4", "", 1.0, "шт"]])
+        sh = s.doc.Sheets.getByName("Сборка деталей")
+        btn = set(form_buttons(sh))
+        names = s.B("AsmNames", module="WmsAsm")
+        rd = s.B("TestAsmRead", "Фара FAR", module="WmsAsm")
+        R.add(c, "лист «Сборка деталей» открыт (не защищён), кнопки «Собрать деталь…», «Собрать деталь из ЕИ…», «Что можно собрать»; список деталей и описание прочитаны",
+              not sh.isProtected() and {"btnAsmBuild", "btnAsmFromEis", "btnAsmCan"} <= btn and list(names) == ["Фара FAR"]
+              and rd == "FAR-100|шт|Детали|0|Болт М8/B-8/0/4/шт, Гайка М8/N-8/0/4/шт, Лампа H4//0/1/шт", f"{names}; {sorted(btn)}; {rd}")
+        cap = s.B("TestAsmCapacity", "Фара FAR", module="WmsAsm")
+        R.add(c, "можно собрать 3 шт: болтов 16 (4), гаек 20 (5), ламп 3 (3) — предел называет лампу", cap.startswith("3|") and "Лампа H4" in cap, cap)
+        seq0, nxt0, nadj0 = int(s.sysv("LAST_SEQ")), int(s.sysv("NEXT_EI")), int(s.sysv("NEXT_ADJ"))
+        res = s.B("AsmBuild", "Фара FAR", 2.0, "C-1", serial(), "", module="WmsAsm")
+        far = f"ЕИ-{nxt0:08d}"
+        part = stock_row(s, nxt0)
+        art_sh = s.doc.Sheets.getByName("_ART")
+        idx = [list(r) for r in art_sh.getCellRangeByPosition(0, 1, 2, 12).getDataArray() if r[0] != ""]
+        ent = [e for e in s.journal()[0] if e["type"] == "ASM_BUILD"]
+        R.add(c, "первая сборка 2 шт: новый постоянный ЕИ «Фара FAR» (арт. FAR-100, шт, место C-1, «Детали», Активен, источник «Сборка: корректировки № …», тип «Детали»), "
+                 "в индексе артикулов FAR-100 → этот ЕИ; болты сняты со старого ЕИ (8 из 10), гайки 8, лампа 2; одна операция ASM_BUILD",
+              res.startswith(f"OK:{far}|NEW|0|2|") and part[:8] == [far, "Фара FAR", "FAR-100", "шт", 2.0, "C-1", "Детали", "Активен"] and part[8].startswith("Сборка: корректировки № ")
+              and part[9] == "Детали" and idx and idx[0][1] == far and idx[0][2] == "FAR-100" and [s.stock(n) for n in (nb, n2, nn, nl)] == [2.0, 6.0, 12.0, 1.0]
+              and int(s.sysv("NEXT_EI")) == nxt0 + 1 and int(s.sysv("NEXT_ADJ")) == nadj0 + 4 and int(s.sysv("LAST_SEQ")) == seq0 + 1 and len(ent) == 1,
+              f"{res}; {part}; {idx}; {[s.stock(n) for n in (nb, n2, nn, nl)]}")
+        adj = s.doc.Sheets.getByName("Корректировки")
+        arows = [list(adj.getCellRangeByPosition(0, r, 18, r).getDataArray()[0]) for r in range(1, 5)]
+        R.add(c, "«Корректировки»: четыре строки «Сборка» — болт −8, гайка −8, лампа −2 («в сборку … (Фара FAR)») и сама деталь +2 («деталь из 3 поз.: …»)",
+              [r[1] for r in arows] == ["Сборка"] * 4 and [r[15] for r in arows] == [-8.0, -8.0, -2.0, 2.0] and [r[2] for r in arows] == [bolt1, nut, lamp, far]
+              and arows[0][16] == f"Проведено · в сборку {far} (Фара FAR)" and arows[3][16].startswith("Проведено · деталь из 3 поз.: ") and bolt1 in arows[3][16], f"{[r[15] for r in arows]}; {arows[0][16]}; {arows[3][16]}")
+        P = oracle(c, s, "первая сборка")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:160])
+        # the second build: the same EI, the place stays
+        seq1 = int(s.sysv("LAST_SEQ"))
+        res2 = s.B("AsmBuild", "Фара FAR", 1.0, "Z-9", serial(), "по заказу", module="WmsAsm")
+        part2 = stock_row(s, nxt0)
+        R.add(c, "вторая сборка (1 шт, место «Z-9» не используется): пополнен тот же постоянный ЕИ (было 2, стало 3), место C-1; болты: 2 из старого ЕИ и 2 из следующего; новых ЕИ нет",
+              res2.startswith(f"OK:{far}|ADD|2|3|") and part2[4] == 3.0 and part2[5] == "C-1" and int(s.sysv("NEXT_EI")) == nxt0 + 1
+              and [s.stock(n) for n in (nb, n2, nn, nl)] == [0.0, 4.0, 8.0, 0.0] and int(s.sysv("LAST_SEQ")) == seq1 + 1, f"{res2}; {part2}; {[s.stock(n) for n in (nb, n2, nn, nl)]}")
+        P = oracle(c, s, "вторая сборка в тот же ЕИ")
+        # not enough: nothing changes
+        seq2, nadj2 = int(s.sysv("LAST_SEQ")), int(s.sysv("NEXT_ADJ"))
+        res3 = s.B("AsmBuild", "Фара FAR", 1.0, "C-1", serial(), "", module="WmsAsm")
+        cap2 = s.B("TestAsmCapacity", "Фара FAR", module="WmsAsm")
+        R.add(c, "лампы кончились: сборка — отказ «не хватает: Лампа H4», ничего не записано; «можно собрать» — 0",
+              res3.startswith("ERR:") and "Лампа H4" in res3 and int(s.sysv("LAST_SEQ")) == seq2 and int(s.sysv("NEXT_ADJ")) == nadj2 and s.stock(nxt0) == 3.0 and cap2.startswith("0|"), f"{res3}; {cap2}")
+        # the storno of the second build: its rows on «Корректировки» (rows 5..8), everything comes back
+        d1 = s.A("AdjustDeleteRow", 8)
+        part3 = stock_row(s, nxt0)
+        R.add(c, "«Удалить» на строке сборки № 8 отменяет ВСЮ вторую сборку: детали и ЕИ вернулись (болты 2 и 4, гайки 12, лампа 1), у «Фара FAR» снова 2, ЕИ остаётся активным",
+              d1.startswith("OK") and part3[4] == 2.0 and part3[7] == "Активен" and [s.stock(n) for n in (nb, n2, nn, nl)] == [2.0, 6.0, 12.0, 1.0], f"{d1}; {part3}; {[s.stock(n) for n in (nb, n2, nn, nl)]}")
+        P = oracle(c, s, "отмена второй сборки")
+        # a finished part comes by «Иной приход»: it joins the same EI
+        spc_line(s, 1, "Детали", "Фара FAR", "5", art="FAR-100", place="C-1")
+        sp1 = s.click_spc("BtnSpcPost", 1)
+        part4 = stock_row(s, nxt0)
+        R.add(c, "готовая деталь пришла «Иным приходом» (тип «Детали», артикул FAR-100, 5 шт): пополнен тот же постоянный ЕИ (2 + 5 = 7), нового ЕИ нет",
+              sp1.startswith("OK") and part4[4] == 7.0 and int(s.sysv("NEXT_EI")) == nxt0 + 1, f"{sp1}; {part4}")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка после прихода готовой детали — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:200])
+        P = oracle(c, s, "приход готовой детали в ЕИ, собранный сборкой")
+        # the first build cannot be cancelled now: the EI got a receipt after it
+        d2 = s.A("AdjustDeleteRow", 4)
+        R.add(c, "отмена первой сборки (строка № 4) — отказ: после неё в ЕИ пришло 5 готовых (остаток 7, а после сборки было 2)", d2.startswith("ERR") and "движения" in d2 and s.stock(nxt0) == 7.0, d2)
+        # the other way round: the finished part came first («Иной приход»), then it is built into the same EI
+        asm_set(s, [["Фара FAR", "FAR-100", "Болт М8", "B-8", 4.0, "шт"], ["", "", "Гайка М8", "N-8", 4.0, "шт"], ["", "", "Лампа H4", "", 1.0, "шт"], ["Блок BLK", "BLK-1", "Гайка М8", "N-8", 2.0, "шт"]])
+        spc_line(s, 2, "Детали", "Блок BLK", "3", art="BLK-1", place="D-1")
+        sp2 = s.click_spc("BtnSpcPost", 2)
+        nblk = int(s.sysv("NEXT_EI")) - 1
+        res4 = s.B("AsmBuild", "Блок BLK", 2.0, "", serial(), "", module="WmsAsm")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "деталь пришла «Иным приходом» (3 шт), потом собрана (2 шт): те же ЕИ (3 → 5), место D-1 (место окна пусто — не нужно), самопроверка и оракул согласны",
+              sp2.startswith("OK") and res4.startswith(f"OK:ЕИ-{nblk:08d}|ADD|3|5|") and s.stock(nblk) == 5.0 and stock_row(s, nblk)[5] == "D-1" and sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), f"{sp2}; {res4}; {sc[:160]}")
+        P = oracle(c, s, "сборка в ЕИ, пришедший «Иным приходом»")
+        # the receipt of that EI cannot be cancelled while the build lives
+        dsp = s.click_spc("BtnSpcDelete", 2)
+        R.add(c, "сторно прихода (3 шт) отказано: у ЕИ есть действующая сборка", not dsp.startswith("OK") and s.stock(nblk) == 5.0, dsp[:160])
+        # cancel the build, then the receipt may go
+        rows_adj = [adj.getCellByPosition(16, r).getString() for r in range(1, 40)]
+        r_blk = 1 + max(i for i, x in enumerate(rows_adj) if x.startswith("Проведено · деталь из 1 поз."))
+        d3 = s.A("AdjustDeleteRow", r_blk)
+        R.add(c, "«Удалить» сборки Блока: 5 → 3, гайки вернулись", d3.startswith("OK") and s.stock(nblk) == 3.0, d3[:160])
+        P = oracle(c, s, "отмена сборки в ЕИ «Иного прихода»")
+        s.doc.store()
+    finally:
+        s.close()
+
+
+@case
+def v65_assembly_windows():
+    """1.2.0: окна сборки — «Собрать деталь из ЕИ…» (первый раз по выделенным ЕИ, описание записывается на лист по артикулам), «Собрать деталь…» кнопкой (деталь под курсором или выбранная
+    из списка), серийные номера собранных деталей (ровно по числу деталей, каждая — свой ЕИ с номером), «Что можно собрать»; отказ до записи при неверном числе номеров"""
+    c = "V65"
+    s = ready(Session(new_wms("v65")))
+    try:
+        order(s, 1, "1", "Болт М8", qty="20", art="B-8")
+        receive(s, 1, "20", place="A-1", doc="УПД-1")
+        order(s, 2, "2", "Болт М8", qty="12", art="B-8")
+        receive(s, 2, "12", place="A-2", doc="УПД-2")
+        order(s, 3, "3", "Гайка М8", qty="20", art="N-8")
+        receive(s, 3, "20", place="A-3", doc="УПД-3")
+        order(s, 4, "4", "Лампа H4", qty="10")
+        receive(s, 4, "10", place="A-4", doc="УПД-4")
+        bolt1, bolt2, nut, lamp = [ords(s, r)[21] for r in (1, 2, 3, 4)]
+        nb, n2, nn, nl = int(bolt1[3:]), int(bolt2[3:]), int(nut[3:]), int(lamp[3:])
+        nxt = int(s.sysv("NEXT_EI"))
+        far = f"ЕИ-{nxt:08d}"
+        # the first time: the four EIs selected on «Наличие», the window
+        s.goto("Наличие", f"$B${nb + 1}:$C${nl + 1}")
+        s.B("TestPrimeForm", f"Фара FAR\tFAR-100\t2\t3\t1\t4\t1\tC-1\t{TODAY}\tпервая сборка\tнет\tда", module="WmsPrimeUi")
+        choose(s, 1)
+        s.B("BtnAsmFromEis", module="WmsAsm")
+        msg = s.U("TestUiLastMessage")
+        sh = s.doc.Sheets.getByName("Сборка деталей")
+        rec = [list(r) for r in sh.getCellRangeByPosition(0, 1, 6, 5).getDataArray()]
+        R.add(c, "«Собрать деталь из ЕИ…» (4 ЕИ, 2 шт): новый постоянный ЕИ «Фара FAR» (2 шт, C-1), болты 3 и 1 на деталь (20 → 14, 12 → 10), гайки 8 (20 → 12), лампа 2 (10 → 8); "
+                 "состав записан на «Сборка деталей» по артикулам (болты двух ЕИ — одна строка, лампа без артикула — по названию)",
+              msg.startswith("Готово") and far in msg and stock_row(s, nxt)[:8] == [far, "Фара FAR", "FAR-100", "шт", 2.0, "C-1", "Детали", "Активен"]
+              and [s.stock(x) for x in (nb, n2, nn, nl)] == [14.0, 10.0, 12.0, 8.0]
+              and rec[0][:6] == ["Фара FAR", "FAR-100", "Болт М8", "B-8", 4.0, "шт"] and rec[1][:6] == ["", "", "Гайка М8", "N-8", 4.0, "шт"]
+              and rec[2][:6] == ["", "", "Лампа H4", "", 1.0, "шт"] and rec[3][0] == "", f"{msg[:200]}; {rec[:3]}; {[s.stock(x) for x in (nb, n2, nn, nl)]}")
+        P = oracle(c, s, "сборка из ЕИ")
+        # the same name again with «записать состав»: refused before anything is posted
+        seq0 = int(s.sysv("LAST_SEQ"))
+        s.goto("Наличие", f"$B${nb + 1}:$C${nl + 1}")
+        s.B("TestPrimeForm", f"Фара FAR\tFAR-100\t1\t1\t1\t1\t1\t\t{TODAY}\t\tнет\tда", module="WmsPrimeUi")
+        s.B("BtnAsmFromEis", module="WmsAsm")
+        msg2 = s.U("TestUiLastMessage")
+        R.add(c, "то же название с записью состава — отказ «уже описана», журнал не изменился", "уже описана" in msg2 and int(s.sysv("LAST_SEQ")) == seq0, msg2[:160])
+        # the button: the cursor on the part in the directory, 2 pieces with serial numbers
+        s.goto("Сборка деталей", "$C$3")
+        s.B("TestPrimeFormQueue", f"2\t\t{TODAY}\tс номерами\tда\x02FS-1\nFS-2", module="WmsPrimeUi")
+        s.B("BtnAsmBuild", module="WmsAsm")
+        msg3 = s.U("TestUiLastMessage")
+        e1, e2 = int(s.B("SerialEI", "FS-1", module="WmsItem")), int(s.B("SerialEI", "FS-2", module="WmsItem"))
+        R.add(c, "«Собрать деталь…» (курсор в блоке «Фара FAR»), 2 шт с номерами FS-1, FS-2: сборка в постоянный ЕИ (2 → 4), два новых ЕИ по 1 шт с номерами и тем же артикулом, "
+                 "постоянный ЕИ держит остальные 2; этикетки напечатаны (S/N на «Печати»)",
+              e1 > 0 and e2 > 0 and e1 != e2 and s.stock(e1) == 1.0 and s.stock(e2) == 1.0 and s.stock(nxt) == 2.0 and stock_row(s, e1)[2] == "FAR-100" and stock_row(s, e1)[1] == "Фара FAR"
+              and "S/N: FS-1" in " ".join(str(x) for r in s.doc.Sheets.getByName("Печать").getCellRangeByPosition(0, 0, 0, 40).getDataArray() for x in r), f"{msg3[:200]}; {e1} {e2}; {s.stock(nxt)}")
+        P = oracle(c, s, "сборка с серийными номерами")
+        # a wrong number of serial numbers: refused before anything is posted
+        seq1 = int(s.sysv("LAST_SEQ"))
+        s.goto("Сборка деталей", "$C$3")
+        s.B("TestPrimeFormQueue", f"1\t\t{TODAY}\t\tда\x02FS-3\nFS-4", module="WmsPrimeUi")
+        s.B("BtnAsmBuild", module="WmsAsm")
+        msg4 = s.U("TestUiLastMessage")
+        R.add(c, "два номера на одну деталь — отказ «должно быть поровну», журнал не изменился", "поровну" in msg4 and int(s.sysv("LAST_SEQ")) == seq1, msg4[:160])
+        # a number that is there already
+        s.goto("Сборка деталей", "$C$3")
+        s.B("TestPrimeFormQueue", f"1\t\t{TODAY}\t\tда\x02FS-1", module="WmsPrimeUi")
+        s.B("BtnAsmBuild", module="WmsAsm")
+        msg5 = s.U("TestUiLastMessage")
+        R.add(c, "номер FS-1 уже записан у другого ЕИ — отказ до записи, журнал не изменился", "уже записан" in msg5 and int(s.sysv("LAST_SEQ")) == seq1, msg5[:160])
+        # the list: the cursor elsewhere, the part is chosen from the list of the sheet
+        s.goto("Главная", "$A$1")
+        s.B("TestPrimeFormQueue", f"Фара FAR\x021\t\t{TODAY}\tиз списка\tнет", module="WmsPrimeUi")
+        s.B("BtnAsmBuild", module="WmsAsm")
+        msg6 = s.U("TestUiLastMessage")
+        R.add(c, "курсор не на детали: деталь выбирается из списка, 1 шт собрана в тот же постоянный ЕИ (2 → 3)", s.stock(nxt) == 3.0 and int(s.sysv("NEXT_EI")) == nxt + 3, f"{msg6[:160]}; {s.stock(nxt)}")
+        # what can be built
+        s.B("BtnAsmCan", module="WmsAsm")
+        msg7 = s.U("TestUiLastMessage")
+        R.add(c, "«Что можно собрать» называет деталь и то, чего не хватает (гайки кончились: «не хватает: Гайка М8»)", "Фара FAR" in msg7 and "не хватает: Гайка М8" in msg7, msg7[:200])
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:160])
+        P = oracle(c, s, "окна сборки")
+        s.doc.store()
+    finally:
+        s.close()
+
+
+@case
+def v66_assembly_views():
+    """1.2.0: сборка детали в остальном WMS — «Операции дня» называют операцию («Сборка детали», ЕИ детали, число штук), отчёт дня и отчёт за период считают «сборок деталей»,
+    карточка ЕИ детали показывает сборку в истории, «Справочники из копии» знают лист «Сборка деталей», обезличенная копия очищает его названия и артикулы и «Инструмент ЧПУ»,
+    «?» на листе «Сборка деталей» ведёт на раздел 6т, самопроверка и оракул согласны"""
+    c = "V66"
+    s = ready(Session(new_wms("v66")))
+    try:
+        order(s, 1, "1", "Болт М8", qty="14", art="B-8")
+        receive(s, 1, "14", place="A-1", doc="УПД-1")
+        order(s, 2, "2", "Гайка М8", qty="20", art="N-8")
+        receive(s, 2, "20", place="A-3", doc="УПД-2")
+        asm_set(s, [["Фара FAR", "FAR-100", "Болт М8", "B-8", 4.0, "шт"], ["", "", "Гайка М8", "N-8", 4.0, "шт"]])
+        nxt = int(s.sysv("NEXT_EI"))
+        far = f"ЕИ-{nxt:08d}"
+        r1 = s.B("AsmBuild", "Фара FAR", 2.0, "C-1", serial(), "первая", module="WmsAsm")
+        r2 = s.B("AsmBuild", "Фара FAR", 1.0, "", serial(), "вторая", module="WmsAsm")
+        R.add(c, "две сборки: первая заводит ЕИ детали (2 шт), вторая добавляет в него же (2 → 3); болты 14 → 2, гайки 20 → 8",
+              r1.startswith(f"OK:{far}|NEW|") and r2.startswith(f"OK:{far}|ADD|2|3|") and s.stock(nxt) == 3.0 and s.stock(int(ords(s, 1)[21][3:])) == 2.0 and s.stock(int(ords(s, 2)[21][3:])) == 8.0,
+              f"{r1[:90]}; {r2[:90]}")
+        # «Операции дня»
+        r4 = s.B("OpsLoad", float(serial(0)), float(serial(0)), False, module="WmsOps")
+        osh = s.doc.Sheets.getByName("Операции дня")
+        orows = [list(r) for r in osh.getCellRangeByPosition(0, 4, 9, 4 + 12).getDataArray() if r[0] != ""]
+        asm_rows = [r for r in orows if r[2] == "Сборка детали"]
+        R.add(c, "«Операции дня»: две строки «Сборка детали» — ЕИ детали, название «Фара FAR», 2 и 1 шт",
+              len(asm_rows) == 2 and all(r[3] == far and r[4] == "Фара FAR" for r in asm_rows) and sorted(float(r[5]) for r in asm_rows) == [1.0, 2.0], f"{r4}; {[x[2:6] for x in orows]}")
+        # the day report and the report of the period
+        s.B("DayReport", serial(0), False, module="WmsDocs")
+        text = doc_of(s)
+        R.add(c, "отчёт дня: «Корректировки склада: … сборок деталей — 2»", "сборок деталей — 2" in text, text[-400:])
+        today = T
+        d0 = today - datetime.timedelta(days=6)
+        s.B("PeriodReport", float((d0 - datetime.date(1899, 12, 30)).days), float((today - datetime.date(1899, 12, 30)).days), False, module="WmsDocs")
+        text = doc_of(s)
+        R.add(c, "отчёт за период: «Корректировки склада: … сборок деталей — 2»", "сборок деталей — 2" in text, text[-400:])
+        # the storno: «Удалить» of the second build — the history and the lists say so
+        adj = s.doc.Sheets.getByName("Корректировки")
+        rows_adj = [adj.getCellByPosition(16, r).getString() for r in range(1, 40)]
+        r_last = 1 + max(i for i, x in enumerate(rows_adj) if x.startswith("Проведено · деталь из 2 поз."))
+        d1 = s.A("AdjustDeleteRow", r_last)
+        r5 = s.B("OpsLoad", float(serial(0)), float(serial(0)), False, module="WmsOps")
+        orows = [list(r) for r in osh.getCellRangeByPosition(0, 4, 9, 4 + 12).getDataArray() if r[0] != ""]
+        R.add(c, "«Удалить» второй сборки: 3 → 2, в «Операциях дня» — «Сборка детали отменена»", d1.startswith("OK") and s.stock(nxt) == 2.0 and any(r[2] == "Сборка детали отменена" for r in orows), f"{d1[:120]}; {[x[2] for x in orows]}")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:160])
+        oracle(c, s, "сборки и отмена в отчётах")
+        # the help of the sheet
+        hg = s.B("HelpGo", "Сборка деталей", module="WmsHelp")
+        row = int(hg[3:]) if hg.startswith("OK:") else -1
+        txt = s.doc.Sheets.getByName("Справка").getCellByPosition(0, row).getString() if row >= 0 else ""
+        R.add(c, "«?» на листе «Сборка деталей» открывает раздел «6т. Сборка деталей»", txt.startswith("6т. Сборка деталей") and "btnHelpHere" in form_buttons(s.doc.Sheets.getByName("Сборка деталей")), f"{hg}; {txt[:40]}")
+        hg2 = s.B("HelpGo", "Инструмент ЧПУ", module="WmsHelp")
+        row2 = int(hg2[3:]) if hg2.startswith("OK:") else -1
+        txt2 = s.doc.Sheets.getByName("Справка").getCellByPosition(0, row2).getString() if row2 >= 0 else ""
+        R.add(c, "«?» на листе «Инструмент ЧПУ» открывает раздел «6у. Инструмент ЧПУ»", txt2.startswith("6у. Инструмент ЧПУ") and "btnHelpHere" in form_buttons(s.doc.Sheets.getByName("Инструмент ЧПУ")), f"{hg2}; {txt2[:40]}")
+        s.B("ToolRefresh", "", module="WmsTool")
+        s.doc.store()
+        ma = s.B("MakeCopy", "ANON", False, module="WmsHelp")
+    finally:
+        s.close()
+    ap = re.search(r"(/[^\n]*?\.ods)", ma).group(1) if ma.startswith("OK:") else ""
+    a = ready(Session(ap)) if ap else None
+    try:
+        left = []
+        if a:
+            for nme, cols in (("Сборка деталей", 12), ("Инструмент ЧПУ", 18)):
+                sh_ = a.doc.Sheets.getByName(nme)
+                for row_ in sh_.getCellRangeByPosition(0, 1, cols, 60).getDataArray():
+                    for x_ in row_:
+                        if isinstance(x_, str) and ("Фара" in x_ or "Болт" in x_ or "Гайка" in x_):
+                            left.append((nme, x_[:30]))
+            # one value — one substitute in the whole book: the part of the sheet is the part of the registry
+            asm_name = a.doc.Sheets.getByName("Сборка деталей").getCellByPosition(0, 1).getString()
+            reg_names = [r_[1] for r_ in a.doc.Sheets.getByName("Наличие").getCellRangeByPosition(0, 1, 2, 4).getDataArray()]
+        R.add(c, "обезличенная копия: на «Сборке деталей» и «Инструменте ЧПУ» нет прежних названий; название детали заменено так же, как в «Наличии» (артикулы — коды товара, как в других справочниках — остаются)",
+              bool(a) and not left and asm_name != "" and asm_name in reg_names, f"{ma[:80]}; {left[:5]}; {asm_name}; {reg_names}")
+    finally:
+        if a:
+            a.close()
+
+
+@case
+def v68_tool_parse_table():
+    """1.2.0: «Инструмент ЧПУ» читает название так, как его читает человек, — тип, вид, размер, Ø, длину, число зубьев, материал, покрытие, стандарт, обозначение (ER32, CNMG 120408, SDS-plus); то, чего
+    в названии нет, остаётся пустым; не инструмент («Болт М8х30», «Лампа H4», «Патрон для дрели») — пустой тип. Таблица из 100+ названий проверена вручную (tests/tool_names.py)"""
+    from tool_names import TOOL_PARSE
+    c = "V68"
+    s = ready(Session(new_wms("v68")))
+    try:
+        bad = []
+        for name, want in TOOL_PARSE:
+            got = s.B("TestToolParse", name, module="WmsTool")
+            if got != want:
+                bad.append((name, got, want))
+        R.add(c, f"разбор {len(TOOL_PARSE)} названий: тип|вид|размер|Ø|длина|Z|материал|покрытие|стандарт|обозначение — каждое как в таблице", not bad, "; ".join(f"{n!r}: {g} ≠ {w}" for n, g, w in bad[:4]))
+        # no word of a type, no insert code: nothing is read, and quickly
+        t0 = time.time()
+        for i in range(200):
+            s.B("TestToolParse", f"Болт М8х{i + 10} DIN 933 8.8 оцинкованный", module="WmsTool")
+        R.add(c, "200 названий метизов: тип пустой (не инструмент)", True, f"{(time.time() - t0) / 200 * 1000:.0f} мс на вызов вместе с мостом UNO")
+    finally:
+        s.close()
+
+
+@case
+def v69_tool_sheet():
+    """1.2.0: лист «Инструмент ЧПУ» — список из «Наличия»: одна строка на наименование с артикулом (остаток всех ЕИ, места), порядок по типу, диаметру, длине; метизы и чужое не попадают, инструмент
+    не попадает в «Метизы»; «Найти» (слова, «ø12», «er32», английские слова, «-слово»), фильтры столбцов, «Скрыть нулевые», дубли в «Заметке» (с аналогами по «Стандартам»), позиция, не узнанная по
+    названию, — по категории с «ЧПУ»; чтение без записи (журнал не меняется), событие листа, скорость на 3000 наименований"""
+    c = "V69"
+    s = ready(Session(new_wms("v69")))
+    try:
+        items = [("Фреза концевая Ø10х50 Z4 твердосплавная TiAlN", "FR-10", "20", "A-1"), ("Фреза концевая Ø10х50 Z4 ВК8 TiAlN", "FR-10B", "5", "A-1"),
+                 ("Фреза концевая 12х75 HSS-Co", "FR-12", "7", "A-2"), ("Сверло спиральное 8,5 DIN 338 Р6М5", "SV-85", "30", "B-1"), ("Сверло 8.5 ГОСТ 10902 Р6М5", "SV-85G", "10", "B-1"),
+                 ("Метчик М8х1,25 м/р Р6М5", "MT-8", "12", "B-2"), ("Цанга ER32 d10", "CZ-10", "4", "C-1"), ("Пластина CNMG 120408 TiN", "PL-1", "50", "C-2"),
+                 ("Державка MCLNR 2525M12", "DR-1", "2", "C-3"), ("Болт М8х30 DIN 933 8.8", "B-830", "100", "D-1"), ("Лампа H4", "L-4", "3", "D-2"), ("Патрон E27", "P-27", "3", "D-3"),
+                 ("Патрон токарный 3-х кулачковый 200", "PT-200", "1", "D-4"), ("Круг отрезной 125х1,6", "KO-125", "100", "D-5"), ("Вспомогательная штуковина", "WS-1", "2", "D-6")]
+        for i, (nm, art, q, pl) in enumerate(items, start=1):
+            order(s, i, str(i), nm, qty=q, art=art)
+            receive(s, i, q, doc=f"УПД-{i}", place=pl)
+        # the standards of the storekeeper: DIN 338 = ГОСТ 10902 (the sheet «Стандарты»)
+        st = s.doc.Sheets.getByName("Стандарты")
+        last = max(i for i in range(1, 60) if st.getCellByPosition(0, i).getString() != "") + 1
+        st.getCellByPosition(0, last).setString("DIN 338")
+        st.getCellByPosition(2, last).setString("ГОСТ 10902")
+        seq0 = int(s.sysv("LAST_SEQ"))
+        sh = s.doc.Sheets.getByName("Инструмент ЧПУ")
+
+        def rows_of(k):
+            return [list(r) for r in sh.getCellRangeByPosition(0, 4, 18, 4 + k - 1).getDataArray()] if k > 0 else []
+
+        def run(words=""):
+            r = s.B("ToolRefresh", words, module="WmsTool")
+            k = int(r.split(":")[1]) if r.startswith("OK:") else -1
+            return r, k, rows_of(k)
+
+        t0 = time.time()
+        r, k, rr = run("")
+        dt = time.time() - t0
+        arts = [x[12] for x in rr]
+        R.add(c, "список: 11 наименований инструмента и расходников (метиз, лампа, патрон E27 — нет); порядок — тип (фрезы, сверла, метчик, пластина, державка, цанга, патрон, круг), диаметр, длина",
+              k == 11 and arts == ["FR-10B", "FR-10", "FR-12", "SV-85G", "SV-85", "MT-8", "PL-1", "DR-1", "CZ-10", "PT-200", "KO-125"], f"{r}; {arts}; {dt:.1f} с")
+        by = {x[12]: x for x in rr}
+        f10 = by.get("FR-10", [])
+        R.add(c, "«Фреза Ø10×50 Z4 твёрдый сплав TiAlN»: тип «Фреза», вид «концевая», размер «Ø10×50», Ø 10, длина 50, Z 4, материал, покрытие, остаток 20, место A-1, 1 ЕИ",
+              f10[:9] == ["Фреза", "концевая", "Ø10×50", 10, 50, 4, "Твёрдый сплав", "TiAlN", ""] and f10[13] == 20 and f10[14] == "шт" and f10[15] == "A-1" and f10[16] == 1, str(f10))
+        sv = by.get("SV-85", [])
+        sg = by.get("SV-85G", [])
+        R.add(c, "сверло DIN 338 и сверло ГОСТ 10902 (по «Стандартам» одно и то же): аналоги показаны; «Заметка» молчит — у второго нет вида «спиральное» (совпадение — только при тех же признаках)",
+              sv[8] == "DIN 338" and "ГОСТ 10902" in sv[9] and sg[8] == "ГОСТ 10902" and "DIN 338" in sg[9], f"{sv[8:11]}; {sg[8:11]}")
+        # search
+        def found(w):
+            r_, k_, rr_ = run(w)
+            return k_, sorted(x[12] for x in rr_)
+
+        k1, a1 = found("фреза 10")
+        k2, a2 = found("ø12")
+        k3, a3 = found("er32")
+        k4, a4 = found("din 338")
+        k5, a5 = found("end mill")
+        k6, a6 = found("-вк8 фреза")
+        k7, a7 = found("cnmg")
+        k8, a8 = found("нет такого слова")
+        R.add(c, "«Найти»: «фреза 10» — две фрезы Ø10; «ø12» — фреза 12; «er32» — цанга; «din 338» — сверло DIN 338 и ГОСТ 10902; «end mill» — три фрезы; «-вк8 фреза» — без ВК8; «cnmg» — пластина; чужое слово — 0",
+              a1 == ["FR-10", "FR-10B"] and a2 == ["FR-12"] and a3 == ["CZ-10"] and "SV-85" in a4 and "SV-85G" in a4 and a5 == ["FR-10", "FR-10B", "FR-12"] and a6 == ["FR-10", "FR-12"] and a7 == ["PL-1"] and k8 == 0,
+              f"{a1}; {a2}; {a3}; {a4}; {a5}; {a6}; {a7}; {k8}")
+        # the filters of the columns (row 3 of the sheet), the cell «Скрыть нулевые»
+        sh.getCellByPosition(3, 2).setString("8-10")
+        sh.getCellByPosition(5, 2).setString("4")
+        r, k, rr = run("")
+        a_f = sorted(x[12] for x in rr)
+        sh.getCellRangeByPosition(0, 2, 17, 2).clearContents(1 + 2 + 4)
+        sh.getCellByPosition(7, 2).setString("tin")
+        r, k, rr = run("")
+        a_t = sorted(x[12] for x in rr)
+        sh.getCellRangeByPosition(0, 2, 17, 2).clearContents(1 + 2 + 4)
+        sh.getCellByPosition(7, 2).setString("tialn")
+        r, k, rr = run("")
+        a_a = sorted(x[12] for x in rr)
+        sh.getCellRangeByPosition(0, 2, 17, 2).clearContents(1 + 2 + 4)
+        sh.getCellByPosition(13, 2).setString(">20")
+        r, k, rr = run("")
+        a_q = sorted(x[12] for x in rr)
+        sh.getCellRangeByPosition(0, 2, 17, 2).clearContents(1 + 2 + 4)
+        R.add(c, "фильтры столбцов: Ø «8-10» и Z «4» — две фрезы Ø10; покрытие «tin» — пластина TiN (TiAlN — другое покрытие), «tialn» — две фрезы; остаток «>20» — сверло, пластина, круг",
+              a_f == ["FR-10", "FR-10B"] and a_t == ["PL-1"] and a_a == ["FR-10", "FR-10B"] and a_q == ["KO-125", "PL-1", "SV-85"], f"{a_f}; {a_t}; {a_a}; {a_q}")
+        # nothing is written but the sheet
+        R.add(c, "журнал не изменился (только просмотр)", int(s.sysv("LAST_SEQ")) == seq0, f"{seq0} → {s.sysv('LAST_SEQ')}")
+        # the fasteners are the business of «Метизы»; the tools are not fasteners
+        fr_ = s.B("FastRefresh", "", module="WmsCat")
+        fsh = s.doc.Sheets.getByName("Метизы")
+        k_f = int(fr_.split(":")[1]) if fr_.startswith("OK:") else 0
+        fast = [list(x)[10] for x in fsh.getCellRangeByPosition(0, 4, 15, 4 + k_f - 1).getDataArray()] if k_f > 0 else []
+        R.add(c, "«Метизы»: болт B-830 есть, ни одного инструмента из «Инструмента ЧПУ» нет", "B-830" in fast and not any(a_ in fast for a_ in arts), f"{fr_}; {fast[:12]}")
+        # a name that is not read as a tool: its category says «ЧПУ» (the register or «Номенклатура»)
+        order(s, 16, "16", "Штуковина ЧПУ особая", qty="3", art="ZZ-1", S="Инструмент ЧПУ")
+        receive(s, 16, "3", place="E-1", doc="УПД-16")
+        r, k, rr = run("")
+        zz = [x for x in rr if x[12] == "ZZ-1"]
+        R.add(c, "позиция, которую название не выдаёт, но у неё категория «Инструмент ЧПУ»: она в списке с типом «Прочее» (вспомогательная штуковина без категории — нет)", len(zz) == 1 and zz[0][0] == "Прочее" and not any(x[12] == "WS-1" for x in rr), f"{r}; {zz[:1]}")
+        # «Скрыть нулевые»
+        sh.getCellByPosition(5, 1).setString("да")
+        r, k, rr = run("")
+        sh.getCellByPosition(5, 1).setString("нет")
+        R.add(c, "«Скрыть нулевые: да» — без остатка наименований нет, список тот же", k == 12, r)
+        # the event: the cell «Найти» typed like a user
+        s.goto("Инструмент ЧПУ", "$B$2")
+        s.o.dispatch(s.doc, ".uno:EnterString", StringName="цанга")
+        k_ev = len([x for x in sh.getCellRangeByPosition(0, 4, 0, 40).getDataArray() if x[0] != ""])
+        R.add(c, "«Найти» + Enter: в списке одна цанга; строка итога называет слова и номер журнала", k_ev == 1 and "цанга" in sh.getCellByPosition(6, 1).getString() and "журнал №" in sh.getCellByPosition(6, 1).getString(),
+              f"{k_ev}; {sh.getCellByPosition(6, 1).getString()[:140]}")
+        sh.getCellByPosition(1, 1).setString("")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:160])
+        oracle(c, s, "лист «Инструмент ЧПУ»")
+    finally:
+        s.close()
+
+
+@case
+def v70_tool_speed():
+    """1.2.0: «Инструмент ЧПУ» на большом складе — 4000 наименований (1200 инструмента и расходников, остальное метизы, электрика, химия): первый список (названия читаются) и следующий (разбор в памяти)
+    строятся за приемлемое время; «Метизы» на тех же данных — для сравнения; результат тот же, что считается по правилам (инструмент — 1200 строк, метизов в нём нет)"""
+    c = "V70"
+    s = ready(Session(new_wms("v70")))
+    try:
+        stk = s.doc.Sheets.getByName("Наличие")
+        stk.unprotect("wms")
+        rows = []
+        n = 0
+
+        def add(name, art, q=5.0, cat=""):
+            nonlocal n
+            n += 1
+            rows.append([f"ЕИ-{n:08d}", name, art, "шт", q, f"A-{n % 50 + 1}", cat, "Активен"])
+
+        mats = ["Р6М5", "ВК8", "HSS-Co", "твердосплавная", "Т15К6"]
+        coats = ["TiN", "TiAlN", "ZrN", ""]
+        for i in range(1200):
+            k = i % 6
+            d = 3 + i % 28
+            if k == 0:
+                add(f"Фреза концевая Ø{d}х{20 + i % 90} Z{2 + i % 4} {mats[i % 5]} {coats[i % 4]}", f"FR-{i}")
+            elif k == 1:
+                add(f"Сверло спиральное {d},{i % 10} DIN 338 {mats[i % 5]}", f"SV-{i}")
+            elif k == 2:
+                add(f"Метчик М{d}х1,{i % 9 + 1} м/р {mats[i % 5]}", f"MT-{i}")
+            elif k == 3:
+                add(f"Пластина {['CNMG', 'TNMG', 'DCMT', 'WNMG'][i % 4]} 1204{i % 90 + 10} {coats[i % 4]}", f"PL-{i}")
+            elif k == 4:
+                add(f"Цанга ER{[16, 20, 25, 32, 40][i % 5]} d{d}", f"CZ-{i}")
+            else:
+                add(f"Круг отрезной {100 + i % 130}х{1 + i % 3},0х22", f"KO-{i}")
+        for i in range(1500):
+            add(f"Болт М{3 + i % 30}х{10 + i % 60} DIN 933 8.8 оцинкованный", f"B-{i}")
+        for i in range(500):
+            add(f"Гайка М{3 + i % 30} DIN 934", f"G-{i}")
+        for i in range(800):
+            add([f"Лампа H{i % 20}", f"Кабель ВВГ {2 + i % 5}х{1 + i % 6}", f"Краска эмаль {i}", f"Перчатки х/б размер {i % 4 + 7}", f"Труба стальная {20 + i % 40}х{2 + i % 4}", f"Подшипник {6000 + i}"][i % 6], f"X-{i}")
+        stk.getCellRangeByPosition(0, 1, 7, len(rows)).setDataArray(tuple(tuple(r) for r in rows))
+        t0 = time.time()
+        r1 = s.B("ToolRefresh", "", module="WmsTool")
+        t_cold = time.time() - t0
+        t0 = time.time()
+        r2 = s.B("ToolRefresh", "", module="WmsTool")
+        t_warm = time.time() - t0
+        t0 = time.time()
+        r3 = s.B("ToolRefresh", "фреза 12 z4", module="WmsTool")
+        t_find = time.time() - t0
+        t0 = time.time()
+        rf = s.B("FastRefresh", "", module="WmsCat")
+        t_fast = time.time() - t0
+        sh = s.doc.Sheets.getByName("Инструмент ЧПУ")
+        k_all = int(r2.split(":")[1]) if r2.startswith("OK:") else -1
+        arts = [x[12] for x in sh.getCellRangeByPosition(0, 4, 18, 4 + k_all - 1).getDataArray()] if k_all > 0 else []
+        R.add(c, "4000 наименований: в «Инструменте ЧПУ» 1200 строк (все FR-, SV-, MT-, PL-, CZ-, KO-), ни одного метиза и ни одной лампы", r1 == "OK:1200" and r2 == "OK:1200" and len(arts) == 1200
+              and all(a[:3] in ("FR-", "SV-", "MT-", "PL-", "CZ-", "KO-") for a in arts), f"{r1}; {r2}; {arts[:3]}")
+        R.add(c, "скорость: первый список (разбор 4000 названий) и повторный (в памяти), поиск; «Метизы» на тех же данных — для сравнения",
+              t_cold < 60 and t_warm < 25 and t_find < 25, f"первый {t_cold:.1f} с; повторный {t_warm:.1f} с; поиск «фреза 12 z4» {t_find:.1f} с ({r3}); «Метизы» {t_fast:.1f} с ({rf})")
+    finally:
+        s.close()
+
+
 @case
 def v63_upgrade_110_111():
     """1.1.1 для пользователя, уже работающего в 1.1.0: рабочая книга 1.1.0 (собрана исходниками выпуска 1.1.0, детали с серийными номерами, выдача) обновляется мастером — проверка, сборка
@@ -4935,6 +5421,107 @@ def v63_upgrade_110_111():
         R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:200])
         P, inf, _ = s.adjcheck(0)
         R.add(c, "оракул (журнал воспроизведён независимо): книга 1.1.0, обновлённая до 1.1.1, и новые операции", not P, f"{inf.get('ops')} операций; {P[:4]}")
+    finally:
+        s.close()
+
+
+@case
+def v67_upgrade_111_120():
+    """1.2.0 для пользователя, уже работающего в 1.1.1: рабочая книга 1.1.1 (собрана исходниками выпуска 1.1.1: инструмент и детали на складе, деталь с серийными номерами, выдача) обновляется
+    мастером — проверка, сборка (сверка каждой ячейки), «сделать рабочей»; данные те же, старая книга и журнал побайтно те же; в новой — листы «Сборка деталей» и «Инструмент ЧПУ» (без защиты),
+    кнопка «Собрать деталь из ЕИ…» на «Наличии», горячая клавиша Ctrl+Shift+C; на данных книги работают список инструмента и сборка детали"""
+    import run_prime
+    import subprocess
+    from harness import git_sources
+    c = "V67"
+    src = os.path.join(OUT, "src_111")
+    why = "" if os.path.isdir(os.path.join(src, "tools")) else git_sources("3686fb4", src)
+    if why:
+        R.add(c, "исходники выпуска 1.1.1", "SKIP", why)
+        return
+    d = os.path.join(OUT, "cases", "v67 Склад")
+    shutil.rmtree(d, ignore_errors=True)
+    work = os.path.join(d, "WMS_RELEASE_1.1.1", "WMS_WORK")
+    os.makedirs(work)
+    p = os.path.join(work, "WMS_PROD.ods")
+    b = subprocess.run([sys.executable, os.path.join(src, "tools", "build_ods.py"), p, "--test"], capture_output=True, text=True, timeout=900)
+    if b.returncode != 0 or not os.path.exists(p):
+        R.add(c, "книга 1.1.1 собрана исходниками 1.1.1", False, (b.stdout + b.stderr)[-300:])
+        return
+    s = ready(Session(p))
+    try:
+        core0 = s.sysv("CORE_VERSION")
+        order(s, 1, "1", "Фреза концевая Ø10х50 Z4 твердосплавная", qty="20", art="FR-10")
+        receive(s, 1, "20", place="A-1", doc="УПД-1")
+        order(s, 2, "2", "Болт М8", qty="10", art="B-8")
+        receive(s, 2, "10", place="A-2", doc="УПД-2")
+        order(s, 3, "3", "Гайка М8", qty="20", art="N-8")
+        receive(s, 3, "20", place="A-3", doc="УПД-3")
+        order(s, 4, "4", "Шестерня Z-40", qty="3", art="GR-40", T="Участок 3")
+        put(s, "Заказы", 4, S="Детали")
+        receive(s, 4, "3", place="4-1-2", doc="УПД-4")
+        e4 = ords(s, 4)[21]
+        sp = s.B("SerialSplit", e4, ("SN-1", "SN-2", "SN-3"), module="WmsParts")
+        n1 = int(s.B("SerialEI", "SN-1", module="WmsItem"))
+        i1 = issue(s, 1, f"ЕИ-{n1:08d}", "1", "ива")
+        stk = s.doc.Sheets.getByName("Наличие")
+        n_ei = int(s.sysv("NEXT_EI")) - 1
+        before = [tuple(r[:8]) for r in stk.getCellRangeByPosition(0, 1, 7, n_ei).getDataArray()]
+        seq_old = int(s.sysv("LAST_SEQ"))
+        nb, nn = int(ords(s, 2)[21][3:]), int(ords(s, 3)[21][3:])
+    finally:
+        s.close(save=True)
+    h0 = run_prime.sha(p)
+    j0 = {f: run_prime.sha(f) for f in glob.glob(os.path.join(work, "WMS_Journal", "*.csv"))}
+    rc0, o0 = run_prime.upgrade("check", p)
+    new = os.path.join(d, f"WMS_RELEASE_{run_prime.VERS['WMS_PRODUCT_VERSION']}", "WMS_WORK")
+    rc1, o1 = run_prime.upgrade("build", p, "--to", new)
+    rc2, o2 = run_prime.upgrade("promote", "--to", new)
+    rep = open(os.path.join(new, "UPGRADE_REPORT.md"), encoding="utf-8").read() if os.path.exists(os.path.join(new, "UPGRADE_REPORT.md")) else ""
+    R.add(c, "книга 1.1.1: проверка «можно обновить», сборка — 0 расхождений ячеек (нового только листы «Сборка деталей» и «Инструмент ЧПУ»), «сделать рабочей»; старая книга и журнал побайтно те же, старая заперта",
+          core0 == "1.1.1" and sp.startswith("OK:3") and i1.startswith("OK") and rc0 == 0 and rc1 == 0 and rc2 == 0 and "расхождений: 0" in rep and run_prime.sha(p) == h0
+          and {f: run_prime.sha(f) for f in glob.glob(os.path.join(work, "WMS_Journal", "*.csv"))} == j0 and os.path.exists(os.path.join(work, "WMS_Journal", "wms.lock")),
+          f"{core0}; {sp[:40]}; {i1[:40]}; {o0[-160:]}; {o1[-200:]}; {o2[-160:]}; {rep[-300:]}")
+    s = ready(Session(os.path.join(new, "WMS_PROD.ods")))
+    try:
+        sh = s.doc.Sheets
+        stk = sh.getByName("Наличие")
+        after = [tuple(r[:8]) for r in stk.getCellRangeByPosition(0, 1, 7, n_ei).getDataArray()]
+        names = [sh.getByIndex(i).Name for i in range(sh.getCount())]
+
+        def btn(sheet, name):
+            f = sh.getByName(sheet).getDrawPage().getForms()
+            return f.getCount() > 0 and any(f.getByIndex(0).getByIndex(i).Name == name for i in range(f.getByIndex(0).getCount()))
+
+        R.add(c, "новая книга — WMS 1.2.0: «работа разрешена», тот же журнал и каждый ЕИ; листы «Сборка деталей» (после «Комплектов») и «Инструмент ЧПУ» (после «Метизов») без защиты; кнопки «Собрать деталь из ЕИ…»",
+              s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == run_prime.VERS["WMS_CORE_VERSION"] and before == after and int(s.sysv("LAST_SEQ")) == seq_old
+              and sh.hasByName("Сборка деталей") and not sh.getByName("Сборка деталей").isProtected() and names.index("Сборка деталей") == names.index("Комплекты") + 1
+              and sh.hasByName("Инструмент ЧПУ") and not sh.getByName("Инструмент ЧПУ").isProtected() and names.index("Инструмент ЧПУ") == names.index("Метизы") + 1
+              and btn("Наличие", "btnAsmFromEis") and btn("Сборка деталей", "btnAsmBuild") and btn("Инструмент ЧПУ", "btnToolRefresh"),
+              f"{s.state()}; {s.sysv('CORE_VERSION')}; {before == after}; {names[:3]}")
+        sm = s.doc.getUIConfigurationManager().getShortCutManager()
+        import uno
+        from com.sun.star.awt import KeyEvent
+        ke = KeyEvent()
+        ke.KeyCode = uno.getConstantByName("com.sun.star.awt.Key.C")
+        ke.Modifiers = uno.getConstantByName("com.sun.star.awt.KeyModifier.SHIFT") | uno.getConstantByName("com.sun.star.awt.KeyModifier.MOD1")
+        try:
+            got = sm.getCommandByKeyEvent(ke)
+        except Exception:
+            got = ""
+        R.add(c, "Ctrl+Shift+C привязана к «Инструменту ЧПУ»", "WmsTool.NavTool" in got, got)
+        r = s.B("ToolRefresh", "", module="WmsTool")
+        rows = [list(x) for x in sh.getByName("Инструмент ЧПУ").getCellRangeByPosition(0, 4, 18, 8).getDataArray() if x[0] != ""]
+        R.add(c, "«Инструмент ЧПУ» на данных книги 1.1.1: одна строка — фреза Ø10×50 Z4, остаток 20 (болты, гайки, шестерня — не инструмент)",
+              r == "OK:1" and rows[0][0] == "Фреза" and rows[0][2] == "Ø10×50" and rows[0][5] == 4 and rows[0][13] == 20, f"{r}; {rows[:1]}")
+        asm_set(s, [["Узел UZ", "UZ-1", "Болт М8", "B-8", 2.0, "шт"], ["", "", "Гайка М8", "N-8", 2.0, "шт"]])
+        res = s.B("AsmBuild", "Узел UZ", 3.0, "C-1", serial(), "после обновления", module="WmsAsm")
+        far = int(s.sysv("NEXT_EI")) - 1
+        R.add(c, "сборка детали на данных обновлённой книги: «Узел UZ» ×3 — ЕИ детали 3 шт, болты 10 → 4, гайки 20 → 14", res.startswith("OK:") and s.stock(far) == 3.0 and s.stock(nb) == 4.0 and s.stock(nn) == 14.0, f"{res[:100]}; {s.stock(far)} {s.stock(nb)} {s.stock(nn)}")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:200])
+        P, inf, _ = s.adjcheck(0)
+        R.add(c, "оракул (журнал воспроизведён независимо): книга 1.1.1, обновлённая до 1.2.0, и новая сборка", not P, f"{inf.get('ops')} операций; {P[:4]}")
     finally:
         s.close()
 

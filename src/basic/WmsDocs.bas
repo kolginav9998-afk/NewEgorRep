@@ -808,7 +808,7 @@ Private Sub DrFill(dt As Double)
     Dim nRcv As Long, nPlaced As Long, rcvU As String, eiMin As Long, eiMax As Long, nEiNew As Long, k As Long
     Dim nCars As Long, carSup As String, nSp(4) As Long, nSpAll As Long, codes As Variant, names As Variant
     Dim iDate() As Double, iWho() As String, iQty() As Double, iUnit() As String, iNo() As String, nIss As Long, delNos As String
-    Dim nRet As Long, retU As String, nMove As Long, nWo As Long, nInv As Long, nSplit As Long, nSup As Long, nKit As Long
+    Dim nRet As Long, retU As String, nMove As Long, nWo As Long, nInv As Long, nSplit As Long, nSup As Long, nKit As Long, nAsm As Long
     Dim nSerial As Long, nPack As Long, nDocNo As Long, docNos As String, nCancel As Long, iLo As Long, iHi As Long
     On Error GoTo EH
     ReDim iDate(200)
@@ -916,6 +916,8 @@ Private Sub DrFill(dt As Double)
                             nSup = nSup + 1
                         Case "KIT_BUILD"
                             nKit = nKit + 1
+                        Case "ASM_BUILD"
+                            nAsm = nAsm + 1
                         Case "EI_PROP"
                             If WmsView.JField(fields, "SERIAL") <> "" Then nSerial = nSerial + 1
                         Case "EI_PACK"
@@ -964,6 +966,7 @@ Private Sub DrFill(dt As Double)
     If nSplit > 0 Then u = u & IIf(u <> "", ", ", "") & "разделений ЕИ — " & nSplit
     If nSup > 0 Then u = u & IIf(u <> "", ", ", "") & "возвратов поставщику — " & nSup
     If nKit > 0 Then u = u & IIf(u <> "", ", ", "") & "сборок комплектов — " & nKit
+    If nAsm > 0 Then u = u & IIf(u <> "", ", ", "") & "сборок деталей — " & nAsm
     If u <> "" Then DrAdd("D", "Корректировки склада: " & u)
     If nSerial > 0 Then DrAdd("D", "Присвоены серийные номера: " & nSerial)
     If nPack > 0 Then DrAdd("D", "Записана фасовка ЕИ: " & nPack)

@@ -113,7 +113,7 @@ Private Sub CtSplit(ByVal sCell As String, ByRef inc As String, ByRef exc As Str
     Next i
 End Sub
 
-Private Sub CtLoad()
+Sub CtLoad()
     Dim sh As Object, last As Long, d As Variant, i As Long, n As Long, inc As String, exc As String, ex2 As String, w() As Variant, x() As Variant, cats() As String, useExcl As Boolean
     gCtN = 0
     gCtCat = Array()
@@ -229,7 +229,7 @@ Private Function CtGoodsKey(sName As String, sArt As String) As String
 End Function
 
 ' «Номенклатура» read: a goods is its article (or its name when it has none); the value is «row|category» (the row of the sheet from 0); the first row of a key counts
-Private Sub GoodsLoad()
+Sub GoodsLoad()
     Dim sh As Object, last As Long, d As Variant, i As Long, k As String, cN As Long, cA As Long, cC As Long, r As Variant
     gGc = New Collection
     If Not gDoc.Sheets.hasByName(SH_GOODS) Then Exit Sub
@@ -270,7 +270,7 @@ Miss:
 End Function
 
 ' the category of a goods in the order: the registry (sRegCat), «Номенклатура», the hint by the words. «Номенклатура» must be read (GoodsLoad)
-Private Function CategoryOf(sName As String, sArt As String, sRegCat As String) As String
+Function CategoryOf(sName As String, sArt As String, sRegCat As String) As String
     Dim nRow As Long, c As String
     If Trim(sRegCat) <> "" Then
         CategoryOf = Trim(sRegCat)
@@ -399,7 +399,7 @@ End Function
 ' ================================================================ the registry by names
 
 ' the registry grouped by name and article: gGrp(i) = (name, article, unit, balance, EIs with a balance, places, category of the registry (the first one that is not empty)), gGrpN
-Private Sub StockGroups()
+Sub StockGroups()
     Dim st As Object, last As Long, d As Variant, i As Long, r As Variant, cEi As Long, cNm As Long, cArt As Long, cUn As Long, cQty As Long, cPl As Long, cCat As Long, q As Double
     Dim nm As String, art As String, key As String, k As Long, n As Long, coll As Object, pl As String
     Dim gN() As String, gA() As String, gU() As String, gB() As Double, gE() As Long, gP() As String, gC() As String, res() As Variant
@@ -582,7 +582,7 @@ EH:
 End Sub
 
 ' a number filter: «8», «8 10 12» (any of them), «8-12» (from–to), «>20», «>=20», «<30», «<=30», «=0» (with signs all must hold); empty — all
-Private Function NumFilterOk(ByVal sExpr As String, v As Double) As Boolean
+Function NumFilterOk(ByVal sExpr As String, v As Double) As Boolean
     Dim a As Variant, i As Long, t As String, hasOp As Boolean, anyOk As Boolean, allOk As Boolean, ok As Boolean, p As Long, x As Double, y As Double
     sExpr = Trim(Replace(Replace(sExpr, ";", " "), ",", "."))
     If sExpr = "" Then
@@ -650,7 +650,7 @@ Private Function HasPlain(a As Variant) As Boolean
 End Function
 
 ' a text filter: every word of sExpr is in the folded text hay
-Private Function TextFilterOk(sExpr As String, hay As String) As Boolean
+Function TextFilterOk(sExpr As String, hay As String) As Boolean
     Dim w As Variant
     TextFilterOk = True
     For Each w In WmsNames.FoldWords(sExpr)
@@ -817,7 +817,7 @@ EH:
 End Function
 
 ' marks a possible double: the key was met in a row before — both rows get a note
-Private Sub DupMark(coll As Object, key As String, i As Long, notes() As String, rows() As Variant)
+Sub DupMark(coll As Object, key As String, i As Long, notes() As String, rows() As Variant)
     Dim j As Long, kind As String, why As String
     On Error GoTo First
     j = coll.Item(key)
@@ -842,7 +842,7 @@ First:
     coll.Add(i, key)
 End Sub
 
-Private Sub CtAddNote(notes() As String, i As Long, s As String)
+Sub CtAddNote(notes() As String, i As Long, s As String)
     If InStr(notes(i), s) = 0 Then notes(i) = notes(i) & IIf(notes(i) <> "", "; ", "") & s
 End Sub
 
