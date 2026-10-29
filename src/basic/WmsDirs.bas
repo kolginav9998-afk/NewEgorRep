@@ -36,16 +36,16 @@ End Function
 
 ' the data of the columns c0…c1 of the rows 0…er of a sheet as one text (the numbers and the texts as they are; the counting columns left out)
 Private Function DataText(sh As Object, er As Long, c0 As Long, c1 As Long, s0 As Long, s1 As Long) As String
-    Dim d As Variant, i As Long, j As Long, t() As String, line As String
+    Dim d As Variant, i As Long, j As Long, t() As String, ln As String
     If er < 0 Then Exit Function
     d = sh.getCellRangeByPosition(c0, 0, c1, er).getDataArray()
     ReDim t(UBound(d))
     For i = 0 To UBound(d)
-        line = ""
+        ln = ""
         For j = 0 To UBound(d(i))
-            If s0 < 0 Or j + c0 < s0 Or j + c0 > s1 Then line = line & CStr(d(i)(j)) & Chr(1)
+            If s0 < 0 Or j + c0 < s0 Or j + c0 > s1 Then ln = ln & CStr(d(i)(j)) & Chr(1)
         Next j
-        t(i) = line
+        t(i) = ln
     Next i
     DataText = Join(t, Chr(2))
 End Function
