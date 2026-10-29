@@ -308,6 +308,25 @@ def main():
         step("1.2.0: «Собрать деталь…» — настоящие окна: форма (деталь под курсором, число 1, место постоянного ЕИ подставлено), вопрос «Собрать?» с перечнем снимаемых ЕИ, итог и вопрос про этикетки; "
              "постоянный ЕИ детали 1 → 2, болты и гайки сняты (40 → 36)",
              done == [True, True, True] and far_n > 0 and stock(doc, far_n) == 2.0, f"{done}; {first}; {rs}; {far_n and stock(doc, far_n)}")
+        # ---------------------------------------------------------------- 8. «Инструмент ЧПУ» — the sheet in a real window (1.2.0)
+        o.basic(doc, "WmsUi", "TestUiAuto", 1)
+        for r, (nm_, art_, q_) in enumerate((("Фреза концевая Ø10х50 Z4 твердосплавная", "FR-10", "20"), ("Цанга ER32 d10", "CZ-10", "4"), ("Пластина CNMG 120408 TiN", "PL-1", "50")), start=10):
+            for col, v in (("A", str(r)), ("B", nm_), ("H", q_), ("I", "шт"), ("L", "Ромашка"), ("E", art_), ("F", q_), ("C", f"УПД-{r}"), ("U", "3-1-1")):
+                zk.getCellByPosition(col_ix(col), r).setString(v)
+            for col in ("N", "O"):
+                zk.getCellByPosition(col_ix(col), r).setValue(TODAY)
+            o.basic(doc, "WmsReceipt", "ReceiptPostRow", r)
+        tsh = doc.Sheets.getByName("Инструмент ЧПУ")
+        goto(o, doc, "Инструмент ЧПУ", "$B$2")
+        o.basic(doc, "WmsTool", "BtnToolRefresh")
+        listed = lambda: [x[12] for x in tsh.getCellRangeByPosition(0, 4, 18, 40).getDataArray() if x[0] != ""]
+        k_all = sorted(listed())
+        typed(o, doc, "Инструмент ЧПУ", "$B$2", "цанга")
+        k_one = listed()
+        stat = tsh.getCellByPosition(7, 1).getString()
+        typed(o, doc, "Инструмент ЧПУ", "$B$2", "")
+        step("1.2.0: «Инструмент ЧПУ» в настоящем окне: «Обновить» — три позиции (фреза, цанга, пластина); «цанга» в «Найти» и Enter — одна, строка итога называет слова",
+             k_all == ["CZ-10", "FR-10", "PL-1"] and k_one == ["CZ-10"] and "цанга" in stat and len(listed()) == 3, f"{k_all}; {k_one}; {stat[:90]}; {len(listed())}")
         o.basic(doc, "WmsUi", "TestUiAuto", 1)
         doc.setModified(False)
         o.dispatch(doc, ".uno:CloseDoc")
