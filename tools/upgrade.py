@@ -56,7 +56,7 @@ import build_ods as B  # noqa: E402
 
 SCHEMA_06 = "WMS-SYS-3"
 SCHEMA_07 = "WMS-SYS-4"
-# 1.0.1, 1.0.2, 1.1.0, 1.1.1: the cores of the schema of this release whose books are carried over too (the same data, the modules and the views new); the core of this release is not among them
+# 1.0.0, 1.0.1, 1.0.2, 1.1.0, 1.1.1, 1.2.0: the cores of the schema of this release whose books are carried over too (the same data, the modules and the views new); the core of this release is not among them
 # («книга уже версии …» — обновлять нечего)
 CORES_SAME_SCHEMA = ("1.0.0", "1.0.1", "1.0.2", "1.1.0", "1.1.1", "1.2.0")
 OLD_SCHEMA = SCHEMA_06                 # the in-place upgrade (release 0.7 called it so)
