@@ -13,6 +13,8 @@ Global gSpEqLoaded As Boolean
 ' the records of the names read already (a name is read once; the sheet «Стандарты» drops them: the equivalents are in a record)
 Global gSpCache As Object
 Global gSpCacheOn As Boolean
+' 1.2.1: the names on which a rule failed — they are answered by an empty record (not read as a fastener) and the list goes on: «Chr(1) name Chr(2) error Chr(1)» one after another (made again with the cache)
+Global gSpBadNames As String
 
 ' the types in the order of the list: (the stem of the word, the name of the type)
 Function SpTypes() As Variant
@@ -94,7 +96,8 @@ Sub SpSize(sName As String, ByRef sSize As String, ByRef dDiam As Double, ByRef 
         st = i
         If (c = "м" Or c = "m") And i < n Then
             If SpIsDigit(Mid(s, i + 1, 1)) Then
-                prev = IIf(i > 1, Mid(s, i - 1, 1), " ")
+                prev = " "
+                If i > 1 Then prev = Mid(s, i - 1, 1)
                 If Not IsLetter(prev) And Not SpIsDigit(prev) Then
                     hasM = True
                     i = i + 1
@@ -103,7 +106,8 @@ Sub SpSize(sName As String, ByRef sSize As String, ByRef dDiam As Double, ByRef 
             End If
         End If
         If SpIsDigit(c) Then
-            prev = IIf(st > 1, Mid(s, st - 1, 1), " ")
+            prev = " "
+            If st > 1 Then prev = Mid(s, st - 1, 1)
             If hasM Or (Not IsLetter(prev) And Not SpIsDigit(prev) And prev <> "." And prev <> ",") Then
                 p = i
                 n1 = NumberAt(s, p)
@@ -399,19 +403,30 @@ Function SpRecordC(sName As String) As Variant
     If Not gSpCacheOn Then
         gSpCache = New Collection
         gSpCacheOn = True
+        gSpBadNames = ""
     End If
     If CacheGet(sName, v) Then
         p = Split(CStr(v), Chr(1))
         SpRecordC = Array(p(0), CLng(p(1)), p(2), Val(p(3)), Val(p(4)), Val(p(5)), p(6), p(7), p(8), p(9), p(10), p(11))
         Exit Function
     End If
-    r = SpRecord(sName)
+    r = SpRecordTry(sName)
     t = r(0) & Chr(1) & r(1) & Chr(1) & r(2) & Chr(1) & Trim(Str(r(3))) & Chr(1) & Trim(Str(r(4))) & Chr(1) & Trim(Str(r(5))) & Chr(1) & r(6) & Chr(1) & r(7) & Chr(1) & r(8) & Chr(1) & r(9) _
         & Chr(1) & r(10) & Chr(1) & r(11)
     On Error Resume Next
     gSpCache.Add(t, sName)
     On Error GoTo 0
     SpRecordC = r
+End Function
+
+' SpRecord for a list: a rule that fails on a name is the failure of that name, not of the list — the answer is an empty record and the failure is counted
+Private Function SpRecordTry(sName As String) As Variant
+    On Error GoTo EH
+    SpRecordTry = SpRecord(sName)
+    Exit Function
+EH:
+    gSpBadNames = gSpBadNames & Chr(1) & sName & Chr(2) & Error$ & " (код " & Err & ", строка " & Erl & ")" & Chr(1)
+    SpRecordTry = Array("", 99, "", 0#, 0#, 0#, "", "", "", "", "", "")
 End Function
 
 Private Function CacheGet(sName As String, ByRef v As Variant) As Boolean

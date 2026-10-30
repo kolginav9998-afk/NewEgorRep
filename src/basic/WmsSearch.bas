@@ -120,8 +120,23 @@ Function Prep(ByVal s As String) As String
 End Function
 
 ' the texts of an array (0-based, Strings) as Prep makes them, all at once: the engine of the language works on one long text, not on every row (1.2.0: a list of thousands of names)
+' 1.2.1: a text that holds the sign that joins them («¦») is not allowed to move the next ones: then one by one
 Function PrepAll(arr As Variant) As Variant
-    PrepAll = Split(Spaced(WmsNames.Fold(Join(arr, "¦"))), "¦")
+    Dim r As Variant, i As Long, out() As String
+    If UBound(arr) < 0 Then
+        PrepAll = Array()
+        Exit Function
+    End If
+    r = Split(Spaced(WmsNames.Fold(Join(arr, "¦"))), "¦")
+    If UBound(r) = UBound(arr) Then
+        PrepAll = r
+        Exit Function
+    End If
+    ReDim out(UBound(arr))
+    For i = 0 To UBound(arr)
+        out(i) = Prep(CStr(arr(i)))
+    Next i
+    PrepAll = out
 End Function
 
 ' ================================================================ the synonyms

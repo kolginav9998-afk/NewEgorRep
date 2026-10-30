@@ -803,7 +803,7 @@ Function FastRefresh(sFind As String) As String
         End If
     Next j
     sh.getCellByPosition(FS_STAT_COL, FS_FIND_ROW).setString("Метизов (позиций): " & k & IIf(k < nAllF, " из " & nAllF, "") & descr & ". Список из «Наличия» на " & Format(Now(), "DD.MM.YYYY HH:MM") _
-        & "; журнал № " & CLng(SysNum(SK_LAST_SEQ)))
+        & "; журнал № " & CLng(SysNum(SK_LAST_SEQ)) & BadNote())
     gFsSeq = CLng(SysNum(SK_LAST_SEQ))
     If gFsSeq = 0 Then gFsSeq = 1
     gFsBusy = False
@@ -814,6 +814,23 @@ EH:
     gFsBusy = False
     FastRefresh = "ERR:список метизов не построен: " & Error$ & " (строка " & Erl & ")"
     gUiLastMsg = FastRefresh
+End Function
+
+' 1.2.1: the names of the groups on which a rule of the fasteners failed (WmsSpec.SpRecordC answered them by an empty record): the note for the status line — how many and the first
+Private Function BadNote() As String
+    Dim i As Long, nBad As Long, sBad As String, pb As Long, qb As Long
+    If gSpBadNames = "" Then Exit Function
+    For i = 0 To gGrpN - 1
+        pb = InStr(gSpBadNames, Chr(1) & CStr(gGrp(i)(0)) & Chr(2))
+        If pb > 0 Then
+            nBad = nBad + 1
+            If sBad = "" Then
+                qb = InStr(pb + 1, gSpBadNames, Chr(2)) + 1
+                sBad = "«" & Left(CStr(gGrp(i)(0)), 60) & "» — " & Mid(gSpBadNames, qb, InStr(qb, gSpBadNames, Chr(1)) - qb)
+            End If
+        End If
+    Next i
+    If nBad > 0 Then BadNote = ". НЕ ПРОЧИТАНО названий: " & nBad & " (первое: " & sBad & ") — их нет в списке"
 End Function
 
 ' marks a possible double: the key was met in a row before — both rows get a note

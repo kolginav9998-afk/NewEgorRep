@@ -85,13 +85,163 @@ def precedence_traps(src_dir):
     return bad
 
 
+# 1.2.1: the traps of the missing short circuit. In LibreOffice Basic «And» and «Or» evaluate BOTH sides and «IIf» BOTH branches, so a check that stands before a call does not stop the call:
+# «If q = 1 Or Not X(Mid(s, q - 1, 1))» and «IIf(i > 1, Mid(s, i - 1, 1), " ")» both run «Mid(s, 0, 1)» — «Invalid procedure call», and in 1.1.0–1.2.0 one name that began with a number stopped the whole
+# list of «Метизы» and of «Инструмент ЧПУ». What is allowed: the block «If … Then … End If» (nothing of it runs when the check fails), the function that answers "" outside the text (WmsTool.TlCh).
+_RISKY = None
+
+
+def _risky():
+    import re
+    global _RISKY
+    if _RISKY is None:
+        _RISKY = re.compile(r"(?<![\w.])(Mid|Left|Right|String)\s*\(", re.I)
+    return _RISKY
+
+
+def _split_args(t):
+    out, depth, cur = [], 0, ""
+    for ch in t:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        if ch == "," and depth == 0:
+            out.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    out.append(cur)
+    return out
+
+
+def _calls(t, name):
+    """the text inside the brackets of every call name(...) of the line"""
+    import re
+    res = []
+    for m in re.finditer(r"(?<![\w.])" + name + r"\s*\(", t, re.I):
+        d, k = 1, m.end()
+        while k < len(t) and d:
+            d += (t[k] == "(") - (t[k] == ")")
+            k += 1
+        res.append((m, t[m.end():k - 1]))
+    return res
+
+
+def _pos_args(fname, inner):
+    """the arguments of a call that must not fall below the allowed value: Mid — the start; Left, Right — the length; String — the count"""
+    a = _split_args(inner)
+    return a[0:1] if fname.lower() == "string" else a[1:2]
+
+
+def _without_risky(op):
+    """the operand with its Mid/Left/Right/String calls cut out: what is left is the check itself"""
+    while True:
+        m = _risky().search(op)
+        if not m:
+            return op
+        d, k = 1, m.end()
+        while k < len(op) and d:
+            d += (op[k] == "(") - (op[k] == ")")
+            k += 1
+        op = op[:m.start()] + " " + op[k:]
+
+
+def _operands(cond):
+    """the operands of a condition split by And / Or outside the brackets"""
+    import re
+    res, depth, cur, i = [], 0, "", 0
+    while i < len(cond):
+        ch = cond[i]
+        depth += (ch == "(") - (ch == ")")
+        if depth == 0:
+            m = re.match(r"\s(And|Or)\s", cond[i:], re.I)
+            if m:
+                res.append(cur)
+                cur = ""
+                i += m.end()
+                continue
+        cur += ch
+        i += 1
+    res.append(cur)
+    return res
+
+
+def _groups(cond):
+    """the condition and the text inside every pair of brackets of it (a check may hide in them: «(q = 0 Or …) And …»)"""
+    res, stack = [cond], []
+    for i, ch in enumerate(cond):
+        if ch == "(":
+            stack.append(i)
+        elif ch == ")" and stack:
+            res.append(cond[stack.pop() + 1:i])
+    return res
+
+
+def eager_traps_in(text):
+    """the lines of a Basic source (text) with a short-circuit trap: [(line number, why, the line)]"""
+    import re
+    out = []
+    lines = text.split("\n")
+    cond_re = re.compile(r"^\s*(?:ElseIf|If|Do\s+While|Do\s+Until|Loop\s+While|Loop\s+Until|While)\s+(.*?)(?:\s+Then\b.*)?$", re.I)
+    sub = re.compile(r"[A-Za-z_]\w*\s*-\s*\w")
+    i = 0
+    while i < len(lines):
+        full, j = lines[i], i
+        while full.rstrip().endswith(" _") and j + 1 < len(lines):
+            j += 1
+            full = full.rstrip()[:-2] + " " + lines[j].strip()
+        t = re.sub(r'"(?:[^"]|"")*"', '""', full).split("'")[0]
+        why = []
+        for _, args in _calls(t, "IIf"):
+            for br in _split_args(args)[1:]:
+                for m in _risky().finditer(br):
+                    d, k = 1, m.end()
+                    while k < len(br) and d:
+                        d += (br[k] == "(") - (br[k] == ")")
+                        k += 1
+                    if any(sub.search(x) for x in _pos_args(m.group(1), br[m.end():k - 1])):
+                        why.append(f"IIf считает обе ветки: {m.group(1)}(…-…) выполнится и когда проверка не прошла")
+        m = cond_re.match(t)
+        if m:
+            for g in _groups(m.group(1)):
+                ops = _operands(g)
+                for k in range(1, len(ops)):
+                    for rm in _risky().finditer(ops[k]):
+                        d, q = 1, rm.end()
+                        while q < len(ops[k]) and d:
+                            d += (ops[k][q] == "(") - (ops[k][q] == ")")
+                            q += 1
+                        for x in _pos_args(rm.group(1), ops[k][rm.end():q - 1]):
+                            for mm in re.finditer(r"\b([A-Za-z_]\w*)\s*-\s*\w", x):
+                                if any(re.search(r"\b" + mm.group(1) + r"\b", _without_risky(ops[n])) for n in range(k)):
+                                    why.append(f"And/Or не обрывают проверку: {rm.group(1)}(… {mm.group(1)} - …) выполнится и когда {mm.group(1)} не прошла")
+                            mm = re.fullmatch(r"\s*([A-Za-z_]\w*)\s*", x)
+                            if mm and any(re.search(r"\b" + mm.group(1) + r"\s*(=|<|<=|>|>=|<>)\s*[01]\b", _without_risky(ops[n])) for n in range(k)):
+                                why.append(f"And/Or не обрывают проверку: {rm.group(1)}(…, {mm.group(1)}, …) выполнится и при {mm.group(1)} = 0")
+        for w in dict.fromkeys(why):
+            out.append((i + 1, w, full.strip()))
+        i = j + 1
+    return out
+
+
+def eager_traps(src_dir):
+    """the traps of the missing short circuit in the Basic sources of a folder: ["Module.bas:line: why: text", ...]"""
+    bad = []
+    for fn in sorted(os.listdir(src_dir)):
+        if fn.endswith(".bas"):
+            for ln, why, text in eager_traps_in(open(os.path.join(src_dir, fn), encoding="utf-8").read()):
+                bad.append(f"{fn}:{ln}: {why}: {text[:90]}")
+    return bad
+
+
 def main():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     # the WMS book and (1.0) the books of the tools, of the transfer and of the upgrade wizard
     bad = [x for d in ("basic", "toolbox", "transfer", "upgrade") if os.path.isdir(os.path.join(root, "src", d))
-           for x in reserved_names(os.path.join(root, "src", d)) + precedence_traps(os.path.join(root, "src", d))]
+           for x in reserved_names(os.path.join(root, "src", d)) + precedence_traps(os.path.join(root, "src", d)) + eager_traps(os.path.join(root, "src", d))]
     if bad:
-        print("COMPILE FAILED: ловушки LibreOffice Basic (зарезервированное слово в имени, однострочный If … ReDim, And и Or без скобок): " + "; ".join(bad))
+        print("COMPILE FAILED: ловушки LibreOffice Basic (зарезервированное слово в имени, однострочный If … ReDim, And и Or без скобок, IIf и And/Or вычисляют всё — Mid(…, 0, …)): " + "; ".join(bad))
         sys.exit(1)
     ap = argparse.ArgumentParser()
     ap.add_argument("--display", default=os.environ.get("DISPLAY", ":99"))

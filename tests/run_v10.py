@@ -15,7 +15,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from harness import OUT, Results, Session, new_wms  # noqa: E402
+from harness import OUT, Results, Session, new_wms, git_sources  # noqa: E402
 import build_ods as B  # noqa: E402
 from run_prime import T, TODAY, issue, order, put, receive, serial, topology  # noqa: E402
 
@@ -2109,10 +2109,10 @@ def v29_help():
         pc = s.B("PcCheck", module="WmsHelp")
         R.add(c, "П1: «Проверить этот ПК» — LibreOffice, макросы, запись, место, Python — с «что сделать»",
               pc.startswith("Проверка этого ПК") and "LibreOffice" in pc and "запись в папку WMS" in pc and "место на диске" in pc and "Python" in pc, pc[:300])
-        choose(s, 6)
+        choose(s, 7)
         wn = s.B("WhatsNew", module="WmsHelp")
         act = s.doc.getCurrentController().getActiveSheet().getName()
-        R.add(c, "П2: «Что нового» — 10 карточек (первая — 1.2.0, вторая — 1.1, третья — 1.0.2), «Показать» открывает лист карточки", len(s.B("WhatsNewCards", module="WmsHelp")) == 10 and wn == 6
+        R.add(c, "П2: «Что нового» — 11 карточек (первая — 1.2.1, вторая — 1.2.0, третья — 1.1, четвёртая — 1.0.2), «Показать» открывает лист карточки", len(s.B("WhatsNewCards", module="WmsHelp")) == 11 and wn == 7
               and act == "Поиск", f"{wn}; {act}")
         col0 = s.B("ButtonModel", "Заказы", "btnReceiveWin", module="WmsHelp").BackgroundColor
         tr = s.B("Tour", module="WmsHelp")
@@ -5342,6 +5342,139 @@ def v70_tool_speed():
 
 
 @case
+def v71_tool_robust():
+    """1.2.1: список «Инструмента ЧПУ» не падает на названиях, которые ломали разбор в 1.2.0 (начинаются с цифры: «10 мм сверло…», «4z фреза…», «8мм сверло»), и на необычных (знак «¦», кавычки,
+    «*?[», «=», «+», «@», табуляция, число в 400 цифр, название в 3000 знаков): строятся, инструмент разобран как в таблице, не инструмент («М8 гайка», «8 мм болт») не попадает; ошибка правила на одном
+    названии (проверочный сбой) не обрывает список — название не попадает в список, строка итога называет его и ошибку, остальное на месте; настоящая причина ошибки не теряется, когда включена
+    полоса хода (текст ошибки, шаг, название — в сообщении и на листе); «Метизы» — те же названия («М8 гайка», «5х40 саморез»)"""
+    c = "V71"
+    s = ready(Session(new_wms("v71")))
+    try:
+        stk = s.doc.Sheets.getByName("Наличие")
+        stk.unprotect("wms")
+        rows = []
+        cells = {}
+
+        def add(name, art, q=5.0, cat="", raw=False):
+            n = len(rows) + 1
+            rows.append([f"ЕИ-{n:08d}", "x" if raw else name, art, "шт", q, f"A-{n % 50 + 1}", cat, "Активен"])
+            if raw:
+                cells[n] = name
+            return n
+
+        mats = ["Р6М5", "ВК8", "HSS-Co", "твердосплавная", "Т15К6"]
+        for i in range(340):
+            add(f"Сверло спиральное {3 + i % 30},{i // 30} DIN 338 {mats[i % 5]}", f"SV-{i}")
+        first = [("10 мм сверло по металлу", "Сверло", "Ø10", 0), ("10х50 фреза концевая", "Фреза", "Ø10×50", 0), ("2,5 сверло", "Сверло", "Ø2,5", 0), ("6 метчик", "Метчик", "Ø6", 0),
+                 ("125х22 круг отрезной", "Абразив", "125×22", 0), ("4z фреза концевая 10", "Фреза", "Ø10", 4), ("4-х зубая фреза концевая Ø10", "Фреза", "Ø10", 4),
+                 ("2 зуба фреза 8 мм", "Фреза", "Ø8", 2), ("3 флейты фреза 6", "Фреза", "Ø6", 3), ("6 канавок развертка 8", "Развёртка", "Ø8", 6), ("Сверло 8мм", "Сверло", "Ø8", 0),
+                 ("8мм сверло спиральное", "Сверло", "Ø8", 0)]
+        for k, (nm, ty, sz, z) in enumerate(first):
+            add(nm, f"DG-{k}")
+        notool = ["М8 гайка", "8 мм болт", "10х1 труба", "6 мм шуруп", "5х40 саморез", "1 болт", "12 вольт лампа", "100 шт перчатки"]
+        for k, nm in enumerate(notool):
+            add(nm, f"NT-{k}")
+        odd = ["Фреза ¦ 10", "Фреза \"10\" 'x' *?[", "=Фреза 10", "+Сверло 5", "@Метчик М6", "Фреза 9" + "9" * 400, "Сверло ø" + "9" * 400, "Метчик " + "М8х" * 100, "Сверло " + "а" * 3000,
+               "Фреза\tZ4\t12", "Сверло 8\nспиральное", "Фреза [10] {z4} <d12>"]
+        for k, nm in enumerate(odd):
+            add(nm, f"OD-{k}", raw=True)
+        add("Болт после необычных названий", "AFTER-1")
+        add("Метчик М10 после необычных названий", "AFTER-2")
+        stk.getCellRangeByPosition(0, 1, 7, len(rows)).setDataArray(tuple(tuple(r) for r in rows))
+        for n, nm in cells.items():
+            stk.getCellByPosition(1, n).setString(nm)
+        r1 = s.B("ToolRefresh", "", module="WmsTool")
+        sh = s.doc.Sheets.getByName("Инструмент ЧПУ")
+        k1 = int(r1.split(":")[1]) if r1.startswith("OK:") else 0
+        data = [list(x) for x in sh.getCellRangeByPosition(0, 4, 17, 4 + k1 - 1).getDataArray()] if k1 > 0 else []
+        by = {x[12]: x for x in data}
+        stat = sh.getCellByPosition(7, 1).getString()
+        want_n = 340 + len(first) + len(odd) + 1
+        R.add(c, "список строится (в «Наличии» названия, которые ломали 1.2.0, и необычные): инструмента — столько, сколько ждём (сверла, начинающиеся с цифры, необычные, «Метчик М10»), не прочитанных нет",
+              r1 == f"OK:{want_n}" and "НЕ ПРОЧИТАНО" not in stat, f"{r1[:200]}; ждали OK:{want_n}; {stat[:200]}")
+        bad = [(nm, by.get(f"DG-{i}", [""] * 18)[0:6]) for i, (nm, ty, sz, z) in enumerate(first)
+               if not (f"DG-{i}" in by and by[f"DG-{i}"][0] == ty and by[f"DG-{i}"][2] == sz and (by[f"DG-{i}"][5] or 0) == z)]
+        R.add(c, "названия, начинающиеся с числа и «8мм»: тип, размер и число зубьев — как в таблице разбора", not bad, "; ".join(f"{n!r}: {g}" for n, g in bad[:4]))
+        R.add(c, "не инструмент («М8 гайка», «8 мм болт», «10х1 труба», «12 вольт лампа», перчатки) в списке нет; необычные названия с типом (все 12) — есть, «Болт после…» нет, «Метчик М10 после…» есть",
+              not any(f"NT-{i}" in by for i in range(len(notool))) and all(f"OD-{i}" in by for i in range(len(odd))) and "AFTER-1" not in by and "AFTER-2" in by,
+              f"{[a for a in by if a.startswith(('NT-', 'AFTER'))]}; нет необычных: {[i for i in range(len(odd)) if f'OD-{i}' not in by]}")
+        # a rule fails on a name (a failure on purpose): the list is made without it, the status line tells
+        s.B("TestToolFailOn", "ЗЗЗ", module="WmsTool")
+        n0 = len(rows)
+        rows2 = [[f"ЕИ-{n0 + 1:08d}", "Фреза ЗЗЗ 10", "FAIL-1", "шт", 5.0, "B-1", "", "Активен"], [f"ЕИ-{n0 + 2:08d}", "Сверло ЗЗЗ 6", "FAIL-2", "шт", 5.0, "B-2", "", "Активен"]]
+        stk.getCellRangeByPosition(0, n0 + 1, 7, n0 + 2).setDataArray(tuple(tuple(r) for r in rows2))
+        r2 = s.B("ToolRefresh", "", module="WmsTool")
+        k2 = int(r2.split(":")[1]) if r2.startswith("OK:") else 0
+        d2 = {x[12]: x for x in sh.getCellRangeByPosition(0, 4, 17, 4 + k2 - 1).getDataArray()} if k2 > 0 else {}
+        stat2 = sh.getCellByPosition(7, 1).getString()
+        R.add(c, "правило упало на двух названиях: список построен без них (столько же строк, остальное на месте), строка итога: «НЕ ПРОЧИТАНО названий: 2», первое название и текст ошибки",
+              r2 == f"OK:{want_n}" and "FAIL-1" not in d2 and "FAIL-2" not in d2 and "DG-0" in d2 and "НЕ ПРОЧИТАНО названий: 2" in stat2 and "ЗЗЗ" in stat2 and "Invalid procedure call" in stat2,
+              f"{r2}; {stat2[:300]}")
+        s.B("TestToolFailOn", "", module="WmsTool")
+        # a failure outside the reading of a name while the bar of the status line is on: the text of the error is not lost
+        rows3 = [[f"ЕИ-{n0 + 3 + i:08d}", f"Метчик М{3 + i % 30}х{1 + i // 30},5 м/р {mats[i % 5]}", f"MT-{i}", "шт", 5.0, "C-1", "", "Активен"] for i in range(320)]
+        stk.getCellRangeByPosition(0, n0 + 3, 7, n0 + 2 + len(rows3)).setDataArray(tuple(tuple(r) for r in rows3))
+        s.B("TestToolFailStep", "разбор названий", module="WmsTool")
+        r3 = s.B("ToolRefresh", "", module="WmsTool")
+        stat3 = sh.getCellByPosition(7, 1).getString()
+        s.B("TestToolFailStep", "", module="WmsTool")
+        R.add(c, "сбой при включённой полосе хода: сообщение называет ошибку («Invalid procedure call»), код 5 и шаг «разбор названий» (в 1.2.0 было пусто: «список инструмента не построен:  (строка 0)»); то же — на листе",
+              r3.startswith("ERR:список инструмента не построен: Invalid procedure call.") and "код 5" in r3 and "шаг «разбор названий»" in r3 and "Invalid procedure call" in stat3 and "(строка 0)" not in r3,
+              f"{r3[:300]}; лист: {stat3[:200]}")
+        r4 = s.B("ToolRefresh", "", module="WmsTool")
+        R.add(c, "после сбоя список строится снова: 340 + 12 + 12 + 1 + 320 метчиков (названия, прочитанные до сбоя, берутся из памяти)", r4 == f"OK:{want_n + 320}", r4)
+        # the same names in «Метизы»
+        rf = s.B("FastRefresh", "", module="WmsCat")
+        fs = s.doc.Sheets.getByName("Метизы")
+        kf = int(rf.split(":")[1]) if rf.startswith("OK:") else 0
+        fd = {x[10]: x for x in fs.getCellRangeByPosition(0, 4, 15, 4 + kf - 1).getDataArray()} if kf > 0 else {}
+        fstat = fs.getCellByPosition(6, 1).getString()
+        want = {"NT-0": ("Гайка", "М8"), "NT-1": ("Болт", ""), "NT-3": ("Шуруп", ""), "NT-4": ("Саморез", "5×40"), "NT-5": ("Болт", "")}
+        bad = [(a, fd.get(a, [""] * 3)[:2]) for a, (ty, sz) in want.items() if not (a in fd and fd[a][0] == ty and fd[a][1] == sz)]
+        R.add(c, "«Метизы» (в 1.1.0–1.2.0 такие названия обрывали и этот список): «М8 гайка», «8 мм болт», «6 мм шуруп», «5х40 саморез», «1 болт» — в списке с типом и размером; не прочитанных нет",
+              rf.startswith("OK:") and not bad and "НЕ ПРОЧИТАНО" not in fstat, f"{rf[:200]}; {bad}; {fstat[:200]}")
+        R.add(c, "чтение списков ничего не проводит: в журнале по-прежнему ни одной записи", int(s.sysv("LAST_SEQ")) == 0, str(s.sysv("LAST_SEQ")))
+    finally:
+        s.close()
+
+
+@case
+def v72_text_fuzz():
+    """1.2.1: правила чтения названий (инструмент ЧПУ, метизы, поиск, проверка названий, подсказки категории, фасовка) не падают ни на одном из ~4000 названий корпуса необычных названий (tests/fuzz_names.py:
+    образцы с каждым началом и концом, с цифрой и знаком впереди, склейки, случайные наборы слов, очень длинные): ни одной ошибки «Invalid procedure call», «Overflow» и т.п. (в 1.2.0 одно название
+    с цифры в начале обрывало весь список); «¦» в названии не сдвигает чужие строки"""
+    import fuzz_names
+    c = "V72"
+    names = fuzz_names.sample(fuzz_names.corpus(7, 6000), 6)
+    s = ready(Session(new_wms("v72")))
+    try:
+        lib = s.doc.BasicLibraries
+        if not lib.isLibraryLoaded("Standard"):
+            lib.loadLibrary("Standard")
+        st = lib.getByName("Standard")
+        if st.hasByName("FzText"):
+            st.removeByName("FzText")
+        st.insertByName("FzText", open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fz_text.bas"), encoding="utf-8").read())
+        groups = [("инструмент ЧПУ", "TlRecord"), ("метизы", "SpRecord,SpRecordC,SpSize,SpStandard,SpEquiv,SpCanon,SpType,SpClass,SpCoating,SpHead"),
+                  ("поиск и свёртка", "NormName,NameIssues,Fold,FoldWords,NormNameFast,Prep,Stem,QueryNeeds,MatchScores,TextFilterOk,NumFilterOk"),
+                  ("категории, фасовка", "CategorySuggest,CategoryOf,PkWords,PackGuess,PkWeight,UnitMatch,FirstPart")]
+        for label, fns in groups:
+            tot, errs = 0, []
+            for i in range(0, len(names), 400):
+                r = s.B("Run", "\n".join(names[i:i + 400]), fns, module="FzText")
+                lines = r.split("\n")
+                m = re.search(r"ошибок (\d+)", lines[0])
+                tot += int(m.group(1)) if m else 1
+                errs += lines[1:4]
+            R.add(c, f"{label}: {len(names)} названий корпуса — ни одной ошибки в правилах", tot == 0, f"ошибок {tot}; {errs[:3]}")
+        # the sign that joins the names in the bulk folding is not allowed to move the next ones
+        fo = s.B("TestFoldAllJoin", module="WmsNames")
+        R.add(c, "свёртка списка: название со знаком «¦» не сдвигает следующие (Fold и Prep на списке из пяти названий)", fo == "OK", fo)
+    finally:
+        s.close()
+
+
+@case
 def v63_upgrade_110_111():
     """1.1.1 для пользователя, уже работающего в 1.1.0: рабочая книга 1.1.0 (собрана исходниками выпуска 1.1.0, детали с серийными номерами, выдача) обновляется мастером — проверка, сборка
     (сверка каждой ячейки), «сделать рабочей»; данные те же, старая книга и журнал побайтно те же; в новой — лист «Серийные детали» (без защиты) и кнопки «Серийные детали…»;
@@ -5524,6 +5657,116 @@ def v67_upgrade_111_120():
         R.add(c, "оракул (журнал воспроизведён независимо): книга 1.1.1, обновлённая до 1.2.0, и новая сборка", not P, f"{inf.get('ops')} операций; {P[:4]}")
     finally:
         s.close()
+
+
+@case
+def v73_upgrade_120_121():
+    """1.2.1 для пользователя, у которого список «Инструмент ЧПУ» в 1.2.0 не строился: рабочая книга 1.2.0 (собрана исходниками выпуска 1.2.0; на складе «10 мм сверло по металлу», фреза, «М8 гайка», болт) —
+    список инструмента в ней не строится (сбой воспроизведён); мастер обновляет её в 1.2.1 (проверка, сборка со сверкой каждой ячейки, «сделать рабочей»): данные те же, старая книга и журнал побайтно
+    те же, старая заперта; в новой список строится — сверло с числа впереди в нём, гайка нет, «Метизы» строятся; журнал воспроизводится независимо"""
+    import run_prime
+    import subprocess
+    from harness import git_sources
+    c = "V73"
+    src = os.path.join(OUT, "src_120")
+    why = "" if os.path.isdir(os.path.join(src, "tools")) else git_sources("4611b5b", src)
+    if why:
+        R.add(c, "исходники выпуска 1.2.0", "SKIP", why)
+        return
+    d = os.path.join(OUT, "cases", "v73 Склад")
+    shutil.rmtree(d, ignore_errors=True)
+    work = os.path.join(d, "WMS_RELEASE_1.2.0", "WMS_WORK")
+    os.makedirs(work)
+    p = os.path.join(work, "WMS_PROD.ods")
+    b = subprocess.run([sys.executable, os.path.join(src, "tools", "build_ods.py"), p, "--test"], capture_output=True, text=True, timeout=900)
+    if b.returncode != 0 or not os.path.exists(p):
+        R.add(c, "книга 1.2.0 собрана исходниками 1.2.0", False, (b.stdout + b.stderr)[-300:])
+        return
+    s = ready(Session(p))
+    try:
+        core0 = s.sysv("CORE_VERSION")
+        order(s, 1, "1", "10 мм сверло по металлу", qty="20", art="DG-1")
+        receive(s, 1, "20", place="A-1", doc="УПД-1")
+        order(s, 2, "2", "Фреза концевая Ø10х50 Z4 твердосплавная", qty="5", art="FR-10")
+        receive(s, 2, "5", place="A-2", doc="УПД-2")
+        order(s, 3, "3", "М8 гайка", qty="30", art="NT-1")
+        receive(s, 3, "30", place="A-3", doc="УПД-3")
+        order(s, 4, "4", "Болт М8", qty="10", art="B-8")
+        receive(s, 4, "10", place="A-4", doc="УПД-4")
+        stk = s.doc.Sheets.getByName("Наличие")
+        n_ei = int(s.sysv("NEXT_EI")) - 1
+        before = [tuple(r[:8]) for r in stk.getCellRangeByPosition(0, 1, 7, n_ei).getDataArray()]
+        seq_old = int(s.sysv("LAST_SEQ"))
+        r_old = s.B("ToolRefresh", "", module="WmsTool")
+        f_old = s.B("FastRefresh", "", module="WmsCat")
+    finally:
+        s.close(save=True)
+    R.add(c, "в книге 1.2.0 список инструмента не строится (название с числа впереди) — сбой воспроизведён; «Метизы» с «М8 гайка» тоже",
+          core0 == "1.2.0" and r_old.startswith("ERR:список инструмента не построен") and f_old.startswith("ERR:список метизов не построен"), f"{core0}; {r_old[:120]}; {f_old[:120]}")
+    h0 = run_prime.sha(p)
+    j0 = {f: run_prime.sha(f) for f in glob.glob(os.path.join(work, "WMS_Journal", "*.csv"))}
+    rc0, o0 = run_prime.upgrade("check", p)
+    new = os.path.join(d, f"WMS_RELEASE_{run_prime.VERS['WMS_PRODUCT_VERSION']}", "WMS_WORK")
+    rc1, o1 = run_prime.upgrade("build", p, "--to", new)
+    rc2, o2 = run_prime.upgrade("promote", "--to", new)
+    rep = open(os.path.join(new, "UPGRADE_REPORT.md"), encoding="utf-8").read() if os.path.exists(os.path.join(new, "UPGRADE_REPORT.md")) else ""
+    R.add(c, "книга 1.2.0: проверка «можно обновить», сборка — 0 расхождений ячеек, «сделать рабочей»; старая книга и журнал побайтно те же, старая заперта",
+          rc0 == 0 and rc1 == 0 and rc2 == 0 and "расхождений: 0" in rep and run_prime.sha(p) == h0
+          and {f: run_prime.sha(f) for f in glob.glob(os.path.join(work, "WMS_Journal", "*.csv"))} == j0 and os.path.exists(os.path.join(work, "WMS_Journal", "wms.lock")),
+          f"{o0[-160:]}; {o1[-200:]}; {o2[-160:]}; {rep[-300:]}")
+    s = ready(Session(os.path.join(new, "WMS_PROD.ods")))
+    try:
+        stk = s.doc.Sheets.getByName("Наличие")
+        after = [tuple(r[:8]) for r in stk.getCellRangeByPosition(0, 1, 7, n_ei).getDataArray()]
+        R.add(c, "новая книга — WMS 1.2.1: «работа разрешена», тот же журнал и каждый ЕИ",
+              s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == run_prime.VERS["WMS_CORE_VERSION"] == "1.2.1" and before == after and int(s.sysv("LAST_SEQ")) == seq_old,
+              f"{s.state()}; {s.sysv('CORE_VERSION')}; {before == after}")
+        r = s.B("ToolRefresh", "", module="WmsTool")
+        sh = s.doc.Sheets.getByName("Инструмент ЧПУ")
+        k = int(r.split(":")[1]) if r.startswith("OK:") else 0
+        rows = {x[12]: list(x) for x in sh.getCellRangeByPosition(0, 4, 17, 4 + k - 1).getDataArray()} if k > 0 else {}
+        R.add(c, "список инструмента в обновлённой книге строится: «10 мм сверло по металлу» (Ø10, остаток 20) и фреза в нём, «М8 гайка» и болт — нет",
+              r == "OK:2" and rows.get("DG-1", [""] * 14)[0:3] == ["Сверло", "по металлу", "Ø10"] and rows["DG-1"][13] == 20 and "FR-10" in rows and "NT-1" not in rows, f"{r}; {list(rows)}")
+        rf = s.B("FastRefresh", "", module="WmsCat")
+        fs = s.doc.Sheets.getByName("Метизы")
+        kf = int(rf.split(":")[1]) if rf.startswith("OK:") else 0
+        fa = {x[10]: list(x) for x in fs.getCellRangeByPosition(0, 4, 15, 4 + kf - 1).getDataArray()} if kf > 0 else {}
+        R.add(c, "«Метизы» в обновлённой книге строятся: «М8 гайка» (Гайка М8, остаток 30) и «Болт М8» в списке", rf.startswith("OK:") and fa.get("NT-1", [""] * 12)[0:2] == ["Гайка", "М8"] and fa["NT-1"][11] == 30 and "B-8" in fa,
+              f"{rf}; {list(fa)}")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:200])
+        P, inf, _ = s.adjcheck(0)
+        R.add(c, "оракул (журнал воспроизведён независимо): книга 1.2.0, обновлённая до 1.2.1", not P, f"{inf.get('ops')} операций; {P[:4]}")
+    finally:
+        s.close()
+
+
+@case
+def v74_lint_eager():
+    """1.2.1: проверка «ловушек без короткого замыкания» (tools/basic_compile_check.py, eager_traps): в LibreOffice Basic And/Or вычисляют обе части, IIf — обе ветки, поэтому «If q = 1 Or Not X(Mid(s, q - 1, 1))»
+    и «IIf(i > 1, Mid(s, i - 1, 1), " ")» выполняют Mid(s, 0, 1) — «Invalid procedure call» (так в 1.1.0–1.2.0 одно название с числа впереди обрывало списки «Метизы» и «Инструмент ЧПУ»). Проверка находит
+    эти строки, не трогает безопасные (блочный If, длина со сложением), и в исходниках выпуска их нет; три места исходников 1.2.0 (WmsTool) она находила"""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools"))
+    import basic_compile_check as cc
+    c = "V74"
+    bad = ['x = IIf(i > 1, Mid(s, i - 1, 1), " ")', "If p = 1 Or Not A(Mid(s, p - 1, 1)) Then", 'Do While q >= 1 And InStr(" =:", Mid(s, q, 1)) > 0',
+           "If (q = 0 Or Not TlIsAlnum(Mid(s, q, 1))) And Val(num) >= 1 Then", 'x = IIf(n > 1, Left(s, n - 1), "")']
+    good = ["If p > 1 Then x = Mid(s, p - 1, 1)", 'x = IIf(n > 0, Left(s, n), "")', 'If ch = "," And i > 1 And i < Len(s) Then', "x = IIf(p > 0, Mid(s, p + 1, 3), \"\")",
+            "If q = 1 Or Not TlIsAlnum(TlCh(s, q - 1)) Then", 'Do While q >= 1 And InStr(" =:", TlCh(s, q)) > 0']
+    miss = [t for t in bad if not cc.eager_traps_in(t)]
+    fp = [t for t in good if cc.eager_traps_in(t)]
+    R.add(c, f"находит {len(bad)} опасных строк-образцов и не трогает {len(good)} безопасных", not miss and not fp, f"не нашла: {miss}; лишнее: {fp}")
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    left = [x for d in ("basic", "toolbox", "transfer", "upgrade") for x in cc.eager_traps(os.path.join(root, "src", d))]
+    R.add(c, "в исходниках выпуска (basic, toolbox, transfer, upgrade) таких строк нет", not left, "; ".join(left[:3]))
+    old = os.path.join(OUT, "src_120")
+    why = "" if os.path.isdir(os.path.join(old, "src")) else git_sources("4611b5b", old)
+    if why:
+        R.add(c, "исходники выпуска 1.2.0: проверка находит в них три места, из-за которых список инструмента не строился", "SKIP", why)
+        return
+    found = cc.eager_traps(os.path.join(old, "src", "basic"))
+    R.add(c, "исходники выпуска 1.2.0: проверка находит в них места, из-за которых список инструмента и «Метизы» не строились (WmsTool ×3, WmsSpec ×2)",
+          sum(1 for x in found if x.startswith("WmsTool.bas")) == 3 and sum(1 for x in found if x.startswith("WmsSpec.bas")) == 2, "; ".join(found[:6]))
 
 
 # ================================================================ runner

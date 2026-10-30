@@ -147,8 +147,23 @@ Function Fold(ByVal s As String) As String
 End Function
 
 ' the texts of an array (0-based, Strings) as Fold makes them, all at once: the engine of the language works on one long text, not on every row
+' 1.2.1: when a text holds the sign that joins them («¦») the pieces are more than the texts and every text after it would take the place of the next one: then one by one
 Function FoldAll(arr As Variant) As Variant
-    FoldAll = Split(Fold(Join(arr, "¦")), "¦")
+    Dim r As Variant, i As Long, out() As String
+    If UBound(arr) < 0 Then
+        FoldAll = Array()
+        Exit Function
+    End If
+    r = Split(Fold(Join(arr, "¦")), "¦")
+    If UBound(r) = UBound(arr) Then
+        FoldAll = r
+        Exit Function
+    End If
+    ReDim out(UBound(arr))
+    For i = 0 To UBound(arr)
+        out(i) = Fold(CStr(arr(i)))
+    Next i
+    FoldAll = out
 End Function
 
 ' the words of a search text (folded), an empty array when there are none
@@ -184,6 +199,29 @@ End Function
 
 Function TestFold(s As String) As String
     TestFold = Fold(s)
+End Function
+
+' a name that holds the sign that joins the texts of a list («¦») does not move the next ones, in FoldAll and in PrepAll: "OK" or what went wrong
+Function TestFoldAllJoin() As String
+    Dim a As Variant, f As Variant, p As Variant, i As Long
+    a = Array("Болт М8", "Фреза ¦ 10", "Гайка M8", "Сверло 5", "Шайба")
+    f = FoldAll(a)
+    p = WmsSearch.PrepAll(a)
+    If UBound(f) <> 4 Or UBound(p) <> 4 Then
+        TestFoldAllJoin = "число текстов: " & (UBound(f) + 1) & " и " & (UBound(p) + 1) & " вместо 5"
+        Exit Function
+    End If
+    For i = 0 To 4
+        If CStr(f(i)) <> Fold(CStr(a(i))) Then
+            TestFoldAllJoin = "FoldAll: текст " & i & " сдвинут: " & CStr(f(i))
+            Exit Function
+        End If
+        If CStr(p(i)) <> WmsSearch.Prep(CStr(a(i))) Then
+            TestFoldAllJoin = "PrepAll: текст " & i & " сдвинут: " & CStr(p(i))
+            Exit Function
+        End If
+    Next i
+    TestFoldAllJoin = "OK"
 End Function
 
 ' ================================================================ the name typed in several lines

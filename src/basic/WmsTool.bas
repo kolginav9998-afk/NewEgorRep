@@ -62,6 +62,11 @@ Global gTlBusy As Boolean
 Global gTlKTab As String
 ' the milliseconds of the steps of the last list (a line for the tests and for a talk about the speed)
 Global gTlProf As String
+' the names on which a rule failed (they are answered by an empty record, the list goes on): «Chr(1) name Chr(2) error Chr(1)» one after another; made again with the cache
+Global gTlBadNames As String
+' test seams: the names with this text fail in the rules; the list fails at the first name of this step (with the bar of the status line on). "" — off
+Global gTlFailOn As String
+Global gTlFailStep As String
 
 ' ================================================================ the tables
 
@@ -225,11 +230,11 @@ Private Function TlNumAt(s As String, ByRef p As Long) As String
     Do While p <= Len(s)
         c = Mid(s, p, 1)
         If TlIsDigit(c) Then
-            t = t & c
+            If Len(t) < 15 Then t = t & c
             p = p + 1
         ElseIf (c = "." Or c = ",") And t <> "" Then
             If TlIsDigit(TlCh(s, p + 1)) Then
-                t = t & "."
+                If Len(t) < 15 Then t = t & "."
                 p = p + 1
             Else
                 Exit Do
@@ -629,8 +634,9 @@ Private Function TlZ(s As String, ByRef mask As String) As Long
                 If Not TlIsDigit(TlCh(s, q - 1)) Then Exit Do
                 q = q - 1
             Loop
-            If q = 1 Or Not TlIsAlnum(Mid(s, q - 1, 1)) Then
+            If q = 1 Or Not TlIsAlnum(TlCh(s, q - 1)) Then
                 num = Mid(s, q, p - q)
+                If Len(num) > 15 Then num = "0"
                 If Val(num) >= 1 And Val(num) <= 60 And TlFree(mask, q, p) Then
                     TlTake(mask, q, p)
                     TlZ = CLng(Val(num))
@@ -664,7 +670,8 @@ Private Function TlZ(s As String, ByRef mask As String) As Long
                                 Exit Do
                             End If
                         Loop
-                        If (q = 0 Or Not TlIsAlnum(Mid(s, q, 1))) And Val(num) >= 1 And Val(num) <= 60 Then
+                        If Len(num) > 15 Then num = "0"
+                        If (q = 0 Or Not TlIsAlnum(TlCh(s, q))) And Val(num) >= 1 And Val(num) <= 60 Then
                             TlTake(mask, q + 1, p + Len(st) - 1)
                             TlZ = CLng(Val(num))
                             Exit Function
@@ -732,6 +739,9 @@ Function TlRecordF(sName As String, sFold As String) As Variant
     Dim dThread As Double, dThLen As Double, kinds As Variant, kind As String, q As Long, w As Variant, kEnd As Long, tStart As Long, kw As String
     Dim gs() As Long, ge() As Long, gv() As String, ng As Long, dDiam As Double, dLen As Double, sSize As String, g As Long, vals As Variant, pre As String, post As String, dRad As Double, dSign As String
     TlLoad()
+    If gTlFailOn <> "" Then
+        If InStr(sName, gTlFailOn) > 0 Then TlFailNow()
+    End If
     If sFold <> "" And Len(sFold) = Len(sName) And Not (sFold Like "*м #*") Then
         orig = sName
         s = sFold
@@ -950,7 +960,7 @@ End Function
 Private Function TlBefore(s As String, p As Long) As String
     Dim q As Long, a As Long, t As String
     q = p - 1
-    Do While q >= 1 And InStr(" =:", Mid(s, q, 1)) > 0
+    Do While q >= 1 And InStr(" =:", TlCh(s, q)) > 0
         q = q - 1
     Loop
     If q < 1 Then Exit Function
@@ -998,8 +1008,11 @@ Private Function TlSkipGroup(s As String, a As Long, b As Long, post As String) 
         Exit Function
     End If
     If TlIsLetter(TlCh(s, b + 1)) Then
-        TlSkipGroup = True
-        Exit Function
+        ' «8мм», «10mm»: the unit of a size glued to the number is not a letter of a code («45hrc», «6g»)
+        If Not ((Mid(s, b + 1, 2) = TlK("мм") Or Mid(s, b + 1, 2) = "mm") And Not TlIsLetter(TlCh(s, b + 3))) Then
+            TlSkipGroup = True
+            Exit Function
+        End If
     End If
     If Left(post, 1) = "°" Or Left(post, 4) = TlK("град") Or Left(post, 2) = TlK("шт") Or Left(post, 1) = "%" Or Left(post, 2) = TlK("кг") Then
         TlSkipGroup = True
@@ -1082,10 +1095,11 @@ End Function
 ' folded name when the caller has it made (a list of names is folded at once): a name with no word of a type and no room for the code of an insert is answered by an empty record without
 ' being read; the answer is kept too
 Function TlRecordC(sName As String, Optional vFold As Variant) As Variant
-    Dim v As Variant, p As Variant, r As Variant, t As String, i As Long, sFold As String
+    Dim v As Variant, p As Variant, r As Variant, t As String, i As Long, sFold As String, sErr As String
     If Not gTlCacheOn Then
         gTlCache = New Collection
         gTlCacheOn = True
+        gTlBadNames = ""
     End If
     If TlCacheGet(sName, v) Then
         p = Split(CStr(v), Chr(1))
@@ -1097,7 +1111,8 @@ Function TlRecordC(sName As String, Optional vFold As Variant) As Variant
     If sFold <> "" And Not TlHasType(sFold) And Not (sFold Like "*#*#*#*#*") Then
         r = Array("", 99, "O", "", "", 0#, 0#, 0, "", "", "", "", "")
     Else
-        r = TlRecordF(sName, sFold)
+        r = TlTry(sName, sFold, sErr)
+        If sErr <> "" Then gTlBadNames = gTlBadNames & Chr(1) & sName & Chr(2) & sErr & Chr(1)
     End If
     t = r(0) & Chr(1) & r(1) & Chr(1) & r(2) & Chr(1) & r(3) & Chr(1) & r(4) & Chr(1) & Trim(Str(r(5))) & Chr(1) & Trim(Str(r(6))) & Chr(1) & r(7) & Chr(1) & r(8) & Chr(1) & r(9) & Chr(1) & r(10) _
         & Chr(1) & r(12)
@@ -1105,6 +1120,16 @@ Function TlRecordC(sName As String, Optional vFold As Variant) As Variant
     gTlCache.Add(t, sName)
     On Error GoTo 0
     TlRecordC = r
+End Function
+
+' TlRecordF for a list: a rule that fails on a name is the failure of that name, not of the list — the answer is an empty record (not read as a tool) and the text of the error in sErr
+Private Function TlTry(sName As String, sFold As String, ByRef sErr As String) As Variant
+    On Error GoTo EH
+    TlTry = TlRecordF(sName, sFold)
+    Exit Function
+EH:
+    sErr = Error$ & " (код " & Err & ", строка " & Erl & ")"
+    TlTry = Array("", 99, "O", "", "", 0#, 0#, 0, "", "", "", "", "")
 End Function
 
 Private Function TlCacheGet(sName As String, ByRef v As Variant) As Boolean
@@ -1256,8 +1281,10 @@ Function ToolRefresh(sFind As String) As String
     Dim eqShow As String, key As String, descr As String, typeName As String, coll As Object, wordsOld As Variant, cc As String
     Dim aPl() As String, aCt() As String, aAr() As String, aSr() As String, t0 As Long, tp As String, nmAll() As String, arAll() As String, folds As Variant, arF As Variant, tgood As String
     Dim sF As String, rawH() As String, rawN() As String, hP As Variant, nP As Variant, nCold As Long, bProg As Boolean, rawO() As String, oldF As Variant
+    Dim sErr As String, nErr As Long, nErl As Long, sStep As String, sAt As String, nBad As Long, sBad As String, pb As Long, qb As Long
     On Error GoTo EH
     gTlBusy = True
+    sStep = "начало"
     t0 = GetSystemTicks()
     WmsInit()
     If Not gDoc.Sheets.hasByName(TL_SHEET) Then
@@ -1266,18 +1293,23 @@ Function ToolRefresh(sFind As String) As String
         Exit Function
     End If
     sh = gDoc.Sheets.getByName(TL_SHEET)
+    sStep = "справочник категорий"
     If Not gCtLoaded Then WmsCat.CtLoad()
+    sStep = "номенклатура"
     WmsCat.GoodsLoad()
+    sStep = "наличие"
     WmsCat.StockGroups()
     tp = "реестр " & (GetSystemTicks() - t0)
     t0 = GetSystemTicks()
     ' the tools among the groups: the name is read as one (a name with no word of a type and no room for the code of an insert is not read at all), or the category that the storekeeper wrote says so
     ' (in the registry, in «Номенклатура»); the fasteners are the business of «Метизы». The names are folded all at once
+    sStep = "свёртка названий"
     ReDim nmAll(IIf(gGrpN > 0, gGrpN - 1, 0))
     For i = 0 To gGrpN - 1
         nmAll(i) = CStr(gGrp(i)(0))
     Next i
     folds = WmsNames.FoldAll(nmAll)
+    sStep = "категории номенклатуры"
     tgood = TlGoodsToolKeys()
     If tgood <> "" Then
         ReDim arAll(IIf(gGrpN > 0, gGrpN - 1, 0))
@@ -1296,12 +1328,17 @@ Function ToolRefresh(sFind As String) As String
         bProg = True
     End If
     n = 0
+    sStep = "разбор названий"
     ReDim rows(IIf(gGrpN > 0, gGrpN - 1, 0))
     For i = 0 To gGrpN - 1
         If bProg Then
             If (i Mod 40) = 0 Then WmsView.ProgressSet(i)
         End If
         g = gGrp(i)
+        sAt = CStr(g(0))
+        If gTlFailStep <> "" Then
+            If i = 0 And gTlFailStep = sStep Then TlFailBar()
+        End If
         sF = CStr(folds(i))
         rec = TlRecordC(CStr(g(0)), sF)
         cat = Trim(CStr(g(6)))
@@ -1323,13 +1360,28 @@ Function ToolRefresh(sFind As String) As String
             n = n + 1
         End If
     Next i
+    sAt = ""
     If bProg Then
         WmsView.ProgressEnd()
         bProg = False
     End If
+    ' the names of this list on which a rule failed (a name that is renamed or gone is not counted): the sheet tells how many and the first
+    If gTlBadNames <> "" Then
+        For i = 0 To gGrpN - 1
+            pb = InStr(gTlBadNames, Chr(1) & CStr(gGrp(i)(0)) & Chr(2))
+            If pb > 0 Then
+                nBad = nBad + 1
+                If sBad = "" Then
+                    qb = InStr(pb + 1, gTlBadNames, Chr(2)) + 1
+                    sBad = "«" & Left(CStr(gGrp(i)(0)), 60) & "» — " & Mid(gTlBadNames, qb, InStr(qb, gTlBadNames, Chr(1)) - qb)
+                End If
+            End If
+        Next i
+    End If
     tp = tp & ", отбор " & (GetSystemTicks() - t0)
     t0 = GetSystemTicks()
     ' the search and the filters of the sheet
+    sStep = "поиск и фильтры листа"
     filt = sh.getCellRangeByPosition(0, TL_FILTER_ROW, TL_COLS - 1, TL_FILTER_ROW).getDataArray()(0)
     For j = 0 To TL_COLS - 1
         fTxt(j) = Trim(CStr(filt(j)))
@@ -1359,6 +1411,7 @@ Function ToolRefresh(sFind As String) As String
     tp = tp & ", тексты поиска " & (GetSystemTicks() - t0)
     t0 = GetSystemTicks()
     ' the possible doubles: the same type, kind, size, teeth, material, coating, designation and standard (or its equivalent) — under different names; or the same name — under different articles
+    sStep = "возможные дубли"
     coll = New Collection
     For i = 0 To n - 1
         rec = rows(i)(1)
@@ -1373,6 +1426,7 @@ Function ToolRefresh(sFind As String) As String
     tp = tp & ", дубли " & (GetSystemTicks() - t0)
     t0 = GetSystemTicks()
     ' the search with the understanding of «Поиск»; the filters «место:», «категория:», «артикул:» of the query need the columns of the rows
+    sStep = "поиск по словам"
     cols = Empty
     If Mid(WmsSearch.QueryNeeds(sFind), 1, 4) <> "0000" Then
         ReDim aPl(IIf(n > 0, n - 1, 0))
@@ -1401,11 +1455,13 @@ Function ToolRefresh(sFind As String) As String
     End If
     tp = tp & ", поиск " & (GetSystemTicks() - t0)
     t0 = GetSystemTicks()
+    sStep = "фильтры столбцов"
     ReDim out(IIf(n > 0, n - 1, 0))
     k = 0
     For i = 0 To n - 1
         g = rows(i)(0)
         rec = rows(i)(1)
+        sAt = CStr(g(0))
         q = g(3)
         ok = (scores(i) > 0)
         ' the old way too: every word of the search as a part of the text of the row (a part of an article, of a place: «b-8», «5-1»)
@@ -1445,6 +1501,8 @@ Function ToolRefresh(sFind As String) As String
     tp = tp & ", фильтры " & (GetSystemTicks() - t0)
     t0 = GetSystemTicks()
     ' the old list out, the new one in
+    sStep = "запись листа"
+    sAt = ""
     sh.getCellRangeByPosition(0, TL_ROW0, TL_KEY_COL, TL_ROW0 + TL_MAX).clearContents(1 + 2 + 4 + 16)
     nAllF = n
     If k > TL_MAX Then k = TL_MAX
@@ -1465,7 +1523,7 @@ Function ToolRefresh(sFind As String) As String
         End If
     Next j
     sh.getCellByPosition(TL_STAT_COL, TL_FIND_ROW).setString("Инструмента (позиций): " & k & IIf(k < nAllF, " из " & nAllF, "") & descr & ". Список из «Наличия» на " & Format(Now(), "DD.MM.YYYY HH:MM") _
-        & "; журнал № " & CLng(SysNum(SK_LAST_SEQ)))
+        & "; журнал № " & CLng(SysNum(SK_LAST_SEQ)) & IIf(nBad > 0, ". НЕ ПРОЧИТАНО названий: " & nBad & " (первое: " & sBad & ") — их нет в списке", ""))
     gTlSeq = CLng(SysNum(SK_LAST_SEQ))
     If gTlSeq = 0 Then gTlSeq = 1
     gTlBusy = False
@@ -1473,10 +1531,18 @@ Function ToolRefresh(sFind As String) As String
     gUiLastMsg = ToolRefresh
     Exit Function
 EH:
+    ' the error is read first: the bar's closing (WmsView.ProgressEnd) switches the error handling off and the text of the error is lost
+    sErr = Error$
+    nErr = Err
+    nErl = Erl
     If bProg Then WmsView.ProgressEnd()
     gTlBusy = False
-    ToolRefresh = "ERR:список инструмента не построен: " & Error$ & " (строка " & Erl & ")"
+    ToolRefresh = "ERR:список инструмента не построен: " & sErr & " (код " & nErr & ", строка " & nErl & ", шаг «" & sStep & "»" & IIf(sAt <> "", ", название «" & Left(sAt, 80) & "»", "") & ")"
     gUiLastMsg = ToolRefresh
+    ' the sheet says it too (a list that is made when the sheet is opened or a cell is changed shows no window): the old list, if there was one, stays
+    On Error Resume Next
+    gDoc.Sheets.getByName(TL_SHEET).getCellByPosition(TL_STAT_COL, TL_FIND_ROW).setString(Mid(ToolRefresh, 5) & ". Нажмите «Обновить» ещё раз; если повторится — покажите это сообщение разработчику.")
+    On Error GoTo 0
 End Function
 
 ' the list sorted by the key of the type, the diameter and the length (the hidden column), then by the name
@@ -1617,6 +1683,51 @@ Function TestToolSteps() As String
     Next i
     td = GetSystemTicks() - t0
     TestToolSteps = "TlRecordC холодный " & ta & ", тёплый " & tb & "; CategoryOf (1/3 групп) " & tc & "; Fold всех " & td & "; инструмента " & n
+End Function
+
+' a failure on purpose («Invalid procedure call»)
+Private Sub TlFailNow()
+    Dim z As String
+    z = Mid("x", 0, 1)
+End Sub
+
+' the same with the bar of the status line switched on first (what a real window has while the names are read)
+Private Sub TlFailBar()
+    gVwIndOn = True
+    TlFailNow()
+End Sub
+
+' test seams: «name has this text» fails in the rules; the list fails at the first name of the step «step» (with the bar on); "" — off
+Sub TestToolFailOn(sMarker As String)
+    gTlFailOn = sMarker
+End Sub
+
+Sub TestToolFailStep(sStep As String)
+    gTlFailStep = sStep
+End Sub
+
+' every name of the list (Chr(10) between them) is read by the rules, twice: by itself and with the folded name given (as the list does it); the answer: how many names, how many failures
+' and the first of them («name ¦ the error»); a name that takes more than 2 s is told too
+Function TestToolFuzz(sList As String) As String
+    Dim a As Variant, i As Long, nBad As Long, out As String, sErr As String, sNm As String, t0 As Long, nSlow As Long
+    TlLoad()
+    a = Split(sList, Chr(10))
+    For i = 0 To UBound(a)
+        sNm = CStr(a(i))
+        t0 = GetSystemTicks()
+        sErr = ""
+        TlTry(sNm, "", sErr)
+        If sErr = "" Then TlTry(sNm, WmsNames.Fold(sNm), sErr)
+        If sErr <> "" Then
+            nBad = nBad + 1
+            If nBad <= 30 Then out = out & Chr(10) & sNm & " ¦ " & sErr
+        End If
+        If GetSystemTicks() - t0 > 2000 Then
+            nSlow = nSlow + 1
+            If nSlow <= 5 Then out = out & Chr(10) & "МЕДЛЕННО " & (GetSystemTicks() - t0) & " мс: " & sNm
+        End If
+    Next i
+    TestToolFuzz = (UBound(a) + 1) & " имён, ошибок " & nBad & ", медленных " & nSlow & out
 End Function
 
 Function TestToolParse(sName As String) As String

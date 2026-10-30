@@ -63,7 +63,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "tests"))
 
-TOOL_VERSION = "1.2.0"
+TOOL_VERSION = "1.2.1"
 SCHEMA = "WMS-SYS-5"
 MIN_CORE = (0, 8, 0)
 SHEET_ORDERS = "1_Вставить_Заказы"

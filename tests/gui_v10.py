@@ -327,6 +327,43 @@ def main():
         typed(o, doc, "Инструмент ЧПУ", "$B$2", "")
         step("1.2.0: «Инструмент ЧПУ» в настоящем окне: «Обновить» — три позиции (фреза, цанга, пластина); «цанга» в «Найти» и Enter — одна, строка итога называет слова",
              k_all == ["CZ-10", "FR-10", "PL-1"] and k_one == ["CZ-10"] and "цанга" in stat and len(listed()) == 3, f"{k_all}; {k_one}; {stat[:90]}; {len(listed())}")
+        # ---------------------------------------------------------------- 9. «Инструмент ЧПУ» on a big warehouse with the bar of the status line (1.2.1): names that begin with a number,
+        # odd ones, and a failure on purpose — the text of the error is not lost
+        o.basic(doc, "WmsUi", "TestUiAuto", 1)
+        stk = doc.Sheets.getByName("Наличие")
+        stk.unprotect("wms")
+        last = max(i for i, x in enumerate(stk.getCellRangeByPosition(0, 0, 0, 3000).getDataArray()) if x[0] != "")
+        mats = ["Р6М5", "ВК8", "HSS-Co", "твердосплавная", "Т15К6"]
+        rows = [[f"Сверло спиральное {3 + i % 30},{i // 30} DIN 338 {mats[i % 5]}", f"SV-{i}"] for i in range(340)]
+        rows += [["10 мм сверло по металлу", "DG-1"], ["4z фреза концевая 10", "DG-2"], ["Сверло 8мм", "DG-3"], ["М8 гайка", "NT-1"], ["8 мм болт", "NT-2"], ["Фреза ¦ 10", "OD-1"],
+                 ["Фреза 9" + "9" * 400, "OD-2"], ["Метчик М10 после необычных", "AFTER-1"]]
+
+        def fill(first, rws):
+            data = tuple(tuple([f"ЕИ-{first + i:08d}", nm_, art_, "шт", 5.0, f"D-{i % 50 + 1}", "", "Активен"]) for i, (nm_, art_) in enumerate(rws))
+            stk.getCellRangeByPosition(0, first, 7, first + len(rws) - 1).setDataArray(data)
+
+        fill(last + 1, rows)
+        import time as _t
+        t0 = _t.time()
+        r9 = str(o.basic(doc, "WmsTool", "ToolRefresh", ""))
+        t9 = _t.time() - t0
+        tsh = doc.Sheets.getByName("Инструмент ЧПУ")
+        k9 = int(r9.split(":")[1]) if r9.startswith("OK:") else 0
+        got = {x[12]: x for x in tsh.getCellRangeByPosition(0, 4, 18, 4 + k9 - 1).getDataArray()} if k9 else {}
+        stat9 = tsh.getCellByPosition(7, 1).getString()
+        step("1.2.1: «Инструмент ЧПУ» в настоящем окне, 340 новых названий (идёт полоса хода) и названия с числа впереди: список построен (в нём «10 мм сверло…» Ø10, «4z фреза…» Z4, «Сверло 8мм» Ø8, «Фреза ¦ 10»), "
+             "«М8 гайка» и «8 мм болт» не в нём, строка итога без «НЕ ПРОЧИТАНО»",
+             r9.startswith("OK:") and all(a in got for a in ("DG-1", "DG-2", "DG-3", "OD-1", "OD-2", "AFTER-1")) and "NT-1" not in got and "NT-2" not in got
+             and got["DG-1"][2] == "Ø10" and got["DG-2"][5] == 4 and got["DG-3"][2] == "Ø8" and "НЕ ПРОЧИТАНО" not in stat9, f"{r9}; {t9:.1f} с; {stat9[:120]}")
+        rows2 = [[f"Метчик М{3 + i % 30}х{1 + i // 30},5 м/р {mats[i % 5]}", f"MT-{i}"] for i in range(320)]
+        fill(last + 1 + len(rows), rows2)
+        o.basic(doc, "WmsTool", "TestToolFailStep", "разбор названий")
+        r10 = str(o.basic(doc, "WmsTool", "ToolRefresh", ""))
+        stat10 = tsh.getCellByPosition(7, 1).getString()
+        o.basic(doc, "WmsTool", "TestToolFailStep", "")
+        step("1.2.1: сбой при настоящей полосе хода — сообщение называет причину («Invalid procedure call», код 5, шаг «разбор названий»), а не «(строка 0)»; то же — на листе; после сбоя список строится",
+             r10.startswith("ERR:") and "Invalid procedure call" in r10 and "код 5" in r10 and "шаг «разбор названий»" in r10 and "(строка 0)" not in r10 and "Invalid procedure call" in stat10
+             and str(o.basic(doc, "WmsTool", "ToolRefresh", "")).startswith("OK:"), f"{r10[:200]}; {stat10[:100]}")
         o.basic(doc, "WmsUi", "TestUiAuto", 1)
         doc.setModified(False)
         o.dispatch(doc, ".uno:CloseDoc")
