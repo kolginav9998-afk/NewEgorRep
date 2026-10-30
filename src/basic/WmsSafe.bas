@@ -1093,7 +1093,7 @@ End Function
 ' at the first start of a day (or bForce): «остаток = движения», the packing, the keys of the sheets, the chain of the
 ' journal, the mirror. The result kept: DAILY=date|OK or FAIL|text|ms; returned as is
 Function DailyCheck(bForce As Boolean) As String
-    Dim today As String, t0 As Long, p As String, probs As String, n As Long, res As String
+    Dim today As String, t0 As Long, p As String, probs As String, n As Long, res As String, sErrTxt As String
     WmsInit()
     today = Format(Now(), "YYYY-MM-DD")
     If Not bForce And Left(StGet("DAILY"), 10) = today Then
@@ -1126,8 +1126,9 @@ Function DailyCheck(bForce As Boolean) As String
     WmsView.ProgressEnd()
     Exit Function
 EH:
+    sErrTxt = Error$
     WmsView.ProgressEnd()
-    res = today & "|FAIL|проверка дня не выполнена: " & Error$ & "|" & (GetSystemTicks() - t0)
+    res = today & "|FAIL|проверка дня не выполнена: " & sErrTxt & "|" & (GetSystemTicks() - t0)
     StSet("DAILY", res)
     DailyCheck = res
 End Function

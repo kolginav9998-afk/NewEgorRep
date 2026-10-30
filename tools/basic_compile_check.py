@@ -235,13 +235,46 @@ def eager_traps(src_dir):
     return bad
 
 
+# 1.2.1: the text of an error is gone after «On Error Resume Next» (in the handler itself or in any procedure it calls — WmsView.ProgressEnd has one): «Error$», «Err», «Erl» are read first.
+# 1.2.0 told «список инструмента не построен:  (строка 0)» for that reason.
+def lost_error_in(text):
+    """the handlers of a Basic source (text) that wipe the error before reading it: [(line number of the label, why)]"""
+    import re
+    out = []
+    lines = text.split("\n")
+    for i, ln in enumerate(lines):
+        if not re.match(r"^[A-Za-z_]\w*:\s*$", ln):
+            continue
+        blk = []
+        for j in range(i + 1, min(i + 40, len(lines))):
+            t = re.sub(r'"(?:[^"]|"")*"', '""', lines[j]).split("'")[0]
+            if re.match(r"^\s*(End\s+(Function|Sub)|Exit\s+(Function|Sub)|Resume\b)", t, re.I) or re.match(r"^[A-Za-z_]\w*:\s*$", t):
+                break
+            blk.append((j + 1, t))
+        wipe = next((k for k, (_, t) in enumerate(blk) if re.search(r"\bOn\s+Error\b|ProgressEnd", t, re.I)), None)
+        use = next((k for k, (_, t) in enumerate(blk) if re.search(r"Error\$|\bErl\b|\bErr\b", t)), None)
+        if wipe is not None and use is not None and wipe <= use:
+            out.append((i + 1, f"обработчик стирает ошибку (строка {blk[wipe][0]}: On Error / ProgressEnd) раньше, чем читает её (строка {blk[use][0]})"))
+    return out
+
+
+def lost_error_traps(src_dir):
+    """the handlers that wipe the error before reading it, in a folder of Basic sources: ["Module.bas:line: why", ...]"""
+    bad = []
+    for fn in sorted(os.listdir(src_dir)):
+        if fn.endswith(".bas"):
+            for ln, why in lost_error_in(open(os.path.join(src_dir, fn), encoding="utf-8").read()):
+                bad.append(f"{fn}:{ln}: {why}")
+    return bad
+
+
 def main():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     # the WMS book and (1.0) the books of the tools, of the transfer and of the upgrade wizard
     bad = [x for d in ("basic", "toolbox", "transfer", "upgrade") if os.path.isdir(os.path.join(root, "src", d))
-           for x in reserved_names(os.path.join(root, "src", d)) + precedence_traps(os.path.join(root, "src", d)) + eager_traps(os.path.join(root, "src", d))]
+           for x in reserved_names(os.path.join(root, "src", d)) + precedence_traps(os.path.join(root, "src", d)) + eager_traps(os.path.join(root, "src", d)) + lost_error_traps(os.path.join(root, "src", d))]
     if bad:
-        print("COMPILE FAILED: ловушки LibreOffice Basic (зарезервированное слово в имени, однострочный If … ReDim, And и Or без скобок, IIf и And/Or вычисляют всё — Mid(…, 0, …)): " + "; ".join(bad))
+        print("COMPILE FAILED: ловушки LibreOffice Basic (зарезервированное слово в имени, однострочный If … ReDim, And и Or без скобок, IIf и And/Or вычисляют всё — Mid(…, 0, …), обработчик стирает ошибку до чтения): " + "; ".join(bad))
         sys.exit(1)
     ap = argparse.ArgumentParser()
     ap.add_argument("--display", default=os.environ.get("DISPLAY", ":99"))

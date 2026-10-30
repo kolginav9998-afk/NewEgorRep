@@ -94,7 +94,7 @@ End Function
 Function SerialSplit(sEI As String, sers As Variant) As String
     Dim n As Long, canon As String, msg As String, d As Variant, nParts As Long, k As Long, i As Long, j As Long, other As Long, why As String
     Dim p As Variant, sExp As String, sNote As String, place As String, last As Long, done As Long, r As String, newEI As String, eis As String, ser As String
-    Dim pu As String, pn As Double
+    Dim pu As String, pn As Double, sErrTxt As String, nErrLine As Long
     WmsInit()
     On Error GoTo EH
     If Not WmsIssue.NormalizeEI(sEI, n, canon, msg) Then
@@ -191,7 +191,9 @@ Function SerialSplit(sEI As String, sers As Variant) As String
     gUiLastMsg = SerialSplit
     Exit Function
 EH:
+    sErrTxt = Error$
+    nErrLine = Erl
     On Error Resume Next
     WmsView.ProgressEnd()
-    SerialSplit = "ERR-SYS:серийные детали не разделены: " & Error$ & " (строка " & Erl & "). Готово: " & done & " из " & k & IIf(eis <> "", " (" & eis & ")", "")
+    SerialSplit = "ERR-SYS:серийные детали не разделены: " & sErrTxt & " (строка " & nErrLine & "). Готово: " & done & " из " & k & IIf(eis <> "", " (" & eis & ")", "")
 End Function

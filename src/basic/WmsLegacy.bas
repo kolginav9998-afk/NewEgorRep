@@ -553,7 +553,7 @@ End Function
 Function LegacyReport() As String
     Dim ex() As Double, mv() As Double, src() As Integer, nextEI As Long, sh As Object, st As Variant, lg As Variant, rows() As Variant, k As Long
     Dim n As Long, last As Long, r0 As Long, r1 As Long, i As Long, q As Variant, diff As Double, note As String, prio As Integer
-    Dim out() As Variant, nOut As Long, p As Integer, j As Long, rep As Object, wasProt As Boolean, t0 As Long, x As Variant, b0 As Variant
+    Dim out() As Variant, nOut As Long, p As Integer, j As Long, rep As Object, wasProt As Boolean, t0 As Long, x As Variant, b0 As Variant, sErrTxt As String, nErrLine As Long
     Dim nBad As Long, nFlag As Long, nLeg As Long, row As Variant, kind As String, moved As Double, wasModified As Boolean
     WmsInit()
     If gState = "" Then WmsStartup()
@@ -661,7 +661,9 @@ NextEI:
         & ", " & (GetSystemTicks() - t0) & " мс"
     Exit Function
 EH:
+    sErrTxt = Error$
+    nErrLine = Erl
     On Error Resume Next
     If wasProt Then rep.protect(PROTECT_PWD)
-    LegacyReport = "ERR:сверка не построена: " & Error$ & " (строка " & Erl & ")"
+    LegacyReport = "ERR:сверка не построена: " & sErrTxt & " (строка " & nErrLine & ")"
 End Function

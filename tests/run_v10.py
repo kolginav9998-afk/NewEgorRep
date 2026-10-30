@@ -5759,6 +5759,14 @@ def v74_lint_eager():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     left = [x for d in ("basic", "toolbox", "transfer", "upgrade") for x in cc.eager_traps(os.path.join(root, "src", d))]
     R.add(c, "в исходниках выпуска (basic, toolbox, transfer, upgrade) таких строк нет", not left, "; ".join(left[:3]))
+    bad_h = "EH:\n    WmsView.ProgressEnd()\n    R = \"x\" & Error$\nEnd Function\n"
+    bad_h2 = "EH:\n    On Error Resume Next\n    R = \"x\" & Error$ & Erl\nEnd Function\n"
+    good_h = "EH:\n    sE = Error$\n    WmsView.ProgressEnd()\n    R = \"x\" & sE\nEnd Function\n"
+    good_h2 = "DONE:\n    On Error Resume Next\n    x = 1\n    Exit Function\nEH:\n    res = \"x\" & Error$\n    Resume DONE\nEnd Function\n"
+    lh = [bool(cc.lost_error_in(t)) for t in (bad_h, bad_h2, good_h, good_h2)]
+    R.add(c, "обработчик, стирающий ошибку до чтения («ProgressEnd», «On Error Resume Next» раньше «Error$»), находится; прочитавший первым и метка «DONE» — нет", lh == [True, True, False, False], str(lh))
+    gone = [x for d in ("basic", "toolbox", "transfer", "upgrade") for x in cc.lost_error_traps(os.path.join(root, "src", d))]
+    R.add(c, "в исходниках выпуска ни один обработчик не стирает текст ошибки до чтения", not gone, "; ".join(gone[:3]))
     old = os.path.join(OUT, "src_120")
     why = "" if os.path.isdir(os.path.join(old, "src")) else git_sources("4611b5b", old)
     if why:
@@ -5767,6 +5775,9 @@ def v74_lint_eager():
     found = cc.eager_traps(os.path.join(old, "src", "basic"))
     R.add(c, "исходники выпуска 1.2.0: проверка находит в них места, из-за которых список инструмента и «Метизы» не строились (WmsTool ×3, WmsSpec ×2)",
           sum(1 for x in found if x.startswith("WmsTool.bas")) == 3 and sum(1 for x in found if x.startswith("WmsSpec.bas")) == 2, "; ".join(found[:6]))
+    lost = cc.lost_error_traps(os.path.join(old, "src", "basic"))
+    R.add(c, "исходники выпуска 1.2.0: обработчики, стиравшие текст ошибки до чтения (из-за них было «…:  (строка 0)»): WmsTool, WmsCare ×2, WmsHelp, WmsLegacy, WmsMap, WmsParts, WmsSafe",
+          sorted(x.split(":")[0] for x in lost) == sorted(["WmsTool.bas", "WmsCare.bas", "WmsCare.bas", "WmsHelp.bas", "WmsLegacy.bas", "WmsMap.bas", "WmsParts.bas", "WmsSafe.bas"]), "; ".join(lost[:8]))
 
 
 # ================================================================ runner

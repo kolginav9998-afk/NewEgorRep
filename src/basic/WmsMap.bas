@@ -228,7 +228,7 @@ End Sub
 ' the sheet of url with the most places becomes «Топология». OK:<places, sheet> / ERR:<why>
 Function TopoLoad(url As String) As String
     Dim args(2) As New com.sun.star.beans.PropertyValue, src As Object, i As Integer, best As Integer, bestN As Long, n As Long, nm As String
-    Dim pos As Integer, sh As Object, ok As Boolean, d As Variant, r As Long, c As Long, cur As Object
+    Dim pos As Integer, sh As Object, ok As Boolean, d As Variant, r As Long, c As Long, cur As Object, sErrTxt As String, nErrLine As Long
     WmsInit()
     On Error GoTo EH
     gTkValid = False
@@ -275,9 +275,11 @@ Function TopoLoad(url As String) As String
     TopoLoad = "OK:мест " & bestN & " (лист «" & nm & "» файла " & ConvertFromURL(url) & ")"
     Exit Function
 EH:
+    sErrTxt = Error$
+    nErrLine = Erl
     On Error Resume Next
     gDoc.protect(PROTECT_PWD)
-    TopoLoad = "ERR:топология не загружена: " & Error$ & " (строка " & Erl & ")"
+    TopoLoad = "ERR:топология не загружена: " & sErrTxt & " (строка " & nErrLine & ")"
 End Function
 
 Private Function SheetIndex(sName As String) As Integer

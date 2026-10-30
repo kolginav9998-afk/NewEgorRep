@@ -23,7 +23,7 @@ End Sub
 ' seconds, no internet: LibreOffice, the macros and the trusted folder, the folders written, the free space, Python for the
 ' tools — each line «✓/✗ что — как есть — что сделать»
 Function PcCheck() As String
-    Dim s As String, why As String, lvl As Integer, trusted As Boolean, p As String, free As Double, py As String, nBad As Integer, sec As Integer
+    Dim s As String, why As String, lvl As Integer, trusted As Boolean, p As String, free As Double, py As String, nBad As Integer, sec As Integer, sErrTxt As String
     WmsInit()
     On Error GoTo EH
     WmsView.ProgressStart("Проверка этого ПК", 6)
@@ -54,8 +54,9 @@ Function PcCheck() As String
     gUiLastMsg = PcCheck
     Exit Function
 EH:
+    sErrTxt = Error$
     WmsView.ProgressEnd()
-    PcCheck = "ERR:проверка не выполнена: " & Error$
+    PcCheck = "ERR:проверка не выполнена: " & sErrTxt
     gUiLastMsg = PcCheck
 End Function
 

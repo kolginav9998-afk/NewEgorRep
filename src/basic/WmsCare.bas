@@ -153,7 +153,7 @@ End Sub
 ' the sheets whose used area goes far below their data (empty texts, formulas of nothing, spaces left there make the file
 ' bigger and slower): «Лист: занято до строки N, данные до M». Nothing is changed
 Function ExtraCells() As String
-    Dim i As Integer, sh As Object, cur As Object, endRow As Long, endCol As Long, dataRow As Long, s As String, n As Integer
+    Dim i As Integer, sh As Object, cur As Object, endRow As Long, endCol As Long, dataRow As Long, s As String, n As Integer, sErrTxt As String
     On Error GoTo EH
     WmsView.ProgressStart("Лишние ячейки: просмотр листов", gDoc.Sheets.getCount())
     For i = 0 To gDoc.Sheets.getCount() - 1
@@ -182,8 +182,9 @@ Function ExtraCells() As String
     gUiLastMsg = ExtraCells
     Exit Function
 EH:
+    sErrTxt = Error$
     WmsView.ProgressEnd()
-    ExtraCells = "ERR:листы не просмотрены: " & Error$
+    ExtraCells = "ERR:листы не просмотрены: " & sErrTxt
     gUiLastMsg = ExtraCells
 End Function
 
@@ -381,7 +382,7 @@ End Sub
 ' movements: «этот ПК комфортно держит до ~N движений». A few seconds; nothing in the book changes
 Function SpeedTest() As String
     Dim t0 As Long, tB As Long, tC As Long, tD As Long, i As Long, x As Double, s As String, f As String, xs As Object, tos As Object, r As Double
-    Dim n As Long, chunk As String, mv As Long
+    Dim n As Long, chunk As String, mv As Long, sErrTxt As String
     On Error GoTo EH
     WmsView.ProgressStart("Замер скорости ПК", 3)
     t0 = GetSystemTicks()
@@ -425,8 +426,9 @@ Function SpeedTest() As String
     gUiLastMsg = SpeedTest
     Exit Function
 EH:
+    sErrTxt = Error$
     WmsView.ProgressEnd()
-    SpeedTest = "ERR:замер не выполнен: " & Error$
+    SpeedTest = "ERR:замер не выполнен: " & sErrTxt
     gUiLastMsg = SpeedTest
 End Function
 
