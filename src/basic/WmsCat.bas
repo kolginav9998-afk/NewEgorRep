@@ -703,7 +703,7 @@ Sub StockGroups()
     Dim st As Object, last As Long, d As Variant, i As Long, r As Variant, cEi As Long, cNm As Long, cArt As Long, cUn As Long, cQty As Long, cPl As Long, cCat As Long, q As Double
     Dim nm As String, art As String, key As String, k As Long, n As Long, coll As Object, pl As String
     Dim gN() As String, gA() As String, gU() As String, gB() As Double, gE() As Long, gP() As String, gC() As String, gL() As String, res() As Variant
-    Dim c10 As String, c13 As String, c9 As String, c160 As String, kv As Variant
+    Dim c10 As String, c13 As String, c9 As String, c160 As String, kv As Variant, un As String, uk As String, gX() As String, gMk() As String
     gGrpN = 0
     gGrp = Array()
     st = WmsIssue.StockSheet()
@@ -729,10 +729,13 @@ Sub StockGroups()
     ReDim gP(UBound(d))
     ReDim gC(UBound(d))
     ReDim gL(UBound(d))
+    ReDim gX(UBound(d))
+    ReDim gMk(UBound(d))
     coll = New Collection
     For i = 0 To UBound(d)
         r = d(i)
         If CStr(r(cEi)) <> "" Then
+            un = Trim(CStr(r(cUn)))
             nm = CStr(r(cNm))
             If InStr(nm, c10) + InStr(nm, c13) + InStr(nm, c9) + InStr(nm, c160) + InStr(nm, "  ") > 0 Then nm = WmsNames.NormName(nm)
             art = Trim(CStr(r(cArt)))
@@ -744,8 +747,20 @@ Sub StockGroups()
                 coll.Add(k, key)
                 gN(k) = nm
                 gA(k) = art
-                gU(k) = Trim(CStr(r(cUn)))
+                gU(k) = un
                 n = n + 1
+            End If
+            ' 1.3.0: the units of one position differ («шт» and «кг»): the position shows them all (the spelling «Шт.» is the same unit as «шт» — WmsPack.UnitKey)
+            If un <> gU(k) And un <> "" Then
+                If gU(k) = "" Then
+                    gU(k) = un
+                Else
+                    uk = WmsPack.UnitKey(un)
+                    If uk <> WmsPack.UnitKey(gU(k)) And InStr(gMk(k), Chr(1) & uk & Chr(1)) = 0 Then
+                        gMk(k) = gMk(k) & Chr(1) & uk & Chr(1)
+                        gX(k) = gX(k) & " / " & un
+                    End If
+                End If
             End If
             q = 0
             If VarType(r(cQty)) = 5 Then q = r(cQty)
@@ -753,7 +768,7 @@ Sub StockGroups()
             pl = Trim(CStr(r(cPl)))
             If q > 0 Then
                 gE(k) = gE(k) + 1
-                If gE(k) <= 8 Then gL(k) = gL(k) & IIf(gL(k) <> "", "; ", "") & CStr(r(cEi)) & " — " & WmsIssue.QtyText(q) & " " & gU(k) & IIf(pl <> "", " (" & pl & ")", "")
+                If gE(k) <= 8 Then gL(k) = gL(k) & IIf(gL(k) <> "", "; ", "") & CStr(r(cEi)) & " — " & WmsIssue.QtyText(q) & " " & un & IIf(pl <> "", " (" & pl & ")", "")
             End If
             If q > 0 And pl <> "" Then
                 If InStr("; " & gP(k) & ";", "; " & pl & ";") = 0 Then gP(k) = gP(k) & IIf(gP(k) <> "", "; ", "") & pl
@@ -764,7 +779,7 @@ Sub StockGroups()
     If n = 0 Then Exit Sub
     ReDim res(n - 1)
     For i = 0 To n - 1
-        res(i) = Array(gN(i), gA(i), gU(i), gB(i), gE(i), gP(i), gC(i), gL(i) & IIf(gE(i) > 8, " … и ещё " & (gE(i) - 8), ""))
+        res(i) = Array(gN(i), gA(i), gU(i) & gX(i), gB(i), gE(i), gP(i), gC(i), gL(i) & IIf(gE(i) > 8, " … и ещё " & (gE(i) - 8), ""))
     Next i
     gGrp = res
     gGrpN = n

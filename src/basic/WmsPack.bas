@@ -121,6 +121,25 @@ Function UnitMatch(ByVal w As String, ByVal u As String) As Boolean
     UnitMatch = (Left(sw, Len(su)) = su) Or (Left(su, Len(sw)) = sw)
 End Function
 
+' 1.3.0: the key of a unit for the sums and the lists: «шт», «Шт.», «шт », «штук», «штука» are one unit «шт»; «м», «метр», «метров» — «м»; «м²» = «м2». Only the words of the table
+' (the same as UnitMatch has) are joined; everything else stays as typed (lower case, no dots and spaces at the ends): «мм» and «м», «кг» and «г» are different units. The data are not
+' changed by the key — it only says which two units the lists and the reports add together
+Function UnitKey(ByVal u As String) As String
+    Dim syn As Variant, i As Integer, a As Variant, t As String
+    t = LCase(Trim(Replace(Replace(Replace(Replace(u, Chr(160), " "), ".", ""), Chr(178), "2"), Chr(179), "3")))
+    If t = "" Then Exit Function
+    syn = Array("м|метр", "л|литр", "г|грамм", "т|тонн", "кг|килограмм", "шт|штук", "уп|упаков", "уп|упак", "пар|пар", "кан|канистр", "бут|бутыл", "рул|рулон", _
+        "меш|мешк", "меш|мешо", "кор|коробк", "пач|пачк", "лист|лист", "бан|банк", "мл|миллилитр", "компл|комплект", "компл|компл")
+    For i = 0 To UBound(syn)
+        a = Split(syn(i), "|")
+        If t = a(0) Or Left(t, Len(a(1))) = a(1) Then
+            UnitKey = a(0)
+            Exit Function
+        End If
+    Next i
+    UnitKey = t
+End Function
+
 ' a unit word: it starts with a letter («кан», «м») or is the percent sign
 Private Function PkIsWord(w As String) As Boolean
     Dim ch As String

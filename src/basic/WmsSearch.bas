@@ -898,7 +898,8 @@ Function SmartRun(sQuery As String, out() As Variant, ByRef nOut As Long, ByRef 
                 unit = CStr(r(cUn))
                 sameUnit = True
             ElseIf CStr(r(cUn)) <> unit Then
-                sameUnit = False
+                ' 1.3.0: «шт» and «Шт.» are one unit (WmsPack.UnitKey)
+                If WmsPack.UnitKey(CStr(r(cUn))) <> WmsPack.UnitKey(unit) Then sameUnit = False
             End If
             sum = sum + r(cQ)
         End If

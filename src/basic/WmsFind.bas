@@ -610,7 +610,8 @@ Private Sub SearchSheet(sName As String, r0 As Long, cLast As Integer, sQuery As
                             unit = CStr(d(SC_UNIT))
                             sameUnit = True
                         ElseIf CStr(d(SC_UNIT)) <> unit Then
-                            sameUnit = False
+                            ' 1.3.0: «шт» and «Шт.» are one unit (WmsPack.UnitKey)
+                            If WmsPack.UnitKey(CStr(d(SC_UNIT))) <> WmsPack.UnitKey(unit) Then sameUnit = False
                         End If
                         sum = sum + d(SC_QTY)
                     End If

@@ -267,7 +267,7 @@ Function PartsRefresh(sFind As String, bZero As Boolean) As String
     Dim keys() As String, nm() As String, art() As String, un() As String, bal() As Double, cnt() As Long, pl() As String, sn() As String, ns() As Long, last() As Double
     Dim key As String, k As Long, place As String, ser As String, dt As Variant, nOut As Long, sSer As String, idx As Object, hays() As String, folded As Variant, bWords As Boolean
     Dim cEi As Long, cNm As Long, cArt As Long, cUn As Long, cQ As Long, cPl As Long, cCat As Long, cSt As Long, cSrc As Long, cSer As Long, cDt As Long, cSty As Long
-    Dim el() As String, rg() As String, cats As Variant, sEis As String
+    Dim el() As String, rg() As String, cats As Variant, sEis As String, sUn As String, uk As String, ux() As String, umk() As String
     On Error GoTo EH
     idx = New Collection
     If Not gDoc.Sheets.hasByName(SH_PARTS) Then
@@ -305,11 +305,14 @@ Function PartsRefresh(sFind As String, bZero As Boolean) As String
         ReDim last(UBound(d))
         ReDim el(UBound(d))
         ReDim rg(UBound(d))
+        ReDim ux(UBound(d))
+        ReDim umk(UBound(d))
     End If
     For i = 0 To nRows - 1
         If CStr(d(i)(cEi)) <> "" Then
             If IsPart(CStr(d(i)(cCat)), CStr(d(i)(cSrc)), CStr(d(i)(cSty))) Then
-                key = LCase(Trim(CStr(d(i)(cArt))))
+                ' 1.3.0: the article as the whole WMS tells it (WmsSpecial.ArticleKey): «ab-12», «AB 12» and «АВ-12» (Cyrillic letters) are one part
+                key = WmsSpecial.ArticleKeyFast(CStr(d(i)(cArt)))
                 If key = "" Then key = "n:" & LCase(Trim(CStr(d(i)(cNm)))) Else key = "a:" & key
                 k = WmsView.CollGet(idx, key)
                 If k < 0 Then
@@ -321,6 +324,19 @@ Function PartsRefresh(sFind As String, bZero As Boolean) As String
                     un(k) = CStr(d(i)(cUn))
                     n = n + 1
                 End If
+                sUn = Trim(CStr(d(i)(cUn)))
+                ' 1.3.0: the units of one part differ («шт» and «кг»): all are shown («Шт.» is the same unit as «шт» — WmsPack.UnitKey)
+                If sUn <> Trim(un(k)) And sUn <> "" Then
+                    If Trim(un(k)) = "" Then
+                        un(k) = sUn
+                    Else
+                        uk = WmsPack.UnitKey(sUn)
+                        If uk <> WmsPack.UnitKey(un(k)) And InStr(umk(k), Chr(1) & uk & Chr(1)) = 0 Then
+                            umk(k) = umk(k) & Chr(1) & uk & Chr(1)
+                            ux(k) = ux(k) & " / " & sUn
+                        End If
+                    End If
+                End If
                 q = QtyOf(d(i)(cQ))
                 bal(k) = bal(k) + q
                 If rg(k) = "" Then rg(k) = Trim(CStr(d(i)(cCat)))
@@ -328,7 +344,7 @@ Function PartsRefresh(sFind As String, bZero As Boolean) As String
                     cnt(k) = cnt(k) + 1
                     place = Trim(CStr(d(i)(cPl)))
                     ' 1.3.0: which EIs hold the part: «ЕИ-… — 3 шт (A-01)», the first eight
-                    If cnt(k) <= 8 Then el(k) = el(k) & IIf(el(k) <> "", "; ", "") & CStr(d(i)(cEi)) & " — " & WmsIssue.QtyText(q) & " " & un(k) & IIf(place <> "", " (" & place & ")", "")
+                    If cnt(k) <= 8 Then el(k) = el(k) & IIf(el(k) <> "", "; ", "") & CStr(d(i)(cEi)) & " — " & WmsIssue.QtyText(q) & " " & sUn & IIf(place <> "", " (" & place & ")", "")
                     If place <> "" Then
                         If InStr("; " & pl(k) & ";", "; " & place & ";") = 0 Then pl(k) = pl(k) & IIf(pl(k) <> "", "; ", "") & place
                     End If
@@ -363,7 +379,7 @@ Function PartsRefresh(sFind As String, bZero As Boolean) As String
             If (Not bWords) Or WmsNames.HasWords(CStr(folded(k)), words) Then
                 sSer = sn(k) & IIf(ns(k) > 12, " … и ещё " & (ns(k) - 12), "")
                 sEis = el(k) & IIf(cnt(k) > 8, " … и ещё " & (cnt(k) - 8), "")
-                out(nOut) = Array(art(k), nm(k), CStr(cats(k)), bal(k), un(k), cnt(k), sEis, pl(k), sSer, IIf(last(k) > 0, last(k), ""))
+                out(nOut) = Array(art(k), nm(k), CStr(cats(k)), bal(k), un(k) & ux(k), cnt(k), sEis, pl(k), sSer, IIf(last(k) > 0, last(k), ""))
                 nOut = nOut + 1
             End If
         End If

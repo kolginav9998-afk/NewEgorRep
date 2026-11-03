@@ -581,14 +581,16 @@ End Function
 
 ' the sums by unit as a text «шт=105;м=3» (an array does not come back from a procedure here): q of unit un added
 Private Function DrUnitAdd(acc As String, un As String, q As Double) As String
-    Dim a As Variant, i As Integer, found As Boolean, r As String, p As Integer, v As Double
+    Dim a As Variant, i As Integer, found As Boolean, r As String, p As Integer, v As Double, uk As String
+    ' 1.3.0: «шт», «Шт.» and «штук» are one unit (WmsPack.UnitKey): the sum is one, in the spelling met first
+    uk = WmsPack.UnitKey(un)
     If acc <> "" Then
         a = Split(acc, ";")
         For i = 0 To UBound(a)
             p = InStr(a(i), "=")
-            If Left(a(i), p - 1) = un Then
+            If Not found And WmsPack.UnitKey(Left(a(i), p - 1)) = uk Then
                 v = Val(Mid(a(i), p + 1)) + q
-                r = r & IIf(r <> "", ";", "") & un & "=" & Str(v)
+                r = r & IIf(r <> "", ";", "") & Left(a(i), p - 1) & "=" & Str(v)
                 found = True
             Else
                 r = r & IIf(r <> "", ";", "") & a(i)

@@ -6259,6 +6259,94 @@ def v79_lists_eis_column():
         s.close()
 
 
+@case
+def v80_units_and_article_keys():
+    """1.3.0: одна единица, записанная по-разному («шт», «Шт.», «штук»), — одна единица: ключ единицы; итог «Отчёта дня» по приёмке; итог страницы «Поиск»; разные единицы одной позиции («шт» и «кг») —
+    видны в столбце «Ед.» и в списке ЕИ с их единицами («Метизы», «Остаток деталей»); деталь в «Остатке деталей» — по ключу артикула (латиница и кириллица, дефисы, пробелы, регистр)"""
+    c = "V80"
+    s = ready(Session(new_wms("v80")))
+    try:
+        # the key of a unit
+        want = {"шт": "шт", "Шт.": "шт", " шт ": "шт", "ШТ": "шт", "штук": "шт", "Штука": "шт", "м": "м", "Метр": "м", "метров": "м", "М.": "м", "м2": "м2", "м²": "м2", "М3": "м3",
+                "мм": "мм", "см": "см", "кг": "кг", "Килограмм": "кг", "г": "г", "грамм": "г", "л": "л", "литр": "л", "упак": "уп", "Упаковка": "уп", "комплект": "компл",
+                "компл.": "компл", "рулон": "рул", "мешок": "меш", "": ""}
+        got = {u: s.B("UnitKey", u, module="WmsPack") for u in want}
+        bad = {u: g for u, g in got.items() if g != want[u]}
+        R.add(c, "ключ единицы: «шт», «Шт.», « шт », «штук», «Штука» — «шт»; «м», «Метр», «метров», «М.» — «м»; «м²» = «м2»; «мм», «см», «кг», «г» — разные единицы", not bad, str(bad))
+        ak = s.B("TestArticleKeyFast", module="WmsSpecial")
+        R.add(c, "ключ артикула для списков (быстрый путь без пробелов и знаков выше кода 127) даёт тот же ответ, что и ключ при проводке, — для каждого знака первой плоскости Юникода, отдельно и между двумя",
+              str(ak).startswith("OK:"), str(ak))
+        # the report of the day: the receipts of one day in «шт», «Шт.», «штук» and «м» — one sum for «шт»
+        order(s, 1, "1", "Вал А", qty="5", art="VAL-1")
+        order(s, 2, "2", "Вал Б", qty="3", unit="Шт.", art="VAL-2")
+        order(s, 3, "3", "Вал В", qty="2", unit="штук", art="VAL-3")
+        order(s, 4, "4", "Кабель", qty="1,5", unit="м")
+        rc = [receive(s, r, f, doc=f"УПД-{r}", place=f"4-1-{r}") for r, f in ((1, "5"), (2, "3"), (3, "2"), (4, "1,5"))]
+        res = s.B("DayReport", serial(0), False, module="WmsDocs")
+        text = doc_of(s)
+        s.B("DcDocClose", module="WmsDocs")
+        line = next((x[2:] for x in text.split("\n") if x.startswith("• Приёмка по заказам:")), "")
+        R.add(c, "«Отчёт дня», приёмка: пять шт, три «Шт.» и две «штук» — «10 шт» одной суммой (первое написание), метры отдельно: «принято позиций — 4; количество: 10 шт, 1,5 м»",
+              all(str(x).startswith("OK") for x in rc) and res.startswith("OK:") and line.startswith("Приёмка по заказам: принято позиций — 4; количество: 10 шт, 1,5 м."), f"{rc}; {res}; {line}")
+        oracle(c, s, "приход четырёх позиций")
+        # the registry of the lists (written straight into «Наличие», as the lists only read it)
+        stk = s.doc.Sheets.getByName("Наличие")
+        stk.unprotect("wms")
+        n0 = int(s.sysv("NEXT_EI"))
+        rows = []
+
+        def add(name, art, q, place, unit="шт", cat=""):
+            rows.append([f"ЕИ-{n0 + len(rows):08d}", name, art, unit, q, place, cat, "Активен", "Заказ 1", ""])
+        add("Болт М5х20 DIN 933", "B-520", 5.0, "A-1")
+        add("Болт М5х20 DIN 933", "B-520", 3.0, "A-2", unit="Шт.")
+        add("Шайба М8 DIN 125", "SH-8", 100.0, "S-1")
+        add("Шайба М8 DIN 125", "SH-8", 2.0, "S-2", unit="кг")
+        add("Гайка М5 DIN 934", "G-5", 4.0, "C-1", unit="")
+        add("Гайка М5 DIN 934", "G-5", 1.0, "C-2")
+        add("Реле", "AB-12", 2.0, "D-1", cat="Детали")
+        add("Реле", "\u0410\u0412-12", 4.0, "D-2", cat="Детали")
+        add("Реле", "ab\u201112", 1.0, "D-3", cat="Детали")
+        add("Реле", "AB - 12", 3.0, "D-4", cat="Детали")
+        add("Втулка", "VT-9", 3.0, "D-5", cat="Детали")
+        add("Втулка", "VT-9", 2.0, "D-6", unit="кг", cat="Детали")
+        stk.getCellRangeByPosition(0, n0, 9, n0 + len(rows) - 1).setDataArray(tuple(tuple(r) for r in rows))
+        eis = [r[0] for r in rows]
+        before = stk.getCellRangeByPosition(0, 0, 9, n0 + len(rows)).getDataArray()
+        seq0 = str(s.sysv("LAST_SEQ"))
+        # «Метизы»: the unit of a position and the units of its EIs
+        rf = s.B("FastRefresh", "", module="WmsCat")
+        fsh = s.doc.Sheets.getByName("Метизы")
+        data = [list(x) for x in fsh.getCellRangeByPosition(0, 4, 17, 4 + 60).getDataArray()]
+        by_art = {x[10]: x for x in data if x[10]}
+        bolt, wash, nut = by_art.get("B-520", [""] * 18), by_art.get("SH-8", [""] * 18), by_art.get("G-5", [""] * 18)
+        R.add(c, "«Метизы»: болт в «шт» и «Шт.» — единица «шт», остаток 8, в списке ЕИ — каждая со своей записью («— 3 Шт. (A-2)»); шайба в «шт» и в «кг» — единица «шт / кг» и в списке ЕИ «100 шт», «2 кг"
+                 "»; гайка, у первого ЕИ которой единицы нет, — «шт»",
+              rf.startswith("OK:") and bolt[12] == "шт" and bolt[11] == 8 and bolt[16] == f"{eis[0]} — 5 шт (A-1); {eis[1]} — 3 Шт. (A-2)"
+              and wash[12] == "шт / кг" and wash[16] == f"{eis[2]} — 100 шт (S-1); {eis[3]} — 2 кг (S-2)" and nut[12] == "шт" and nut[11] == 5, f"{rf}; {bolt[10:17]}; {wash[10:17]}; {nut[10:17]}")
+        # «Остаток деталей»: one part for the four writings of an article
+        rp = s.B("PartsRefresh", "", False, module="WmsStockView")
+        psh = s.doc.Sheets.getByName("Остаток деталей")
+        pdata = [list(x) for x in psh.getCellRangeByPosition(0, 4, 9, 4 + 30).getDataArray()]
+        rel = [x for x in pdata if x[1] == "Реле"]
+        vt = next((x for x in pdata if x[0] == "VT-9"), [""] * 10)
+        R.add(c, "«Остаток деталей»: «AB-12» (латиница), «АВ-12» (кириллица), «ab‑12» (неразрывный дефис) и «AB - 12» — одна деталь: артикул как записан первым, остаток 10, четыре ЕИ",
+              rp.startswith("OK:") and len(rel) == 1 and rel[0][0] == "AB-12" and rel[0][3] == 10 and rel[0][5] == 4, f"{rp}; {rel}")
+        R.add(c, "«Остаток деталей»: втулка VT-9 в «шт» и «кг» — единица «шт / кг», остаток 5, в списке ЕИ «3 шт (D-5)» и «2 кг (D-6)»",
+              vt[4] == "шт / кг" and vt[3] == 5 and f"{eis[10]} — 3 шт (D-5)" in vt[6] and f"{eis[11]} — 2 кг (D-6)" in vt[6], str(vt))
+        # the page «Поиск»: the sum of the EIs found
+        s.B("TestFind", "Болт М5х20", module="WmsFind")
+        fnd = s.doc.Sheets.getByName("Поиск")
+        info1 = fnd.getCellByPosition(1, 7).getString()
+        s.B("TestFind", "Шайба М8", module="WmsFind")
+        info2 = fnd.getCellByPosition(1, 7).getString()
+        R.add(c, "страница «Поиск»: у болта (5 шт и 3 Шт.) итог «остаток 8 шт»; у шайбы (шт и кг) — «единицы разные — общей суммы нет»",
+              "остаток 8 шт" in info1 and "единицы разные" not in info1 and "единицы разные" in info2, f"{info1}; {info2}")
+        after = stk.getCellRangeByPosition(0, 0, 9, n0 + len(rows)).getDataArray()
+        R.add(c, "списки и поиск ничего не проводят: «Наличие» и номер последней операции журнала те же", after == before and str(s.sysv("LAST_SEQ")) == seq0, f"LAST_SEQ {seq0} → {s.sysv('LAST_SEQ')}")
+    finally:
+        s.close()
+
+
 # ================================================================ runner
 
 def main():
