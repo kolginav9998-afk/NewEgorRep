@@ -14,7 +14,7 @@ Private Const SV_HEAD = 3
 Private Const SV_ROW0 = 4
 Private Const SV_MAX = 60000
 Private Const SV_BYNAME_COLS = 11
-Private Const SV_PARTS_COLS = 8
+Private Const SV_PARTS_COLS = 10
 
 ' the journal position of the last build of each view (a view is built again when the journal moved)
 Global gSvSeqName As Long
@@ -267,6 +267,7 @@ Function PartsRefresh(sFind As String, bZero As Boolean) As String
     Dim keys() As String, nm() As String, art() As String, un() As String, bal() As Double, cnt() As Long, pl() As String, sn() As String, ns() As Long, last() As Double
     Dim key As String, k As Long, place As String, ser As String, dt As Variant, nOut As Long, sSer As String, idx As Object, hays() As String, folded As Variant, bWords As Boolean
     Dim cEi As Long, cNm As Long, cArt As Long, cUn As Long, cQ As Long, cPl As Long, cCat As Long, cSt As Long, cSrc As Long, cSer As Long, cDt As Long, cSty As Long
+    Dim el() As String, rg() As String, cats As Variant, sEis As String
     On Error GoTo EH
     idx = New Collection
     If Not gDoc.Sheets.hasByName(SH_PARTS) Then
@@ -302,6 +303,8 @@ Function PartsRefresh(sFind As String, bZero As Boolean) As String
         ReDim sn(UBound(d))
         ReDim ns(UBound(d))
         ReDim last(UBound(d))
+        ReDim el(UBound(d))
+        ReDim rg(UBound(d))
     End If
     For i = 0 To nRows - 1
         If CStr(d(i)(cEi)) <> "" Then
@@ -320,9 +323,12 @@ Function PartsRefresh(sFind As String, bZero As Boolean) As String
                 End If
                 q = QtyOf(d(i)(cQ))
                 bal(k) = bal(k) + q
+                If rg(k) = "" Then rg(k) = Trim(CStr(d(i)(cCat)))
                 If q > 0.0000005 Then
                     cnt(k) = cnt(k) + 1
                     place = Trim(CStr(d(i)(cPl)))
+                    ' 1.3.0: which EIs hold the part: «ЕИ-… — 3 шт (A-01)», the first eight
+                    If cnt(k) <= 8 Then el(k) = el(k) & IIf(el(k) <> "", "; ", "") & CStr(d(i)(cEi)) & " — " & WmsIssue.QtyText(q) & " " & un(k) & IIf(place <> "", " (" & place & ")", "")
                     If place <> "" Then
                         If InStr("; " & pl(k) & ";", "; " & place & ";") = 0 Then pl(k) = pl(k) & IIf(pl(k) <> "", "; ", "") & place
                     End If
@@ -342,11 +348,13 @@ Function PartsRefresh(sFind As String, bZero As Boolean) As String
     If n > 0 Then
         ReDim out(n - 1)
         ReDim hays(n - 1)
+        ' 1.3.0: the category of every part at once: of the registry, else of «Номенклатура», else the hint by the words
+        cats = WmsCat.CatsForGoods(nm, art, rg, n)
     End If
     bWords = (UBound(words) >= 0)
     If bWords And n > 0 Then
         For k = 0 To n - 1
-            hays(k) = art(k) & " " & nm(k) & " " & pl(k) & " " & sn(k)
+            hays(k) = art(k) & " " & nm(k) & " " & CStr(cats(k)) & " " & pl(k) & " " & sn(k)
         Next k
         folded = WmsNames.FoldAll(hays)
     End If
@@ -354,7 +362,8 @@ Function PartsRefresh(sFind As String, bZero As Boolean) As String
         If bZero Or bal(k) > 0.0000005 Then
             If (Not bWords) Or WmsNames.HasWords(CStr(folded(k)), words) Then
                 sSer = sn(k) & IIf(ns(k) > 12, " … и ещё " & (ns(k) - 12), "")
-                out(nOut) = Array(art(k), nm(k), bal(k), un(k), cnt(k), pl(k), sSer, IIf(last(k) > 0, last(k), ""))
+                sEis = el(k) & IIf(cnt(k) > 8, " … и ещё " & (cnt(k) - 8), "")
+                out(nOut) = Array(art(k), nm(k), CStr(cats(k)), bal(k), un(k), cnt(k), sEis, pl(k), sSer, IIf(last(k) > 0, last(k), ""))
                 nOut = nOut + 1
             End If
         End If

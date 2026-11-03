@@ -490,12 +490,14 @@ def step_120(doc, done):
 def step_130(doc, done):
     """1.2.x → 1.3.0 (and the earlier ones on their way): «Написания поставщиков» after «Поставщики» and the button «Одно написание…» there; no cell of the data is written"""
     sheets = doc.Sheets
+    B.lists_130(doc, sheets)
     B.spell_130(doc, sheets)
     B.buttons_130(doc, sheets)
     B.settings_130(doc, sheets)
     done.append(f"1.3.0: лист «{B.SPELL}» (все написания поставщиков книги, одинаковые по смыслу вместе; столбец «Привести к» — ваше решение, кнопка меняет только название поставщика: "
                 f"ожидаемые строки как будто вы вписали сами, принятые — исправлением позиции, визиты — исправлением визита, каждое в журнале; перед этим копия книги) и кнопка "
                 f"«Одно написание…» на «{B.SUPPLIERS}»; данные не менялись")
+    done.append(f"1.3.0: списки «{B.FAST}», «{B.TOOL}» (столбец «Какие ЕИ» — номера ЕИ с остатком) и «{B.PARTS}» (столбцы «Категория» и «Какие ЕИ») построены заново; список появится при первом открытии листа; данные не менялись")
     done.append(f"1.3.0: в «{B.SETTINGS}» добавлена настройка «Артикул на этикетке: у кого печатать» (детали / все / нет); то, что вы там писали, не тронуто")
     return []
 
@@ -718,8 +720,8 @@ def allowed_change(sheet, r, c, old=""):
     if sheet == B.CATS:
         # 1.1: the headers of the columns «Не считать», «Позиций», «ЕИ с остатком» (C1…E1), the hint moved from D1 to G1; the categories and their words are not touched
         return r == 0 and 2 <= c <= B.CATS_HINT_COL
-    if sheet == B.FAST:
-        # 1.1: «Метизы» is a list made from «Наличия» (no data of the storekeeper): the layout is made anew, the list is built at the first opening
+    if sheet in (B.FAST, B.TOOL, B.PARTS):
+        # 1.1: «Метизы» is a list made from «Наличия» (no data of the storekeeper): the layout is made anew, the list is built at the first opening; 1.3.0: the same for «Инструмент ЧПУ» and «Остаток деталей»
         return True
     if sheet == B.SERVICE:
         # 1.1: the line of text beside the new button «Справочники из копии…» (column C, a cell that was empty)

@@ -10,8 +10,8 @@ Private Const TL_FIND_ROW = 1
 Private Const TL_FILTER_ROW = 2
 Private Const TL_HEAD = 3
 Private Const TL_ROW0 = 4
-Private Const TL_COLS = 18
-Private Const TL_KEY_COL = 18
+Private Const TL_COLS = 19
+Private Const TL_KEY_COL = 19
 Private Const TL_STAT_COL = 7
 Private Const TL_MAX = 5000
 
@@ -34,6 +34,8 @@ Private Const TC_UNIT = 14
 Private Const TC_PLACES = 15
 Private Const TC_NEI = 16
 Private Const TC_NOTE = 17
+' 1.3.0: the EIs with a balance (a text: «ЕИ-… — 5 шт (A-01); …»)
+Private Const TC_EIS = 18
 
 ' the fields of a record (TlRecord)
 Private Const RC_TYPE = 0
@@ -1277,11 +1279,11 @@ End Sub
 ' with no balance. Only shows: nothing is posted, nothing is written but the cells of this sheet. OK:<rows> / ERR:…
 Function ToolRefresh(sFind As String) As String
     Dim sh As Object, i As Long, j As Long, k As Long, n As Long, g As Variant, rec As Variant, rows() As Variant, hays() As String, nms() As String, cols As Variant, notes() As String
-    Dim filt As Variant, fTxt(17) As String, hide As Boolean, scores As Variant, ok As Boolean, out() As Variant, nAllF As Long, q As Double, cat As String
+    Dim filt As Variant, fTxt(18) As String, hide As Boolean, scores As Variant, ok As Boolean, out() As Variant, nAllF As Long, q As Double, cat As String
     Dim eqShow As String, key As String, descr As String, typeName As String, coll As Object, wordsOld As Variant, cc As String
     Dim aPl() As String, aCt() As String, aAr() As String, aSr() As String, t0 As Long, tp As String, nmAll() As String, arAll() As String, folds As Variant, arF As Variant, tgood As String
     Dim sF As String, rawH() As String, rawN() As String, hP As Variant, nP As Variant, nCold As Long, bProg As Boolean, rawO() As String, oldF As Variant
-    Dim sErr As String, nErr As Long, nErl As Long, sStep As String, sAt As String, nBad As Long, sBad As String, pb As Long, qb As Long
+    Dim sErr As String, nErr As Long, nErl As Long, sStep As String, sAt As String, nBad As Long, sBad As String, pb As Long, qb As Long, bCatQ As Boolean
     On Error GoTo EH
     gTlBusy = True
     sStep = "начало"
@@ -1356,7 +1358,7 @@ Function ToolRefresh(sFind As String) As String
             ok = (InStr(tgood, Chr(1) & key & Chr(1)) > 0)
         End If
         If ok Then
-            rows(n) = Array(g, rec, sF)
+            rows(n) = Array(g, rec, sF, i)
             n = n + 1
         End If
     Next i
@@ -1429,6 +1431,9 @@ Function ToolRefresh(sFind As String) As String
     sStep = "поиск по словам"
     cols = Empty
     If Mid(WmsSearch.QueryNeeds(sFind), 1, 4) <> "0000" Then
+        ' 1.3.0: the category of every group is made at once (not one by one: 2 ms a name)
+        bCatQ = (Mid(WmsSearch.QueryNeeds(sFind), 2, 1) = "1")
+        If bCatQ Then WmsCat.GroupCats()
         ReDim aPl(IIf(n > 0, n - 1, 0))
         ReDim aCt(IIf(n > 0, n - 1, 0))
         ReDim aAr(IIf(n > 0, n - 1, 0))
@@ -1437,7 +1442,7 @@ Function ToolRefresh(sFind As String) As String
             g = rows(i)(0)
             aPl(i) = CStr(g(5))
             aAr(i) = CStr(g(1))
-            aCt(i) = WmsCat.CategoryOf(CStr(g(0)), CStr(g(1)), CStr(g(6)))
+            If bCatQ Then aCt(i) = CStr(gGrpCat(CLng(rows(i)(3))))
         Next i
         cols = Array(WmsNames.FoldAll(aPl), WmsNames.FoldAll(aCt), WmsNames.FoldAll(aAr), WmsNames.FoldAll(aSr))
     End If
@@ -1490,10 +1495,11 @@ Function ToolRefresh(sFind As String) As String
             If fTxt(TC_PLACES) <> "" Then ok = ok And WmsCat.TextFilterOk(fTxt(TC_PLACES), WmsNames.Fold(CStr(g(5))))
             If fTxt(TC_NEI) <> "" Then ok = ok And WmsCat.NumFilterOk(fTxt(TC_NEI), CDbl(g(4)))
             If fTxt(TC_NOTE) <> "" Then ok = ok And WmsCat.TextFilterOk(fTxt(TC_NOTE), WmsNames.Fold(notes(i)))
+            If fTxt(TC_EIS) <> "" Then ok = ok And WmsCat.TextFilterOk(fTxt(TC_EIS), WmsNames.Fold(CStr(g(7))))
         End If
         If ok Then
             out(k) = Array(typeName, rec(RC_KIND), rec(RC_SIZE), IIf(rec(RC_DIAM) > 0, rec(RC_DIAM), ""), IIf(rec(RC_LEN) > 0, rec(RC_LEN), ""), IIf(rec(RC_Z) > 0, rec(RC_Z), ""), rec(RC_MAT), rec(RC_COAT), _
-                rec(RC_STD), eqShow, rec(RC_DES), g(0), g(1), WmsPack.PkRound(q, 3), g(2), g(5), g(4), notes(i), _
+                rec(RC_STD), eqShow, rec(RC_DES), g(0), g(1), WmsPack.PkRound(q, 3), g(2), g(5), g(4), notes(i), g(7), _
                 CDbl(rec(RC_IDX)) * 1000000000000# + CDbl(Int(rec(RC_DIAM) * 100 + 0.5)) * 1000000# + CDbl(Int(rec(RC_LEN) * 10 + 0.5)))
             k = k + 1
         End If

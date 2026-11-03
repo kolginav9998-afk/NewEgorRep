@@ -2109,10 +2109,10 @@ def v29_help():
         pc = s.B("PcCheck", module="WmsHelp")
         R.add(c, "П1: «Проверить этот ПК» — LibreOffice, макросы, запись, место, Python — с «что сделать»",
               pc.startswith("Проверка этого ПК") and "LibreOffice" in pc and "запись в папку WMS" in pc and "место на диске" in pc and "Python" in pc, pc[:300])
-        choose(s, 7)
+        choose(s, 8)
         wn = s.B("WhatsNew", module="WmsHelp")
         act = s.doc.getCurrentController().getActiveSheet().getName()
-        R.add(c, "П2: «Что нового» — 11 карточек (первая — 1.2.1, вторая — 1.2.0, третья — 1.1, четвёртая — 1.0.2), «Показать» открывает лист карточки", len(s.B("WhatsNewCards", module="WmsHelp")) == 11 and wn == 7
+        R.add(c, "П2: «Что нового» — 12 карточек (первая — 1.3.0, вторая — 1.2.1, третья — 1.2.0, четвёртая — 1.1), «Показать» открывает лист карточки", len(s.B("WhatsNewCards", module="WmsHelp")) == 12 and wn == 8
               and act == "Поиск", f"{wn}; {act}")
         col0 = s.B("ButtonModel", "Заказы", "btnReceiveWin", module="WmsHelp").BackgroundColor
         tr = s.B("Tour", module="WmsHelp")
@@ -3754,9 +3754,9 @@ def v47_views_ops_whatnow():
         s.B("ByNameRefresh", "", True, module="WmsStockView")
         s.B("StockInfoRefresh", True, module="WmsItem")
         r3 = s.B("PartsRefresh", "", False, module="WmsStockView")
-        pr = [list(r) for r in s.doc.Sheets.getByName("Остаток деталей").getCellRangeByPosition(0, 4, 7, 6).getDataArray()]
+        pr = [list(r) for r in s.doc.Sheets.getByName("Остаток деталей").getCellRangeByPosition(0, 4, 9, 6).getDataArray()]
         R.add(c, "«Остаток деталей»: одна строка на деталь GR-40 — остаток 150 (пополнение того же ЕИ), один ЕИ, место D-1, серийный номер SN-7", r3 == "OK:1" and pr[0][0] == "GR-40"
-              and pr[0][2] == 150 and pr[0][4] == 1 and pr[0][5] == "D-1" and "SN-7" in pr[0][6], f"{r3}; {pr[0]}")
+              and pr[0][3] == 150 and pr[0][5] == 1 and pr[0][7] == "D-1" and "SN-7" in pr[0][8] and pr[0][2] == "Детали" and pr[0][6].startswith("ЕИ-") and "150" in pr[0][6], f"{r3}; {pr[0]}")
         # the user sorts the copy as he likes — the registry is the same; the next refresh builds the list again
         sh.getCellRangeByPosition(0, 4, 10, 8).clearContents(1 + 2 + 4)
         s.B("ByNameRefresh", "", False, module="WmsStockView")
@@ -5123,7 +5123,7 @@ def v66_assembly_views():
     try:
         left = []
         if a:
-            for nme, cols in (("Сборка деталей", 12), ("Инструмент ЧПУ", 18)):
+            for nme, cols in (("Сборка деталей", 12), ("Инструмент ЧПУ", 20)):
                 sh_ = a.doc.Sheets.getByName(nme)
                 for row_ in sh_.getCellRangeByPosition(0, 1, cols, 60).getDataArray():
                     for x_ in row_:
@@ -6183,6 +6183,78 @@ def v78_label_article_of_parts():
         seq0 = str(s.sysv("LAST_SEQ"))
         lb = s.B("LabelPrint", (ei[0], ei[1], ei[4]), 1, "40×30", module="WmsItem")
         R.add(c, "этикетки печатаются (3 штуки) и ничего не проводят: номер последней операции журнала прежний", lb.startswith("OK:этикеток 3") and str(s.sysv("LAST_SEQ")) == seq0, f"{lb}; {seq0} → {s.sysv('LAST_SEQ')}")
+    finally:
+        s.close()
+
+
+@case
+def v79_lists_eis_column():
+    """1.3.0: в «Метизах», «Инструменте ЧПУ» и «Остатке деталей» — столбец «Какие ЕИ»: номер ЕИ, сколько, место (первые восемь, дальше «… и ещё N»); по нему работает фильтр столбца; в «Остатке деталей»
+    ещё «Категория» (реестр → «Номенклатура» → подсказка по словам); деталь — по тому же определению, что и артикул на этикетке (категория «Детали», приход типа «Детали»). Счёт, сортировка и остальные столбцы те же"""
+    c = "V79"
+    s = ready(Session(new_wms("v79")))
+    try:
+        stk = s.doc.Sheets.getByName("Наличие")
+        stk.unprotect("wms")
+        n0 = int(s.sysv("NEXT_EI"))
+        rows = []
+        k = [0]
+
+        def add(name, art, q, place, cat="", stype=""):
+            k[0] += 1
+            rows.append([f"ЕИ-{n0 + k[0] - 1:08d}", name, art, "шт", q, place, cat, "Активен", "Заказ 1", stype])
+        add("Болт М8х30 DIN 933 8.8 оцинкованный", "B-830", 5.0, "A-1")
+        add("Болт М8х30 DIN 933 8.8 оцинкованный", "B-830", 3.0, "A-2")
+        add("Болт М8х30 DIN 933 8.8 оцинкованный", "B-830", 0.0, "A-3")
+        for i in range(10):
+            add("Гайка М10 DIN 934", "G-10", 2.0, f"B-{i + 1}")
+        add("Фреза концевая Ø10х50 Z4 Р6М5", "FR-1", 4.0, "C-1")
+        add("Корпус фары", "FAR-1", 3.0, "D-1", cat="Детали")
+        add("Корпус фары", "FAR-1", 2.0, "D-2", cat="Детали")
+        add("Втулка стальная", "VT-2", 6.0, "D-3", cat="Запчасти", stype="Детали")
+        add("Болт М6х20", "B-620", 9.0, "A-9", cat="Метизы")
+        stk.getCellRangeByPosition(0, n0, 9, n0 + len(rows) - 1).setDataArray(tuple(tuple(r) for r in rows))
+        e1, e2 = rows[0][0], rows[1][0]
+        before = stk.getCellRangeByPosition(0, 0, 9, n0 + len(rows)).getDataArray()
+        seq0 = str(s.sysv("LAST_SEQ"))
+        # «Метизы»
+        rf = s.B("FastRefresh", "", module="WmsCat")
+        fsh = s.doc.Sheets.getByName("Метизы")
+        hdr = [fsh.getCellByPosition(c_, 3).getString() for c_ in range(18)]
+        data = [list(x) for x in fsh.getCellRangeByPosition(0, 4, 17, 4 + 60).getDataArray()]
+        by_art = {x[10]: x for x in data if x[10]}
+        b = by_art.get("B-830", [""] * 18)
+        g = by_art.get("G-10", [""] * 18)
+        R.add(c, "«Метизы»: новый столбец «Какие ЕИ» (последний видимый, после «Заметки»); у болта B-830 два ЕИ с остатком — «ЕИ … — 5 шт (A-1); ЕИ … — 3 шт (A-2)» (ЕИ без остатка не показан); у гайки G-10 десять — первые восемь и «… и ещё 2»",
+              rf.startswith("OK:") and hdr[16] == "Какие ЕИ" and b[16] == f"{e1} — 5 шт (A-1); {e2} — 3 шт (A-2)" and g[16].endswith(" … и ещё 2") and g[16].count("ЕИ-") == 8 and b[14] == 2 and g[14] == 10,
+              f"{rf}; {hdr[14:]}; {b[14:17]}; {g[14:17]}")
+        # the filter of the column
+        fsh.getCellByPosition(16, 2).setString(e2)
+        rf2 = s.B("FastRefresh", "", module="WmsCat")
+        fsh.getCellByPosition(16, 2).setString("")
+        R.add(c, "фильтр столбца «Какие ЕИ»: номер второго ЕИ болта — в списке одна строка (B-830)", rf2 == "OK:1" and fsh.getCellByPosition(10, 4).getString() == "B-830", f"{rf2}; {fsh.getCellByPosition(10, 4).getString()}")
+        # «Инструмент ЧПУ»
+        rt = s.B("ToolRefresh", "", module="WmsTool")
+        tsh = s.doc.Sheets.getByName("Инструмент ЧПУ")
+        thdr = [tsh.getCellByPosition(c_, 3).getString() for c_ in range(19)]
+        tdata = [list(x) for x in tsh.getCellRangeByPosition(0, 4, 19, 4 + 60).getDataArray()]
+        tl = next((x for x in tdata if x[12] == "FR-1"), [""] * 20)
+        R.add(c, "«Инструмент ЧПУ»: столбец «Какие ЕИ» — у фрезы FR-1 «ЕИ … — 4 шт (C-1)»", rt.startswith("OK:") and thdr[18] == "Какие ЕИ" and tl[18] == f"{rows[13][0]} — 4 шт (C-1)", f"{rt}; {thdr[16:]}; {tl[16:19]}")
+        # «Остаток деталей»
+        rp = s.B("PartsRefresh", "", False, module="WmsStockView")
+        psh = s.doc.Sheets.getByName("Остаток деталей")
+        phdr = [psh.getCellByPosition(c_, 3).getString() for c_ in range(10)]
+        pdata = [list(x) for x in psh.getCellRangeByPosition(0, 4, 9, 4 + 60).getDataArray()]
+        pm = {x[0]: x for x in pdata if x[0]}
+        far = pm.get("FAR-1", [""] * 10)
+        vt = pm.get("VT-2", [""] * 10)
+        R.add(c, "«Остаток деталей»: столбцы «Категория» и «Какие ЕИ»; деталь FAR-1 (категория «Детали») — остаток 5, два ЕИ с местами; деталь VT-2 (приход типа «Детали», категория «Запчасти») — в списке с категорией «Запчасти»; метиз B-620 — нет",
+              rp.startswith("OK:") and phdr[2] == "Категория" and phdr[6] == "Какие ЕИ" and far[2] == "Детали" and far[3] == 5 and far[5] == 2 and "(D-1)" in far[6] and "(D-2)" in far[6]
+              and vt[2] == "Запчасти" and vt[3] == 6 and "B-620" not in pm, f"{rp}; {phdr}; {far}; {vt}; {list(pm)}")
+        rq = s.B("PartsRefresh", "запчасти", False, module="WmsStockView")
+        R.add(c, "поиск «запчасти» в «Остатке деталей» находит по категории: одна деталь (VT-2)", rq == "OK:1" and psh.getCellByPosition(0, 4).getString() == "VT-2", f"{rq}; {psh.getCellByPosition(0, 4).getString()}")
+        after = stk.getCellRangeByPosition(0, 0, 9, n0 + len(rows)).getDataArray()
+        R.add(c, "списки ничего не проводят: «Наличие» и номер последней операции журнала те же", after == before and str(s.sysv("LAST_SEQ")) == seq0, f"LAST_SEQ {seq0} → {s.sysv('LAST_SEQ')}")
     finally:
         s.close()
 

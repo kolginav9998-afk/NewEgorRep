@@ -23,8 +23,8 @@ Public Const FS_FIND_ROW = 1
 Private Const FS_FILTER_ROW = 2
 Private Const FS_HEAD = 3
 Private Const FS_ROW0 = 4
-Private Const FS_COLS = 16
-Private Const FS_KEY_COL = 16
+Private Const FS_COLS = 17
+Private Const FS_KEY_COL = 17
 Private Const FS_STAT_COL = 6
 Private Const FS_MAX = 5000
 ' the columns of «Метизы»
@@ -44,6 +44,8 @@ Private Const FC_UNIT = 12
 Private Const FC_PLACES = 13
 Private Const FC_NEI = 14
 Private Const FC_NOTE = 15
+' 1.3.0: the EIs with a balance (a text: «ЕИ-… — 5 шт (A-01); …»)
+Private Const FC_EIS = 16
 
 Public Const SH_NOCAT = "Без категории"
 Private Const NK_FIND_ROW = 1
@@ -465,12 +467,83 @@ Private Function CtNameAt(off() As Long, n As Long, p As Long, cur As Long) As L
     CtNameAt = lo
 End Function
 
-' the category of every group of gGrp, for all at once (after StockGroups; CtLoad and GoodsLoad are made here): gGrpCat, gGrpRow, gGrpHint — the same answers as CategoryOf and GoodsLookup give group by group
-Sub GroupCats()
-    Dim n As Long, i As Long, j As Long, g As Variant, cat() As String, rw() As Long, ht() As String, nm() As String, ar() As String, fa As Variant, fn As Variant, key As String, v As String, p As Long, c As String
-    Dim idx() As Long, nNeed As Long, names() As String, hints As Variant, bGoods As Boolean, t0 As Long, tp As String, nd() As Boolean
+' the category of each of n goods at once (0-based arrays of Strings: the name, the article, the category of the registry): the registry, then «Номенклатура» (GoodsLoad before), then the hint by the
+' words of «Категории». cat — the answers, rw — the row of the goods in «Номенклатуре» (from 0; -1 — none), ht — the hint (made for those that have no category in the registry and none in
+' «Номенклатуре»), nd — True for those, nNeed — how many of them. The same answers as CategoryOf and GoodsLookup give one by one
+Private Sub CatsCore(names() As String, arts() As String, regs() As String, n As Long, cat() As String, rw() As Long, ht() As String, nd() As Boolean, ByRef nNeed As Long)
+    Dim i As Long, j As Long, ar() As String, nm() As String, fa As Variant, fn As Variant, key As String, v As Variant, p As Long, c As String
+    Dim idx() As Long, hn() As String, hints As Variant, bGoods As Boolean, t0 As Long, tp As String
     t0 = GetSystemTicks()
     gGrpProf = ""
+    ReDim cat(n - 1)
+    ReDim rw(n - 1)
+    ReDim ht(n - 1)
+    ReDim nd(n - 1)
+    ReDim idx(n - 1)
+    ReDim hn(n - 1)
+    nNeed = 0
+    bGoods = (gGcKeys <> "")
+    If bGoods Then
+        ReDim nm(n - 1)
+        ReDim ar(n - 1)
+        For i = 0 To n - 1
+            ar(i) = Trim(arts(i))
+            ' (the key by the name is used only for a goods with no article, and only when the registry has no category of it)
+            If ar(i) = "" And Trim(regs(i)) = "" Then nm(i) = WmsNames.NormName(names(i))
+        Next i
+        fa = WmsNames.FoldAll(ar)
+        fn = WmsNames.FoldAll(nm)
+    End If
+    tp = "ключи " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
+    For i = 0 To n - 1
+        rw(i) = -1
+        c = Trim(regs(i))
+        If c <> "" Then
+            cat(i) = c
+        Else
+            If bGoods Then
+                key = ""
+                If ar(i) <> "" Then
+                    key = "a:" & CStr(fa(i))
+                ElseIf Trim(names(i)) <> "" Then
+                    key = "n:" & CStr(fn(i))
+                End If
+                If key <> "" Then
+                    ' (the list of the keys tells at once that there is none; a key that holds a sign of the list itself is looked for in the Collection)
+                    If InStr(gGcKeys, Chr(1) & key & Chr(1)) > 0 Then
+                        If CtCollGet(gGc, key, v) Then
+                            p = InStr(CStr(v), "|")
+                            rw(i) = CLng(Left(CStr(v), p - 1))
+                            cat(i) = Mid(CStr(v), p + 1)
+                        End If
+                    End If
+                End If
+            End If
+            If cat(i) = "" Then
+                nd(i) = True
+                idx(nNeed) = i
+                hn(nNeed) = names(i)
+                nNeed = nNeed + 1
+            End If
+        End If
+    Next i
+    tp = tp & ", «Номенклатура» " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
+    If nNeed > 0 Then
+        ReDim Preserve hn(nNeed - 1)
+        hints = CtHintsAll(hn, nNeed)
+        For j = 0 To nNeed - 1
+            ht(idx(j)) = CStr(hints(j))
+            cat(idx(j)) = CStr(hints(j))
+        Next j
+    End If
+    gGrpProf = tp & ", подсказки " & (GetSystemTicks() - t0) & " [" & gGrpProf & "] (без категории " & nNeed & ")"
+End Sub
+
+' the category of every group of gGrp, for all at once (after StockGroups; CtLoad and GoodsLoad are made here): gGrpCat, gGrpRow, gGrpHint, gGrpNeed — the same answers as CategoryOf and GoodsLookup give group by group
+Sub GroupCats()
+    Dim n As Long, i As Long, g As Variant, cat() As String, rw() As Long, ht() As String, nd() As Boolean, nm() As String, ar() As String, rg() As String, nNeed As Long
     If Not gCtLoaded Then CtLoad()
     n = gGrpN
     If n = 0 Then
@@ -480,73 +553,35 @@ Sub GroupCats()
         gGrpNeed = Array()
         Exit Sub
     End If
-    ReDim cat(n - 1)
-    ReDim rw(n - 1)
-    ReDim ht(n - 1)
-    ReDim nd(n - 1)
-    ReDim idx(n - 1)
-    ReDim names(n - 1)
-    bGoods = (gGcKeys <> "")
-    If bGoods Then
-        ReDim nm(n - 1)
-        ReDim ar(n - 1)
-        For i = 0 To n - 1
-            g = gGrp(i)
-            ar(i) = Trim(CStr(g(1)))
-            ' (the key by the name is used only for a goods with no article, and only when the registry has no category of it)
-            If ar(i) = "" And Trim(CStr(g(6))) = "" Then nm(i) = WmsNames.NormName(CStr(g(0)))
-        Next i
-        fa = WmsNames.FoldAll(ar)
-        fn = WmsNames.FoldAll(nm)
-    End If
-    tp = "ключи " & (GetSystemTicks() - t0)
-    t0 = GetSystemTicks()
+    ReDim nm(n - 1)
+    ReDim ar(n - 1)
+    ReDim rg(n - 1)
     For i = 0 To n - 1
         g = gGrp(i)
-        rw(i) = -1
-        c = Trim(CStr(g(6)))
-        If c <> "" Then
-            cat(i) = c
-        Else
-            If bGoods Then
-                key = ""
-                If ar(i) <> "" Then
-                    key = "a:" & CStr(fa(i))
-                ElseIf Trim(CStr(g(0))) <> "" Then
-                    key = "n:" & CStr(fn(i))
-                End If
-                If key <> "" Then
-                    If InStr(gGcKeys, Chr(1) & key & Chr(1)) > 0 Then
-                        v = gGc.Item(key)
-                        p = InStr(v, "|")
-                        rw(i) = CLng(Left(v, p - 1))
-                        cat(i) = Mid(v, p + 1)
-                    End If
-                End If
-            End If
-            If cat(i) = "" Then
-                nd(i) = True
-                idx(nNeed) = i
-                names(nNeed) = CStr(g(0))
-                nNeed = nNeed + 1
-            End If
-        End If
+        nm(i) = CStr(g(0))
+        ar(i) = CStr(g(1))
+        rg(i) = CStr(g(6))
     Next i
-    tp = tp & ", «Номенклатура» " & (GetSystemTicks() - t0)
-    t0 = GetSystemTicks()
-    If nNeed > 0 Then
-        hints = CtHintsAll(names, nNeed)
-        For j = 0 To nNeed - 1
-            ht(idx(j)) = CStr(hints(j))
-            cat(idx(j)) = CStr(hints(j))
-        Next j
-    End If
+    CatsCore(nm, ar, rg, n, cat, rw, ht, nd, nNeed)
     gGrpCat = cat
     gGrpRow = rw
     gGrpHint = ht
     gGrpNeed = nd
-    gGrpProf = tp & ", подсказки " & (GetSystemTicks() - t0) & " [" & gGrpProf & "] (без категории " & nNeed & ")"
 End Sub
+
+' 1.3.0: the category of each of n goods at once for a list (names, articles, categories of the registry — arrays from 0 of Strings, n of them): the registry, «Номенклатура», the hint by the words;
+' one answer per goods, "" when there is none. Makes CtLoad and GoodsLoad itself
+Function CatsForGoods(names() As String, arts() As String, regs() As String, n As Long) As Variant
+    Dim cat() As String, rw() As Long, ht() As String, nd() As Boolean, nNeed As Long
+    If n <= 0 Then
+        CatsForGoods = Array()
+        Exit Function
+    End If
+    If Not gCtLoaded Then CtLoad()
+    GoodsLoad()
+    CatsCore(names, arts, regs, n, cat, rw, ht, nd, nNeed)
+    CatsForGoods = cat
+End Function
 
 ' the category of every row of the registry array d (rows from 0; the columns of «Наличие»): its own, else of «Номенклатура», else the hint — one reading of a name, however many EIs
 ' have it. An array aligned with d ("" for an empty row). The search «категория:…» uses it
@@ -662,11 +697,12 @@ End Function
 
 ' ================================================================ the registry by names
 
-' the registry grouped by name and article: gGrp(i) = (name, article, unit, balance, EIs with a balance, places, category of the registry (the first one that is not empty)), gGrpN
+' the registry grouped by name and article: gGrp(i) = (name, article, unit, balance, EIs with a balance, places, category of the registry (the first one that is not empty), the EIs with a balance as a text
+' «ЕИ-… — 5 шт (A-01); …» (1.3.0: the first eight, then «… и ещё N»)), gGrpN
 Sub StockGroups()
     Dim st As Object, last As Long, d As Variant, i As Long, r As Variant, cEi As Long, cNm As Long, cArt As Long, cUn As Long, cQty As Long, cPl As Long, cCat As Long, q As Double
     Dim nm As String, art As String, key As String, k As Long, n As Long, coll As Object, pl As String
-    Dim gN() As String, gA() As String, gU() As String, gB() As Double, gE() As Long, gP() As String, gC() As String, res() As Variant
+    Dim gN() As String, gA() As String, gU() As String, gB() As Double, gE() As Long, gP() As String, gC() As String, gL() As String, res() As Variant
     Dim c10 As String, c13 As String, c9 As String, c160 As String, kv As Variant
     gGrpN = 0
     gGrp = Array()
@@ -692,6 +728,7 @@ Sub StockGroups()
     ReDim gE(UBound(d))
     ReDim gP(UBound(d))
     ReDim gC(UBound(d))
+    ReDim gL(UBound(d))
     coll = New Collection
     For i = 0 To UBound(d)
         r = d(i)
@@ -713,8 +750,11 @@ Sub StockGroups()
             q = 0
             If VarType(r(cQty)) = 5 Then q = r(cQty)
             gB(k) = gB(k) + q
-            If q > 0 Then gE(k) = gE(k) + 1
             pl = Trim(CStr(r(cPl)))
+            If q > 0 Then
+                gE(k) = gE(k) + 1
+                If gE(k) <= 8 Then gL(k) = gL(k) & IIf(gL(k) <> "", "; ", "") & CStr(r(cEi)) & " — " & WmsIssue.QtyText(q) & " " & gU(k) & IIf(pl <> "", " (" & pl & ")", "")
+            End If
             If q > 0 And pl <> "" Then
                 If InStr("; " & gP(k) & ";", "; " & pl & ";") = 0 Then gP(k) = gP(k) & IIf(gP(k) <> "", "; ", "") & pl
             End If
@@ -724,7 +764,7 @@ Sub StockGroups()
     If n = 0 Then Exit Sub
     ReDim res(n - 1)
     For i = 0 To n - 1
-        res(i) = Array(gN(i), gA(i), gU(i), gB(i), gE(i), gP(i), gC(i))
+        res(i) = Array(gN(i), gA(i), gU(i), gB(i), gE(i), gP(i), gC(i), gL(i) & IIf(gE(i) > 8, " … и ещё " & (gE(i) - 8), ""))
     Next i
     gGrp = res
     gGrpN = n
@@ -927,7 +967,7 @@ End Function
 ' under it the filters of the columns; «Скрыть нулевые» leaves out the names with no balance. OK:<rows> / ERR:…
 Function FastRefresh(sFind As String) As String
     Dim sh As Object, i As Long, j As Long, k As Long, n As Long, g As Variant, rec As Variant, rows() As Variant, hays() As String, nms() As String, cols As Variant, notes() As String
-    Dim canon() As String, filt As Variant, fTxt(15) As String, hide As Boolean, scores As Variant, ok As Boolean, out() As Variant, nShown As Long, nAllF As Long, q As Double
+    Dim canon() As String, filt As Variant, fTxt(16) As String, hide As Boolean, scores As Variant, ok As Boolean, out() As Variant, nShown As Long, nAllF As Long, q As Double
     Dim eqShow As String, hay As String, key As String, pk As Long, ra As Object, descr As String, tIdx As Long, typeName As String, fl As Boolean, dd As Variant
     Dim coll As Object, wordsOld As Variant, cc As String, fcat As Variant, rawH() As String, rawN() As String, rawM() As String, hP As Variant, nP As Variant, nmF As Variant, t0 As Long, tp As String, rawO() As String, oldF As Variant
     On Error GoTo EH
@@ -1078,9 +1118,10 @@ Function FastRefresh(sFind As String) As String
             If fTxt(FC_PLACES) <> "" Then ok = ok And TextFilterOk(fTxt(FC_PLACES), WmsNames.Fold(CStr(g(5))))
             If fTxt(FC_NEI) <> "" Then ok = ok And NumFilterOk(fTxt(FC_NEI), CDbl(g(4)))
             If fTxt(FC_NOTE) <> "" Then ok = ok And TextFilterOk(fTxt(FC_NOTE), WmsNames.Fold(notes(i)))
+            If fTxt(FC_EIS) <> "" Then ok = ok And TextFilterOk(fTxt(FC_EIS), WmsNames.Fold(CStr(g(7))))
         End If
         If ok Then
-            out(k) = Array(typeName, rec(2), IIf(rec(3) > 0, rec(3), ""), IIf(rec(4) > 0, rec(4), ""), rec(6), eqShow, rec(7), rec(8), rec(9), g(0), g(1), WmsPack.PkRound(q, 3), g(2), g(5), g(4), notes(i), _
+            out(k) = Array(typeName, rec(2), IIf(rec(3) > 0, rec(3), ""), IIf(rec(4) > 0, rec(4), ""), rec(6), eqShow, rec(7), rec(8), rec(9), g(0), g(1), WmsPack.PkRound(q, 3), g(2), g(5), g(4), notes(i), g(7), _
                 CDbl(tIdx) * 1000000000000# + CDbl(Int(rec(3) * 100 + 0.5)) * 1000000# + CDbl(Int(rec(4) * 10 + 0.5)))
             k = k + 1
         End If
