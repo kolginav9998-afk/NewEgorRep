@@ -6388,6 +6388,8 @@ def v81_upgrade_121_130():
         r4 = receive(s, 4, "3", place="D-1", doc="УПД-4")
         order(s, 5, "5", "Реле", qty="2", art="\u0410\u0412-12", supplier="Ромашка", S="Детали")
         r5 = receive(s, 5, "2", place="D-2", doc="УПД-5")
+        order(s, 6, "6", "Круг 20 Ст45", qty="12", unit="м", art="KR-20", supplier="Ромашка")
+        r6 = receive(s, 6, "12", place="E-1", doc="УПД-6")
         car = s.B("CarArrive", "Газель А111АА", "ВСЕ ИНСТРУМЕНТЫ", module="WmsCar")
         stk = s.doc.Sheets.getByName("Наличие")
         n_ei = int(s.sysv("NEXT_EI")) - 1
@@ -6397,7 +6399,7 @@ def v81_upgrade_121_130():
         s.B("PartsRefresh", "", False, module="WmsStockView")
         pv = s.doc.Sheets.getByName("Остаток деталей")
         rele_old = [x for x in pv.getCellRangeByPosition(0, 4, 7, 4 + 10).getDataArray() if x[1] == "Реле"]
-        ok_old = all(str(x).startswith("OK") for x in (r1, r2, r4, r5, car))
+        ok_old = all(str(x).startswith("OK") for x in (r1, r2, r4, r5, r6, car))
     finally:
         s.close(save=True)
     R.add(c, "в книге 1.2.1 всё проведено, листа «Написания поставщиков» нет, «Реле» в «Остатке деталей» — двумя строками (латиница и кириллица, как было)",
@@ -6440,6 +6442,12 @@ def v81_upgrade_121_130():
         rele = [list(x) for x in pv.getCellRangeByPosition(0, 4, 9, 4 + 10).getDataArray() if x[1] == "Реле"]
         R.add(c, "списки новой книги: у «Метизов» последний столбец «Какие ЕИ», у «Остатка деталей» — «Категория» и «Какие ЕИ»; «Реле» (AB-12 и АВ-12) — одна строка, остаток 5, два ЕИ",
               fh[16] == "Какие ЕИ" and phdr[2] == "Категория" and phdr[6] == "Какие ЕИ" and len(rele) == 1 and rele[0][3] == 5 and rele[0][5] == 2, f"{fh[14:]}; {phdr}; {rele}")
+        # «Металл»: a new sheet with its button; the list is made from the data of the old book
+        rmm = s.B("MetalRefresh", "", module="WmsMetal")
+        msh = sh.getByName("Металл")
+        mrows = [list(x) for x in msh.getCellRangeByPosition(0, 4, 19, 4 + 5).getDataArray() if x[0] != ""]
+        R.add(c, "лист «Металл» в обновлённой книге: без защиты, кнопка «Обновить»; на данных книги 1.2.1 — одна строка, круг Ø20 Ст45: 12 м и 29,6 кг (болт, гайка, шайба, реле в нём нет)",
+              btn("Металл", "btnMetalRefresh") and not msh.isProtected() and rmm == "OK:1" and mrows[0][:5] == ["Круг", "", "Сталь", "Ст45", "Ø20"] and mrows[0][14] == 12 and mrows[0][15] == 29.6, f"{rmm}; {mrows}")
         # the suppliers of the old book
         rf = s.B("SpelRefresh", module="WmsSup")
         ssh = sh.getByName("Написания поставщиков")
@@ -6600,6 +6608,78 @@ def v83_metal_sheet():
         after = stk.getCellRangeByPosition(0, 0, 9, n_ei).getDataArray()
         R.add(c, "список ничего не проводит: «Наличие» и номер последней операции журнала те же", after == before and str(s.sysv("LAST_SEQ")) == seq0 and str(ip).startswith("OK"), f"LAST_SEQ {seq0} → {s.sysv('LAST_SEQ')}")
         oracle(c, s, "лист «Металл»")
+    finally:
+        s.close()
+
+
+@case
+def v84_metal_speed():
+    """1.3.0: «Металл» на большом складе — 3600 наименований (800 металла всех видов, остальное метизы, инструмент, электрика, химия): в списке ровно металл (ни болта, ни фрезы, ни «круга отрезного»), список строится за
+    приемлемое время, повторный (названия уже прочитаны) быстрее; результат тот же, что считается по правилам"""
+    c = "V84"
+    s = ready(Session(new_wms("v84")))
+    try:
+        stk = s.doc.Sheets.getByName("Наличие")
+        stk.unprotect("wms")
+        rows = []
+        n = 0
+
+        def add(name, art, q=5.0, cat="", unit="шт"):
+            nonlocal n
+            n += 1
+            rows.append([f"ЕИ-{n:08d}", name, art, unit, q, f"A-{n % 50 + 1}", cat, "Активен"])
+        grades = ["Ст3", "Ст45", "09Г2С", "40Х", "12Х18Н10Т", "AISI 304", "АМг6", "Д16Т", "Л63", "М1"]
+        for i in range(800):
+            k = i % 8
+            g = grades[i % 10]
+            if k == 0:
+                add(f"Лист г/к {2 + i % 20}х1250х2500 {g}", f"ML-{i}", unit="лист")
+            elif k == 1:
+                add(f"Круг {10 + i % 90} {g} ГОСТ 2590", f"MK-{i}", q=12.0, unit="м")
+            elif k == 2:
+                add(f"Труба профильная {20 + i % 60}х{20 + i % 40}х{2 + i % 4} {g} 6м", f"MT-{i}", q=6.0)
+            elif k == 3:
+                add(f"Уголок {25 + i % 50}х{25 + i % 50}х{3 + i % 5} {g}", f"MU-{i}", q=3.0)
+            elif k == 4:
+                add(f"Швеллер {5 + i % 20}У {g} ГОСТ 8240-97", f"MS-{i}", q=2.0)
+            elif k == 5:
+                add(f"Арматура Ø{8 + i % 20} А500С 11,7м", f"MA-{i}", q=20.0)
+            elif k == 6:
+                add(f"Полоса {20 + i % 80}х{3 + i % 10} {g}", f"MP-{i}", q=5.0)
+            else:
+                add(f"Труба {20 + i % 90}х{2 + i % 4},5 {g} ГОСТ 8732-78", f"MR-{i}", q=7.0)
+        mats = ["Р6М5", "ВК8", "HSS-Co", "твердосплавная"]
+        for i in range(600):
+            k = i % 4
+            if k == 0:
+                add(f"Фреза концевая Ø{3 + i % 28}х{20 + i % 90} Z{2 + i % 4} {mats[i % 4]}", f"FR-{i}")
+            elif k == 1:
+                add(f"Сверло спиральное {3 + i % 28},{i % 10} DIN 338 {mats[i % 4]}", f"SV-{i}")
+            elif k == 2:
+                add(f"Круг отрезной {100 + i % 130}х{1 + i % 3},0х22", f"KO-{i}")
+            else:
+                add(f"Цанга ER{[16, 20, 25, 32, 40][i % 5]} d{3 + i % 28}", f"CZ-{i}")
+        for i in range(1000):
+            add(f"Болт М{3 + i % 30}х{10 + i % 60} DIN 933 8.8 оцинкованный", f"B-{i}")
+        for i in range(600):
+            add([f"Лампа H{i % 20}", f"Кабель ВВГ {2 + i % 5}х{1 + i % 6}", f"Краска эмаль {i}", f"Лист ДСП {10 + i % 20} мм", f"Труба ПВХ {20 + i % 40}", f"Профиль гипсокартонный {60 + i % 3}х27"][i % 6], f"X-{i}")
+        stk.getCellRangeByPosition(0, 1, 7, len(rows)).setDataArray(tuple(tuple(r) for r in rows))
+        t0 = time.time()
+        r1 = s.B("MetalRefresh", "", module="WmsMetal")
+        t_cold = time.time() - t0
+        t0 = time.time()
+        r2 = s.B("MetalRefresh", "", module="WmsMetal")
+        t_warm = time.time() - t0
+        sh = s.doc.Sheets.getByName("Металл")
+        k_all = int(r2.split(":")[1]) if r2.startswith("OK:") else -1
+        arts = [x[11] for x in sh.getCellRangeByPosition(0, 4, 19, 4 + k_all - 1).getDataArray()] if k_all > 0 else []
+        t0 = time.time()
+        r3 = s.B("MetalRefresh", "круг 20 ст45", module="WmsMetal")
+        t_find = time.time() - t0
+        R.add(c, "3600 наименований: в «Металле» 800 строк (все ML-, MK-, MT-, MU-, MS-, MA-, MP-, MR-), ни одного болта, фрезы, «круга отрезного», листа ДСП и трубы ПВХ", r1 == "OK:800" and r2 == "OK:800" and len(arts) == 800
+              and all(a[:3] in ("ML-", "MK-", "MT-", "MU-", "MS-", "MA-", "MP-", "MR-") for a in arts), f"{r1}; {r2}; {arts[:3]}")
+        R.add(c, "скорость: первый список (разбор 3600 названий) и повторный (в памяти), поиск", t_cold < 40 and t_warm < 15 and t_find < 15,
+              f"первый {t_cold:.1f} с; повторный {t_warm:.1f} с; поиск «круг 20 ст45» {t_find:.1f} с ({r3}); шаги: {s.B('TestMetalProf', module='WmsMetal')}")
     finally:
         s.close()
 

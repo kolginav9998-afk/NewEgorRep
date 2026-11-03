@@ -358,6 +358,29 @@ def main():
              "вопрос кнопки — настоящее окно «WMS» с «Да»; после «Да» во всех трёх строках «Заказов» и в визите одно и то же написание",
              rc3.startswith("OK") and car.startswith("OK") and rf.startswith("OK:") and len(rows_) == 3 and tgt != "" and done == [True] and str(ra).startswith("OK:")
              and now == [tgt, tgt, tgt] and visit == [tgt], f"{rc3[:30]}; {car[:30]}; {rf}; {targets}; {done}; {str(ra)[:120]}; {now}; {visit}")
+        # ---------------------------------------------------------------- 8в. «Металл» — the sheet in a real window (1.3.0)
+        o.basic(doc, "WmsUi", "TestUiAuto", 1)
+        rr2 = next(i for i in range(1, 900) if zk.getCellByPosition(0, i).getString() == "" and zk.getCellByPosition(1, i).getString() == "")
+        rcm = []
+        for k, (nm_, art_, q_, un_) in enumerate((("Круг 20 Ст45 ГОСТ 2590", "KR-20", "12", "м"), ("Лист г/к 3х1250х2500 Ст3", "L-3", "5", "лист"), ("Труба профильная 40х20х2 Ст3 6м", "TP-1", "3", "шт"))):
+            for col, v in (("A", f"M-{k + 1}"), ("B", nm_), ("H", q_), ("I", un_), ("L", "Ромашка"), ("E", art_), ("F", q_), ("C", f"УПД-M{k + 1}"), ("U", "7-1-1")):
+                zk.getCellByPosition(col_ix(col), rr2 + k).setString(v)
+            for col in ("N", "O"):
+                zk.getCellByPosition(col_ix(col), rr2 + k).setValue(TODAY)
+            rcm.append(str(o.basic(doc, "WmsReceipt", "ReceiptPostRow", rr2 + k)))
+        msh = doc.Sheets.getByName("Металл")
+        goto(o, doc, "Металл", "$B$2")
+        o.basic(doc, "WmsMetal", "BtnMetalRefresh")
+        listed_m = lambda: [x for x in msh.getCellRangeByPosition(0, 4, 19, 40).getDataArray() if x[0] != ""]
+        m_all = sorted(x[11] for x in listed_m())
+        m_rows = {x[11]: x for x in listed_m()}
+        typed(o, doc, "Металл", "$B$2", "круг")
+        m_one = [x[11] for x in listed_m()]
+        stat_m = msh.getCellByPosition(7, 1).getString()
+        typed(o, doc, "Металл", "$B$2", "")
+        step("1.3.0: «Металл» в настоящем окне: «Обновить» — три позиции (круг 12 м, лист, труба 6 м: «Всего, м» 6 и «Масса» по размеру); «круг» в «Найти» — одна строка; строка итога «Металла (позиций): 1 из 3»",
+             all(x.startswith("OK") for x in rcm) and m_all == ["KR-20", "L-3", "TP-1"] and m_one == ["KR-20"] and "Металла (позиций): 1 из 3" in stat_m and m_rows["KR-20"][14] == 12 and m_rows["KR-20"][15] == 29.6
+             and m_rows["TP-1"][14] == 18 and len(listed_m()) == 3, f"{rcm}; {m_all}; {m_one}; {stat_m[:80]}; {m_rows.get('KR-20', [])[12:16]}; {m_rows.get('TP-1', [])[12:16]}")
         # ---------------------------------------------------------------- 9. «Инструмент ЧПУ» on a big warehouse with the bar of the status line (1.2.1): names that begin with a number,
         # odd ones, and a failure on purpose — the text of the error is not lost
         o.basic(doc, "WmsUi", "TestUiAuto", 1)
