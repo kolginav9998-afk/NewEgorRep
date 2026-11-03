@@ -216,14 +216,14 @@ Private Function SpFind(ByVal raw As String) As Long
 End Function
 
 ' the kind of a row of «Заказы»: 0 — not a position (a copy, an empty row), 1 — not received, 2 — received (any state of the receipt), 3 — cancelled before any receipt
-Private Function RowKind(r As Variant) As Long
+Private Function SupRowKind(r As Variant) As Long
     If Left(CStr(r(OC_CTL)), 5) = "КОПИЯ" Then Exit Function
     If CStr(r(OC_EI)) <> "" Then
-        RowKind = 2
+        SupRowKind = 2
     ElseIf CStr(r(OC_STATUS)) = OS_CANCELLED Then
-        RowKind = 3
+        SupRowKind = 3
     ElseIf Left(CStr(r(OC_BLOCK)), 2) <> "OL" Then
-        RowKind = 1
+        SupRowKind = 1
     End If
 End Function
 
@@ -239,7 +239,7 @@ Private Sub SpRead()
             sup = CStr(d(i)(OC_SUPPLIER))
             If Trim(sup) <> "" Then
                 If WmsOrders.SpecialSupplier(sup) = "" Then
-                    k = RowKind(d(i))
+                    k = SupRowKind(d(i))
                     If k > 0 Then
                         j = SpIndex(sup)
                         If k = 1 Then
@@ -578,8 +578,8 @@ Sub BtnSpelApply(Optional oEvent As Variant)
     End If
 End Sub
 
-Private Function CellShown(c As Object) As String
-    If c.getType() = com.sun.star.table.CellContentType.VALUE Then CellShown = NumStr(c.getValue()) Else CellShown = c.getString()
+Private Function SupCellShown(c As Object) As String
+    If c.getType() = com.sun.star.table.CellContentType.VALUE Then SupCellShown = NumStr(c.getValue()) Else SupCellShown = c.getString()
 End Function
 
 ' a received row r of «Заказы»: the position gets the supplier sTo through «Исправить позицию» (POSITION_FIX); everything else of the position is passed as it is written, and if anything else would
@@ -604,7 +604,7 @@ Private Function PositionSupplier(r As Long, sTo As String) As String
     vOdate = ""
     If c.getType() = com.sun.star.table.CellContentType.VALUE Then vOdate = Format(c.getValue(), "DD.MM.YYYY")
     gPosFixOnly = "L"
-    res = WmsReceipt.PositionFixRow(r, CellShown(sh.getCellByPosition(OC_ORDER, src)), sh.getCellByPosition(OC_NAME, src).getString(), CellShown(sh.getCellByPosition(OC_INVOICE, src)), _
+    res = WmsReceipt.PositionFixRow(r, SupCellShown(sh.getCellByPosition(OC_ORDER, src)), sh.getCellByPosition(OC_NAME, src).getString(), SupCellShown(sh.getCellByPosition(OC_INVOICE, src)), _
         sh.getCellByPosition(OC_ART, src).getString(), vQty, sh.getCellByPosition(OC_UNIT, src).getString(), sTo, vOdate, sh.getCellByPosition(OC_CAT, src).getString())
     gPosFixOnly = ""
     PositionSupplier = res
@@ -747,7 +747,7 @@ Function SpelApply() As String
                 j = SpFind(sup)
                 If j >= 0 Then
                     If mapTo(j) <> "" Then
-                        kind = RowKind(dOrd(i))
+                        kind = SupRowKind(dOrd(i))
                         If kind = 1 Then
                             nOpenRows = nOpenRows + 1
                         ElseIf kind = 2 Then
@@ -840,7 +840,7 @@ Function SpelApply() As String
                     j = SpFind(sup)
                     If j >= 0 Then
                         If mapTo(j) <> "" Then
-                            kind = RowKind(dOrd(i))
+                            kind = SupRowKind(dOrd(i))
                             r = i + 1
                             If kind = 1 Then
                                 If WmsOrders.OrderRowKind(r) = "OPEN" Then
