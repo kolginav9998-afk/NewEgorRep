@@ -257,8 +257,8 @@ EH:
 End Sub
 
 ' a part: its category is «Детали», or it came as a part («Детали DET-…» in the source)
-Private Function IsPart(cat As String, src As String) As Boolean
-    IsPart = (LCase(Trim(cat)) = "детали" Or LCase(Left(Trim(src), 6)) = "детали")
+Private Function IsPart(cat As String, src As String, stype As String) As Boolean
+    IsPart = WmsCat.IsPartCard(cat, src, stype)
 End Function
 
 ' the list: one row per part — the article (the name when there is none) — with the balance of all its EIs; OK:<rows> / ERR:…
@@ -266,7 +266,7 @@ Function PartsRefresh(sFind As String, bZero As Boolean) As String
     Dim sh As Object, d As Variant, nRows As Long, i As Long, j As Long, n As Long, q As Double, words As Variant, hay As String, out() As Variant
     Dim keys() As String, nm() As String, art() As String, un() As String, bal() As Double, cnt() As Long, pl() As String, sn() As String, ns() As Long, last() As Double
     Dim key As String, k As Long, place As String, ser As String, dt As Variant, nOut As Long, sSer As String, idx As Object, hays() As String, folded As Variant, bWords As Boolean
-    Dim cEi As Long, cNm As Long, cArt As Long, cUn As Long, cQ As Long, cPl As Long, cCat As Long, cSt As Long, cSrc As Long, cSer As Long, cDt As Long
+    Dim cEi As Long, cNm As Long, cArt As Long, cUn As Long, cQ As Long, cPl As Long, cCat As Long, cSt As Long, cSrc As Long, cSer As Long, cDt As Long, cSty As Long
     On Error GoTo EH
     idx = New Collection
     If Not gDoc.Sheets.hasByName(SH_PARTS) Then
@@ -287,6 +287,7 @@ Function PartsRefresh(sFind As String, bZero As Boolean) As String
     cCat = SC_CAT
     cSt = SC_STATE
     cSrc = SC_SRC
+    cSty = SC_STYPE
     cSer = SI_COL0 + 8
     cDt = SI_COL0 + 4
     words = WmsNames.FoldWords(sFind)
@@ -304,7 +305,7 @@ Function PartsRefresh(sFind As String, bZero As Boolean) As String
     End If
     For i = 0 To nRows - 1
         If CStr(d(i)(cEi)) <> "" Then
-            If IsPart(CStr(d(i)(cCat)), CStr(d(i)(cSrc))) Then
+            If IsPart(CStr(d(i)(cCat)), CStr(d(i)(cSrc)), CStr(d(i)(cSty))) Then
                 key = LCase(Trim(CStr(d(i)(cArt))))
                 If key = "" Then key = "n:" & LCase(Trim(CStr(d(i)(cNm)))) Else key = "a:" & key
                 k = WmsView.CollGet(idx, key)

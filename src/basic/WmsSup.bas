@@ -114,6 +114,25 @@ Public Function SupSnap(ByVal s As String) As String
     If Trim(sh.getCellByPosition(WmsSupply.SU_NAME, r).getString()) <> "" Then SupSnap = Trim(sh.getCellByPosition(WmsSupply.SU_NAME, r).getString())
 End Function
 
+' the supplier typed into a cell (sheet sSheet, row r, column c) gets the spelling of «Поставщики» when it is the same supplier by its key; True when the cell was changed. Special receipts
+' («Офис», «Иной приход» …) are not touched
+Function SupFixCell(sSheet As String, r As Long, c As Integer) As Boolean
+    Dim cell As Object, t As String, u As String
+    On Error GoTo EH
+    cell = gDoc.Sheets.getByName(sSheet).getCellByPosition(c, r)
+    If cell.getType() <> com.sun.star.table.CellContentType.TEXT Then Exit Function
+    t = cell.getString()
+    If Trim(t) = "" Then Exit Function
+    If WmsOrders.SpecialSupplier(t) <> "" Then Exit Function
+    u = SupSnap(t)
+    If u <> t Then
+        cell.setString(u)
+        SupFixCell = True
+    End If
+    Exit Function
+EH:
+End Function
+
 ' ================================================================ reading the spellings from the book
 
 Private Function CollTry(coll As Object, key As String, ByRef v As Variant) As Boolean

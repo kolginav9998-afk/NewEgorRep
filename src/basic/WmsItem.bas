@@ -216,13 +216,13 @@ Function LabelPrint(eis As Variant, nCopies As Long, sSize As String) As String
 End Function
 
 ' the labels of the EIs eis (numbers), counts(i) labels of eis(i) (its own number of every position), on «Печать» in its own page style
-' of the label size sSize («40×30»): one label — one page. Below the unit: «Арт.: …» for the goods of the category «Детали» and
+' of the label size sSize («40×30»): one label — one page. Below the unit: «Арт.: …» for a part (the category «Детали», or the type «Детали»; 1.3.0: the setting «Артикул на этикетке») and
 ' «S/N: …» of an EI with a serial number; «Выдача по 1 шт · в уп. 10» for the goods that come in packs of «Номенклатуры» R (or an EI
 ' with a packing). OK:<labels> / ERR:…
 Function LabelPrintN(eis As Variant, counts As Variant, sSize As String) As String
     Dim a As Variant, w As Double, h As Double, sh As Object, ps As Object, st As Object, i As Long, j As Long, r As Long, row As Variant, n As Long
     Dim pr(0) As New com.sun.star.table.CellRangeAddress, k As Long, d As Variant, yTop As Long, goods As Variant, ex As Variant, nx As Integer, need As Long
-    Dim exs() As Variant
+    Dim exs() As Variant, sMode As String
     On Error GoTo EH
     a = Split(Replace(Replace(LCase(sSize), "x", "×"), "*", "×"), "×")
     If UBound(a) <> 1 Then
@@ -239,13 +239,15 @@ Function LabelPrintN(eis As Variant, counts As Variant, sSize As String) As Stri
     End If
     st = WmsIssue.StockSheet()
     goods = LbGoods()
+    WmsCat.GoodsLoad()
+    sMode = LbArtMode()
     ' what every label carries (the extra lines) and how many rows the printing takes — before the page is touched
     ReDim exs(UBound(eis))
     For i = 0 To UBound(eis)
         n = eis(i)
         row = st.getCellRangeByPosition(0, n, SC_LAST, n).getDataArray()(0)
         If CStr(row(SC_EI)) <> "" Then
-            exs(i) = LbExtra(n, row, goods)
+            exs(i) = LbExtra(n, row, goods, sMode)
             nx = 0
             If exs(i)(0) <> "" Then nx = nx + 1
             If exs(i)(1) <> "" Then nx = nx + 1
@@ -315,20 +317,56 @@ Private Function LbGoods() As Variant
     LbGoods = gs.getCellRangeByPosition(0, 1, GD_PACKQ, last).getDataArray()
 End Function
 
-' the extra lines of the label of EI n (its stock row `row`): (1) «Арт.: …» — only for the goods of the category «Детали» — and
+' who gets the article on the label (the setting «Артикул на этикетке» of «Настройки»): "parts" — a part and an EI with a serial number (the default, as before), "all" — every EI that has an article,
+' "none" — nobody
+Private Function LbArtMode() As String
+    Select Case LCase(Trim(WmsSettings.SettingText(WmsSettings.SET_LABEL_ART, "детали")))
+    Case "все", "всем", "всех", "да", "all"
+        LbArtMode = "all"
+    Case "нет", "никому", "не печатать", "никогда", "none"
+        LbArtMode = "none"
+    Case Else
+        LbArtMode = "parts"
+    End Select
+End Function
+
+' 1.3.0: is the card of the registry (`row`) a part — by the one definition of «Остаток деталей» (the category «Детали», the source or the type of the source «Детали»); a card with no category of its
+' own is a part when its goods in «Номенклатура» (by the article, else by the name) or the hint by the words of «Категории» says «Детали» — as every list of WMS takes the category
+Private Function LbIsPart(row As Variant, art As String) As Boolean
+    Dim cat As String
+    cat = Trim(CStr(row(SC_CAT)))
+    If WmsCat.IsPartCard(cat, CStr(row(SC_SRC)), CStr(row(SC_STYPE))) Then
+        LbIsPart = True
+    ElseIf cat = "" Then
+        LbIsPart = WmsCat.IsPartCard(WmsCat.CategoryOf(CStr(row(SC_NAME)), art, ""), "", "")
+    End If
+End Function
+
+' the extra lines of the label of EI n (its stock row `row`): (1) «Арт.: …» — for a part (see LbIsPart; the setting «Артикул на этикетке» may say every EI or nobody) and
 ' «S/N: …» of an EI with a serial number; (2) the way the pieces are given out: «Выдача по 1 шт · в уп. 10» — the packing of the EI,
 ' otherwise «В упаковке» of its goods in «Номенклатуре» (matched by the article, else by the name)
-Private Function LbExtra(n As Long, row As Variant, goods As Variant) As Variant
+Private Function LbExtra(n As Long, row As Variant, goods As Variant, sMode As String) As Variant
     Dim l1 As String, l2 As String, p As Variant, pu As String, pn As Double, i As Long, art As String, nm As String, q As Double, unit As String
-    Dim cArt As Long, cName As Long
+    Dim cArt As Long, cName As Long, bArt As Boolean
     cArt = WmsSupply.GD_ART
     cName = WmsSupply.GD_NAME
     art = Trim(CStr(row(SC_ART)))
     nm = LCase(Trim(CStr(row(SC_NAME))))
     unit = Trim(CStr(row(SC_UNIT)))
     p = PropOf(n)
-    ' 1.1.1: the article stands on the label of a part (the category «Детали») and of anything that has a serial number
-    If (LCase(Trim(CStr(row(SC_CAT)))) = "детали" Or CStr(p(0)) <> "") And art <> "" Then l1 = "Арт.: " & art
+    ' 1.1.1: the article stands on the label of a part and of anything that has a serial number; 1.3.0: a part is one definition for all (LbIsPart), the setting may widen or close it
+    If art <> "" Then
+        If sMode = "all" Then
+            bArt = True
+        ElseIf sMode = "none" Then
+            bArt = False
+        ElseIf CStr(p(0)) <> "" Then
+            bArt = True
+        Else
+            bArt = LbIsPart(row, art)
+        End If
+    End If
+    If bArt Then l1 = "Арт.: " & art
     If CStr(p(0)) <> "" Then l1 = l1 & IIf(l1 <> "", " · ", "") & "S/N: " & p(0)
     If WmsPack.PackOf(n, pu, pn) Then
         l2 = "Выдача по 1 " & pu & " · в 1 " & unit & " — " & WmsIssue.QtyText(pn) & " " & pu
@@ -346,6 +384,16 @@ Private Function LbExtra(n As Long, row As Variant, goods As Variant) As Variant
         Next i
     End If
     LbExtra = Array(l1, l2)
+End Function
+
+' 1.3.0: test seam — the extra lines of the label of EI n as "line 1|line 2"
+Function TestLbExtra(n As Long) As String
+    Dim row As Variant, ex As Variant
+    WmsInit()
+    WmsCat.GoodsLoad()
+    row = WmsIssue.StockSheet().getCellRangeByPosition(0, n, SC_LAST, n).getDataArray()(0)
+    ex = LbExtra(n, row, LbGoods(), LbArtMode())
+    TestLbExtra = ex(0) & "|" & ex(1)
 End Function
 
 ' the page style of the labels (made once; the size follows the last labels)

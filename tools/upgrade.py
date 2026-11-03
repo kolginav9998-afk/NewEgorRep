@@ -492,9 +492,11 @@ def step_130(doc, done):
     sheets = doc.Sheets
     B.spell_130(doc, sheets)
     B.buttons_130(doc, sheets)
+    B.settings_130(doc, sheets)
     done.append(f"1.3.0: лист «{B.SPELL}» (все написания поставщиков книги, одинаковые по смыслу вместе; столбец «Привести к» — ваше решение, кнопка меняет только название поставщика: "
                 f"ожидаемые строки как будто вы вписали сами, принятые — исправлением позиции, визиты — исправлением визита, каждое в журнале; перед этим копия книги) и кнопка "
                 f"«Одно написание…» на «{B.SUPPLIERS}»; данные не менялись")
+    done.append(f"1.3.0: в «{B.SETTINGS}» добавлена настройка «Артикул на этикетке: у кого печатать» (детали / все / нет); то, что вы там писали, не тронуто")
     return []
 
 
@@ -710,6 +712,9 @@ def allowed_change(sheet, r, c, old=""):
     if sheet == B.DAYREP:
         # 1.1: the end of a period (A4, B4) on «Отчёт дня»
         return (r, c) in ((3, 0), (3, 1))
+    if sheet == B.SETTINGS:
+        # 1.3.0: the settings rows that the old book did not have are written into the empty cells of the first free rows
+        return r >= 1 and c <= 3 and old == ""
     if sheet == B.CATS:
         # 1.1: the headers of the columns «Не считать», «Позиций», «ЕИ с остатком» (C1…E1), the hint moved from D1 to G1; the categories and their words are not touched
         return r == 0 and 2 <= c <= B.CATS_HINT_COL

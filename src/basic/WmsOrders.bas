@@ -1146,7 +1146,7 @@ End Sub
 ' what its operations wrote (its expected date Q, open after the receipt, changes no status — D-089). Cancelled rows and
 ' copies are never touched here; a key in V that WMS did not write marks the row КОПИЯ.
 Sub PreviewOrderRow(r As Long, bKeyTouched As Boolean)
-    Dim sh As Object, kind As String, p As String, bNameFixed As Boolean, sPast As String
+    Dim sh As Object, kind As String, p As String, bNameFixed As Boolean, sPast As String, bSupFixed As Boolean
     sh = OrdersSheet()
     kind = OrderRowKind(r)
     Select Case kind
@@ -1157,6 +1157,8 @@ Sub PreviewOrderRow(r As Long, bKeyTouched As Boolean)
     Case "OPEN"
         ' 1.1: a name typed or pasted in several lines is one line («Винт» / «м3х25» / «Din 912» → «Винт м3х25 DIN 912»)
         If mWaitHint Then bNameFixed = WmsNames.FixNameCell(SH_ORDERS, r, OC_NAME)
+        ' 1.3.0: the supplier written otherwise than in «Поставщики» (the case, the spaces, the signs, the Latin letters) is written as the directory has it
+        If mWaitHint Then bSupFixed = WmsSup.SupFixCell(SH_ORDERS, r, OC_SUPPLIER)
         SetIfDiff(sh.getCellByPosition(OC_STATUS, r), OpenRowStatus(r))
         p = OpenRowProblem(r)
         If p <> "" Then
@@ -1168,6 +1170,7 @@ Sub PreviewOrderRow(r As Long, bKeyTouched As Boolean)
             p = sh.getCellByPosition(OC_CTL, r).getString()
         End If
         If bNameFixed Then p = "Название записано в одну строку" & IIf(p <> "", " · " & p, "")
+        If bSupFixed Then p = "Поставщик записан как в справочнике: " & sh.getCellByPosition(OC_SUPPLIER, r).getString() & IIf(p <> "", " · " & p, "")
         SetIfDiff(sh.getCellByPosition(OC_CTL, r), p)
         SetIfDiff(sh.getCellByPosition(OC_STOCK, r), "")
         SetIfDiff(sh.getCellByPosition(OC_DUP, r), "")

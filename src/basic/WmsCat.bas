@@ -291,6 +291,14 @@ Miss:
     nRow = -1
 End Function
 
+' 1.3.0: a card of the registry is a part (the one definition for «Остаток деталей» and for the article on the label): its category is «Детали» («Деталь»), or it came by «Иной приход» of the type «Детали»
+' (the source or the type of the source of the card says so). cat — the category, src — «Источник», stype — «Тип источника» of the card
+Function IsPartCard(cat As String, src As String, stype As String) As Boolean
+    Dim c As String
+    c = LCase(Trim(cat))
+    IsPartCard = (c = "детали" Or c = "деталь" Or LCase(Left(Trim(src), 6)) = "детали" Or LCase(Trim(stype)) = "детали")
+End Function
+
 ' the category of a goods in the order: the registry (sRegCat), «Номенклатура», the hint by the words. «Номенклатура» must be read (GoodsLoad)
 Function CategoryOf(sName As String, sArt As String, sRegCat As String) As String
     Dim nRow As Long, c As String

@@ -1209,6 +1209,11 @@ Function ReceivedOn(sup As String, dt As Double) As Long
     ReceivedOn = n
 End Function
 
+' 1.3.0: test seam — how many open positions the last OpenPositions found
+Function TestSpN() As Long
+    TestSpN = gSpN
+End Function
+
 ' the row (0-based) of «Заказы» the last return window wrote for the replacement (0 — none)
 Function TestSupNewRow() As Long
     TestSupNewRow = gSuNewRow

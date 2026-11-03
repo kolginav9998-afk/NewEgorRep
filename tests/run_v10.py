@@ -6058,6 +6058,135 @@ def v76_suppliers_one_spelling():
         s.close()
 
 
+@case
+def v77_supplier_key_everywhere():
+    """1.3.0: один ключ поставщика на всю книгу. «Принять товар» (OpenPositions), «Принято сегодня» (ReceivedOn) и число открытых позиций при приезде машины находят поставщика по ключу, а не по тексту:
+    «ВсеИнструменты» находит «Все инструменты», «все инструменты.» и «Bce инструменты». Новое написание, которое по ключу совпадает с «Поставщиками», записывается как в справочнике — на «Заказах» (в «Контроле»
+    сказано), при приезде машины и в «Исправить» визита; особые приходы («Офис») и поставщик, которого в справочнике нет, остаются как набраны. SupId: регистр, ё, латинские буквы-двойники, пробелы, знаки"""
+    c = "V77"
+    s = ready(Session(new_wms("v77")))
+    try:
+        od = s.doc.Sheets.getByName("Заказы")
+
+        def typed(r, *a_, **kw):
+            """a row as the storekeeper types it: the cells, then the change handler of «Заказы» for the cell L (an API write does not fire it)"""
+            order(s, r, *a_, **kw)
+            s.B("OnOrdersChange", od.getCellByPosition(11, r), module="WmsOrders")
+
+        ids = {t: s.B("SupId", t, module="WmsSup") for t in ["Все инструменты", "ВсеИнструменты", "все инструменты.", "Bce инструменты", '"Все-Инструменты"', "ВСЕ  ИНСТРУМЕНТЫ ", "Ромашка", "Ёлка", "елка"]}
+        same = {ids[t] for t in ["Все инструменты", "ВсеИнструменты", "все инструменты.", "Bce инструменты", '"Все-Инструменты"', "ВСЕ  ИНСТРУМЕНТЫ "]}
+        R.add(c, "SupId: «Все инструменты», «ВсеИнструменты», «все инструменты.», «Bce инструменты» (латинские B, c, e), «\"Все-Инструменты\"», «ВСЕ  ИНСТРУМЕНТЫ » — один ключ; «Ромашка» другой; «Ёлка» = «елка»",
+              len(same) == 1 and ids["Ромашка"] not in same and ids["Ёлка"] == ids["елка"], str(ids))
+        lk = {t: s.B("SupLike", t, module="WmsSup") for t in ["Все инструменты", "ООО Все инструменты", "ВсеИнструменты.ру", "Все инструменты (Москва)", "ИП Иванов", "Иванов"]}
+        R.add(c, "SupLike: без «ООО», «ИП», «.ру» и скобок — «ООО Все инструменты», «ВсеИнструменты.ру», «Все инструменты (Москва)» похожи на «Все инструменты»; «ИП Иванов» — на «Иванов»",
+              len({lk[t] for t in ["Все инструменты", "ООО Все инструменты", "ВсеИнструменты.ру", "Все инструменты (Москва)"]}) == 1 and lk["ИП Иванов"] == lk["Иванов"] and lk["Иванов"] != lk["Все инструменты"], str(lk))
+        # the orders before the directory knows the supplier: three spellings
+        typed(1, "1", "Болт М8", qty="10", supplier="Все инструменты", art="Б-8")
+        typed(2, "1", "Гайка М8", qty="10", supplier="все инструменты.", art="Г-8")
+        typed(3, "1", "Шайба М8", qty="10", supplier="Bce инструменты", art="Ш-8")
+        typed(4, "2", "Кран", qty="2", supplier="Ромашка", art="К-1")
+        rcv = receive(s, 2, "10", place="A-01", k=0)
+        open_vs = s.B("OpenPositions", "ВсеИнструменты", module="WmsSupply")
+        n_open = int(s.B("TestSpN", module="WmsSupply"))
+        recd = int(s.B("ReceivedOn", "ВСЕ ИНСТРУМЕНТЫ", serial(), module="WmsSupply"))
+        R.add(c, "«Принять товар»: по «ВсеИнструменты» открыты 2 позиции из трёх (Гайка уже принята) — строки с тремя написаниями; «Принято сегодня» — 1 (по «ВСЕ ИНСТРУМЕНТЫ»)",
+              rcv.startswith("OK") and n_open == 2 and recd == 1, f"{open_vs}; открыто {n_open}; принято {recd}; {rcv}")
+        # the directory, then the typed supplier is written as the directory has it
+        sup_sh = s.doc.Sheets.getByName("Поставщики")
+        sup_sh.getCellByPosition(0, 1).setString("Все инструменты")
+        typed(5, "3", "Винт М5", qty="3", supplier="ВсеИнструменты", art="В-5")
+        typed(6, "3", "Пила", qty="1", supplier="Все инструменты ", art="П-1")
+        typed(7, "3", "Лампа", qty="1", supplier="Офис", art="Л-1")
+        typed(8, "3", "Кабель", qty="1", supplier="Новый поставщик", art="К-2")
+        got = [od.getCellByPosition(11, r).getString() for r in (5, 6, 7, 8)]
+        ctl5 = od.getCellByPosition(24, 5).getString()
+        R.add(c, "на «Заказах» набрано «ВсеИнструменты» и «Все инструменты » — записано «Все инструменты» (в «Контроле» сказано); «Офис» (особый приход) и «Новый поставщик» (нет в справочнике) — как набраны",
+              got == ["Все инструменты", "Все инструменты", "Офис", "Новый поставщик"] and "записан как в справочнике" in ctl5, f"{got}; {ctl5}")
+        # the vehicle: the supplier typed otherwise is written as in the directory, and the number of open positions is by the key
+        car = lambda f, *a: s.B(f, *a, module="WmsCar")      # noqa: E731
+        car("TestCarNow", serial() + 0.4)
+        ca = car("CarArrive", "Газель А111АА", "ВСЕ ИНСТРУМЕНТЫ")
+        cars = s.doc.Sheets.getByName("Приход авто")
+        v1 = cars.getCellByPosition(3, 6).getString()
+        ctl = cars.getCellByPosition(11, 6).getString()
+        R.add(c, "приезд машины «ВСЕ ИНСТРУМЕНТЫ» — в визите «Все инструменты» (в строке сказано), открытых позиций поставщика: 4 (болт, шайба, винт, пила); визит без перезаписи справочника",
+              ca.startswith("OK:") and v1 == "Все инструменты" and "поставщик записан как в справочнике" in ctl and "открытых позиций заказов поставщика: 4" in ctl, f"{ca}; {v1}; {ctl}")
+        car("TestCarNow", serial() + 0.5)
+        car("CarDepart", 1)
+        car("TestCarNow", serial() + 0.6)
+        fx = car("CarFix", 1, "", "все инструменты.", "", "")
+        R.add(c, "«Исправить» визита: «все инструменты.» → то же, что в справочнике — изменений нет (поставщик остаётся «Все инструменты»)", fx.startswith("ERR:") and "изменений нет" in fx and cars.getCellByPosition(3, 6).getString() == "Все инструменты", fx)
+        st = s.B("SelfCheck", module="WmsDiagnostics")
+        R.add(c, "самопроверка — без ошибок", "ошибок 0" in st.split("\n")[0], st.split("\n")[0])
+    finally:
+        s.close()
+
+
+@case
+def v78_label_article_of_parts():
+    """1.3.0: артикул детали на этикетке печатается не только когда категория ЕИ в реестре точно «Детали». Деталь — одно определение для «Остатка деталей» и этикетки: категория «Детали» («Деталь»),
+    приход типа «Детали» (при любой категории), а у ЕИ без своей категории — категория товара в «Номенклатуре» или подсказка по словам листа «Категории». Остальным (метиз) артикул не печатается; настройка
+    «Артикул на этикетке» на «Настройках»: «детали» (по умолчанию) / «все» / «нет»; пустой артикул не печатается нигде"""
+    c = "V78"
+    s = ready(Session(new_wms("v78")))
+    try:
+        stk = s.doc.Sheets.getByName("Наличие")
+        names = [("Корпус фары", "FAR-1", "Детали"), ("Втулка", "VT-2", "Запчасти"), ("Шестерня", "SH-3", ""), ("Крышка редуктора", "KR-4", ""), ("Болт М8", "B-8", "Метизы"), ("Ось", "OS-6", "Деталь"),
+                 ("Прокладка", "", "Детали"), ("Сувенир", "KB-8", "")]
+        oks = []
+        for i, (nm, art, cat) in enumerate(names, start=1):
+            order(s, i, str(i), nm, qty="2", supplier="Ромашка", art=art, S=cat) if cat else order(s, i, str(i), nm, qty="2", supplier="Ромашка", art=art)
+            oks.append(receive(s, i, "2", place=f"A-0{i}", k=0))
+        ei = [int(ords(s, i)[21][3:]) for i in range(1, len(names) + 1)]      # the numbers of the EIs that the receipts made (the test book has its own stock before them)
+        stk.unprotect("wms")
+        # EI 2 came as «Иной приход» of the type «Детали» with another category; EI 3 has no category, but «Номенклатура» says «Детали»; EI 4 has none and the hint of «Категории» says «Детали»
+        stk.getCellByPosition(9, ei[1]).setString("Детали")
+        gd = s.doc.Sheets.getByName("Номенклатура")
+        gd.unprotect("wms")
+        gd.getCellByPosition(1, 1).setString("Шестерня")
+        gd.getCellByPosition(2, 1).setString("SH-3")
+        gd.getCellByPosition(4, 1).setString("Детали")
+        ct = s.doc.Sheets.getByName("Категории")
+        ct.unprotect("wms")
+        k = 1
+        while k < 300 and ct.getCellByPosition(0, k).getString() != "":
+            k += 1
+        ct.getCellByPosition(0, k).setString("Детали")
+        ct.getCellByPosition(1, k).setString("крышка")
+        s.B("CtLoad", module="WmsCat")
+        got = {i: s.B("TestLbExtra", ei[i - 1], module="WmsItem") for i in range(1, len(names) + 1)}
+        R.add(c, "заказы приняты (все операции прошли)", all(str(x).startswith("OK") for x in oks), str(oks))
+        R.add(c, "артикул детали на этикетке: категория «Детали» — есть; тип прихода «Детали» при категории «Запчасти» — есть; нет категории, но «Номенклатура» говорит «Детали» — есть; нет категории, подсказка по "
+                 "словам «Детали» — есть; категория «Деталь» — есть",
+              got[1].startswith("Арт.: FAR-1") and got[2].startswith("Арт.: VT-2") and got[3].startswith("Арт.: SH-3") and got[4].startswith("Арт.: KR-4") and got[6].startswith("Арт.: OS-6"), str(got))
+        R.add(c, "артикул не печатается: метиз («Болт М8», категория «Метизы»); у детали без артикула; у ЕИ без категории и без признака детали («Сувенир»)",
+              got[5].startswith("|") and got[7].startswith("|") and got[8].startswith("|"), str(got))
+        parts = s.B("PartsRefresh", "", False, module="WmsStockView")
+        pv = s.doc.Sheets.getByName("Остаток деталей")
+        arts = [pv.getCellByPosition(0, 4 + i).getString() for i in range(20)]
+        R.add(c, "«Остаток деталей» считает деталью то же: FAR-1, VT-2 (тип «Детали»), OS-6 — в списке; метиз B-8 — нет", parts.startswith("OK:") and "FAR-1" in arts and "VT-2" in arts and "OS-6" in arts and "B-8" not in arts, f"{parts}; {arts}")
+        # the setting
+        st = s.doc.Sheets.getByName("Настройки")
+        rows = st.getCellRangeByPosition(0, 1, 3, 10).getDataArray()
+        rr = next((i + 1 for i, x in enumerate(rows) if x[3] == "LABEL_ART"), -1)
+        R.add(c, "в «Настройках» есть строка «Артикул на этикетке: у кого печатать» (код скрыт), значение «детали»", rr > 0 and rows[rr - 1][1] == "детали", str(rows[:3]))
+        if rr > 0:
+            st.getCellByPosition(1, rr).setString("все")
+            all_ = {i: s.B("TestLbExtra", ei[i - 1], module="WmsItem") for i in (5, 7, 8)}
+            st.getCellByPosition(1, rr).setString("нет")
+            none_ = {i: s.B("TestLbExtra", ei[i - 1], module="WmsItem") for i in (1, 2)}
+            st.getCellByPosition(1, rr).setString("ерунда")
+            dflt = s.B("TestLbExtra", ei[0], module="WmsItem")
+            R.add(c, "«все» — артикул печатается у метиза и у ЕИ без категории, но не у ЕИ без артикула; «нет» — ни у кого; непонятное слово — как «детали»",
+                  all_[5].startswith("Арт.: B-8") and all_[8].startswith("Арт.: KB-8") and all_[7].startswith("|") and none_[1].startswith("|") and none_[2].startswith("|") and dflt.startswith("Арт.: FAR-1"),
+                  f"{all_}; {none_}; {dflt}")
+        seq0 = str(s.sysv("LAST_SEQ"))
+        lb = s.B("LabelPrint", (ei[0], ei[1], ei[4]), 1, "40×30", module="WmsItem")
+        R.add(c, "этикетки печатаются (3 штуки) и ничего не проводят: номер последней операции журнала прежний", lb.startswith("OK:этикеток 3") and str(s.sysv("LAST_SEQ")) == seq0, f"{lb}; {seq0} → {s.sysv('LAST_SEQ')}")
+    finally:
+        s.close()
+
+
 # ================================================================ runner
 
 def main():

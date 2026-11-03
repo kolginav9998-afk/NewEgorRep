@@ -1785,6 +1785,9 @@ SETTINGS_WIDTHS = [11000, 3200, 24000, 2400]
 SETTINGS_ROWS = [
     ("Большая операция: спрашивать дважды от количества", 1000,
      "Выдача или списание от этого количества (в единицах учёта: штуки, метры, килограммы) спрашивается дважды — лишний ноль при вводе обходится дорого. 0 — не спрашивать.", "BIG_QTY"),
+    ("Артикул на этикетке: у кого печатать", "детали",
+     "детали — у деталей и у ЕИ с серийным номером (деталь: категория «Детали» в реестре, в «Номенклатуре» или по словам листа «Категории»; приход типа «Детали»); все — у всех, у кого артикул есть; "
+     "нет — не печатать (серийный номер остаётся). Артикул печатается, только если он записан у ЕИ.", "LABEL_ART"),
 ]
 
 
@@ -1795,14 +1798,36 @@ def build_settings(doc, sh):
     sh.getCellRangeByPosition(1, 1, 1, 40).CellBackColor = INPUT_HEAD_10
     sh.getCellRangeByPosition(1, 1, 1, 40).HoriJustify = 3
     sh.getCellRangeByPosition(0, 1, 2, 40).IsTextWrapped = True
-    for r, (a, v, e, code) in enumerate(SETTINGS_ROWS, start=1):
-        sh.getCellByPosition(0, r).setString(a)
+    for r, row in enumerate(SETTINGS_ROWS, start=1):
+        settings_row(sh, r, row)
+    sh.getColumns().getByIndex(3).IsVisible = False
+
+
+def settings_row(sh, r, row):
+    """a row of «Настройки»: what to set, the value (a number or a word), the explanation, the code (hidden)"""
+    a, v, e, code = row
+    sh.getCellByPosition(0, r).setString(a)
+    if isinstance(v, str):
+        sh.getCellByPosition(1, r).setString(v)
+    else:
         sh.getCellByPosition(1, r).setValue(v)
         sh.getCellByPosition(1, r).NumberFormat = 0
-        sh.getCellByPosition(2, r).setString(e)
-        sh.getCellByPosition(2, r).CharColor = MUTED
-        sh.getCellByPosition(3, r).setString(code)
-    sh.getColumns().getByIndex(3).IsVisible = False
+    sh.getCellByPosition(2, r).setString(e)
+    sh.getCellByPosition(2, r).CharColor = MUTED
+    sh.getCellByPosition(3, r).setString(code)
+
+
+def settings_130(doc, sheets):
+    """1.3.0: the settings of this release that «Настройки» of an earlier book does not have are added in the first free rows (what is written there is not touched); a new book has them already"""
+    if not sheets.hasByName(SETTINGS):
+        return
+    sh = sheets.getByName(SETTINGS)
+    d = sh.getCellRangeByPosition(0, 1, 3, 40).getDataArray()
+    have = {str(x[3]) for x in d}
+    free = [i + 1 for i, x in enumerate(d) if all(str(c) == "" for c in x)]
+    for row in SETTINGS_ROWS:
+        if row[3] not in have and free:
+            settings_row(sh, free.pop(0), row)
 
 
 # 1.1: «Без категории» (WmsCat SH_NOCAT) — the names of the registry with no category in the registry nor in «Номенклатура», with the hint; the column «Категория» is filled with the hint and
@@ -3388,6 +3413,7 @@ def build(office, out_path, test=False, instance_id=None):
     buttons_120(doc, sheets)
     spell_130(doc, sheets)
     buttons_130(doc, sheets)
+    settings_130(doc, sheets)
     main_buttons_110(doc, sheets)
     hotkeys_10(doc)
     build_service(doc, sheets)

@@ -9,6 +9,8 @@ Private Const ST_ROWS = 40
 
 ' the codes of the settings
 Public Const SET_BIG_QTY = "BIG_QTY"
+' 1.3.0: who gets the article on the label of an EI: «детали» (parts, an EI with a serial number), «все» (every EI that has an article), «нет» (nobody)
+Public Const SET_LABEL_ART = "LABEL_ART"
 
 ' the text of a setting; the default when the sheet, the code or the value is not there
 Function SettingText(sCode As String, sDefault As String) As String
