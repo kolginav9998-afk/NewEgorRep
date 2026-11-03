@@ -10,6 +10,9 @@ Option Explicit
 Global gRcvNote As String
 ' 1.0 (З5): the reason of «Отменить заказ» / «Отменить остаток» / «Отменить весь заказ» (set by the window, cleared after)
 Global gCancelReason As String
+' 1.3.0: «Привести поставщиков к одному написанию» исправляет позицию, меняя ТОЛЬКО поставщика: когда здесь буквы столбцов («L»), PositionFixRow отказывается (SKIP), если вместе с ними изменилось что-то ещё —
+' позиция тогда остаётся как была. Пусто — обычное «Исправить позицию»
+Global gPosFixOnly As String
 ' 1.0: OrderCancelCheck — the checks of a cancellation run without the operation (the question comes after them)
 Private mCheckOnly As Boolean
 
@@ -1942,6 +1945,12 @@ Function PositionFixRow(r As Long, vOrder As Variant, vName As Variant, vInvoice
     If chg = "" Then
         PositionFixRow = "SKIP:ничего не изменилось"
         Exit Function
+    End If
+    If gPosFixOnly <> "" Then
+        If chg <> gPosFixOnly Then
+            PositionFixRow = "SKIP:кроме поставщика различаются " & Replace(chg, gPosFixOnly, "") & " (значения позиции не совпали с записанными) — позиция не тронута"
+            Exit Function
+        End If
     End If
     list = PositionReceipts(olid, why)
     If why <> "" Then

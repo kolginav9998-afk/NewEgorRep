@@ -268,13 +268,54 @@ def lost_error_traps(src_dir):
     return bad
 
 
+# 1.3.0: StrComp(a, b, 0) in LibreOffice Basic is the TEXT comparison (the case does not count, «ß» = «ss»), StrComp(a, b, 1) and StrComp(a, b) are the binary ones — the other way round than in VBA and in the
+# help of LibreOffice. The exact comparison of two texts is «a = b» / «a <> b» (and «<», «<=» for the order of the letters as they are)
+def strcomp_in(text):
+    """the lines of a Basic source (text) with StrComp(…, 0): [(line number, text)] — the arguments are cut by the brackets, so nested calls are fine"""
+    import re
+    out = []
+    for i, ln in enumerate(text.split("\n")):
+        t = re.sub(r'"(?:[^"]|"")*"', '""', ln).split("'")[0]
+        for m in re.finditer(r"\bStrComp\s*\(", t, re.I):
+            depth, j, args, cur = 1, m.end(), [], ""
+            while j < len(t) and depth > 0:
+                ch = t[j]
+                if ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                if ch == "," and depth == 1:
+                    args.append(cur.strip())
+                    cur = ""
+                else:
+                    cur += ch
+                j += 1
+            args.append(cur.strip())
+            if len(args) == 3 and args[2] == "0":
+                out.append((i + 1, ln.strip()))
+                break
+    return out
+
+
+def strcomp_traps(src_dir):
+    """the uses of StrComp(…, 0) in a folder of Basic sources: ["Module.bas:line: StrComp(…, 0) — текстовое сравнение: text", ...]"""
+    bad = []
+    for fn in sorted(os.listdir(src_dir)):
+        if fn.endswith(".bas"):
+            for ln, t in strcomp_in(open(os.path.join(src_dir, fn), encoding="utf-8").read()):
+                bad.append(f"{fn}:{ln}: StrComp(…, 0) — это сравнение без учёта регистра (в Basic наоборот, чем в VBA); точное — «a = b»: {t[:80]}")
+    return bad
+
+
 def main():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     # the WMS book and (1.0) the books of the tools, of the transfer and of the upgrade wizard
     bad = [x for d in ("basic", "toolbox", "transfer", "upgrade") if os.path.isdir(os.path.join(root, "src", d))
-           for x in reserved_names(os.path.join(root, "src", d)) + precedence_traps(os.path.join(root, "src", d)) + eager_traps(os.path.join(root, "src", d)) + lost_error_traps(os.path.join(root, "src", d))]
+           for x in reserved_names(os.path.join(root, "src", d)) + precedence_traps(os.path.join(root, "src", d)) + eager_traps(os.path.join(root, "src", d)) + lost_error_traps(os.path.join(root, "src", d)) + strcomp_traps(os.path.join(root, "src", d))]
     if bad:
-        print("COMPILE FAILED: ловушки LibreOffice Basic (зарезервированное слово в имени, однострочный If … ReDim, And и Or без скобок, IIf и And/Or вычисляют всё — Mid(…, 0, …), обработчик стирает ошибку до чтения): " + "; ".join(bad))
+        print("COMPILE FAILED: ловушки LibreOffice Basic (зарезервированное слово в имени, однострочный If … ReDim, And и Or без скобок, IIf и And/Or вычисляют всё — Mid(…, 0, …), обработчик стирает ошибку до чтения, StrComp(…, 0) — сравнение без учёта регистра): " + "; ".join(bad))
         sys.exit(1)
     ap = argparse.ArgumentParser()
     ap.add_argument("--display", default=os.environ.get("DISPLAY", ":99"))

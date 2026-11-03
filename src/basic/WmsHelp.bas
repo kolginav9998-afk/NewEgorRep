@@ -315,7 +315,7 @@ Function HelpTopic(sSheet As String) As String
     Case SH_FIND: HelpTopic = "6а. "
     Case SH_MAP, "Топология", "Места": HelpTopic = "6б. "
     Case SH_STOCK, "Резервы": HelpTopic = "6в. "
-    Case "Снабжение", "Поставщики", "Номенклатура": HelpTopic = "6г. "
+    Case "Снабжение", "Поставщики", "Номенклатура", "Написания поставщиков": HelpTopic = "6г. "
     Case "Комплекты": HelpTopic = "6д. "
     Case "Сборка деталей": HelpTopic = "6т. "
     Case "Инструмент ЧПУ": HelpTopic = "6у. "
@@ -687,7 +687,7 @@ Private Function Anonymize(hd As Object) As Long
         End If
     Next a
     ' 1.1.1: the views of 1.1 (made from the registry, the issues and the journal) hold names, recipients and the words that were searched for — emptied, their buttons make them again
-    For Each a In Array("Наличие по названию", "Остаток деталей", "Операции дня", "Проверка названий", "Без категории", "ABC-анализ", "Без движения", "Серийные детали", "Инструмент ЧПУ")
+    For Each a In Array("Наличие по названию", "Остаток деталей", "Операции дня", "Проверка названий", "Без категории", "ABC-анализ", "Без движения", "Серийные детали", "Инструмент ЧПУ", "Написания поставщиков")
         If hd.Sheets.hasByName(a) Then
             sh = hd.Sheets.getByName(a)
             If sh.isProtected() Then sh.unprotect(PROTECT_PWD)

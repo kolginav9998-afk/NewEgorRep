@@ -6,11 +6,11 @@ Option Explicit
 
 Public Const SH_SUPPLIERS = "Поставщики"
 ' «Поставщики»: A the supplier (one spelling), B phone, C contact, D the usual delivery time in days, E note
-Private Const SU_NAME = 0
-Private Const SU_PHONE = 1
-Private Const SU_CONTACT = 2
-Private Const SU_LEAD = 3
-Private Const SU_NOTE = 4
+Public Const SU_NAME = 0
+Public Const SU_PHONE = 1
+Public Const SU_CONTACT = 2
+Public Const SU_LEAD = 3
+Public Const SU_NOTE = 4
 
 ' the result of the last return window (for the tests): the row of «Корректировки», the row of the replacement in «Заказы»
 Global gSuRetRow As Long
@@ -79,16 +79,10 @@ Function SupplierRow(ByVal s As String) As Long
 EH:
 End Function
 
-' a supplier as it is compared: upper case, «ё» = «е», the spaces, the quotes and the dots do not part two spellings
+' a supplier as it is compared (1.3.0: one rule for the whole book — WmsSup.SupId: the case, «ё», the Latin letters that look like the Russian ones, the spaces, the quotes, the dots, the commas
+' and the hyphens do not part two spellings)
 Function SupKey(ByVal s As String) As String
-    Dim i As Integer, ch As String, r As String
-    s = UCase(Trim(s))
-    For i = 1 To Len(s)
-        ch = Mid(s, i, 1)
-        If ch = "Ё" Then ch = "Е"
-        If ch <> " " And ch <> """" And ch <> "«" And ch <> "»" And ch <> "." And ch <> "," And ch <> "'" Then r = r & ch
-    Next i
-    SupKey = r
+    SupKey = WmsSup.SupId(s)
 End Function
 
 ' the usual delivery time of supplier s in days («Поставщики» D); 0 when not known
@@ -532,7 +526,7 @@ Public Const GD_PACKN = 5
 Public Const GD_PACKU = 6
 Private Const GD_MIN = 7
 Private Const GD_BATCH = 8
-Private Const GD_SUP = 9
+Public Const GD_SUP = 9
 Public Const GD_PHOTO = 10
 Private Const GD_NOTE = 11
 Public Const GD_STOCK = 12
@@ -676,7 +670,7 @@ End Function
 ' the open positions of «Заказы» (sSup — one supplier, "" — all): gSpN rows in gSpRow, the goods in gSpKey, the rest in gSpRest
 Function OpenPositions(sSup As String) As String
     Dim sh As Object, last As Long, cond As String, a As Variant, nItems As Long, i As Long, r As Long, d As Variant, n As Long, rv As Variant
-    Dim od As Variant, ord As Double, rcv As Double, msg As String, canon As String
+    Dim od As Variant, ord As Double, rcv As Double, msg As String, canon As String, kSup As String, bKeep As Boolean, nOut As Long
     gSpN = 0
     ReDim gSpRow(0)
     ReDim gSpKey(0)
@@ -686,7 +680,8 @@ Function OpenPositions(sSup As String) As String
     last = WmsOrders.LastRow(sh)
     If last < 1 Then Exit Function
     cond = OpenCond(last)
-    If sSup <> "" Then cond = cond & "*(" & WmsView.ColRng(SH_ORDERS, OC_SUPPLIER, 1, last) & "=""" & Esc(sSup) & """)"
+    ' 1.3.0: the supplier is compared by its key (WmsSup.SupId) below, not by the text in the formula: «Все инструменты» and «ВсеИнструменты» are one supplier
+    If sSup <> "" Then kSup = WmsSup.SupId(sSup)
     a = WmsView.EngList("TEXTJOIN("";"";1;IF(" & cond & ";ROW(" & WmsView.ColRng(SH_ORDERS, OC_NAME, 1, last) & ")-1;""""))", nItems)
     If gVwEngFail <> "" Then
         OpenPositions = "ERR:" & gVwEngFail
@@ -699,27 +694,32 @@ Function OpenPositions(sSup As String) As String
     For i = 0 To nItems - 1
         r = CLng(a(i))
         d = sh.getCellRangeByPosition(0, r, OC_EI, r).getDataArray()(0)
-        ord = 0
-        rcv = 0
-        canon = CStr(d(OC_EI))
-        If canon <> "" Then
-            If WmsOrders.StrictEI(canon, n) Then
-                If WmsOrders.RcvRegistered(n, rv) Then
-                    If WmsOrders.OlValid(CLng(rv(RV_OL)), od) Then
-                        ord = od(OD_ORD)
-                        rcv = od(OD_RCV)
+        bKeep = True
+        If kSup <> "" Then bKeep = (WmsSup.SupId(CStr(d(OC_SUPPLIER))) = kSup)
+        If bKeep Then
+            ord = 0
+            rcv = 0
+            canon = CStr(d(OC_EI))
+            If canon <> "" Then
+                If WmsOrders.StrictEI(canon, n) Then
+                    If WmsOrders.RcvRegistered(n, rv) Then
+                        If WmsOrders.OlValid(CLng(rv(RV_OL)), od) Then
+                            ord = od(OD_ORD)
+                            rcv = od(OD_RCV)
+                        End If
                     End If
                 End If
+            Else
+                If Not WmsOrders.ParseQtyValueAs(d(OC_ORDQTY), "заказано", ord, msg) Then ord = 0
             End If
-        Else
-            If Not WmsOrders.ParseQtyValueAs(d(OC_ORDQTY), "заказано", ord, msg) Then ord = 0
+            gSpRow(nOut) = r
+            gSpKey(nOut) = GoodsKey(CStr(d(OC_ART)), CStr(d(OC_NAME)))
+            gSpRest(nOut) = WmsIssue.Round3(ord - rcv)
+            If gSpRest(nOut) < 0 Then gSpRest(nOut) = 0
+            nOut = nOut + 1
         End If
-        gSpRow(i) = r
-        gSpKey(i) = GoodsKey(CStr(d(OC_ART)), CStr(d(OC_NAME)))
-        gSpRest(i) = WmsIssue.Round3(ord - rcv)
-        If gSpRest(i) < 0 Then gSpRest(i) = 0
     Next i
-    gSpN = nItems
+    gSpN = nOut
 End Function
 
 ' «Ожидаем»: the positions still expected, grouped by supplier (the late ones first in a group). OK:<n> / ERR:…
@@ -1186,14 +1186,27 @@ Function CarAccept() As String
     gUiLastMsg = CarAccept
 End Function
 
-' how many receipts of supplier sup were posted with the receipt date dt («Заказы» L, N; a row with its EI)
+' how many receipts of supplier sup were posted with the receipt date dt («Заказы» L, N; a row with its EI). 1.3.0: the supplier is compared by its key (WmsSup.SupId)
 Function ReceivedOn(sup As String, dt As Double) As Long
-    Dim last As Long
-    last = WmsOrders.LastRow(WmsOrders.OrdersSheet())
+    Dim sh As Object, last As Long, d As Variant, i As Long, k As String, n As Long, x As Variant
+    sh = WmsOrders.OrdersSheet()
+    last = WmsOrders.LastRow(sh)
     If last < 1 Then Exit Function
-    ReceivedOn = CLng(WmsView.ListNum(Array(WmsView.Eng("SUMPRODUCT((" & WmsView.ColRng(SH_ORDERS, OC_SUPPLIER, 1, last) & "=""" & Esc(sup) & """)*(" _
-        & WmsView.ColRng(SH_ORDERS, OC_EI, 1, last) & "<>"""")*(LEFT(" & WmsView.ColRng(SH_ORDERS, OC_STATUS, 1, last) & ";14)<>""Поступление уд"")*" _
-        & WmsView.DaysExpr(WmsView.ColRng(SH_ORDERS, OC_RDATE, 1, last), dt, dt) & ")")), 0))
+    k = WmsSup.SupId(sup)
+    d = sh.getCellRangeByPosition(0, 1, OC_STATUS, last).getDataArray()
+    For i = 0 To UBound(d)
+        If CStr(d(i)(OC_EI)) <> "" Then
+            x = d(i)(OC_RDATE)
+            If VarType(x) = 5 Then
+                If x >= Int(dt) And x < Int(dt) + 1 Then
+                    If Left(CStr(d(i)(OC_STATUS)), 14) <> "Поступление уд" Then
+                        If WmsSup.SupId(CStr(d(i)(OC_SUPPLIER))) = k Then n = n + 1
+                    End If
+                End If
+            End If
+        End If
+    Next i
+    ReceivedOn = n
 End Function
 
 ' the row (0-based) of «Заказы» the last return window wrote for the replacement (0 — none)

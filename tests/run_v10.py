@@ -5767,6 +5767,13 @@ def v74_lint_eager():
     R.add(c, "обработчик, стирающий ошибку до чтения («ProgressEnd», «On Error Resume Next» раньше «Error$»), находится; прочитавший первым и метка «DONE» — нет", lh == [True, True, False, False], str(lh))
     gone = [x for d in ("basic", "toolbox", "transfer", "upgrade") for x in cc.lost_error_traps(os.path.join(root, "src", d))]
     R.add(c, "в исходниках выпуска ни один обработчик не стирает текст ошибки до чтения", not gone, "; ".join(gone[:3]))
+    sc_bad = ["If StrComp(a, b, 0) = 0 Then", "x = StrComp(Trim(CStr(d(i)(0))), Trim(s), 0)", "If StrComp(Left(a, 3), b, 0) <> 0 Then"]
+    sc_good = ["If a = b Then", "x = StrComp(a, b, 1)", "x = StrComp(a, b)", "k = InStr(1, a, b, 0)"]
+    sc_miss = [t for t in sc_bad if not cc.strcomp_in(t)]
+    sc_fp = [t for t in sc_good if cc.strcomp_in(t)]
+    sc_left = [x for d in ("basic", "toolbox", "transfer", "upgrade") for x in cc.strcomp_traps(os.path.join(root, "src", d))]
+    R.add(c, "StrComp(…, 0) — в LibreOffice Basic это сравнение БЕЗ учёта регистра (StrComp(…, 1) и «a = b» — точные): проверка находит такие строки, не трогает остальные, в исходниках их нет",
+          not sc_miss and not sc_fp and not sc_left, f"не нашла: {sc_miss}; лишнее: {sc_fp}; в исходниках: {sc_left[:3]}")
     old = os.path.join(OUT, "src_120")
     why = "" if os.path.isdir(os.path.join(old, "src")) else git_sources("4611b5b", old)
     if why:
@@ -5917,6 +5924,136 @@ def v75_lists_fast_same():
         after = stk.getCellRangeByPosition(0, 0, 9, len(rows)).getDataArray()
         R.add(c, "списки ничего не проводят: «Наличие» и номер последней операции журнала те же, что до списков", after == before and str(s.sysv("LAST_SEQ")) == seq0,
               f"LAST_SEQ {seq0} → {s.sysv('LAST_SEQ')}")
+    finally:
+        s.close()
+
+
+def _spel_rows(s):
+    """the rows of the sheet «Написания поставщиков» (from the fifth), until the first empty spelling: [A…K]"""
+    sh = s.doc.Sheets.getByName("Написания поставщиков")
+    d = sh.getCellRangeByPosition(0, 4, 10, 400).getDataArray()
+    out = []
+    for r in d:
+        if str(r[10]) == "":
+            break
+        out.append(list(r))
+    return out
+
+
+@case
+def v76_suppliers_one_spelling():
+    """1.3.0: поставщик, записанный по-разному («Все инструменты», «ВсеИнструменты», «все инструменты.», «Bce инструменты» с латинскими буквами, с пробелом в конце), приводится к одному написанию:
+    лист «Написания поставщиков» показывает все написания и предлагает основное для тех, что отличаются только регистром/пробелами/знаками/буквами; похожие («ООО Все инструменты») только называет;
+    «Привести поставщиков» меняет строки «Заказов» (ещё не принятые — как будто вписал сам, принятые — «Исправить позицию», POSITION_FIX), визиты «Прихода авто» (CAR_FIX), «Номенклатуру», «Поставщики» (строки
+    объединяются, телефон и контакт сохраняются); количества, остатки и ЕИ те же; отменённые без прихода и визиты, особые приходы («Офис») не меняются; журнал воспроизводится независимо; повтор — менять нечего"""
+    c = "V76"
+    s = ready(Session(new_wms("v76")))
+    try:
+        od = s.doc.Sheets.getByName("Заказы")
+        main = "Все инструменты"
+        order(s, 1, "1", "Болт М8х30", qty="10", supplier=main, art="Б-830")
+        r1 = receive(s, 1, "10", place="A-01", k=0)
+        order(s, 2, "1", "Болт М6х30", qty="10", supplier=main, art="Б-630")
+        r2 = receive(s, 2, "10", place="A-02", k=0)
+        order(s, 3, "2", "Гайка М8", qty="20", supplier="ВсеИнструменты", art="Г-8")
+        r3 = receive(s, 3, "5", place="A-03", k=0)
+        order(s, 4, "2", "Шайба 8", qty="30", supplier="все инструменты.", art="Ш-8")
+        order(s, 5, "2", "Винт М5х20", qty="40", supplier="Bce инструменты", art="В-520")
+        order(s, 6, "3", "Сверло 6", qty="5", supplier="ВСЕ ИНСТРУМЕНТЫ", art="С-6")
+        r6 = receive(s, 6, "5", place="A-04", k=0)
+        order(s, 7, "3", "Фреза 10", qty="3", supplier="Все инструменты ", art="Ф-10")
+        order(s, 8, "4", "Кран шаровый", qty="2", supplier="Ромашка", art="К-1")
+        order(s, 9, "4", "Лампа", qty="2", supplier="Офис", art="Л-1")
+        order(s, 10, "5", "Труба", qty="7", supplier="все инструменты.", art="Т-1")
+        cn = s.Rc("OrderCancelRow", 10)
+        order(s, 11, "6", "Пила", qty="1", supplier="ООО Все инструменты", art="П-1")
+        order(s, 12, "7", "Рулетка", qty="2", supplier=main, art="Р-1")
+        order(s, 13, "7", "Отвёртка", qty="2", supplier=main, art="О-1")
+        ok_rcv = all(str(x).startswith("OK") for x in (r1, r2, r3, r6)) and str(cn).startswith("OK")
+        # «Приход авто»: five visits (one of them cancelled), the clock of the operations is set by the test seam
+        car = lambda f, *a: s.B(f, *a, module="WmsCar")      # noqa: E731
+        t0 = serial() + 0.4
+        visits = [("Газель А111АА", main, True), ("Газель В222ВВ", "ВсеИнструменты", True), ("Газель С333СС", "все инструменты.", False), ("Газель Е444ЕЕ", "Ромашка", True), ("Ошибочная запись", "ВсеИнструменты", True)]
+        okc = []
+        for n, (plate, sup, dep) in enumerate(visits, start=1):
+            car("TestCarNow", t0 + n * 0.01)
+            okc.append(car("CarArrive", plate, sup))
+            if dep:
+                car("TestCarNow", t0 + n * 0.01 + 0.003)
+                okc.append(car("CarDepart", n))
+        car("TestCarNow", t0 + 0.2)
+        okc.append(car("CarCancel", 5))
+        car("TestCarNow", t0 + 0.5)
+        # the directory and the goods
+        sup_sh = s.doc.Sheets.getByName("Поставщики")
+        sup_sh.getCellByPosition(0, 1).setString(main)
+        sup_sh.getCellByPosition(1, 1).setString("8-800-111")
+        sup_sh.getCellByPosition(0, 2).setString("ВсеИнструменты")
+        sup_sh.getCellByPosition(2, 2).setString("Иван")
+        sup_sh.getCellByPosition(3, 2).setValue(5)
+        sup_sh.getCellByPosition(0, 3).setString("Ромашка")
+        gd = s.doc.Sheets.getByName("Номенклатура")
+        gd.unprotect("wms")
+        gd.getCellByPosition(1, 1).setString("Болт М8х30")
+        gd.getCellByPosition(2, 1).setString("Б-830")
+        gd.getCellByPosition(9, 1).setString("ВсеИнструменты")
+        R.add(c, "заказы, приходы и визиты созданы (все операции прошли)", ok_rcv and all(str(x).startswith("OK") for x in okc), f"{r1} {r2} {r3} {r6} {cn}; {okc}")
+        before_stock = s.doc.Sheets.getByName("Наличие").getCellRangeByPosition(0, 0, 9, 12).getDataArray()
+        j0 = len(s.journal()[0])
+        # --- the list
+        rf = s.B("SpelRefresh", module="WmsSup")
+        rows = _spel_rows(s)
+        by = {r[0]: r for r in rows}
+        proposals = {r[0]: r[8] for r in rows if r[8] != ""}
+        names_all = [r[0] for r in rows]
+        R.add(c, "список: все написания книги (шесть вариантов «Все инструменты», «ООО Все инструменты», «Ромашка»; «Офис» — не поставщик, его в списке нет); для всех, кроме основного, предложено основное "
+                 "написание; «ООО Все инструменты» только названо; на «Ромашке» нет ничего", rf.startswith("OK:") and "Офис" not in by and len(rows) == 8 and set(proposals) == {"ВсеИнструменты", "все инструменты.", "Bce инструменты",
+              "ВСЕ ИНСТРУМЕНТЫ", "Все инструменты "} and all(v == main for v in proposals.values()) and by["ООО Все инструменты"][8] == "" and "похоже" in by["ООО Все инструменты"][7]
+              and by["Ромашка"][8] == "" and by["Ромашка"][7] == "", f"{rf}; {names_all}; {proposals}")
+        R.add(c, "счёт по местам: у «ВсеИнструменты» — 1 принятая строка, 1 визит и 1 отменённый, 1 товар, строка справочника 3; у «все инструменты.» — 1 ожидаемая, 1 отменённая строка, 1 визит",
+              by["ВсеИнструменты"][1:7] == [0.0, 1.0, 1.0, 1.0, 1.0, "строка 3"] and by["все инструменты."][1:6] == [1.0, 0.0, 1.0, 1.0, 0.0], f"{by['ВсеИнструменты'][1:7]}; {by['все инструменты.'][1:7]}")
+        # --- the decision of the storekeeper for the one that only looks alike
+        sp = s.doc.Sheets.getByName("Написания поставщиков")
+        at = names_all.index("ООО Все инструменты") + 4
+        sp.getCellByPosition(8, at).setString(main)
+        # --- the guards: a special receipt, a chain, nothing to change
+        sp2 = names_all.index("Ромашка") + 4
+        sp.getCellByPosition(8, sp2).setString("Офис")
+        g1 = s.B("SpelApply", module="WmsSup")
+        sp.getCellByPosition(8, sp2).setString("Все инструменты ")
+        sp.getCellByPosition(8, names_all.index(main) + 4).setString("ВсеИнструменты")
+        g2 = s.B("SpelApply", module="WmsSup")
+        sp.getCellByPosition(8, names_all.index(main) + 4).setString("")
+        sp.getCellByPosition(8, sp2).setString("")
+        R.add(c, "защита: «Офис» (особый приход) как конечное написание — отказ; цепочка «основное → ВсеИнструменты → основное» — отказ; ничего не изменено", g1.startswith("ERR:") and "Офис" in g1
+              and g2.startswith("ERR:") and len(s.journal()[0]) == j0, f"{g1}; {g2}")
+        # --- apply
+        ap = s.B("SpelApply", module="WmsSup")
+        ents = s.journal()[0][j0:]
+        types = sorted(e["type"] for e in ents)
+        R.add(c, "«Привести поставщиков»: журнал вырос на 2 исправления позиции (принятые «ВсеИнструменты» и «ВСЕ ИНСТРУМЕНТЫ») и 2 исправления визита; ещё не принятые строки («все инструменты.», «Bce инструменты», с пробелом в конце, «ООО …») — прямая запись, без журнала; ничего другого",
+              ap.startswith("OK:") and types == ["CAR_FIX", "CAR_FIX", "POSITION_FIX", "POSITION_FIX"], f"{ap[:600]}; {types}")
+        sup_col = [od.getCellByPosition(11, r).getString() for r in range(1, 14)]
+        R.add(c, "«Заказы» L: все написания «Все инструменты» стали основным, «Ромашка», «Офис» и отменённая строка («все инструменты.») не тронуты",
+              sup_col == [main, main, main, main, main, main, main, "Ромашка", "Офис", "все инструменты.", main, main, main], str(sup_col))
+        cars = s.doc.Sheets.getByName("Приход авто")
+        vs = [cars.getCellByPosition(3, 6 + n).getString() for n in range(5)]
+        R.add(c, "«Приход авто» D: визиты стали «Все инструменты» (в том числе тот, что ещё на территории); «Ромашка» и отменённый визит не тронуты", vs == [main, main, main, "Ромашка", "ВсеИнструменты"], str(vs))
+        dirs = [[sup_sh.getCellByPosition(c_, r).getString() for c_ in range(5)] for r in range(1, 4)]
+        R.add(c, "«Поставщики»: строка «ВсеИнструменты» объединена с основной — телефон остался, контакт и срок перенесены в пустые клетки основной, строки осталось две; «Номенклатура» J — основное",
+              dirs[0] == [main, "8-800-111", "Иван", "5", ""] and dirs[1][0] == "Ромашка" and dirs[2][0] == "" and gd.getCellByPosition(9, 1).getString() == main, f"{dirs}; {gd.getCellByPosition(9, 1).getString()}")
+        after_stock = s.doc.Sheets.getByName("Наличие").getCellRangeByPosition(0, 0, 9, 12).getDataArray()
+        R.add(c, "количества, остатки и ЕИ те же: «Наличие» до и после — одно и то же", before_stock == after_stock, "")
+        oracle(c, s, "исправления поставщика в журнале (POSITION_FIX, CAR_FIX) воспроизводятся независимо")
+        # --- once more: nothing to do
+        rf2 = s.B("SpelRefresh", module="WmsSup")
+        rows2 = _spel_rows(s)
+        left = {r[0] for r in rows2}
+        ap2 = s.B("SpelApply", module="WmsSup")
+        R.add(c, "повтор: остались «Все инструменты», «Ромашка» и два написания, которые есть только в отменённой строке и в отменённом визите (они не меняются) — предложений нет; «Привести» — менять нечего",
+              rf2.startswith("OK:") and left == {main, "все инструменты.", "ВсеИнструменты", "Ромашка"} and all(r[8] == "" for r in rows2) and ap2.startswith("SKIP:"), f"{rf2}; {left}; {ap2[:200]}")
+        st = s.B("SelfCheck", module="WmsDiagnostics")
+        R.add(c, "самопроверка после замены — без ошибок", "ошибок 0" in st.split("\n")[0], st.split("\n")[0])
     finally:
         s.close()
 

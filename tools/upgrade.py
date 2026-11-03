@@ -415,6 +415,7 @@ def upgrade_doc(doc, test_book, schema, leg, from_text):
         new += step_110(doc, done)
         new += step_111(doc, done)
         new += step_120(doc, done)
+        new += step_130(doc, done)
     else:
         if schema == SCHEMA_06:
             new += step_07(doc, done)
@@ -483,6 +484,17 @@ def step_120(doc, done):
     done.append(f"1.2.0: лист «{B.ASM}» (описание деталей, которые вы собираете из других деталей; кнопки «Собрать деталь…», «Собрать деталь из ЕИ…», «Что можно собрать») и кнопка "
                 f"«Собрать деталь из ЕИ…» на «{B.STOCK}»; данные не менялись")
     done.append(f"1.2.0: лист «{B.TOOL}» (справочник фрез, свёрл, метчиков, пластин, цанг и других расходников станков с ЧПУ из «{B.STOCK}», только просмотр; Ctrl+Shift+C); данные не менялись")
+    return []
+
+
+def step_130(doc, done):
+    """1.2.x → 1.3.0 (and the earlier ones on their way): «Написания поставщиков» after «Поставщики» and the button «Одно написание…» there; no cell of the data is written"""
+    sheets = doc.Sheets
+    B.spell_130(doc, sheets)
+    B.buttons_130(doc, sheets)
+    done.append(f"1.3.0: лист «{B.SPELL}» (все написания поставщиков книги, одинаковые по смыслу вместе; столбец «Привести к» — ваше решение, кнопка меняет только название поставщика: "
+                f"ожидаемые строки как будто вы вписали сами, принятые — исправлением позиции, визиты — исправлением визита, каждое в журнале; перед этим копия книги) и кнопка "
+                f"«Одно написание…» на «{B.SUPPLIERS}»; данные не менялись")
     return []
 
 
@@ -721,7 +733,7 @@ def compare_books(old, new, leg_expected, from10=False):
         P.append("в новой книге нет листов: " + ", ".join(missing))
     extra = [n for n in new_names if n not in old_names]
     # the sheets of 1.0.2 and 1.1 that the old book does not have yet (a book of 1.0.2 has those of 1.0.2 already)
-    new_sheets = [n for n in list(B.SHEETS_102) + list(B.SHEETS_110) + list(B.SHEETS_111) + list(B.SHEETS_120) if n not in old_names]
+    new_sheets = [n for n in list(B.SHEETS_102) + list(B.SHEETS_110) + list(B.SHEETS_111) + list(B.SHEETS_120) + list(B.SHEETS_130) if n not in old_names]
     want_extra = new_sheets if from10 else [B.LEG, B.LEGREP, B.PACK] + B.VIEW_SHEETS + B.SHEETS_10 + new_sheets \
         + [x for x in (B.CARS, B.CAR) if x in extra]
     if sorted(extra) != sorted(want_extra):

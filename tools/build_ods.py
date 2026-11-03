@@ -2357,6 +2357,61 @@ def buttons_120(doc, sheets):
     help_buttons_10(doc, sheets)
 
 
+# 1.3.0: «Написания поставщиков» (WmsSup) — every spelling of a supplier that the book has («Заказы», «Приход авто», «Номенклатура», «Поставщики»), the spellings that look like one supplier together;
+# the column «Привести к» is the storekeeper's decision, the button changes the texts (the rows not received as typed, the received positions and the visits through the corrections of the journal)
+SPELL = "Написания поставщиков"
+SPELL_HEADERS = ["Написание (как записано в книге)", "Ожидаем (строк «Заказов»)", "Принято (строк «Заказов»)", "Отменено (строк и визитов)", "Визитов «Прихода авто»", "Товаров («Номенклатура»)",
+                 "В «Поставщиках»", "Что заметила программа", "Привести к (впишите или очистите)", "Что изменится", "(как записано)"]
+SPELL_WIDTHS = [7000, 2300, 2300, 2300, 2300, 2300, 2400, 7600, 6000, 9000, 1200]
+SPELL_HINT = ("Один поставщик, записанный по-разному («Все инструменты», «ВсеИнструменты», «все инструменты.»), для WMS — разные поставщики: «Принять товар» на «Приходе авто», «Уже ожидается» и "
+              "справочник «Поставщики» ищут по написанию. Здесь все написания книги; те, что отличаются только регистром, пробелами, знаками или русскими/латинскими буквами, стоят вместе, и для всех, "
+              "кроме основного, в столбце «Привести к» уже подставлено основное. Похожие по смыслу («ООО …», «….ру») программа только называет — впишите им то же написание сами, если это один поставщик. "
+              "Свои решения вписывайте в «Привести к»: любое написание можно привести к любому; пустая клетка — не менять. «Привести поставщиков» меняет только название поставщика: ещё не принятые строки «Заказов» — "
+              "как будто вы вписали сами, принятые позиции — «Исправить позицию», визиты — «Исправить» (каждое — в журнале), «Номенклатуру» и справочник «Поставщики» — напрямую. Количества, остатки и ЕИ не "
+              "меняются. Перед началом делается копия книги. Отменённые без прихода строки не меняются.")
+
+
+def build_spell(doc, sh):
+    build_view110(doc, sh, SPELL_HEADERS, SPELL_WIDTHS, SPELL_HINT, None, None)
+    text = number_format(doc, "@", ("ru", "RU"))
+    sh.getCellRangeByPosition(0, 4, 0, 4000).NumberFormat = text
+    sh.getCellRangeByPosition(6, 4, 10, 4000).NumberFormat = text
+    sh.getCellRangeByPosition(8, 4, 8, 4000).CellBackColor = INPUT_HEAD_10
+    sh.getCellRangeByPosition(1, 4, 5, 4000).HoriJustify = 3
+    sh.getColumns().getByIndex(10).IsVisible = False
+    sh.getCellByPosition(0, 2).CharColor = MUTED
+    add_button(doc, sh, "btnSpelRefresh", "Обновить", "WmsSup.BtnSpelRefresh", 150, 120, 3000, 650, bold=True, back=0xC6E0B4)
+    add_button(doc, sh, "btnSpelApply", "Привести поставщиков", "WmsSup.BtnSpelApply", 3250, 120, 5000, 650, back=0xDDEBF7)
+    bind_event(sh.Events, "OnFocus", "WmsSup.OnSpelFocus")
+    bind_event(sh.Events, "OnChange", "WmsSup.OnSpelChange")
+
+
+SHEETS_130 = [SPELL]
+
+
+def spell_130(doc, sheets):
+    """1.3.0: «Написания поставщиков» after «Поставщики», for a new book and an upgraded one; nothing that exists is touched, the list is built at the first opening"""
+    if not sheets.hasByName(SPELL):
+        names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+        at = names.index(SUPPLIERS) + 1 if SUPPLIERS in names else (names.index(GOODS) + 1 if GOODS in names else len(names))
+        sheets.insertNewByName(SPELL, at)
+        build_spell(doc, sheets.getByName(SPELL))
+
+
+# 1.3.0: the button «Одно написание…» on «Поставщики» (next to «Пополнить из заказов»); only the missing button is added
+BUTTONS_130 = [
+    (SUPPLIERS, "btnSpellOpen", "Одно написание…", "WmsSup.NavSpel", 22950, 120, 4200, 650, 0xDDEBF7),
+]
+
+
+def buttons_130(doc, sheets):
+    for sheet, name, label, macro, x, y, w, h, back in BUTTONS_130:
+        if sheets.hasByName(sheet):
+            sh = sheets.getByName(sheet)
+            if not has_button(sh, name):
+                add_button(doc, sh, name, label, macro, x, y, w, h, back=back)
+
+
 def ledger_10(doc, sheets):
     """1.0 (этап G): what a new book and an upgraded one both get — the hidden _CLOSE (the closed months) and the page «Отчёты»"""
     if not sheets.hasByName(CLOSE):
@@ -3331,6 +3386,8 @@ def build(office, out_path, test=False, instance_id=None):
     asm_120(doc, sheets)
     tool_120(doc, sheets)
     buttons_120(doc, sheets)
+    spell_130(doc, sheets)
+    buttons_130(doc, sheets)
     main_buttons_110(doc, sheets)
     hotkeys_10(doc)
     build_service(doc, sheets)

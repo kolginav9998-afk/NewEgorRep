@@ -281,19 +281,27 @@ Function StaleOpen() As Long
     StaleOpen = k
 End Function
 
-' the number of open order positions of the supplier on «Заказы» (the same rule as the hint of the panel); -1 unknown
+' the number of open order positions of the supplier on «Заказы» (the same rule as the hint of the panel); -1 unknown. 1.3.0: the supplier is compared by its key (WmsSup.SupId): «Все инструменты»
+' and «ВсеИнструменты» are one supplier
 Private Function OpenOrderPositions(sSup As String) As Long
-    Dim q As String, f As String, s As String, ok As Boolean, l As String, w As String, st As Variant, i As Integer
-    q = """=" & Replace(Replace(Replace(Replace(sSup, "~", "~~"), "*", "~*"), "?", "~?"), """", """""") & """"
-    l = "$'" & SH_ORDERS & "'.$L$2:$L$1048576"
-    w = "$'" & SH_ORDERS & "'.$W$2:$W$1048576"
+    Dim sh As Object, last As Long, d As Variant, i As Long, k As String, n As Long, st As String
+    On Error GoTo EH
+    sh = WmsOrders.OrdersSheet()
+    last = WmsOrders.LastRow(sh)
+    If last < 1 Then Exit Function
+    k = WmsSup.SupId(sSup)
     ' the open statuses (with the date statuses of an earlier core, until the refresh at the opening turns them)
-    st = Array(OS_WAITING, OS_OVERDUE, OS_PARTIAL, OS_PARTIAL_OVERDUE)
-    For i = 0 To UBound(st)
-        f = f & IIf(f <> "", "+", "") & "COUNTIFS(" & l & ";" & q & ";" & w & ";""" & st(i) & """)"
+    d = sh.getCellRangeByPosition(0, 1, OC_STATUS, last).getDataArray()
+    For i = 0 To UBound(d)
+        st = CStr(d(i)(OC_STATUS))
+        If st = OS_WAITING Or st = OS_OVERDUE Or st = OS_PARTIAL Or st = OS_PARTIAL_OVERDUE Then
+            If WmsSup.SupId(CStr(d(i)(OC_SUPPLIER))) = k Then n = n + 1
+        End If
     Next i
-    s = WmsOrders.ScratchEval("(" & f & ")", ok)
-    If ok And IsNumeric(s) Then OpenOrderPositions = CLng(s) Else OpenOrderPositions = -1
+    OpenOrderPositions = n
+    Exit Function
+EH:
+    OpenOrderPositions = -1
 End Function
 
 ' "" when visit № n may be issued now: _CAR and the table are behind the counter
@@ -345,7 +353,7 @@ End Sub
 ' ERR-SYS:<why>, BLOCKED:… or an ApplyOperation error.
 Function CarArrive(ByVal sPlate As String, ByVal sSup As String) As String
     Dim why As String, key As String, skey As String, n As Long, r As Long, t As Double, d As Double, nday As Long, o As Long
-    Dim prev As Variant, nVis As Long, nOrd As Long, ctl As String, res As String, k As Long
+    Dim prev As Variant, nVis As Long, nOrd As Long, ctl As String, res As String, k As Long, sTyped As String
     WmsInit()
     On Error GoTo EH
     sPlate = CleanText(sPlate)
@@ -367,6 +375,9 @@ Function CarArrive(ByVal sPlate As String, ByVal sSup As String) As String
         CarArrive = "ERR:в «Марка / госномер» нет ни букв, ни цифр"
         Exit Function
     End If
+    ' 1.3.0: the same supplier written otherwise than in «Поставщики» gets the spelling of the directory (the row says so)
+    sTyped = sSup
+    sSup = WmsSup.SupSnap(sSup)
     skey = SupplierKey(sSup)
     why = PostingBlockReason()
     If why <> "" Then
@@ -401,6 +412,7 @@ Function CarArrive(ByVal sPlate As String, ByVal sSup As String) As String
     ctl = "Приезд записан · " & IIf(nVis > 0, "повторная машина: визитов раньше — " & nVis, "первый визит этой машины")
     If nOrd > 0 Then ctl = ctl & " · открытых позиций заказов поставщика: " & nOrd
     If nOrd = 0 Then ctl = ctl & " · открытых заказов поставщика нет"
+    If sSup <> sTyped Then ctl = ctl & " · поставщик записан как в справочнике: «" & sSup & "» (вы вписали «" & sTyped & "»)"
     PlanBegin("CAR_ARRIVE", CStr(n))
     PlanField("CAR", n)
     PlanField("PLATE", sPlate)
@@ -605,6 +617,7 @@ Function CarFix(n As Long, ByVal sPlate As String, ByVal sSup As String, ByVal s
     sSup = CleanText(sSup)
     If sPlate = "" Then sPlate = oldPlate
     If sSup = "" Then sSup = oldSup
+    If sSup <> oldSup Then sSup = WmsSup.SupSnap(sSup)
     If Len(sPlate) > CAR_TEXT_MAX Or Len(sSup) > CAR_TEXT_MAX Then
         CarFix = "ERR:слишком длинный текст (больше " & CAR_TEXT_MAX & " знаков)"
         Exit Function
