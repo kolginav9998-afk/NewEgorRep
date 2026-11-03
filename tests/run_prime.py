@@ -676,6 +676,25 @@ def pr11_upgrade_072():
                  "(«Выдачи», «Корректировки»), «Фасовка ЕИ» на «Наличие», каждая один раз", all(btns[n].count("btnWherePut") == 1 for n in ("Заказы", "Иной приход"))
               and all(btns[n].count("btnPickEI") == 1 and btns[n].count("btnPackEI") == 1 for n in ("Выдачи", "Корректировки"))
               and btns["Наличие"].count("btnPackEI") == 1, str(btns))
+        # 1.3.0: the book of 0.7.2 goes to this release by step_08 — it must get the sheets and the button of 1.3.0 just as a book of 1.2.1 does (step_130)
+        shs = s.doc.Sheets
+        order = [shs.getByIndex(i).Name for i in range(shs.getCount())]
+
+        def has_btn(sheet, name):
+            f = shs.getByName(sheet).getDrawPage().getForms()
+            return f.getCount() > 0 and any(f.getByIndex(0).getByIndex(i).Name == name for i in range(f.getByIndex(0).getCount()))
+        srows = shs.getByName("Настройки").getCellRangeByPosition(0, 1, 3, 12).getDataArray()
+        rl = next((i for i, x in enumerate(srows) if x[3] == "LABEL_ART"), -1)
+        rmm = s.B("MetalRefresh", "", module="WmsMetal")
+        rsp = s.B("SpelRefresh", module="WmsSup")
+        R.add(c, "1.3.0 в книге, обновлённой с 0.7.2: листы «Написания поставщиков» (за «Поставщиками») и «Металл» (за «Инструментом ЧПУ») есть, без защиты, с кнопками «Обновить»; "
+                 "«Одно написание…» на «Поставщиках»; настройка «Артикул на этикетке» = «детали»; оба списка строятся",
+              "Написания поставщиков" in order and "Металл" in order and order.index("Написания поставщиков") == order.index("Поставщики") + 1
+              and order.index("Металл") == order.index("Инструмент ЧПУ") + 1
+              and not shs.getByName("Написания поставщиков").isProtected() and not shs.getByName("Металл").isProtected()
+              and has_btn("Написания поставщиков", "btnSpelRefresh") and has_btn("Металл", "btnMetalRefresh") and has_btn("Поставщики", "btnSpellOpen")
+              and rl >= 0 and srows[rl][1] == "детали" and str(rmm).startswith("OK:") and str(rsp).startswith("OK:"),
+              f"{[n for n in order if n in ('Поставщики', 'Написания поставщиков', 'Инструмент ЧПУ', 'Металл')]}; {rl}; {rmm}; {rsp}")
         wcf = s.doc.Sheets.getByName("Заказы").getCellRangeByPosition(22, 1, 22, 1048575).ConditionalFormat
         wst = [wcf.getByIndex(k).getStyleName() for k in range(wcf.getCount())]
         acf = s.doc.Sheets.getByName("Заказы").getCellRangeByPosition(0, 1, 15, 1048575).ConditionalFormat
