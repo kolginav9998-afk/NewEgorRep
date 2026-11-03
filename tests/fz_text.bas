@@ -57,6 +57,8 @@ Private Function Call1(sFn As String, nm As String) As String
     Case "UnitMatch": b = WmsPack.UnitMatch(nm, "шт")
     Case "FirstPart": v = WmsUi.FirstPart(nm)
     Case "TlRecord": v = WmsTool.TlRecord(nm)
+    Case "MtRecord": v = WmsMetal.MtRecordF(nm, "")
+    Case "MtRecordFold": v = WmsMetal.MtRecordF(nm, WmsNames.Fold(nm))
     Case "TextFilterOk": b = WmsCat.TextFilterOk(nm, " болт м8 ")
     Case "NumFilterOk": b = WmsCat.NumFilterOk(nm, 8)
     Case Else: Call1 = "нет функции " & sFn

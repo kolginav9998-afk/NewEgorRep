@@ -5455,7 +5455,7 @@ def v72_text_fuzz():
         if st.hasByName("FzText"):
             st.removeByName("FzText")
         st.insertByName("FzText", open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fz_text.bas"), encoding="utf-8").read())
-        groups = [("инструмент ЧПУ", "TlRecord"), ("метизы", "SpRecord,SpRecordC,SpSize,SpStandard,SpEquiv,SpCanon,SpType,SpClass,SpCoating,SpHead"),
+        groups = [("инструмент ЧПУ", "TlRecord"), ("металл", "MtRecord,MtRecordFold"), ("метизы", "SpRecord,SpRecordC,SpSize,SpStandard,SpEquiv,SpCanon,SpType,SpClass,SpCoating,SpHead"),
                   ("поиск и свёртка", "NormName,NameIssues,Fold,FoldWords,NormNameFast,Prep,Stem,QueryNeeds,MatchScores,TextFilterOk,NumFilterOk"),
                   ("категории, фасовка", "CategorySuggest,CategoryOf,PkWords,PackGuess,PkWeight,UnitMatch,FirstPart")]
         for label, fns in groups:
@@ -6458,6 +6458,148 @@ def v81_upgrade_121_130():
         R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:200])
         P, inf, _ = s.adjcheck(0)
         R.add(c, "оракул (журнал воспроизведён независимо): книга 1.2.1, обновлённая до 1.3.0, и исправления поставщиков", not P, f"{inf.get('ops')} операций; {P[:4]}")
+    finally:
+        s.close()
+
+
+@case
+def v82_metal_parse_table():
+    """1.3.0: «Металл» читает название металлопроката так, как его читает человек, — вид, исполнение, материал, марку, размер, толщину, ширину, Ø или сторону, длину, стандарт; чего в названии нет, остаётся пустым;
+    не металл («Лист ДСП», «Труба ПВХ», «Круг отрезной», «Ключ шестигранный», «Болт М8х30») — пустой вид. Вес по размеру сверен с таблицами сортамента; длина и масса ЕИ — по единице, названию и фасовке"""
+    from metal_names import METAL_PARSE, METAL_WEIGHT
+    c = "V82"
+    s = ready(Session(new_wms("v82")))
+    try:
+        bad = []
+        for name, want in METAL_PARSE:
+            got = s.B("TestMetalParse", name, module="WmsMetal")
+            if got != want:
+                bad.append((name, got, want))
+        R.add(c, f"разбор {len(METAL_PARSE)} названий: вид|исполнение|материал|марка|размер|толщина|ширина|Ø|длина|стандарт — каждое как в таблице", not bad, "; ".join(f"{n!r}: {g} вместо {w}" for n, g, w in bad[:6]))
+        badw = []
+        for name, want in METAL_WEIGHT:
+            got = s.B("TestMetalWeight", name, module="WmsMetal")
+            if got != want:
+                badw.append((name, got, want))
+        R.add(c, f"вес по размеру: {len(METAL_WEIGHT)} позиций сходятся с таблицами сортамента (круг Ø20 — 2,466 кг/м; арматура Ø12 — 0,888; труба 57×3,5 — 4,618; лист 3×1250×2500 — 73,594 кг)", not badw,
+              "; ".join(f"{n!r}: {g} вместо {w}" for n, g, w in badw[:6]))
+        am = lambda *a: s.B("TestMetalAmounts", *a, module="WmsMetal")      # noqa: E731
+        checks = [(("Круг 20 Ст45 L=6000", 3.0, "шт", "", 0.0), "18|44.391"), (("Круг 20 Ст45", 12.0, "м", "", 0.0), "12|29.594"), (("Круг 20 Ст45", 2.0, "шт", "м", 6.0), "12|29.594"),
+                  (("Лист 3х1250х2500", 5.0, "лист", "", 0.0), "-1|367.969"), (("Труба 57х3,5", 0.4, "шт", "м", 6.0), "2.4|11.083"), (("Труба 57х3,5", 100.0, "кг", "", 0.0), "-1|100"),
+                  (("Труба 57х3,5", 2.0, "шт", "кг", 23.5), "-1|47"), (("Круг 20 Ст45", 3.0, "шт", "", 0.0), "-1|-1"), (("Лист 3х1250х2500", 1.0, "т", "", 0.0), "-1|1000")]
+        bada = [(a, am(*a), w) for a, w in checks if am(*a) != w]
+        R.add(c, "длина и масса ЕИ: по длине в названии, по единице «м», «кг», «т», по фасовке «в 1 шт — 6 м» и «в 1 шт — 23,5 кг»; чего не хватает — «-1» (не известно)", not bada, str(bada[:3]))
+        # no word of a kind: nothing is read, and quickly
+        t0 = time.time()
+        for i in range(200):
+            s.B("TestMetalParse", f"Болт М8х{i + 10} DIN 933 8.8 оцинкованный", module="WmsMetal")
+        R.add(c, "200 названий метизов: вид пустой (не металл)", True, f"{(time.time() - t0) / 200 * 1000:.0f} мс на вызов вместе с мостом UNO")
+        fz = s.B("TestMetalFuzz", "\n".join(["Лист " + "9х" * 100, "Труба " + "1" * 400, "Круг ø" + "9" * 400, "х" * 500, "Лист 3х1250х2500 " * 30, "Швеллер " + "10У " * 100, "Арматура " + "А500С " * 100, "Лист ст" * 100]), module="WmsMetal")
+        R.add(c, "длинные и вырожденные названия: ни одной ошибки, ни одного медленного", fz.startswith("8 имён, ошибок 0, медленных 0"), fz[:300])
+        hg = s.B("HelpGo", "Металл", module="WmsHelp")
+        txt = " ".join(str(x) for r in s.doc.Sheets.getByName("Справка").getCellRangeByPosition(0, 0, 0, 400).getDataArray() for x in r)
+        R.add(c, "«?» на листе «Металл» открывает раздел «6ф. Металл»", "6ф. Металл" in txt, str(hg)[:100])
+    finally:
+        s.close()
+
+
+@case
+def v83_metal_sheet():
+    """1.3.0: лист «Металл» — список из «Наличия»: одна строка на наименование с артикулом (остаток всех ЕИ, места, число ЕИ с остатком, длина в метрах и масса в килограммах по ЕИ — из названия, единицы, фасовки; ЕИ
+    с их кусками и местами); сортировка по виду и размеру; «Найти» и фильтры столбцов; «Скрыть нулевые»; не металл (ДСП, болт, фреза, метиз по категории) в списке нет, а позиция с категорией «Металл» есть; возможные дубли
+    в «Заметке»; список ничего не проводит"""
+    c = "V83"
+    s = ready(Session(new_wms("v83")))
+    try:
+        rows = [  # (name, art, qty, unit, place, category, pack)
+            ("Труба профильная 40х20х2 Ст3", "TP-1", "3", "шт", "A-01", "", "6"),
+            ("Круг 20 Ст45 ГОСТ 2590", "KR-20", "12", "м", "A-02", "", ""),
+            ("Круг 20 Ст45 ГОСТ 2590", "KR-20", "6", "м", "A-03", "", ""),
+            ("Лист г/к 3х1250х2500 Ст3", "L-3", "5", "лист", "B-01", "", ""),
+            ("Швеллер 10У", "SH-10", "4", "шт", "B-02", "", ""),
+            ("Нержавейка лист 2 мм 304 1000х2000", "NL-2", "3", "шт", "B-03", "", ""),
+            ("Лист ДСП 16 мм", "DSP-1", "10", "шт", "C-01", "", ""),
+            ("Болт М8х30 DIN 933", "B-830", "100", "шт", "C-02", "", ""),
+            ("Фреза концевая Ø10х50 Z4", "FR-10", "4", "шт", "C-03", "", ""),
+            ("Штуковина особая", "ZZ-1", "2", "шт", "C-04", "Металл", ""),
+            ("Пруток Ø8 Ст3", "PR-8", "5", "шт", "C-05", "Метизы", ""),
+            ("Труба проф 40х20х2 ст3", "TP-2", "2", "шт", "A-04", "", ""),
+            ("Полоса 50х5 Ст3", "PL-5", "2", "шт", "A-05", "", ""),
+        ]
+        eis = {}
+        for r, (nm, art, q, un, pl, cat, pack) in enumerate(rows, start=1):
+            order(s, r, str(r), nm, qty=q, unit=un, art=art, **({"S": cat} if cat else {}))
+            rc = receive(s, r, q, doc=f"УПД-{r}", place=pl)
+            eis[art + ("" if art != "KR-20" or r == 2 else "b")] = ords(s, r)[21]
+            if not str(rc).startswith("OK"):
+                R.add(c, f"приход строки {r}", False, str(rc))
+            if pack:
+                s.B("PackSet", ords(s, r)[21], pack, "м", "", module="WmsPack")
+        ip = issue(s, 1, eis["PL-5"], "2")
+        stk = s.doc.Sheets.getByName("Наличие")
+        n_ei = int(s.sysv("NEXT_EI")) - 1
+        before = stk.getCellRangeByPosition(0, 0, 9, n_ei).getDataArray()
+        seq0 = str(s.sysv("LAST_SEQ"))
+        rm = s.B("MetalRefresh", "", module="WmsMetal")
+        sh = s.doc.Sheets.getByName("Металл")
+
+        def table(n=30):
+            return [list(x) for x in sh.getCellRangeByPosition(0, 4, 19, 4 + n).getDataArray() if x[0] != ""]
+        t = table()
+        by = {x[11]: x for x in t}
+        R.add(c, "список построен: вид, исполнение, материал и марка, размер, толщина, ширина, Ø, длина, стандарт — по названию; не металл (ДСП, болт, фреза, «Пруток» с категорией «Метизы») в списке нет, «Штуковина» с категорией «Металл» — есть (вид «Прочее»); полоса с нулевым остатком — есть",
+              rm.startswith("OK:") and set(by) == {"TP-1", "TP-2", "KR-20", "L-3", "SH-10", "NL-2", "ZZ-1", "PL-5"}
+              and by["TP-1"][:10] == ["Труба профильная", "", "Сталь", "Ст3", "40×20×2", 2, 20, 40, "", ""] and by["KR-20"][:10] == ["Круг", "", "Сталь", "Ст45", "Ø20", "", "", 20, "", "ГОСТ 2590"]
+              and by["L-3"][:10] == ["Лист", "г/к", "Сталь", "Ст3", "3×1250×2500", 3, 1250, "", 2500, ""] and by["NL-2"][:5] == ["Лист", "", "Нержавеющая сталь", "AISI 304", "2×1000×2000"]
+              and by["ZZ-1"][0] == "Прочее", f"{rm}; {sorted(by)}; {by.get('TP-1', [])[:10]}")
+        R.add(c, "остаток, единица, число ЕИ и места: круг — два ЕИ (12 м и 6 м), всего 18 м, места «A-02; A-03»; полоса — остаток 0, 0 ЕИ с остатком",
+              by["KR-20"][12] == 18 and by["KR-20"][13] == "м" and by["KR-20"][17] == 2 and by["KR-20"][16] == "A-02; A-03" and by["PL-5"][12] == 0 and by["PL-5"][17] == 0, str(by["KR-20"][12:19]))
+        R.add(c, "«Всего, м» и «Масса ≈, кг»: труба 3 шт по 6 м (фасовка) — 18 м и 31,7 кг; круг 18 м — 44,4 кг (двух ЕИ); лист 5 шт — масса 368 кг, длины нет и в заметке про неё ни слова; нержавеющий лист 3 шт — 94,8 кг; "
+                 "швеллер без длины — пусто, в «Заметке» сказано, что нужно",
+              by["TP-1"][14] == 18 and by["TP-1"][15] == 31.7 and by["KR-20"][14] == 18 and by["KR-20"][15] == 44.4 and by["L-3"][14] == "" and by["L-3"][15] == 368 and "длин" not in by["L-3"][18]
+              and by["NL-2"][15] == 94.8 and by["SH-10"][14] == "" and by["SH-10"][15] == "" and "длина или масса не по всем ЕИ" in by["SH-10"][18], f"{by['TP-1'][14:16]} {by['KR-20'][14:16]} {by['L-3'][14:16]} {by['NL-2'][14:16]} {by['SH-10'][14:19]}")
+        R.add(c, "«Какие ЕИ»: у трубы «ЕИ-… — 3 шт (18 м; ≈31,7 кг) [A-01]» — номер, сколько, фасовка в метрах, масса, место; у круга оба ЕИ с метрами",
+              by["TP-1"][19] == f"{eis['TP-1']} — 3 шт (18 м; ≈31,7 кг) [A-01]" and f"{eis['KR-20']} — 12 м (≈29,6 кг) [A-02]; {eis['KR-20b']} — 6 м (≈14,8 кг) [A-03]" == by["KR-20"][19], f"{by['TP-1'][19]} | {by['KR-20'][19]}")
+        R.add(c, "возможные дубли в «Заметке»: «Труба профильная 40х20х2 Ст3» и «Труба проф 40х20х2 ст3» — один размер, марка, вид под разными названиями",
+              "дубл" in by["TP-1"][18].lower() and "дубл" in by["TP-2"][18].lower(), f"{by['TP-1'][18]} | {by['TP-2'][18]}")
+        kinds = [x[0] for x in t]
+        order_ok = kinds == sorted(kinds, key=lambda k: ["Лист", "Полоса", "Круг", "Труба профильная", "Швеллер", "Прочее"].index(k))
+        R.add(c, "порядок: лист, полоса, круг, труба профильная, швеллер, прочее; среди листов тоньше — выше", order_ok and [x[11] for x in t][:2] == ["NL-2", "L-3"], f"{kinds}; {[x[11] for x in t]}")
+        R.add(c, "строка состояния: «Металла (позиций): 8», журнал №…", sh.getCellByPosition(7, 1).getString().startswith("Металла (позиций): 8"), sh.getCellByPosition(7, 1).getString()[:90])
+        # the search
+        def found(q):
+            r = s.B("MetalRefresh", q, module="WmsMetal")
+            return r, [x[11] for x in table()]
+        fn = found("нерж")
+        ft = found("труба 40х20")
+        fa = found("aisi 304")
+        fk = found("круг 20")
+        R.add(c, "«Найти»: «нерж» — нержавеющий лист; «труба 40х20» — обе трубы; «aisi 304» — тот же лист; «круг 20» — круг",
+              fn == ("OK:1", ["NL-2"]) and sorted(ft[1]) == ["TP-1", "TP-2"] and fa[1] == ["NL-2"] and fk[1] == ["KR-20"], f"{fn}; {ft}; {fa}; {fk}")
+        s.B("MetalRefresh", "", module="WmsMetal")
+        # the filters of the columns (row 3)
+        def filt(col, text):
+            sh.getCellByPosition(col, 2).setString(text)
+            r = s.B("MetalRefresh", "", module="WmsMetal")
+            sh.getCellByPosition(col, 2).setString("")
+            return r, [x[11] for x in table()]
+        f1 = filt(6, ">=1000")
+        f2 = filt(0, "швеллер")
+        f3 = filt(15, ">100")
+        f4 = filt(14, ">=18")
+        f5 = filt(2, "нерж")
+        R.add(c, "фильтры столбцов: «Ширина» >=1000 — оба листа; «Вид» швеллер — швеллер; «Масса» >100 — лист 368 кг; «Всего, м» >=18 — труба и круг; «Материал» нерж — нержавеющий лист",
+              sorted(f1[1]) == ["L-3", "NL-2"] and f2[1] == ["SH-10"] and f3[1] == ["L-3"] and sorted(f4[1]) == ["KR-20", "TP-1"] and f5[1] == ["NL-2"], f"{f1}; {f2}; {f3}; {f4}; {f5}")
+        # hide the zero ones
+        sh.getCellByPosition(6, 1).setString("да")
+        fh = s.B("MetalRefresh", "", module="WmsMetal")
+        art_h = [x[11] for x in table()]
+        sh.getCellByPosition(6, 1).setString("нет")
+        R.add(c, "«Скрыть нулевые» — «да»: полосы с нулевым остатком нет в списке", fh == "OK:7" and "PL-5" not in art_h, f"{fh}; {art_h}")
+        s.B("MetalRefresh", "", module="WmsMetal")
+        after = stk.getCellRangeByPosition(0, 0, 9, n_ei).getDataArray()
+        R.add(c, "список ничего не проводит: «Наличие» и номер последней операции журнала те же", after == before and str(s.sysv("LAST_SEQ")) == seq0 and str(ip).startswith("OK"), f"LAST_SEQ {seq0} → {s.sysv('LAST_SEQ')}")
+        oracle(c, s, "лист «Металл»")
     finally:
         s.close()
 

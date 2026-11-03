@@ -70,6 +70,10 @@ Global gNkBusy As Boolean
 ' the registry grouped by name and article (StockGroups)
 Global gGrp As Variant
 Global gGrpN As Long
+' 1.3.0: the registry rows that StockGroups has read (the columns of «Наличия» up to the category) and the group of each of them (a number from 0, -1 for a row with no EI): a list that needs the EIs of its groups
+' («Металл»: the length and the weight of each EI) does not read the registry again
+Global gGrpReg As Variant
+Global gGrpOfRow As Variant
 ' «Номенклатура»: «a:article» / «n:name» → «row|category»
 Global gGc As Object
 ' 1.3.0: the keys of gGc in one text («Chr(1) key Chr(1) key …»): a key that is not there is found by one search, not by the error of a Collection
@@ -703,9 +707,11 @@ Sub StockGroups()
     Dim st As Object, last As Long, d As Variant, i As Long, r As Variant, cEi As Long, cNm As Long, cArt As Long, cUn As Long, cQty As Long, cPl As Long, cCat As Long, q As Double
     Dim nm As String, art As String, key As String, k As Long, n As Long, coll As Object, pl As String
     Dim gN() As String, gA() As String, gU() As String, gB() As Double, gE() As Long, gP() As String, gC() As String, gL() As String, res() As Variant
-    Dim c10 As String, c13 As String, c9 As String, c160 As String, kv As Variant, un As String, uk As String, gX() As String, gMk() As String
+    Dim c10 As String, c13 As String, c9 As String, c160 As String, kv As Variant, un As String, uk As String, gX() As String, gMk() As String, ofRow() As Long
     gGrpN = 0
     gGrp = Array()
+    gGrpReg = Array()
+    gGrpOfRow = Array()
     st = WmsIssue.StockSheet()
     last = WmsOrders.LastRow(st)
     If last < 1 Then Exit Sub
@@ -721,6 +727,7 @@ Sub StockGroups()
     c9 = Chr(9)
     c160 = Chr(160)
     d = st.getCellRangeByPosition(0, 1, SC_CAT, last).getDataArray()
+    ReDim ofRow(UBound(d))
     ReDim gN(UBound(d))
     ReDim gA(UBound(d))
     ReDim gU(UBound(d))
@@ -734,6 +741,7 @@ Sub StockGroups()
     coll = New Collection
     For i = 0 To UBound(d)
         r = d(i)
+        ofRow(i) = -1
         If CStr(r(cEi)) <> "" Then
             un = Trim(CStr(r(cUn)))
             nm = CStr(r(cNm))
@@ -763,6 +771,7 @@ Sub StockGroups()
                     End If
                 End If
             End If
+            ofRow(i) = k
             q = 0
             If VarType(r(cQty)) = 5 Then q = r(cQty)
             gB(k) = gB(k) + q
@@ -784,6 +793,8 @@ Sub StockGroups()
     Next i
     gGrp = res
     gGrpN = n
+    gGrpReg = d
+    gGrpOfRow = ofRow
 End Sub
 
 ' ================================================================ the statistics of «Категории»

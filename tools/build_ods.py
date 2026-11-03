@@ -2386,6 +2386,89 @@ def buttons_120(doc, sheets):
     help_buttons_10(doc, sheets)
 
 
+# 1.3.0: «Металл» (WmsMetal) — the directory of the rolled metal made from «Наличие» by the names like «Метизы» and «Инструмент ЧПУ»: the kind, the finish, the material and the grade, the size, the standard, and what is left
+# in metres and in kilograms; the EIs themselves (the pieces and the offcuts) with their lengths. The storekeeper's own sheet, not protected, not journaled
+METAL = "Металл"
+METAL_HEADERS = ["Вид", "Исполнение", "Материал", "Марка", "Размер", "Толщина, стенка, мм", "Ширина, 2-я сторона, мм", "Ø или сторона, мм", "Длина, мм", "Стандарт", "Наименование (как в учёте)", "Артикул",
+                 "Остаток", "Ед.", "Всего, м", "Масса ≈, кг", "Места", "ЕИ с остатком", "Заметка", "Какие ЕИ (кусок, длина, масса, место)"]
+METAL_WIDTHS = [2800, 2600, 2900, 2600, 3800, 1800, 2000, 1800, 1700, 3400, 9000, 3200, 2200, 1500, 2000, 2200, 5000, 2200, 7000, 12000]
+METAL_HINT = ("Справочник металлопроката из «Наличия»: листы и плиты, круг, пруток, квадрат, шестигранник, катанка и проволока, арматура, трубы (круглые и профильные), уголок, швеллер, двутавр, полоса, лента, шина, "
+              "заготовки и поковки. WMS узнаёт их по названию (и по категории, в названии которой есть «металл», «прокат», «сталь», «нержавеющая», «алюминий» — в «Номенклатуре» или в «Наличии») и раскладывает его "
+              "по столбцам: вид, исполнение (г/к, х/к, оцинк., бесшовная, ВГП), материал и марка (Ст3, 09Г2С, 40Х, 12Х18Н10Т, AISI 304, АМг6, Д16Т, М1, Л63, БрАЖ9-4, ВТ6), размер (3×1250×2500; Ø20; Ø57×3,5; 40×20×2; "
+              "50×50×5; 10У; 20Б1), толщина или стенка, ширина, Ø или сторона, длина (6 м, L=6000) и стандарт (ГОСТ 19903-2015). Что в названии не нашлось — остаётся пустым: WMS ничего не додумывает, кроме массы. "
+              "Слова, которые не про металл («лист ДСП», «труба ПВХ», «круг отрезной», «ключ шестигранный»), лист не берёт. «Всего, м» и «Масса ≈, кг» — сколько метров и килограммов осталось: по длине в названии, "
+              "по фасовке ЕИ («в 1 шт — 6 м», «в 1 шт — 23,5 кг») или по единице «м» и «кг»; масса — по размеру и плотности материала (сталь, если материал не назван), всегда приблизительная. Если хотя бы по одному ЕИ "
+              "длины или массы не хватает, клетка пуста, а в «Заметке» сказано, что нужно. «Какие ЕИ» — ЕИ с остатком: номер, сколько, (фасовка, длина, масса), [место]; это и есть куски и обрезки, по номеру ЕИ строка "
+              "находится в «Выдачах». Одна строка — одно наименование с артикулом. «Найти» понимает слова, как страница «Поиск» («круг 20», «лист 3 нерж», «ст3», «труба 40х20», «aisi 304»). Строка под ним — фильтры "
+              "столбцов: текст — слова, которые должны быть («нерж»); числа — «8», «8 10 12» (любое из), «8-12», «>20», «<=40»; нажмите Enter. «Скрыть нулевые» — «да». Только просмотр: ничего не проводится. "
+              "Если позиция не узнана, впишите ей категорию «Металл» (в «Номенклатуре» или в «Наличии»): она появится здесь. Список обновляется при открытии листа и кнопкой «Обновить».")
+METAL_FIND_ROW = 1
+METAL_FILTER_ROW = 2
+METAL_HEAD = 3
+METAL_KEY_COL = 20
+METAL_HINT_COL = 22
+
+
+def build_metal(doc, sh):
+    """«Металл» (the layout of «Инструмент ЧПУ»): the button, the search (row 2) and its «Скрыть нулевые», the filters of the columns (row 3), the head of the table (row 4), the list; the key of the sort is hidden,
+    the hint is on the right"""
+    header(sh, METAL_HEADERS, METAL_WIDTHS, height=1500)
+    n = len(METAL_HEADERS)
+    sh.getRows().getByIndex(0).Height = 1500
+    for c in range(n):
+        sh.getCellByPosition(c, METAL_HEAD).setString(METAL_HEADERS[c])
+        sh.getCellByPosition(c, 0).setString("")
+    hd = sh.getCellRangeByPosition(0, METAL_HEAD, n - 1, METAL_HEAD)
+    hd.CharWeight = 150
+    hd.IsTextWrapped = True
+    hd.VertJustify = 2
+    hd.CellBackColor = 0xE7E6E6
+    sh.getCellRangeByPosition(0, 0, n - 1, 0).CellBackColor = 0xFFFFFF
+    text = number_format(doc, "@", ("ru", "RU"))
+    for c in (0, 1, 2, 3, 4, 9, 10, 11, 13, 16, 18, 19):
+        sh.getCellRangeByPosition(c, METAL_HEAD + 1, c, 6000).NumberFormat = text
+    # the filters of the columns are texts too («>20», «8-12»)
+    sh.getCellRangeByPosition(0, METAL_FILTER_ROW, n - 1, METAL_FILTER_ROW).NumberFormat = text
+    sh.getCellRangeByPosition(0, METAL_FILTER_ROW, n - 1, METAL_FILTER_ROW).CellBackColor = INPUT_HEAD_10
+    sh.getCellByPosition(0, METAL_FIND_ROW).setString("Найти:")
+    sh.getCellByPosition(0, METAL_FIND_ROW).CharWeight = 150
+    sh.getCellByPosition(1, METAL_FIND_ROW).CellBackColor = INPUT_HEAD_10
+    sh.getCellByPosition(1, METAL_FIND_ROW).NumberFormat = text
+    merge(sh, 1, METAL_FIND_ROW, 3, METAL_FIND_ROW)
+    sh.getCellByPosition(4, METAL_FIND_ROW).setString("Скрыть нулевые:")
+    sh.getCellByPosition(4, METAL_FIND_ROW).CharWeight = 150
+    sh.getCellByPosition(4, METAL_FIND_ROW).HoriJustify = 3
+    merge(sh, 4, METAL_FIND_ROW, 5, METAL_FIND_ROW)
+    sh.getCellByPosition(6, METAL_FIND_ROW).setString("нет")
+    sh.getCellByPosition(6, METAL_FIND_ROW).CellBackColor = INPUT_HEAD_10
+    sh.getCellByPosition(6, METAL_FIND_ROW).NumberFormat = text
+    sh.getCellByPosition(0, 2).CharColor = MUTED
+    hint = sh.getCellByPosition(METAL_HINT_COL, 0)
+    hint.setString(METAL_HINT)
+    hint.IsTextWrapped = True
+    hint.VertJustify = 1
+    hint.CharHeight = 9
+    hint.CharColor = MUTED
+    sh.getColumns().getByIndex(METAL_KEY_COL).IsVisible = False
+    sh.getColumns().getByIndex(METAL_KEY_COL + 1).Width = 600
+    sh.getColumns().getByIndex(METAL_HINT_COL).Width = 12000
+    for c in (5, 6, 7, 8, 12, 14, 15, 17):
+        sh.getCellRangeByPosition(c, METAL_HEAD + 1, c, 6000).HoriJustify = 3
+    if not has_button(sh, "btnMetalRefresh"):
+        add_button(doc, sh, "btnMetalRefresh", "Обновить", "WmsMetal.BtnMetalRefresh", 150, 120, 3000, 650, bold=True, back=0xC6E0B4)
+    bind_event(sh.Events, "OnFocus", "WmsMetal.OnMetalFocus")
+    bind_event(sh.Events, "OnChange", "WmsMetal.OnMetalChange")
+
+
+def metal_130(doc, sheets):
+    """1.3.0: «Металл» right after «Инструмент ЧПУ» (or «Метизы»), for a new book and an upgraded one; nothing that exists is touched, the list is built at the first opening"""
+    if not sheets.hasByName(METAL):
+        names = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
+        at = names.index(TOOL) + 1 if TOOL in names else (names.index(FAST) + 1 if FAST in names else (names.index(CATS) + 1 if CATS in names else len(names)))
+        sheets.insertNewByName(METAL, at)
+        build_metal(doc, sheets.getByName(METAL))
+
+
 # 1.3.0: «Написания поставщиков» (WmsSup) — every spelling of a supplier that the book has («Заказы», «Приход авто», «Номенклатура», «Поставщики»), the spellings that look like one supplier together;
 # the column «Привести к» is the storekeeper's decision, the button changes the texts (the rows not received as typed, the received positions and the visits through the corrections of the journal)
 SPELL = "Написания поставщиков"
@@ -2415,7 +2498,7 @@ def build_spell(doc, sh):
     bind_event(sh.Events, "OnChange", "WmsSup.OnSpelChange")
 
 
-SHEETS_130 = [SPELL]
+SHEETS_130 = [SPELL, METAL]
 
 
 def relayout_130(doc, sheets, name, head_row, col, head_text, build):
@@ -2903,7 +2986,7 @@ def buttons_10(doc, sheets):
 
 # 1.0 (П6): «?» — the section of «Справка» of the sheet, right of the first row of its buttons
 HELP_MARK_SHEETS = (ORDERS, SPECIAL, CARS, ISSUES, RETURNS, ADJUST, STOCK, FIND, MAP, DASH, SUPPLY, REPORTS, SERVICE, KITS, RESERVES, GOODS,
-                    SUPPLIERS, PLACES, MAIN, "Сборка деталей", "Инструмент ЧПУ")
+                    SUPPLIERS, PLACES, MAIN, "Сборка деталей", "Инструмент ЧПУ", "Металл")
 
 
 def help_buttons_10(doc, sheets):
@@ -3439,6 +3522,7 @@ def build(office, out_path, test=False, instance_id=None):
     tool_120(doc, sheets)
     buttons_120(doc, sheets)
     spell_130(doc, sheets)
+    metal_130(doc, sheets)
     buttons_130(doc, sheets)
     settings_130(doc, sheets)
     main_buttons_110(doc, sheets)
