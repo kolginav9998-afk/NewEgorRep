@@ -6608,8 +6608,23 @@ def v83_metal_sheet():
         after = stk.getCellRangeByPosition(0, 0, 9, n_ei).getDataArray()
         R.add(c, "список ничего не проводит: «Наличие» и номер последней операции журнала те же", after == before and str(s.sysv("LAST_SEQ")) == seq0 and str(ip).startswith("OK"), f"LAST_SEQ {seq0} → {s.sysv('LAST_SEQ')}")
         oracle(c, s, "лист «Металл»")
+        s.B("MetalRefresh", "", module="WmsMetal")
+        ma = s.B("MakeCopy", "ANON", False, module="WmsHelp")
     finally:
         s.close()
+    ap = re.search(r"(/[^\n]*?\.ods)", ma).group(1) if str(ma).startswith("OK:") else ""
+    a = ready(Session(ap)) if ap else None
+    try:
+        left = []
+        if a:
+            for row_ in a.doc.Sheets.getByName("Металл").getCellRangeByPosition(0, 4, 19, 60).getDataArray():
+                for x_ in row_:
+                    if isinstance(x_, str) and x_ != "":
+                        left.append(x_[:30])
+        R.add(c, "обезличенная копия: на листе «Металл» нет ни одной строки списка (названия и артикулы не остаются)", bool(a) and not left, f"{str(ma)[:80]}; {left[:5]}")
+    finally:
+        if a:
+            a.close()
 
 
 @case
