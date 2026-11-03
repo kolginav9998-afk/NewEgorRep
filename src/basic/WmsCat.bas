@@ -739,7 +739,8 @@ Sub StockGroups()
             nm = CStr(r(cNm))
             If InStr(nm, c10) + InStr(nm, c13) + InStr(nm, c9) + InStr(nm, c160) + InStr(nm, "  ") > 0 Then nm = WmsNames.NormName(nm)
             art = Trim(CStr(r(cArt)))
-            key = LCase(nm) & "|" & LCase(art)
+            ' 1.3.0: the article as the whole WMS tells it (ArticleKey): «B-830», «b-830», «В-830» (Cyrillic) and «B 830» are one article, the position is one
+            key = LCase(nm) & "|" & WmsSpecial.ArticleKeyFast(art)
             If CtCollGet(coll, key, kv) Then
                 k = CLng(kv)
             Else

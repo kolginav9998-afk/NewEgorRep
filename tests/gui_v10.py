@@ -327,6 +327,37 @@ def main():
         typed(o, doc, "Инструмент ЧПУ", "$B$2", "")
         step("1.2.0: «Инструмент ЧПУ» в настоящем окне: «Обновить» — три позиции (фреза, цанга, пластина); «цанга» в «Найти» и Enter — одна, строка итога называет слова",
              k_all == ["CZ-10", "FR-10", "PL-1"] and k_one == ["CZ-10"] and "цанга" in stat and len(listed()) == 3, f"{k_all}; {k_one}; {stat[:90]}; {len(listed())}")
+        # ---------------------------------------------------------------- 8б. «Написания поставщиков» — the sheet and the real question of the button (1.3.0)
+        o.basic(doc, "WmsUi", "TestUiAuto", 1)
+        zk = doc.Sheets.getByName("Заказы")
+        rr = next(i for i in range(1, 900) if zk.getCellByPosition(0, i).getString() == "" and zk.getCellByPosition(1, i).getString() == "")
+        spell = ("Все инструменты", "ВСЕ ИНСТРУМЕНТЫ", "все  инструменты")
+        for k, (nm_, sup_) in enumerate((("Отвёртка", spell[0]), ("Ключ", spell[1]), ("Молоток", spell[2]))):
+            for col, v in (("A", f"SP-{k + 1}"), ("B", nm_), ("H", "3"), ("I", "шт"), ("L", sup_)):
+                zk.getCellByPosition(col_ix(col), rr + k).setString(v)
+        for col, v in (("F", "3"), ("C", "УПД-SP"), ("U", "6-1-1")):
+            zk.getCellByPosition(col_ix(col), rr + 2).setString(v)
+        for col in ("N", "O"):
+            zk.getCellByPosition(col_ix(col), rr + 2).setValue(TODAY)
+        rc3 = str(o.basic(doc, "WmsReceipt", "ReceiptPostRow", rr + 2))
+        car = str(o.basic(doc, "WmsCar", "CarArrive", "Газель А123ВС", spell[1]))
+        doc.getCurrentController().setActiveSheet(doc.Sheets.getByName("Написания поставщиков"))
+        o.idle()
+        ssh = doc.Sheets.getByName("Написания поставщиков")
+        rf = str(o.basic(doc, "WmsSup", "SpelRefresh"))
+        rows_ = [list(x) for x in ssh.getCellRangeByPosition(0, 4, 10, 4 + 80).getDataArray() if str(x[0]).lower().replace(" ", "") == "всеинструменты"]
+        targets = {str(x[8]) for x in rows_ if str(x[8]) != ""}
+        o.basic(doc, "WmsUi", "TestUiAuto", 0)
+        done, ra = drive(o, doc, "WmsSup", "SpelApply", (), [("WMS", pick_any(("Yes", "Да")))])
+        o.basic(doc, "WmsUi", "TestUiAuto", 1)
+        tgt = next(iter(targets)) if len(targets) == 1 else ""
+        now = [zk.getCellByPosition(col_ix("L"), rr + k).getString() for k in range(3)]
+        cs = doc.Sheets.getByName("Приход авто")
+        visit = [str(x[3]) for x in cs.getCellRangeByPosition(0, 0, 14, 80).getDataArray() if "123" in str(x[2]) or "123" in str(x[1])]
+        step("1.3.0: «Написания поставщиков» в настоящем окне: «Показать» — три написания одного поставщика (в двух ожидаемых строках, в принятой и в визите «Прихода авто»), одно предложение «Привести к»; "
+             "вопрос кнопки — настоящее окно «WMS» с «Да»; после «Да» во всех трёх строках «Заказов» и в визите одно и то же написание",
+             rc3.startswith("OK") and car.startswith("OK") and rf.startswith("OK:") and len(rows_) == 3 and tgt != "" and done == [True] and str(ra).startswith("OK:")
+             and now == [tgt, tgt, tgt] and visit == [tgt], f"{rc3[:30]}; {car[:30]}; {rf}; {targets}; {done}; {str(ra)[:120]}; {now}; {visit}")
         # ---------------------------------------------------------------- 9. «Инструмент ЧПУ» on a big warehouse with the bar of the status line (1.2.1): names that begin with a number,
         # odd ones, and a failure on purpose — the text of the error is not lost
         o.basic(doc, "WmsUi", "TestUiAuto", 1)

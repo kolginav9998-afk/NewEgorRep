@@ -6303,6 +6303,8 @@ def v80_units_and_article_keys():
         add("Шайба М8 DIN 125", "SH-8", 2.0, "S-2", unit="кг")
         add("Гайка М5 DIN 934", "G-5", 4.0, "C-1", unit="")
         add("Гайка М5 DIN 934", "G-5", 1.0, "C-2")
+        add("Болт М6х25", "BK-6", 7.0, "E-1")
+        add("Болт М6х25", "\u0412\u041a-6", 2.0, "E-2")
         add("Реле", "AB-12", 2.0, "D-1", cat="Детали")
         add("Реле", "\u0410\u0412-12", 4.0, "D-2", cat="Детали")
         add("Реле", "ab\u201112", 1.0, "D-3", cat="Детали")
@@ -6319,10 +6321,13 @@ def v80_units_and_article_keys():
         data = [list(x) for x in fsh.getCellRangeByPosition(0, 4, 17, 4 + 60).getDataArray()]
         by_art = {x[10]: x for x in data if x[10]}
         bolt, wash, nut = by_art.get("B-520", [""] * 18), by_art.get("SH-8", [""] * 18), by_art.get("G-5", [""] * 18)
+        b6 = [x for x in data if x[9] == "Болт М6х25"]
         R.add(c, "«Метизы»: болт в «шт» и «Шт.» — единица «шт», остаток 8, в списке ЕИ — каждая со своей записью («— 3 Шт. (A-2)»); шайба в «шт» и в «кг» — единица «шт / кг» и в списке ЕИ «100 шт», «2 кг"
                  "»; гайка, у первого ЕИ которой единицы нет, — «шт»",
               rf.startswith("OK:") and bolt[12] == "шт" and bolt[11] == 8 and bolt[16] == f"{eis[0]} — 5 шт (A-1); {eis[1]} — 3 Шт. (A-2)"
               and wash[12] == "шт / кг" and wash[16] == f"{eis[2]} — 100 шт (S-1); {eis[3]} — 2 кг (S-2)" and nut[12] == "шт" and nut[11] == 5, f"{rf}; {bolt[10:17]}; {wash[10:17]}; {nut[10:17]}")
+        R.add(c, "«Метизы»: болт «BK-6» (латиница) и «ВК-6» (кириллица) — одна строка: артикул как записан первым, остаток 9, два ЕИ с остатком",
+              len(b6) == 1 and b6[0][10] == "BK-6" and b6[0][11] == 9 and b6[0][14] == 2, str(b6))
         # «Остаток деталей»: one part for the four writings of an article
         rp = s.B("PartsRefresh", "", False, module="WmsStockView")
         psh = s.doc.Sheets.getByName("Остаток деталей")
@@ -6332,7 +6337,7 @@ def v80_units_and_article_keys():
         R.add(c, "«Остаток деталей»: «AB-12» (латиница), «АВ-12» (кириллица), «ab‑12» (неразрывный дефис) и «AB - 12» — одна деталь: артикул как записан первым, остаток 10, четыре ЕИ",
               rp.startswith("OK:") and len(rel) == 1 and rel[0][0] == "AB-12" and rel[0][3] == 10 and rel[0][5] == 4, f"{rp}; {rel}")
         R.add(c, "«Остаток деталей»: втулка VT-9 в «шт» и «кг» — единица «шт / кг», остаток 5, в списке ЕИ «3 шт (D-5)» и «2 кг (D-6)»",
-              vt[4] == "шт / кг" and vt[3] == 5 and f"{eis[10]} — 3 шт (D-5)" in vt[6] and f"{eis[11]} — 2 кг (D-6)" in vt[6], str(vt))
+              vt[4] == "шт / кг" and vt[3] == 5 and f"{eis[12]} — 3 шт (D-5)" in vt[6] and f"{eis[13]} — 2 кг (D-6)" in vt[6], str(vt))
         # the page «Поиск»: the sum of the EIs found
         s.B("TestFind", "Болт М5х20", module="WmsFind")
         fnd = s.doc.Sheets.getByName("Поиск")
