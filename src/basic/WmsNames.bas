@@ -9,6 +9,8 @@ Option Explicit
 ' the characters that are a blank in a name (codes): the controls, the non-breaking and the unusual spaces
 Global gNmBl() As String
 Global gNmBlN As Long
+' 1.3.0: the pattern of «there is a blank in the text» — one test (the operator Like) instead of sixty searches; most names have none
+Global gNmBlPat As String
 
 Private Sub NmInit()
     Dim i As Long, n As Long
@@ -35,12 +37,17 @@ Private Sub NmInit()
     gNmBl(n) = Chr(65279)
     n = n + 1
     gNmBlN = n
+    gNmBlPat = "*[" & Chr(1) & "-" & Chr(31) & Chr(127) & Chr(160) & Chr(8192) & "-" & Chr(8207) & Chr(8232) & Chr(8233) & Chr(8239) & Chr(65279) & "]*"
 End Sub
 
 ' the text with the signs of a line break and the like turned into a space (not yet put in order otherwise)
 Private Function BlankToSpace(ByVal s As String) As String
     Dim i As Long
     NmInit()
+    If Not (s Like gNmBlPat) Then
+        BlankToSpace = s
+        Exit Function
+    End If
     For i = 0 To gNmBlN - 1
         If InStr(s, gNmBl(i)) > 0 Then s = Replace(s, gNmBl(i), " ")
     Next i
@@ -77,6 +84,12 @@ Function NormName(ByVal s As String) As String
     Dim a As Variant, out As String, i As Long, t As String, n As String, k As String, bJoin As Boolean, c As Long
     s = OneSpace(BlankToSpace(s))
     If s = "" Then Exit Function
+    ' 1.3.0: a name without the words that are joined («A 2», «М 8») or written in capitals («din») is as it is (the loop below would only put the same words together again)
+    t = " " & LCase(s) & " "
+    If InStr(t, " a ") + InStr(t, " а ") + InStr(t, " m ") + InStr(t, " м ") + InStr(t, " din ") + InStr(t, " iso ") + InStr(t, " гост ") + InStr(t, " en ") + InStr(t, " дин ") = 0 Then
+        NormName = s
+        Exit Function
+    End If
     a = Split(s, " ")
     i = 0
     Do While i <= UBound(a)
@@ -125,24 +138,29 @@ End Function
 ' the text as it is compared when searching (see the head of the module)
 Function Fold(ByVal s As String) As String
     s = LCase(BlankToSpace(s))
-    s = Replace(s, "ё", "е")
-    s = Replace(s, "a", "а")
-    s = Replace(s, "b", "в")
-    s = Replace(s, "c", "с")
-    s = Replace(s, "e", "е")
-    s = Replace(s, "h", "н")
-    s = Replace(s, "k", "к")
-    s = Replace(s, "m", "м")
-    s = Replace(s, "o", "о")
-    s = Replace(s, "p", "р")
-    s = Replace(s, "t", "т")
-    s = Replace(s, "x", "х")
-    s = Replace(s, "y", "у")
-    s = Replace(s, "×", "х")
-    s = Replace(s, "*", "х")
-    s = Replace(s, ",", ".")
-    s = Replace(s, "–", "-")
-    s = Replace(s, "—", "-")
+    ' 1.3.0: the replacements are made only when the text has something to replace (a name of the Russian letters has none of the Latin ones: fifteen empty passes were most of the time)
+    If s Like "*[abcehkmoptxy]*" Then
+        s = Replace(s, "a", "а")
+        s = Replace(s, "b", "в")
+        s = Replace(s, "c", "с")
+        s = Replace(s, "e", "е")
+        s = Replace(s, "h", "н")
+        s = Replace(s, "k", "к")
+        s = Replace(s, "m", "м")
+        s = Replace(s, "o", "о")
+        s = Replace(s, "p", "р")
+        s = Replace(s, "t", "т")
+        s = Replace(s, "x", "х")
+        s = Replace(s, "y", "у")
+    End If
+    If s Like "*[ё×*,–—]*" Then
+        s = Replace(s, "ё", "е")
+        s = Replace(s, "×", "х")
+        s = Replace(s, "*", "х")
+        s = Replace(s, ",", ".")
+        s = Replace(s, "–", "-")
+        s = Replace(s, "—", "-")
+    End If
     Fold = OneSpace(s)
 End Function
 

@@ -62,6 +62,7 @@ Global gCtStatSeq As Long
 ' the journal position of the last list of «Метизы» and of «Без категории» (a list is made again when the journal moved)
 Global gFsSeq As Long
 Global gFsBusy As Boolean
+Global gFsProf As String
 Global gNkSeq As Long
 Global gNkBusy As Boolean
 ' the registry grouped by name and article (StockGroups)
@@ -69,6 +70,17 @@ Global gGrp As Variant
 Global gGrpN As Long
 ' «Номенклатура»: «a:article» / «n:name» → «row|category»
 Global gGc As Object
+' 1.3.0: the keys of gGc in one text («Chr(1) key Chr(1) key …»): a key that is not there is found by one search, not by the error of a Collection
+Global gGcKeys As String
+' 1.3.0: the category of every group of gGrp, made for all of them at once (GroupCats): gGrpCat(i) — as CategoryOf says it (the registry, «Номенклатура», the hint by the words), gGrpRow(i) — the row of the goods in
+' «Номенклатура» (from 0; -1 — none), gGrpHint(i) — the hint by the words ("" when the category came from the registry or from «Номенклатуры»), gGrpNeed(i) — True when the group has no category
+' in the registry and none in «Номенклатуре» (it has only the hint, which may be empty)
+Global gGrpCat As Variant
+Global gGrpRow As Variant
+Global gGrpHint As Variant
+Global gGrpNeed As Variant
+' 1.3.0: the time (ms) of the steps of the last GroupCats (for the test of the speed)
+Global gGrpProf As String
 
 ' the value of a key of a Collection; False when it has none (an error handler set inside a loop works for the first error only in this Basic: each lookup is a call of its own)
 Private Function CtCollGet(coll As Object, key As String, ByRef v As Variant) As Boolean
@@ -171,13 +183,15 @@ EH:
 End Sub
 
 ' how well the name nm (" folded name ") fits the category i: 0 — no word, -1 — a word to leave out is there; a whole word 2, the beginning of a word 1
+' 1.3.0: the folded text is compared as it is (InStr with the binary mode): the text mode of the language looks for every call through the whole text with the case rules of Unicode (ß = ss, ſ = s) and costs a millisecond on
+' a long text; the text is lower case already (Fold), so only those rare signs differ
 Private Function CtScore(nm As String, i As Long) As Long
     Dim w As Variant, j As Long, k As String, sc As Long
     w = gCtExcl(i)
     For j = 0 To UBound(w)
         k = CStr(w(j))
         If k <> "" Then
-            If InStr(nm, " " & k) > 0 Then
+            If InStr(1, nm, " " & k, 0) > 0 Then
                 CtScore = -1
                 Exit Function
             End If
@@ -188,10 +202,10 @@ Private Function CtScore(nm As String, i As Long) As Long
         k = CStr(w(j))
         If k <> "" Then
             If Left(k, 1) = "=" Then
-                If InStr(nm, " " & Mid(k, 2) & " ") > 0 Then sc = sc + 2
-            ElseIf InStr(nm, " " & k & " ") > 0 Then
+                If InStr(1, nm, " " & Mid(k, 2) & " ", 0) > 0 Then sc = sc + 2
+            ElseIf InStr(1, nm, " " & k & " ", 0) > 0 Then
                 sc = sc + 2
-            ElseIf InStr(nm, " " & k) > 0 Then
+            ElseIf InStr(1, nm, " " & k, 0) > 0 Then
                 sc = sc + 1
             End If
         End If
@@ -230,8 +244,9 @@ End Function
 
 ' «Номенклатура» read: a goods is its article (or its name when it has none); the value is «row|category» (the row of the sheet from 0); the first row of a key counts
 Sub GoodsLoad()
-    Dim sh As Object, last As Long, d As Variant, i As Long, k As String, cN As Long, cA As Long, cC As Long, r As Variant
+    Dim sh As Object, last As Long, d As Variant, i As Long, k As String, cN As Long, cA As Long, cC As Long, r As Variant, ks() As String, nk As Long
     gGc = New Collection
+    gGcKeys = ""
     If Not gDoc.Sheets.hasByName(SH_GOODS) Then Exit Sub
     sh = gDoc.Sheets.getByName(SH_GOODS)
     last = WmsOrders.LastRow(sh)
@@ -240,6 +255,7 @@ Sub GoodsLoad()
     cA = GD_ART
     cC = GD_CAT
     d = sh.getCellRangeByPosition(0, 1, cC, last).getDataArray()
+    ReDim ks(UBound(d))
     For i = 0 To UBound(d)
         r = d(i)
         k = CtGoodsKey(CStr(r(cN)), CStr(r(cA)))
@@ -247,8 +263,14 @@ Sub GoodsLoad()
             On Error Resume Next
             gGc.Add((i + 1) & "|" & Trim(CStr(r(cC))), k)
             On Error GoTo 0
+            ks(nk) = k
+            nk = nk + 1
         End If
     Next i
+    If nk > 0 Then
+        ReDim Preserve ks(nk - 1)
+        gGcKeys = Chr(1) & Join(ks, Chr(1)) & Chr(1)
+    End If
 End Sub
 
 ' the row of «Номенклатура» (from 0; -1 — none) and the category of the goods of this name and article ("" — none)
@@ -283,6 +305,240 @@ Function CategoryOf(sName As String, sArt As String, sRegCat As String) As Strin
     End If
     CategoryOf = CategorySuggest(sName)
 End Function
+
+' 1.3.0: the hints of the categories for many names at once — for each name the answer of CategorySuggest; found by the words, not by the names: every word of the sheet «Категории» is looked for once in the text
+' that joins all the names (a name by itself costs about 2 ms: 4500 names are 10 s, this is a second). names — an array (from 0) of the names, n — how many
+Private Function CtHintsAll(names As Variant, n As Long) As Variant
+    Dim res() As String, prep() As String, off() As Long, i As Long, c As Long, j As Long, k As Long, w As Variant, sw As String, p As Long, tot As Long, big As String, parts As Variant, jt As String
+    Dim sc() As Long, ex() As Boolean, cur As Long, cb As Long, best As Long, hint As String, nc As Long, pat As String, bFall As Boolean, sg As Variant, t0 As Long, tp As String
+    t0 = GetSystemTicks()
+    ReDim res(IIf(n > 0, n - 1, 0))
+    If n <= 0 Then
+        CtHintsAll = res
+        Exit Function
+    End If
+    If Not gCtLoaded Then CtLoad()
+    nc = gCtN
+    If nc = 0 Then
+        CtHintsAll = res
+        Exit Function
+    End If
+    ReDim prep(n - 1)
+    For i = 0 To n - 1
+        prep(i) = WmsNames.NormName(CStr(names(i)))
+        If InStr(prep(i), "¦") > 0 Then bFall = True
+    Next i
+    If Not bFall Then
+        big = Join(prep, "¦")
+        For Each sg In Array(",", ";", "(", ")", "/", Chr(34), "«", "»", ":", "|")
+            big = Replace(big, CStr(sg), " ")
+        Next sg
+        parts = Split(WmsNames.Fold(big), "¦")
+        If UBound(parts) <> n - 1 Then bFall = True
+    End If
+    If bFall Then
+        ' a name holds the sign that joins them: one by one
+        For i = 0 To n - 1
+            res(i) = CategorySuggest(CStr(names(i)))
+        Next i
+        CtHintsAll = res
+        Exit Function
+    End If
+    ReDim off(n)
+    tot = 1
+    For i = 0 To n - 1
+        prep(i) = " " & Trim(CStr(parts(i))) & " "
+        off(i) = tot
+        tot = tot + Len(prep(i))
+    Next i
+    off(n) = tot
+    jt = Join(prep, "")
+    ReDim sc(nc * n - 1)
+    ReDim ex(nc * n - 1)
+    tp = "тексты " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
+    For c = 0 To nc - 1
+        cb = c * n
+        ' the words to leave out: a word at the beginning of a word of the name
+        w = gCtExcl(c)
+        For k = 0 To UBound(w)
+            sw = CStr(w(k))
+            If sw <> "" Then
+                pat = " " & sw
+                cur = 0
+                p = InStr(1, jt, pat, 0)
+                Do While p > 0
+                    cur = CtNameAt(off, n, p, cur)
+                    ex(cb + cur) = True
+                    p = InStr(off(cur + 1), jt, pat, 0)
+                Loop
+            End If
+        Next k
+        ' the words to find: the beginning of a word 1 and a whole word 1 more; «=word» — a whole word only, 2; one word counts once in a name (the search goes on from the next name)
+        w = gCtWords(c)
+        For k = 0 To UBound(w)
+            sw = CStr(w(k))
+            If sw <> "" Then
+                If Left(sw, 1) = "=" Then
+                    pat = " " & Mid(sw, 2) & " "
+                    cur = 0
+                    p = InStr(1, jt, pat, 0)
+                    Do While p > 0
+                        cur = CtNameAt(off, n, p, cur)
+                        sc(cb + cur) = sc(cb + cur) + 2
+                        p = InStr(off(cur + 1), jt, pat, 0)
+                    Loop
+                Else
+                    pat = " " & sw
+                    cur = 0
+                    p = InStr(1, jt, pat, 0)
+                    Do While p > 0
+                        cur = CtNameAt(off, n, p, cur)
+                        sc(cb + cur) = sc(cb + cur) + 1
+                        p = InStr(off(cur + 1), jt, pat, 0)
+                    Loop
+                    pat = pat & " "
+                    cur = 0
+                    p = InStr(1, jt, pat, 0)
+                    Do While p > 0
+                        cur = CtNameAt(off, n, p, cur)
+                        sc(cb + cur) = sc(cb + cur) + 1
+                        p = InStr(off(cur + 1), jt, pat, 0)
+                    Loop
+                End If
+            End If
+        Next k
+    Next c
+    tp = tp & ", поиск слов " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
+    For j = 0 To n - 1
+        best = 0
+        hint = ""
+        For c = 0 To nc - 1
+            If Not ex(c * n + j) Then
+                If sc(c * n + j) > best Then
+                    best = sc(c * n + j)
+                    hint = gCtCat(c)
+                End If
+            End If
+        Next c
+        res(j) = hint
+    Next j
+    gGrpProf = tp & ", выбор " & (GetSystemTicks() - t0)
+    CtHintsAll = res
+End Function
+
+' the number of the name (from 0) that holds the position p of the joined text: off(i) — where the name i begins, off(n) — the end. The hits of one search go up, so the search starts from the name of the
+' previous hit (cur) and steps forward by 1, 2, 4 … names, then halves the last step
+Private Function CtNameAt(off() As Long, n As Long, p As Long, cur As Long) As Long
+    Dim lo As Long, hi As Long, st As Long, mid As Long
+    If p < off(cur + 1) Then
+        CtNameAt = cur
+        Exit Function
+    End If
+    lo = cur + 1
+    st = 1
+    hi = lo + st
+    Do While hi < n
+        If off(hi) > p Then Exit Do
+        lo = hi
+        st = st * 2
+        hi = lo + st
+    Loop
+    If hi > n Then hi = n
+    Do While hi - lo > 1
+        mid = (lo + hi) \ 2
+        If off(mid) <= p Then
+            lo = mid
+        Else
+            hi = mid
+        End If
+    Loop
+    CtNameAt = lo
+End Function
+
+' the category of every group of gGrp, for all at once (after StockGroups; CtLoad and GoodsLoad are made here): gGrpCat, gGrpRow, gGrpHint — the same answers as CategoryOf and GoodsLookup give group by group
+Sub GroupCats()
+    Dim n As Long, i As Long, j As Long, g As Variant, cat() As String, rw() As Long, ht() As String, nm() As String, ar() As String, fa As Variant, fn As Variant, key As String, v As String, p As Long, c As String
+    Dim idx() As Long, nNeed As Long, names() As String, hints As Variant, bGoods As Boolean, t0 As Long, tp As String, nd() As Boolean
+    t0 = GetSystemTicks()
+    gGrpProf = ""
+    If Not gCtLoaded Then CtLoad()
+    n = gGrpN
+    If n = 0 Then
+        gGrpCat = Array()
+        gGrpRow = Array()
+        gGrpHint = Array()
+        gGrpNeed = Array()
+        Exit Sub
+    End If
+    ReDim cat(n - 1)
+    ReDim rw(n - 1)
+    ReDim ht(n - 1)
+    ReDim nd(n - 1)
+    ReDim idx(n - 1)
+    ReDim names(n - 1)
+    bGoods = (gGcKeys <> "")
+    If bGoods Then
+        ReDim nm(n - 1)
+        ReDim ar(n - 1)
+        For i = 0 To n - 1
+            g = gGrp(i)
+            ar(i) = Trim(CStr(g(1)))
+            ' (the key by the name is used only for a goods with no article, and only when the registry has no category of it)
+            If ar(i) = "" And Trim(CStr(g(6))) = "" Then nm(i) = WmsNames.NormName(CStr(g(0)))
+        Next i
+        fa = WmsNames.FoldAll(ar)
+        fn = WmsNames.FoldAll(nm)
+    End If
+    tp = "ключи " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
+    For i = 0 To n - 1
+        g = gGrp(i)
+        rw(i) = -1
+        c = Trim(CStr(g(6)))
+        If c <> "" Then
+            cat(i) = c
+        Else
+            If bGoods Then
+                key = ""
+                If ar(i) <> "" Then
+                    key = "a:" & CStr(fa(i))
+                ElseIf Trim(CStr(g(0))) <> "" Then
+                    key = "n:" & CStr(fn(i))
+                End If
+                If key <> "" Then
+                    If InStr(gGcKeys, Chr(1) & key & Chr(1)) > 0 Then
+                        v = gGc.Item(key)
+                        p = InStr(v, "|")
+                        rw(i) = CLng(Left(v, p - 1))
+                        cat(i) = Mid(v, p + 1)
+                    End If
+                End If
+            End If
+            If cat(i) = "" Then
+                nd(i) = True
+                idx(nNeed) = i
+                names(nNeed) = CStr(g(0))
+                nNeed = nNeed + 1
+            End If
+        End If
+    Next i
+    tp = tp & ", «Номенклатура» " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
+    If nNeed > 0 Then
+        hints = CtHintsAll(names, nNeed)
+        For j = 0 To nNeed - 1
+            ht(idx(j)) = CStr(hints(j))
+            cat(idx(j)) = CStr(hints(j))
+        Next j
+    End If
+    gGrpCat = cat
+    gGrpRow = rw
+    gGrpHint = ht
+    gGrpNeed = nd
+    gGrpProf = tp & ", подсказки " & (GetSystemTicks() - t0) & " [" & gGrpProf & "] (без категории " & nNeed & ")"
+End Sub
 
 ' the category of every row of the registry array d (rows from 0; the columns of «Наличие»): its own, else of «Номенклатура», else the hint — one reading of a name, however many EIs
 ' have it. An array aligned with d ("" for an empty row). The search «категория:…» uses it
@@ -471,7 +727,7 @@ End Sub
 ' how many names (positions) and EIs with a balance each category of the sheet has, by the category of the registry, of «Номенклатура» or the hint; the two columns D, E of the sheet
 ' are written (they are the counting, not the input). OK:<categories>|<positions without a category>
 Function CatsStat() As String
-    Dim sh As Object, i As Long, j As Long, g As Variant, c As String, nPos() As Long, nEi() As Long, nNone As Long, last As Long, out() As Variant, key As String, names As Variant, keys() As String
+    Dim sh As Object, i As Long, j As Long, g As Variant, c As String, nPos() As Long, nEi() As Long, nNone As Long, last As Long, out() As Variant, key As String, names As Variant, keys() As String, fcat As Variant
     On Error GoTo EH
     WmsInit()
     If Not gDoc.Sheets.hasByName(SH_CATS) Then
@@ -487,6 +743,7 @@ Function CatsStat() As String
     CtLoad()
     GoodsLoad()
     StockGroups()
+    GroupCats()
     last = WmsOrders.LastRow(sh)
     If last < 1 Then last = 1
     If last > CT_MAX Then last = CT_MAX
@@ -497,13 +754,15 @@ Function CatsStat() As String
     For j = 1 To last
         keys(j) = WmsNames.Fold(Trim(CStr(names(j - 1)(0))))
     Next j
+    ' (the category of every group is made at once, GroupCats; the categories are folded at once)
+    If gGrpN > 0 Then fcat = WmsNames.FoldAll(gGrpCat)
     For i = 0 To gGrpN - 1
         g = gGrp(i)
-        c = CategoryOf(CStr(g(0)), CStr(g(1)), CStr(g(6)))
+        c = CStr(gGrpCat(i))
         If c = "" Then
             nNone = nNone + 1
         Else
-            key = WmsNames.Fold(c)
+            key = CStr(fcat(i))
             For j = 1 To last
                 If keys(j) = key Then
                     nPos(j) = nPos(j) + 1
@@ -532,14 +791,6 @@ EH:
 End Function
 
 ' ================================================================ «Метизы»
-
-' True when the group of this name, article and category of the registry is a fastener: its category says so («Метизы», «Крепёж»), or it has none and «Номенклатура» or the name says
-' so (the hints of «Категории»); a category of something else («Инструмент» for «Болторез») keeps it out
-Private Function FsIsFastener(sName As String, sArt As String, sCat As String) As Boolean
-    Dim c As String
-    c = WmsNames.Fold(CategoryOf(sName, sArt, sCat))
-    FsIsFastener = (InStr(c, "метиз") > 0 Or InStr(c, "крепеж") > 0)
-End Function
 
 Sub BtnFastRefresh(Optional oEvent As Variant)
     Dim s As String
@@ -670,7 +921,7 @@ Function FastRefresh(sFind As String) As String
     Dim sh As Object, i As Long, j As Long, k As Long, n As Long, g As Variant, rec As Variant, rows() As Variant, hays() As String, nms() As String, cols As Variant, notes() As String
     Dim canon() As String, filt As Variant, fTxt(15) As String, hide As Boolean, scores As Variant, ok As Boolean, out() As Variant, nShown As Long, nAllF As Long, q As Double
     Dim eqShow As String, hay As String, key As String, pk As Long, ra As Object, descr As String, tIdx As Long, typeName As String, fl As Boolean, dd As Variant
-    Dim coll As Object, wordsOld As Variant, cc As String
+    Dim coll As Object, wordsOld As Variant, cc As String, fcat As Variant, rawH() As String, rawN() As String, rawM() As String, hP As Variant, nP As Variant, nmF As Variant, t0 As Long, tp As String, rawO() As String, oldF As Variant
     On Error GoTo EH
     gFsBusy = True
     WmsInit()
@@ -682,18 +933,29 @@ Function FastRefresh(sFind As String) As String
     sh = gDoc.Sheets.getByName(SH_FAST)
     If Not gCtLoaded Then CtLoad()
     GoodsLoad()
+    t0 = GetSystemTicks()
     StockGroups()
-    ' the fasteners among the groups
+    tp = "реестр " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
+    ' 1.3.0: the category of every group at once (registry, «Номенклатура», the hint by the words) — not group by group
+    GroupCats()
+    tp = tp & ", категории " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
+    ' the fasteners among the groups: their category says so («Метизы», «Крепёж»); a category of something else («Инструмент» for «Болторез») keeps a group out
     n = 0
     ReDim rows(IIf(gGrpN > 0, gGrpN - 1, 0))
+    If gGrpN > 0 Then fcat = WmsNames.FoldAll(gGrpCat)
     For i = 0 To gGrpN - 1
-        g = gGrp(i)
-        If FsIsFastener(CStr(g(0)), CStr(g(1)), CStr(g(6))) Then
+        cc = CStr(fcat(i))
+        If InStr(cc, "метиз") > 0 Or InStr(cc, "крепеж") > 0 Then
+            g = gGrp(i)
             rec = WmsSpec.SpRecordC(CStr(g(0)))
-            rows(n) = Array(g, rec)
+            rows(n) = Array(g, rec, i)
             n = n + 1
         End If
     Next i
+    tp = tp & ", разбор " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
     ' the search and the filters of the sheet
     filt = sh.getCellRangeByPosition(0, FS_FILTER_ROW, FS_COLS - 1, FS_FILTER_ROW).getDataArray()(0)
     For j = 0 To FS_COLS - 1
@@ -704,14 +966,30 @@ Function FastRefresh(sFind As String) As String
     ReDim nms(IIf(n > 0, n - 1, 0))
     ReDim notes(IIf(n > 0, n - 1, 0))
     ReDim canon(IIf(n > 0, n - 1, 0))
-    For i = 0 To n - 1
-        g = rows(i)(0)
-        rec = rows(i)(1)
-        typeName = CStr(rec(0))
-        If typeName = "" Then typeName = "Прочее"
-        hays(i) = " " & Trim(WmsSearch.Prep(typeName & " " & rec(2) & " " & WmsSpec.SpTokens(rec) & " " & rec(7) & " " & rec(8) & " " & rec(9) & " " & g(0) & " " & g(1) & " " & g(5))) & " "
-        nms(i) = " " & Trim(WmsSearch.Prep(CStr(g(0)) & " " & g(1))) & " "
-    Next i
+    ' 1.3.0: the texts of all the rows are folded at once (the engine of the language works on one long text, not on every row)
+    If n > 0 Then
+        ReDim rawH(n - 1)
+        ReDim rawN(n - 1)
+        ReDim rawM(n - 1)
+        For i = 0 To n - 1
+            g = rows(i)(0)
+            rec = rows(i)(1)
+            typeName = CStr(rec(0))
+            If typeName = "" Then typeName = "Прочее"
+            rawH(i) = typeName & " " & rec(2) & " " & WmsSpec.SpTokens(rec) & " " & rec(7) & " " & rec(8) & " " & rec(9) & " " & g(0) & " " & g(1) & " " & g(5)
+            rawN(i) = CStr(g(0)) & " " & g(1)
+            rawM(i) = CStr(g(0))
+        Next i
+        hP = WmsSearch.PrepAll(rawH)
+        nP = WmsSearch.PrepAll(rawN)
+        nmF = WmsNames.FoldAll(rawM)
+        For i = 0 To n - 1
+            hays(i) = " " & Trim(CStr(hP(i))) & " "
+            nms(i) = " " & Trim(CStr(nP(i))) & " "
+        Next i
+    End If
+    tp = tp & ", тексты поиска " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
     ' the possible doubles: the same type, size, standard (or its equivalent), class, coating, head — under different names; or the same name — under different articles
     coll = New Collection
     For i = 0 To n - 1
@@ -724,9 +1002,11 @@ Function FastRefresh(sFind As String) As String
             key = "p|" & rec(0) & "|" & rec(2) & "|" & rec(11) & "|" & rec(7) & "|" & cc & "|" & rec(9)
             DupMark(coll, key, i, notes, rows)
         End If
-        key = "n|" & WmsNames.Fold(CStr(g(0)))
+        key = "n|" & CStr(nmF(i))
         DupMark(coll, key, i, notes, rows)
     Next i
+    tp = tp & ", дубли " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
     ' the search with the understanding of «Поиск»; the filters «место:», «категория:», «артикул:» of the query need the columns of the rows
     cols = Empty
     If Mid(WmsSearch.QueryNeeds(sFind), 1, 4) <> "0000" Then
@@ -739,12 +1019,26 @@ Function FastRefresh(sFind As String) As String
             g = rows(i)(0)
             aPl(i) = CStr(g(5))
             aAr(i) = CStr(g(1))
-            aCt(i) = CategoryOf(CStr(g(0)), CStr(g(1)), CStr(g(6)))
+            aCt(i) = CStr(gGrpCat(CLng(rows(i)(2))))
         Next i
         cols = Array(WmsNames.FoldAll(aPl), WmsNames.FoldAll(aCt), WmsNames.FoldAll(aAr), WmsNames.FoldAll(aSr))
     End If
+    tp = tp & ", столбцы запроса " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
     scores = WmsSearch.MatchScores(sFind, hays, nms, n, cols)
     wordsOld = WmsNames.FoldWords(sFind)
+    ' the old way too: every word of the search as a part of the text of the row (a part of an article, of a place: «b-8», «5-1»); the texts folded at once, only for a search
+    If Trim(sFind) <> "" And n > 0 Then
+        ReDim rawO(n - 1)
+        For i = 0 To n - 1
+            g = rows(i)(0)
+            rec = rows(i)(1)
+            rawO(i) = CStr(g(0)) & " " & g(1) & " " & g(5) & " " & rec(0) & " " & rec(2) & " " & rec(6) & " " & rec(7) & " " & rec(8)
+        Next i
+        oldF = WmsNames.FoldAll(rawO)
+    End If
+    tp = tp & ", поиск " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
     ReDim out(IIf(n > 0, n - 1, 0))
     k = 0
     For i = 0 To n - 1
@@ -752,8 +1046,7 @@ Function FastRefresh(sFind As String) As String
         rec = rows(i)(1)
         q = g(3)
         ok = (scores(i) > 0)
-        ' the old way too: every word of the search as a part of the text of the row (a part of an article, of a place: «b-8», «5-1»)
-        If Not ok And Trim(sFind) <> "" Then ok = WmsNames.HasWords(WmsNames.Fold(CStr(g(0)) & " " & g(1) & " " & g(5) & " " & rec(0) & " " & rec(2) & " " & rec(6) & " " & rec(7) & " " & rec(8)), wordsOld)
+        If Not ok And Trim(sFind) <> "" Then ok = WmsNames.HasWords(CStr(oldF(i)), wordsOld)
         If ok And hide And q < 0.0000005 Then ok = False
         If ok Then
             typeName = CStr(rec(0))
@@ -784,6 +1077,8 @@ Function FastRefresh(sFind As String) As String
             k = k + 1
         End If
     Next i
+    tp = tp & ", фильтры " & (GetSystemTicks() - t0)
+    t0 = GetSystemTicks()
     ' the old list out, the new one in
     sh.getCellRangeByPosition(0, FS_ROW0, FS_KEY_COL, FS_ROW0 + FS_MAX).clearContents(1 + 2 + 4 + 16)
     nAllF = n
@@ -794,6 +1089,8 @@ Function FastRefresh(sFind As String) As String
         FsSort(sh.getCellRangeByPosition(0, FS_ROW0, FS_KEY_COL, FS_ROW0 + k - 1))
         sh.getCellRangeByPosition(0, FS_ROW0, FS_COLS - 1, FS_ROW0 + k - 1).CharColor = RGB(38, 50, 56)
     End If
+    tp = tp & ", запись " & (GetSystemTicks() - t0)
+    gFsProf = tp & " (групп " & gGrpN & ", метизов " & n & ")"
     descr = ""
     If Trim(sFind) <> "" Then descr = " — по словам «" & Trim(sFind) & "»"
     For j = 0 To FS_COLS - 1
@@ -926,7 +1223,8 @@ End Sub
 ' the names of «Наличие» with no category — neither in the registry, nor in «Номенклатуре» — and the hint by the words for each; the column «Категория» is filled with the hint:
 ' the storekeeper changes it or clears it, «Записать в «Номенклатуру»» takes what stays. OK:<rows> / ERR:…
 Function NoCatRefresh(sFind As String) As String
-    Dim sh As Object, i As Long, k As Long, g As Variant, nRow As Long, gc As String, hint As String, out() As Variant, hay As String, words As Variant, w As Variant, ok As Boolean, nNoGoods As Long
+    Dim sh As Object, i As Long, j As Long, k As Long, g As Variant, nRow As Long, hint As String, out() As Variant, words As Variant, w As Variant, ok As Boolean, nNoGoods As Long
+    Dim cand() As Long, nc As Long, raw() As String, hayF As Variant, bSearch As Boolean
     On Error GoTo EH
     gNkBusy = True
     WmsInit()
@@ -939,31 +1237,45 @@ Function NoCatRefresh(sFind As String) As String
     If Not gCtLoaded Then CtLoad()
     GoodsLoad()
     StockGroups()
+    ' 1.3.0: the category of every group at once; the groups with no category in the registry and none in «Номенклатуре» are the candidates, the hint is the one that GroupCats made
+    GroupCats()
     words = WmsNames.FoldWords(sFind)
+    bSearch = (Trim(sFind) <> "")
     ReDim out(IIf(gGrpN > 0, gGrpN - 1, 0))
+    ReDim cand(IIf(gGrpN > 0, gGrpN - 1, 0))
     For i = 0 To gGrpN - 1
-        g = gGrp(i)
-        If Trim(CStr(g(6))) = "" Then
-            gc = GoodsLookup(CStr(g(0)), CStr(g(1)), nRow)
-            If gc = "" Then
-                ok = True
-                If Trim(sFind) <> "" Then
-                    hay = WmsNames.Fold(CStr(g(0)) & " " & g(1))
-                    For Each w In words
-                        If CStr(w) <> "" Then
-                            If InStr(hay, CStr(w)) = 0 Then ok = False
-                        End If
-                    Next w
-                End If
-                If ok Then
-                    hint = CategorySuggest(CStr(g(0)))
-                    If nRow < 0 Then nNoGoods = nNoGoods + 1
-                    out(k) = Array(g(0), g(1), g(4), WmsPack.PkRound(CDbl(g(3)), 3), g(2), hint, hint, IIf(nRow >= 0, "есть, строка " & (nRow + 1), "нет в «Номенклатуре»"), nRow)
-                    k = k + 1
-                End If
-            End If
+        If gGrpNeed(i) Then
+            cand(nc) = i
+            nc = nc + 1
         End If
     Next i
+    If bSearch And nc > 0 Then
+        ReDim raw(nc - 1)
+        For j = 0 To nc - 1
+            g = gGrp(cand(j))
+            raw(j) = CStr(g(0)) & " " & g(1)
+        Next j
+        hayF = WmsNames.FoldAll(raw)
+    End If
+    For j = 0 To nc - 1
+        i = cand(j)
+        g = gGrp(i)
+        ok = True
+        If bSearch Then
+            For Each w In words
+                If CStr(w) <> "" Then
+                    If InStr(CStr(hayF(j)), CStr(w)) = 0 Then ok = False
+                End If
+            Next w
+        End If
+        If ok Then
+            hint = CStr(gGrpHint(i))
+            nRow = CLng(gGrpRow(i))
+            If nRow < 0 Then nNoGoods = nNoGoods + 1
+            out(k) = Array(g(0), g(1), g(4), WmsPack.PkRound(CDbl(g(3)), 3), g(2), hint, hint, IIf(nRow >= 0, "есть, строка " & (nRow + 1), "нет в «Номенклатуре»"), nRow)
+            k = k + 1
+        End If
+    Next j
     sh.getCellRangeByPosition(0, NK_ROW0, NK_COLS - 1, NK_ROW0 + NK_MAX).clearContents(1 + 2 + 4 + 16)
     If k > NK_MAX Then k = NK_MAX
     If k > 0 Then
@@ -1073,6 +1385,72 @@ End Function
 
 ' ================================================================ test seam
 
+' test seam (1.3.0): the hints made for many names at once and the hint of each name alone must agree: the names (Chr(10) between); how many, how many differ, the first of them («name ¦ alone ¦ at once»)
+' 1.3.0: test seam — "groups|groups with no category in the registry and in «Номенклатура»|of them with no hint" after StockGroups and GroupCats
+Function TestGroupNeed() As String
+    Dim i As Long, nNeed As Long, nNo As Long
+    WmsInit()
+    If Not gCtLoaded Then CtLoad()
+    GoodsLoad()
+    StockGroups()
+    GroupCats()
+    For i = 0 To gGrpN - 1
+        If CBool(gGrpNeed(i)) Then
+            nNeed = nNeed + 1
+            If CStr(gGrpHint(i)) = "" Then nNo = nNo + 1
+        End If
+    Next i
+    TestGroupNeed = gGrpN & "|" & nNeed & "|" & nNo
+End Function
+
+' 1.3.0: test seam — GroupCats against CategoryOf, GoodsLookup and CategorySuggest, group by group (the same answers must come). "групп N, различий M …", the first differences after
+Function TestGroupCats() As String
+    Dim i As Long, g As Variant, c As String, nRow As Long, gc As String, nBad As Long, out As String, bNeed As Boolean, hint As String, why As String
+    WmsInit()
+    If Not gCtLoaded Then CtLoad()
+    GoodsLoad()
+    StockGroups()
+    GroupCats()
+    For i = 0 To gGrpN - 1
+        g = gGrp(i)
+        why = ""
+        c = CategoryOf(CStr(g(0)), CStr(g(1)), CStr(g(6)))
+        If c <> CStr(gGrpCat(i)) Then why = "категория «" & c & "» ≠ «" & CStr(gGrpCat(i)) & "»"
+        If Trim(CStr(g(6))) = "" Then
+            nRow = -1
+            gc = GoodsLookup(CStr(g(0)), CStr(g(1)), nRow)
+            bNeed = (gc = "")
+            hint = ""
+            If bNeed Then hint = CategorySuggest(CStr(g(0)))
+            If nRow <> CLng(gGrpRow(i)) Then why = why & "; строка номенклатуры " & nRow & " ≠ " & CLng(gGrpRow(i))
+            If bNeed <> CBool(gGrpNeed(i)) Then why = why & "; «без категории» " & bNeed & " ≠ " & CBool(gGrpNeed(i))
+            If hint <> CStr(gGrpHint(i)) Then why = why & "; подсказка «" & hint & "» ≠ «" & CStr(gGrpHint(i)) & "»"
+        ElseIf CBool(gGrpNeed(i)) Then
+            why = why & "; группа с категорией реестра помечена «без категории»"
+        End If
+        If why <> "" Then
+            nBad = nBad + 1
+            If nBad <= 10 Then out = out & Chr(10) & CStr(g(0)) & " | " & CStr(g(1)) & " — " & why
+        End If
+    Next i
+    TestGroupCats = "групп " & gGrpN & ", различий " & nBad & out
+End Function
+
+Function TestHintsAll(sList As String) As String
+    Dim a As Variant, i As Long, h As Variant, nBad As Long, out As String, x As String
+    If Not gCtLoaded Then CtLoad()
+    a = Split(sList, Chr(10))
+    h = CtHintsAll(a, UBound(a) + 1)
+    For i = 0 To UBound(a)
+        x = CategorySuggest(CStr(a(i)))
+        If x <> CStr(h(i)) Then
+            nBad = nBad + 1
+            If nBad <= 15 Then out = out & Chr(10) & CStr(a(i)) & " ¦ " & x & " ¦ " & CStr(h(i))
+        End If
+    Next i
+    TestHintsAll = (UBound(a) + 1) & " имён, различий " & nBad & out
+End Function
+
 Function TestCategory(sName As String) As String
     TestCategory = CategorySuggest(sName)
 End Function
@@ -1084,6 +1462,15 @@ Function TestCategoryOf(sName As String, sArt As String, sRegCat As String) As S
 End Function
 
 ' «М8х30 …» parsed: size|diameter|length|standard|class|coating|type
+' 1.3.0: the time of the steps of the last FastRefresh, ms (for the test of the speed)
+Function TestFastProf() As String
+    TestFastProf = gFsProf
+End Function
+
+Function TestGroupProf() As String
+    TestGroupProf = gGrpProf
+End Function
+
 Function TestFastParse(sName As String) As String
     Dim sSize As String, dD As Double, dL As Double, dP As Double, idx As Long, t As String
     t = WmsSpec.SpType(sName, idx)

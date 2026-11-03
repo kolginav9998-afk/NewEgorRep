@@ -5780,6 +5780,147 @@ def v74_lint_eager():
           sorted(x.split(":")[0] for x in lost) == sorted(["WmsTool.bas", "WmsCare.bas", "WmsCare.bas", "WmsHelp.bas", "WmsLegacy.bas", "WmsMap.bas", "WmsParts.bas", "WmsSafe.bas"]), "; ".join(lost[:8]))
 
 
+def _lists_dataset(scale=1):
+    """1.3.0: rows of «Наличие» for the tests of the lists (as WMS 1.2.1 saw them): tools, fasteners with doubles, names with a line break, with no article, with the signs of other languages;
+    the rows of «Номенклатура» (some goods with a category, some with an empty one)"""
+    rows = []
+    n = [0]
+
+    def add(name, art, q=5.0, cat="", unit="шт"):
+        n[0] += 1
+        rows.append([f"ЕИ-{n[0]:08d}", name, art, unit, q, f"A-{n[0] % 50 + 1}", cat, "Активен"])
+
+    mats = ["Р6М5", "ВК8", "HSS-Co", "твердосплавная", "Т15К6"]
+    coats = ["TiN", "TiAlN", "ZrN", ""]
+    for i in range(240 * scale):
+        k = i % 6
+        d = 3 + i % 28
+        if k == 0:
+            add(f"Фреза концевая Ø{d}х{20 + i % 90} Z{2 + i % 4} {mats[i % 5]} {coats[i % 4]}", f"FR-{i}")
+        elif k == 1:
+            add(f"Сверло спиральное {d},{i % 10} DIN 338 {mats[i % 5]}", f"SV-{i}")
+        elif k == 2:
+            add(f"Метчик М{d}х1,{i % 9 + 1} м/р {mats[i % 5]}", f"MT-{i}")
+        elif k == 3:
+            add(f"Пластина {['CNMG', 'TNMG', 'DCMT', 'WNMG'][i % 4]} 1204{i % 90 + 10} {coats[i % 4]}", f"PL-{i}")
+        elif k == 4:
+            add(f"Цанга ER{[16, 20, 25, 32, 40][i % 5]} d{d}", f"CZ-{i}")
+        else:
+            add(f"Круг отрезной {100 + i % 130}х{1 + i % 3},0х22", f"KO-{i}")
+    for i in range(300 * scale):
+        add(f"Болт М{3 + i % 30}х{10 + i % 60} DIN 933 8.8 оцинкованный", f"B-{i}")
+        if i % 3 == 0:
+            add(f"Болт М{3 + i % 30}х{10 + i % 60} DIN 933 8.8 оцинкованный", f"B-{i}", q=2.0)
+        if i % 7 == 0:
+            add(f"Винт М{3 + i % 10}х{8 + i % 40} DIN 912 A2", "")
+        if i % 11 == 0:
+            add(f"Болторез {i}", f"BR-{i}")
+        if i % 13 == 0:
+            add(f"Шайба А 2 {i % 20}", f"SH-{i}")
+        if i % 17 == 0:
+            add(f"Гайка\nМ {3 + i % 20} din 934", f"GN-{i}")
+    for i in range(100 * scale):
+        add(f"Гайка М{3 + i % 30} DIN 934", f"G-{i}")
+    for i in range(160 * scale):
+        add([f"Лампа H{i % 20}", f"Кабель ВВГ {2 + i % 5}х{1 + i % 6}", f"Краска эмаль {i}", f"Перчатки х/б размер {i % 4 + 7}", f"Труба стальная {20 + i % 40}х{2 + i % 4}", f"Подшипник {6000 + i}"][i % 6], f"X-{i}")
+    for i in range(100 * scale):
+        add(f"Корпус фары FAR-{i}", f"DET-{i}", q=3.0, cat="Детали")
+        if i % 2 == 0:
+            add(f"Корпус фары FAR-{i}", f"DET-{i}", q=4.0, cat="Детали")
+    for i in range(30 * scale):
+        add(f"Straße {i} Weißmetall ß ſ ﬁ", f"EX-{i}")
+        add(f"Болт М8х{i + 20} с реестровой категорией", f"RC-{i}", cat="Инструмент" if i % 2 else "Метизы")
+        add(f"Заклёпка вытяжная 4х{i + 8}", f"ZK-{i}", q=0.0)
+    goods = []
+    seen = set()
+    for r in rows:
+        key = r[2] or r[1]
+        if key in seen:
+            continue
+        seen.add(key)
+        m = len(seen) % 9
+        if m == 1:
+            goods.append(["", r[1], r[2], r[3], "Метизы"])
+        elif m == 2:
+            goods.append(["", r[1], r[2], r[3], "Инструмент"])
+        elif m == 3:
+            goods.append(["", r[1], r[2], r[3], ""])
+    return rows, goods
+
+
+def _lists_fill(s, rows, goods):
+    """the rows of the dataset into «Наличие» and «Номенклатура»; two categories of ours into «Категории» (a whole word, a word to leave out)"""
+    stk = s.doc.Sheets.getByName("Наличие")
+    stk.unprotect("wms")
+    stk.getCellRangeByPosition(0, 1, 7, len(rows)).setDataArray(tuple(tuple(r) for r in rows))
+    gd = s.doc.Sheets.getByName("Номенклатура")
+    gd.unprotect("wms")
+    if goods:
+        gd.getCellRangeByPosition(0, 1, 4, len(goods)).setDataArray(tuple(tuple(r) for r in goods))
+    ct = s.doc.Sheets.getByName("Категории")
+    ct.unprotect("wms")
+    k = 1
+    while k < 300 and ct.getCellByPosition(0, k).getString() != "":
+        k += 1
+    ct.getCellByPosition(0, k).setString("Электрика")
+    ct.getCellByPosition(1, k).setString("кабель, лампа, =вв, ввг")
+    ct.getCellByPosition(2, k).setString("краска")
+    ct.getCellByPosition(0, k + 1).setString("Для сборки")
+    ct.getCellByPosition(1, k + 1).setString("шайба, болт м8, фара, =корпус")
+
+
+@case
+def v75_lists_fast_same():
+    """1.3.0: списки быстрее и те же. Категория каждой позиции считается для всех сразу (реестр → «Номенклатура» → подсказка по словам листа «Категории»), «Метизы», «Без категории» и счёт на листе
+    «Категории» берут её оттуда, а не считают по одной (по 2 мс на название: 4500 позиций — 27 с, теперь около 3 с). Проверки: пакетный расчёт даёт те же ответы, что одиночные CategoryOf / GoodsLookup /
+    CategorySuggest (в том числе на названиях со «ß», «ſ», «ﬁ», с переносом строки, без артикула); списки строятся за приемлемое время; «Без категории» — ровно группы без категории в реестре и в «Номенклатуре»"""
+    from tool_names import TOOL_PARSE
+    c = "V75"
+    rows, goods = _lists_dataset(2)
+    s = ready(Session(new_wms("v75")))
+    try:
+        _lists_fill(s, rows, goods)
+        before = s.doc.Sheets.getByName("Наличие").getCellRangeByPosition(0, 0, 9, len(rows)).getDataArray()
+        seq0 = str(s.sysv("LAST_SEQ"))
+        t0 = time.time()
+        r1 = s.B("TestGroupCats", module="WmsCat")
+        t_chk = time.time() - t0
+        R.add(c, "категория каждой группы, посчитанная разом, = ответ одиночных CategoryOf, GoodsLookup и CategorySuggest (реестр, «Номенклатура» со строкой и с пустой категорией, подсказка, названия без артикула)",
+              r1.split("\n")[0].endswith(", различий 0") and r1.startswith("групп "), f"{r1[:400]}; проверка {t_chk:.1f} с")
+        names = [x[0] for x in TOOL_PARSE] + [r[1] for r in rows[:600]] + ["Straße 5 Weißmetall ß ſ ﬁ", "Болт\nМ 8х30 DIN 933", "", "  ", "Лампа H4¦ВВГ 3х2,5", "Заклёпка 4х8 «вытяжная»", "кабель ВВГ-нг 3х1,5"]
+        r2 = s.B("TestHintsAll", "\n".join(names), module="WmsCat")
+        R.add(c, f"подсказки по словам для {len(names)} названий (инструмент, метизы, названия со «ß», «ſ», «ﬁ», с переносом строки, пустые, со знаком «¦») — пакетом те же, что по одной",
+              r2.split("\n")[0].endswith(", различий 0"), r2[:400])
+        t0 = time.time()
+        rf = s.B("FastRefresh", "", module="WmsCat")
+        t_fast = time.time() - t0
+        prof = s.B("TestFastProf", module="WmsCat")
+        t0 = time.time()
+        rn = s.B("NoCatRefresh", "", module="WmsCat")
+        t_nocat = time.time() - t0
+        t0 = time.time()
+        rc = s.B("CatsStat", module="WmsCat")
+        t_cats = time.time() - t0
+        need = s.B("TestGroupNeed", module="WmsCat")
+        ngr, nneed = int(need.split("|")[0]), int(need.split("|")[1])
+        R.add(c, "«Без категории» — ровно группы без категории в реестре и в «Номенклатуре» (по числу); «Метизы» и счёт на «Категориях» построены",
+              rn == f"OK:{nneed}" and rf.startswith("OK:") and int(rf.split(":")[1]) > 100 and rc.startswith("OK:"), f"групп {ngr}, без категории {nneed}: {rn}; {rf}; {rc}")
+        R.add(c, "скорость (по 2 мс на название было бы: «Метизы» ~15 с, «Без категории» ~9 с, «Категории» ~9 с на этих данных)", t_fast < 8 and t_nocat < 6 and t_cats < 6,
+              f"«Метизы» {t_fast:.1f} с; «Без категории» {t_nocat:.1f} с; «Категории» {t_cats:.1f} с ({ngr} групп); шаги «Метизов»: {prof}; категорий: {s.B('TestGroupProf', module='WmsCat')}")
+        # a search and the filters of the sheet give the same rows as before: the count for a query is the count of the rows that have the words
+        rq = s.B("FastRefresh", "болт м8", module="WmsCat")
+        k_q = int(rq.split(":")[1]) if rq.startswith("OK:") else -1
+        sh = s.doc.Sheets.getByName("Метизы")
+        got = sh.getCellRangeByPosition(9, 4, 9, 4 + max(k_q, 1) - 1).getDataArray() if k_q > 0 else ()
+        R.add(c, "поиск «болт м8» в «Метизах»: все найденные строки — болты М8", k_q > 0 and all("болт" in str(x[0]).lower() and ("м8" in str(x[0]).lower() or "m8" in str(x[0]).lower()) for x in got), f"{rq}; {[x[0] for x in got[:3]]}")
+        stk = s.doc.Sheets.getByName("Наличие")
+        after = stk.getCellRangeByPosition(0, 0, 9, len(rows)).getDataArray()
+        R.add(c, "списки ничего не проводят: «Наличие» и номер последней операции журнала те же, что до списков", after == before and str(s.sysv("LAST_SEQ")) == seq0,
+              f"LAST_SEQ {seq0} → {s.sysv('LAST_SEQ')}")
+    finally:
+        s.close()
+
+
 # ================================================================ runner
 
 def main():
