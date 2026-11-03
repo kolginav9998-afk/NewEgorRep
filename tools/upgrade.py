@@ -56,9 +56,9 @@ import build_ods as B  # noqa: E402
 
 SCHEMA_06 = "WMS-SYS-3"
 SCHEMA_07 = "WMS-SYS-4"
-# 1.0.0, 1.0.1, 1.0.2, 1.1.0, 1.1.1, 1.2.0: the cores of the schema of this release whose books are carried over too (the same data, the modules and the views new); the core of this release is not among them
+# 1.0.0, 1.0.1, 1.0.2, 1.1.0, 1.1.1, 1.2.0, 1.2.1: the cores of the schema of this release whose books are carried over too (the same data, the modules and the views new); the core of this release is not among them
 # («книга уже версии …» — обновлять нечего)
-CORES_SAME_SCHEMA = ("1.0.0", "1.0.1", "1.0.2", "1.1.0", "1.1.1", "1.2.0")
+CORES_SAME_SCHEMA = ("1.0.0", "1.0.1", "1.0.2", "1.1.0", "1.1.1", "1.2.0", "1.2.1")
 OLD_SCHEMA = SCHEMA_06                 # the in-place upgrade (release 0.7 called it so)
 JOURNAL_DIR = "WMS_Journal"
 BACKUP_DIR = "WMS_Backups"
@@ -729,6 +729,18 @@ def allowed_change(sheet, r, c, old=""):
     return sheet == B.HELP
 
 
+def same_time(doc, sheet, r, c, a, b):
+    """True when two numbers of a cell of a time / date format are one moment: LibreOffice writes such a cell as hours, minutes and seconds («PT1111905H30M11.000004876S») and reads it back through a sum, so a time of the
+    clock (a visit of «Приход авто»: 46329.39596064821) may come back one or two units of the last digit away (…822, 3·10⁻¹¹ of a day, a microsecond). Anything further than a millisecond (10⁻⁸ of a day)
+    is a different time; a cell of any other format is never excused"""
+    if not (isinstance(a, float) and isinstance(b, float)) or abs(a - b) > 1e-8:
+        return False
+    try:
+        return bool(doc.NumberFormats.getByKey(sheet.getCellByPosition(c, r).NumberFormat).Type & 6)
+    except Exception:
+        return False
+
+
 def compare_books(old, new, leg_expected, from10=False):
     """every cell of every sheet of the old book against the new one; (problems, statistics). from10: the old book is of 1.0.0 / 1.0.1
     (only the sheets of 1.0.2 are added, its registry of the transfer stays as it was)"""
@@ -777,6 +789,8 @@ def compare_books(old, new, leg_expected, from10=False):
                         differs = fo[i][c] != fn[i][c]
                     else:
                         differs = vo[i][c] != vn[i][c] or fo[i][c] != fn[i][c]
+                        if differs and same_time(old, so, r, c, vo[i][c], vn[i][c]):
+                            differs = False
                     if differs and not allowed_change(name, r, c, str(fo[i][c])):
                         bad += 1
                         if bad <= 3:

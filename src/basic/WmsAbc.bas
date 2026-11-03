@@ -100,7 +100,8 @@ Function Aggregate(dSince As Double) As String
             nm = CStr(r(cNm))
             If InStr(nm, c10) + InStr(nm, c13) + InStr(nm, c9) + InStr(nm, c160) + InStr(nm, "  ") > 0 Then nm = WmsNames.NormName(nm)
             art = Trim(CStr(r(cArt)))
-            key = LCase(nm) & "|" & LCase(art)
+            ' 1.3.0: the same position as in the lists («Метизы», «Остаток деталей»): the article by its key (WmsSpecial.ArticleKeyFast)
+            key = LCase(nm) & "|" & WmsSpecial.ArticleKeyFast(art)
             g = CollIdx(coll, key)
             If g < 0 Then
                 g = n

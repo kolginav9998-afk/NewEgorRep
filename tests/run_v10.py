@@ -5718,8 +5718,8 @@ def v73_upgrade_120_121():
     try:
         stk = s.doc.Sheets.getByName("Наличие")
         after = [tuple(r[:8]) for r in stk.getCellRangeByPosition(0, 1, 7, n_ei).getDataArray()]
-        R.add(c, "новая книга — WMS 1.2.1: «работа разрешена», тот же журнал и каждый ЕИ",
-              s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == run_prime.VERS["WMS_CORE_VERSION"] == "1.2.1" and before == after and int(s.sysv("LAST_SEQ")) == seq_old,
+        R.add(c, "новая книга — WMS 1.3.0 (текущий выпуск): «работа разрешена», тот же журнал и каждый ЕИ",
+              s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == run_prime.VERS["WMS_CORE_VERSION"] == "1.3.0" and before == after and int(s.sysv("LAST_SEQ")) == seq_old,
               f"{s.state()}; {s.sysv('CORE_VERSION')}; {before == after}")
         r = s.B("ToolRefresh", "", module="WmsTool")
         sh = s.doc.Sheets.getByName("Инструмент ЧПУ")
@@ -5736,7 +5736,7 @@ def v73_upgrade_120_121():
         sc = s.B("ActionSelfCheck")
         R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:200])
         P, inf, _ = s.adjcheck(0)
-        R.add(c, "оракул (журнал воспроизведён независимо): книга 1.2.0, обновлённая до 1.2.1", not P, f"{inf.get('ops')} операций; {P[:4]}")
+        R.add(c, "оракул (журнал воспроизведён независимо): книга 1.2.0, обновлённая до текущего выпуска", not P, f"{inf.get('ops')} операций; {P[:4]}")
     finally:
         s.close()
 
@@ -6348,6 +6348,116 @@ def v80_units_and_article_keys():
               "остаток 8 шт" in info1 and "единицы разные" not in info1 and "единицы разные" in info2, f"{info1}; {info2}")
         after = stk.getCellRangeByPosition(0, 0, 9, n0 + len(rows)).getDataArray()
         R.add(c, "списки и поиск ничего не проводят: «Наличие» и номер последней операции журнала те же", after == before and str(s.sysv("LAST_SEQ")) == seq0, f"LAST_SEQ {seq0} → {s.sysv('LAST_SEQ')}")
+    finally:
+        s.close()
+
+
+@case
+def v81_upgrade_121_130():
+    """1.3.0 для пользователя 1.2.1: рабочая книга 1.2.1 (собрана исходниками выпуска 1.2.1; поставщик «Все инструменты» в трёх написаниях — в двух принятых строках, в ожидаемой и в визите «Прихода авто»; единицы «шт» и «Шт.»;
+    деталь с артикулом латиницей и кириллицей) — мастер обновляет её в 1.3.0 (проверка, сборка со сверкой каждой ячейки, «сделать рабочей»): данные те же, старая заперта; в новой есть лист «Написания поставщиков» и его кнопка на «Поставщиках»,
+    новые столбцы списков, настройка «Артикул на этикетке»; «Привести поставщиков» работает на данных старой книги (журнал 1.2.1 и новые исправления воспроизводятся независимо), остатки те же, «Остаток деталей» склеивает написания артикула"""
+    import run_prime
+    import subprocess
+    from harness import git_sources
+    c = "V81"
+    src = os.path.join(OUT, "src_121")
+    why = "" if os.path.isdir(os.path.join(src, "tools")) else git_sources("378cffb", src)
+    if why:
+        R.add(c, "исходники выпуска 1.2.1", "SKIP", why)
+        return
+    d = os.path.join(OUT, "cases", "v81 Склад")
+    shutil.rmtree(d, ignore_errors=True)
+    work = os.path.join(d, "WMS_RELEASE_1.2.1", "WMS_WORK")
+    os.makedirs(work)
+    p = os.path.join(work, "WMS_PROD.ods")
+    b = subprocess.run([sys.executable, os.path.join(src, "tools", "build_ods.py"), p, "--test"], capture_output=True, text=True, timeout=900)
+    if b.returncode != 0 or not os.path.exists(p):
+        R.add(c, "книга 1.2.1 собрана исходниками 1.2.1", False, (b.stdout + b.stderr)[-300:])
+        return
+    main = "Все инструменты"
+    s = ready(Session(p))
+    try:
+        core0 = s.sysv("CORE_VERSION")
+        order(s, 1, "1", "Болт М8х30", qty="10", art="B-830", supplier=main)
+        r1 = receive(s, 1, "10", place="A-1", doc="УПД-1")
+        order(s, 2, "2", "Гайка М8", qty="20", unit="Шт.", art="G-8", supplier="ВСЕ ИНСТРУМЕНТЫ")
+        r2 = receive(s, 2, "20", place="A-2", doc="УПД-2")
+        order(s, 3, "3", "Шайба М8", qty="5", art="SH-8", supplier="все инструменты.")
+        order(s, 4, "4", "Реле", qty="3", art="AB-12", supplier="Ромашка", S="Детали")
+        r4 = receive(s, 4, "3", place="D-1", doc="УПД-4")
+        order(s, 5, "5", "Реле", qty="2", art="\u0410\u0412-12", supplier="Ромашка", S="Детали")
+        r5 = receive(s, 5, "2", place="D-2", doc="УПД-5")
+        car = s.B("CarArrive", "Газель А111АА", "ВСЕ ИНСТРУМЕНТЫ", module="WmsCar")
+        stk = s.doc.Sheets.getByName("Наличие")
+        n_ei = int(s.sysv("NEXT_EI")) - 1
+        before = [tuple(r[:8]) for r in stk.getCellRangeByPosition(0, 1, 7, n_ei).getDataArray()]
+        seq_old = int(s.sysv("LAST_SEQ"))
+        had_sheet = s.doc.Sheets.hasByName("Написания поставщиков")
+        s.B("PartsRefresh", "", False, module="WmsStockView")
+        pv = s.doc.Sheets.getByName("Остаток деталей")
+        rele_old = [x for x in pv.getCellRangeByPosition(0, 4, 7, 4 + 10).getDataArray() if x[1] == "Реле"]
+        ok_old = all(str(x).startswith("OK") for x in (r1, r2, r4, r5, car))
+    finally:
+        s.close(save=True)
+    R.add(c, "в книге 1.2.1 всё проведено, листа «Написания поставщиков» нет, «Реле» в «Остатке деталей» — двумя строками (латиница и кириллица, как было)",
+          core0 == "1.2.1" and ok_old and not had_sheet and len(rele_old) == 2, f"{core0}; {ok_old}; {had_sheet}; {rele_old}")
+    h0 = run_prime.sha(p)
+    j0 = {f: run_prime.sha(f) for f in glob.glob(os.path.join(work, "WMS_Journal", "*.csv"))}
+    rc0, o0 = run_prime.upgrade("check", p)
+    new = os.path.join(d, f"WMS_RELEASE_{run_prime.VERS['WMS_PRODUCT_VERSION']}", "WMS_WORK")
+    rc1, o1 = run_prime.upgrade("build", p, "--to", new)
+    rc2, o2 = run_prime.upgrade("promote", "--to", new)
+    rep = open(os.path.join(new, "UPGRADE_REPORT.md"), encoding="utf-8").read() if os.path.exists(os.path.join(new, "UPGRADE_REPORT.md")) else ""
+    R.add(c, "книга 1.2.1: проверка «можно обновить», сборка — 0 расхождений ячеек, «сделать рабочей»; старая книга и журнал побайтно те же, старая заперта",
+          rc0 == 0 and rc1 == 0 and rc2 == 0 and "расхождений: 0" in rep and run_prime.sha(p) == h0
+          and {f: run_prime.sha(f) for f in glob.glob(os.path.join(work, "WMS_Journal", "*.csv"))} == j0 and os.path.exists(os.path.join(work, "WMS_Journal", "wms.lock")),
+          f"{o0[-160:]}; {o1[-200:]}; {o2[-160:]}; {rep[-300:]}")
+    s = ready(Session(os.path.join(new, "WMS_PROD.ods")))
+    try:
+        sh = s.doc.Sheets
+        stk = sh.getByName("Наличие")
+        after = [tuple(r[:8]) for r in stk.getCellRangeByPosition(0, 1, 7, n_ei).getDataArray()]
+        R.add(c, "новая книга — WMS 1.3.0: «работа разрешена», тот же журнал и каждый ЕИ",
+              s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == run_prime.VERS["WMS_CORE_VERSION"] == "1.3.0" and before == after and int(s.sysv("LAST_SEQ")) == seq_old,
+              f"{s.state()}; {s.sysv('CORE_VERSION')}; {before == after}")
+
+        def btn(sheet, name):
+            f = sh.getByName(sheet).getDrawPage().getForms()
+            return f.getCount() > 0 and any(f.getByIndex(0).getByIndex(i).Name == name for i in range(f.getByIndex(0).getCount()))
+        st = sh.getByName("Настройки")
+        srows = st.getCellRangeByPosition(0, 1, 3, 12).getDataArray()
+        rr = next((i + 1 for i, x in enumerate(srows) if x[3] == "LABEL_ART"), -1)
+        R.add(c, "в новой книге есть лист «Написания поставщиков» (без защиты), кнопка «Одно написание…» на «Поставщиках», настройка «Артикул на этикетке» = «детали»",
+              sh.hasByName("Написания поставщиков") and not sh.getByName("Написания поставщиков").isProtected() and btn("Поставщики", "btnSpellOpen") and rr > 0 and srows[rr - 1][1] == "детали",
+              f"{sh.hasByName('Написания поставщиков')}; {btn('Поставщики', 'btnSpellOpen')}; {rr}")
+        # the new lists on the data of this book
+        s.B("FastRefresh", "", module="WmsCat")
+        fh = [sh.getByName("Метизы").getCellByPosition(c_, 3).getString() for c_ in range(17)]
+        s.B("PartsRefresh", "", False, module="WmsStockView")
+        pv = sh.getByName("Остаток деталей")
+        phdr = [pv.getCellByPosition(c_, 3).getString() for c_ in range(10)]
+        rele = [list(x) for x in pv.getCellRangeByPosition(0, 4, 9, 4 + 10).getDataArray() if x[1] == "Реле"]
+        R.add(c, "списки новой книги: у «Метизов» последний столбец «Какие ЕИ», у «Остатка деталей» — «Категория» и «Какие ЕИ»; «Реле» (AB-12 и АВ-12) — одна строка, остаток 5, два ЕИ",
+              fh[16] == "Какие ЕИ" and phdr[2] == "Категория" and phdr[6] == "Какие ЕИ" and len(rele) == 1 and rele[0][3] == 5 and rele[0][5] == 2, f"{fh[14:]}; {phdr}; {rele}")
+        # the suppliers of the old book
+        rf = s.B("SpelRefresh", module="WmsSup")
+        ssh = sh.getByName("Написания поставщиков")
+        lst = [list(x) for x in ssh.getCellRangeByPosition(0, 4, 10, 4 + 30).getDataArray() if str(x[0]).lower().replace(" ", "").replace(".", "") == "всеинструменты"]
+        R.add(c, "«Написания поставщиков» на данных 1.2.1: три написания «Все инструменты» вместе (с принятой строкой, ожидаемой и визитом), у двух предложено основное",
+              rf.startswith("OK:") and len(lst) == 3 and sum(1 for x in lst if str(x[8]) != "") == 2, f"{rf}; {[x[:5] + [x[8]] for x in lst]}")
+        seq1 = int(s.sysv("LAST_SEQ"))
+        ap = s.B("SpelApply", module="WmsSup")
+        od = sh.getByName("Заказы")
+        sups = [od.getCellByPosition(11, r).getString() for r in range(1, 4)]
+        vis = sh.getByName("Приход авто").getCellByPosition(3, 6).getString()
+        after2 = [tuple(r[:8]) for r in stk.getCellRangeByPosition(0, 1, 7, n_ei).getDataArray()]
+        R.add(c, "«Привести поставщиков»: все три строки «Заказов» и визит — одно написание; остатки и ЕИ те же; в журнале только исправления позиций и визита",
+              ap.startswith("OK:") and len(set(sups)) == 1 and vis == sups[0] and after2 == before and int(s.sysv("LAST_SEQ")) > seq1, f"{ap[:200]}; {sups}; {vis!r}")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:200])
+        P, inf, _ = s.adjcheck(0)
+        R.add(c, "оракул (журнал воспроизведён независимо): книга 1.2.1, обновлённая до 1.3.0, и исправления поставщиков", not P, f"{inf.get('ops')} операций; {P[:4]}")
     finally:
         s.close()
 
