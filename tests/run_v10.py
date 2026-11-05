@@ -6699,6 +6699,110 @@ def v84_metal_speed():
         s.close()
 
 
+@case
+def v85_feature_switches():
+    """1.4.0: переключатели помощников в «Настройках» и «Лёгкий режим»: 11 новых строк (да/нет, список в ячейке), событие листа сбрасывает кэш; выключенный помощник не работает (название на «Заказах» остаётся как набрано,
+    списки не пересчитываются при заходе на лист, сведения «Наличия» не заполняются), включённый — работает; «Лёгкий режим» гасит все помощники разом; цепочка подсказок «Заказов» срабатывает на название, артикул и поставщика,
+    количество её не запускает; ячейка далеко внизу листа (строка 101) читается; проведение от переключателей не зависит"""
+    c = "V85"
+    s = ready(Session(new_wms("v85")))
+    try:
+        sh = s.doc.Sheets
+        st = sh.getByName("Настройки")
+        data = st.getCellRangeByPosition(0, 1, 3, 30).getDataArray()
+        codes = [r[3] for r in data if r[3]]
+        vals = {r[3]: r[1] for r in data if r[3]}
+        rowof = {r[3]: i + 1 for i, r in enumerate(data) if r[3]}
+        want = ["BIG_QTY", "LABEL_ART", "LITE", "NAME_FIX", "SUP_FIX", "HINT_CAT", "HINT_PAST", "HINT_WAIT", "RET_HINT", "AUTO_LISTS", "AUTO_DASH", "AUTO_MAP", "AUTO_STOCKINFO"]
+        helpers = [k for k in want[3:]]
+        script = [p_.Value for p_ in st.Events.getByName("OnChange") if p_.Name == "Script"]
+        val = st.getCellByPosition(1, rowof["NAME_FIX"]).Validation
+        R.add(c, "«Настройки»: BIG_QTY, LABEL_ART и 11 новых строк (LITE, NAME_FIX, SUP_FIX, HINT_CAT, HINT_PAST, HINT_WAIT, RET_HINT, AUTO_LISTS, AUTO_DASH, AUTO_MAP, AUTO_STOCKINFO); помощники — «да», «Лёгкий режим» — «нет»; "
+                 "в ячейке список «да/нет»; на листе событие OnChange (WmsSettings.OnSettingsChange)",
+              codes == want and all(vals[k] == "да" for k in helpers if k != "LITE") and vals["LITE"] == "нет" and val.Type.value == "LIST"
+              and any("OnSettingsChange" in str(x) for x in script), f"{codes}; {vals}; {script}; {val.Type}")
+
+        def switch(code, value):
+            st.getCellByPosition(1, rowof[code]).setString(value)
+            s.B("OnSettingsChange", module="WmsSettings")   # the event of the sheet (an API write does not fire it)
+        osh = sh.getByName("Заказы")
+        broken = "Винт\nм3х25\nDin 912"
+        on1 = s.B("FeatOn", "NAME_FIX", module="WmsSettings")
+        switch("NAME_FIX", "нет")
+        off1 = s.B("FeatOn", "NAME_FIX", module="WmsSettings")
+        put(s, "Заказы", 1, A="1", B=broken, H="10", I="шт", L="Ромашка")
+        s.B("OnOrdersChange", osh.getCellByPosition(1, 1), module="WmsOrders")
+        nm_off = osh.getCellByPosition(1, 1).getString()
+        switch("NAME_FIX", "да")
+        s.B("OnOrdersChange", osh.getCellByPosition(1, 1), module="WmsOrders")
+        nm_on = osh.getCellByPosition(1, 1).getString()
+        R.add(c, "NAME_FIX «нет»: название на «Заказах» осталось как набрано (в три строки); «да»: стало «Винт м3х25 DIN 912»; кэш читает лист заново после события",
+              on1 is True and off1 is False and nm_off == broken and nm_on == "Винт м3х25 DIN 912", f"{on1}; {off1}; {nm_off!r}; {nm_on!r}")
+        # «Лёгкий режим»: every helper off at once
+        switch("LITE", "да")
+        lite_all = [s.B("FeatOn", k, module="WmsSettings") for k in helpers]
+        put(s, "Заказы", 2, A="1", B=broken, H="10", I="шт", L="Ромашка")
+        s.B("OnOrdersChange", osh.getCellByPosition(1, 2), module="WmsOrders")
+        nm_lite = osh.getCellByPosition(1, 2).getString()
+        switch("LITE", "нет")
+        back = [s.B("FeatOn", k, module="WmsSettings") for k in helpers]
+        R.add(c, "«Лёгкий режим» = «да»: все 10 помощников выключены, название на «Заказах» не исправляется; «нет» — все снова работают",
+              not any(lite_all) and nm_lite == broken and all(back), f"{lite_all}; {nm_lite!r}; {back}")
+        # the chain of the hints of «Заказы»: the name, the article or the supplier run it; the quantity does not
+        put(s, "Заказы", 3, A="1", B=broken, H="10", I="шт", L="Ромашка")
+        s.B("OnOrdersChange", osh.getCellByPosition(7, 3), module="WmsOrders")
+        nm_h = osh.getCellByPosition(1, 3).getString()
+        s.B("OnOrdersChange", osh.getCellByPosition(1, 3), module="WmsOrders")
+        nm_b = osh.getCellByPosition(1, 3).getString()
+        R.add(c, "цепочка подсказок «Заказов»: ввод количества (H) её не запускает — название остаётся как набрано; ввод названия (B) — запускает",
+              nm_h == broken and nm_b == "Винт м3х25 DIN 912", f"{nm_h!r}; {nm_b!r}")
+        # a row far down the sheet (the limit was 40 rows, now 120)
+        st.getCellByPosition(3, 100).setString("TEST_FAR")
+        switch("NAME_FIX", "да")
+        st.getCellByPosition(1, 100).setString("нет")
+        s.B("OnSettingsChange", module="WmsSettings")
+        far = s.B("FeatOn", "TEST_FAR", module="WmsSettings")
+        st.getCellByPosition(3, 100).setString("")
+        st.getCellByPosition(1, 100).setString("")
+        s.B("OnSettingsChange", module="WmsSettings")
+        R.add(c, "строка 101 «Настроек» читается (предел 120 строк): код TEST_FAR со значением «нет» — выключен", far is False, str(far))
+        # the lists: opened after an operation they are rebuilt by themselves — unless AUTO_LISTS is «нет» (then only by the button)
+        order(s, 5, "1", "Болт М8х30", qty="10")
+        receive(s, 5, "10", place="2-1-1")
+        fast = sh.getByName("Метизы")
+
+        def fast_rows():
+            return [r for r in fast.getCellRangeByPosition(0, 4, 3, 40).getDataArray() if any(str(x) != "" for x in r[:3])]
+        switch("AUTO_LISTS", "нет")
+        s.B("OnFastFocus", module="WmsCat")
+        n_off = len(fast_rows())
+        btn = s.B("FastRefresh", "", module="WmsCat")
+        n_btn = len(fast_rows())
+        switch("AUTO_LISTS", "да")
+        s.B("OnFastFocus", module="WmsCat")
+        n_on = len(fast_rows())
+        R.add(c, "AUTO_LISTS «нет»: заход на «Метизы» после прихода список не строит (0 строк), «Обновить» строит; «да» — заход строит сам",
+              n_off == 0 and str(btn).startswith("OK:") and n_btn >= 1 and n_on >= 1, f"{n_off}; {btn}; {n_btn}; {n_on}")
+        # the information L…V of «Наличие»
+        stk = sh.getByName("Наличие")
+        switch("AUTO_STOCKINFO", "нет")
+        s.B("OnStockFocus", module="WmsItem")
+        l_off = [str(x) for x in stk.getCellRangeByPosition(11, 1, 21, 1).getDataArray()[0]]
+        switch("AUTO_STOCKINFO", "да")
+        s.B("OnStockFocus", module="WmsItem")
+        l_on = [str(x) for x in stk.getCellRangeByPosition(11, 1, 21, 1).getDataArray()[0]]
+        R.add(c, "AUTO_STOCKINFO «нет»: заход на «Наличие» сведения L…V не заполняет; «да» — заполняет", all(x == "" for x in l_off) and any(x != "" for x in l_on), f"{l_off}; {l_on}")
+        # nothing of the posting depends on the switches: «Лёгкий режим» — an issue is posted all the same, the oracle is silent
+        switch("LITE", "да")
+        ei5 = ords(s, 5)[21]
+        i5 = issue(s, 1, ei5, "1", "ива")
+        switch("LITE", "нет")
+        P, inf, _ = s.adjcheck(0)
+        R.add(c, "в «Лёгком режиме» выдача проводится как обычно; независимая проверка журнала — без замечаний", str(i5).startswith("OK") and not P, f"{str(i5)[:80]}; {P[:3]}")
+    finally:
+        s.close()
+
+
 # ================================================================ runner
 
 def main():

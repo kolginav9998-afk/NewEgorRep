@@ -258,6 +258,8 @@ Sub RetColumnsHint(ra As Variant)
     On Error GoTo EH
     If gAskRetHint Then Exit Sub
     WmsInit()
+    ' 1.4.0: a helper — «Настройки» (RET_HINT / «Лёгкий режим») can switch it off
+    If Not WmsSettings.FeatOn("RET_HINT") Then Exit Sub
     sh = WmsIssue.IssuesSheet()
     If ra.EndRow - ra.StartRow > 200 Then Exit Sub
     c0 = IIf(ra.StartColumn > IC_RET, ra.StartColumn, IC_RET)

@@ -123,6 +123,8 @@ Sub OnByNameFocus(Optional oEvent As Variant)
     If gSvBusy Then Exit Sub
     On Error GoTo EH
     WmsInit()
+    ' 1.4.0: «Настройки» (AUTO_LISTS / «Лёгкий режим»): the list is rebuilt by its button only
+    If Not WmsSettings.FeatOn("AUTO_LISTS") Then Exit Sub
     If SvSeq() = gSvSeqName And gSvSeqName > 0 Then Exit Sub
     ByNameRefresh(ViewFind(SH_BYNAME), ViewZero(SH_BYNAME))
     Exit Sub
@@ -236,6 +238,8 @@ Sub OnPartsFocus(Optional oEvent As Variant)
     If gSvBusy Then Exit Sub
     On Error GoTo EH
     WmsInit()
+    ' 1.4.0: «Настройки» (AUTO_LISTS / «Лёгкий режим»): the list is rebuilt by its button only
+    If Not WmsSettings.FeatOn("AUTO_LISTS") Then Exit Sub
     If SvSeq() = gSvSeqPart And gSvSeqPart > 0 Then Exit Sub
     PartsRefresh(ViewFind(SH_PARTS), ViewZero(SH_PARTS))
     Exit Sub

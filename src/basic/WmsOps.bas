@@ -213,6 +213,8 @@ Sub OnOpsFocus(Optional oEvent As Variant)
     If gOpsBusy Then Exit Sub
     On Error GoTo EH
     WmsInit()
+    ' 1.4.0: «Настройки» (AUTO_LISTS / «Лёгкий режим»): the list is rebuilt by its button only
+    If Not WmsSettings.FeatOn("AUTO_LISTS") Then Exit Sub
     sh = gDoc.Sheets.getByName(SH_OPS)
     If sh.getCellByPosition(0, OP_ROW0).getString() = "" And sh.getCellByPosition(0, OP_STAT_ROW).getString() = "" Then OpsShowDates()
     Exit Sub

@@ -258,6 +258,8 @@ End Function
 Function FixNameCell(sSheet As String, r As Long, c As Integer) As Boolean
     Dim cell As Object, t As String, u As String
     On Error GoTo EH
+    ' 1.4.0: a helper — «Настройки» (NAME_FIX / «Лёгкий режим») can switch it off; the name then stays as typed
+    If Not WmsSettings.FeatOn("NAME_FIX") Then Exit Function
     cell = gDoc.Sheets.getByName(sSheet).getCellByPosition(c, r)
     If cell.getType() <> com.sun.star.table.CellContentType.TEXT Then Exit Function
     t = cell.getString()

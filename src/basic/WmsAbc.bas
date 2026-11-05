@@ -264,6 +264,8 @@ Sub OnAbcFocus(Optional oEvent As Variant)
     If gAbBusy Then Exit Sub
     On Error GoTo EH
     WmsInit()
+    ' 1.4.0: «Настройки» (AUTO_LISTS / «Лёгкий режим»): the list is rebuilt by its button only
+    If Not WmsSettings.FeatOn("AUTO_LISTS") Then Exit Sub
     seq = CLng(SysNum(SK_LAST_SEQ))
     If seq = gAbSeq And gAbSeq > 0 Then Exit Sub
     AbcRefresh()
@@ -387,6 +389,8 @@ Sub OnIdleFocus(Optional oEvent As Variant)
     If gIdBusy Then Exit Sub
     On Error GoTo EH
     WmsInit()
+    ' 1.4.0: «Настройки» (AUTO_LISTS / «Лёгкий режим»): the list is rebuilt by its button only
+    If Not WmsSettings.FeatOn("AUTO_LISTS") Then Exit Sub
     seq = CLng(SysNum(SK_LAST_SEQ))
     If seq = gIdSeq And gIdSeq > 0 Then Exit Sub
     IdleRefresh()

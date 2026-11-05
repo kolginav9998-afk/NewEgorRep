@@ -1125,6 +1125,11 @@ Private Sub HandleRange(ra As Variant)
     um.enterUndoContext("WMS: проверка строки заказа")
     inCtx = True
     mWaitHint = (ra.StartRow = ra.EndRow And ra.StartColumn <= OC_SUPPLIER And ra.EndColumn >= OC_NAME)
+    ' 1.4.0: the helpers (the name in one line, the supplier as in the directory, «уже ожидается», the category and the past receipt) work when the NAME, the ARTICLE or the SUPPLIER was
+    ' typed; a quantity, a price or a date typed into the same row used to run all of them again (a measure of a book of 20 000 receipts: the slowest part of the input)
+    If mWaitHint Then
+        mWaitHint = (ra.StartColumn <= OC_NAME And ra.EndColumn >= OC_NAME) Or (ra.StartColumn <= OC_ART And ra.EndColumn >= OC_ART) Or (ra.StartColumn <= OC_SUPPLIER And ra.EndColumn >= OC_SUPPLIER)
+    End If
     For r = IIf(ra.StartRow < 1, 1, ra.StartRow) To r1
         n = n + 1
         ' more rows at once (paste, fill): the rest keeps its status until «Обновить статусы» (spec §13)

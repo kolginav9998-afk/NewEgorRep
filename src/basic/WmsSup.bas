@@ -119,6 +119,8 @@ End Function
 Function SupFixCell(sSheet As String, r As Long, c As Integer) As Boolean
     Dim cell As Object, t As String, u As String
     On Error GoTo EH
+    ' 1.4.0: a helper — «Настройки» (SUP_FIX / «Лёгкий режим») can switch it off; the supplier then stays as typed
+    If Not WmsSettings.FeatOn("SUP_FIX") Then Exit Function
     cell = gDoc.Sheets.getByName(sSheet).getCellByPosition(c, r)
     If cell.getType() <> com.sun.star.table.CellContentType.TEXT Then Exit Function
     t = cell.getString()
@@ -412,6 +414,8 @@ Sub OnSpelFocus(Optional oEvent As Variant)
     If gSpelBusy Then Exit Sub
     On Error GoTo EH
     WmsInit()
+    ' 1.4.0: «Настройки» (AUTO_LISTS / «Лёгкий режим»): the list is rebuilt by its button only
+    If Not WmsSettings.FeatOn("AUTO_LISTS") Then Exit Sub
     seq = CLng(SysNum(SK_LAST_SEQ))
     If seq = gSpelSeq And gSpelSeq > 0 Then Exit Sub
     SpelRefresh()

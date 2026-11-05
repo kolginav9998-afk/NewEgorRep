@@ -1401,6 +1401,8 @@ Sub OnMapFocus(Optional oEvent As Variant)
     On Error GoTo EH
     WmsInit()
     If gMpBusy Or MapEditing() Then Exit Sub
+    ' 1.4.0: «Настройки» (AUTO_MAP / «Лёгкий режим»): the map is refreshed by «Обновить» only
+    If Not WmsSettings.FeatOn("AUTO_MAP") Then Exit Sub
     ' 1.0 (С5): the map saved with the book is up to date — its places read, nothing counted or painted again
     If gMpN = 0 Then
         If MapLazy() Then Exit Sub

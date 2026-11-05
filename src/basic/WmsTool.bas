@@ -1267,6 +1267,8 @@ Sub OnToolFocus(Optional oEvent As Variant)
     If gTlBusy Then Exit Sub
     On Error GoTo EH
     WmsInit()
+    ' 1.4.0: «Настройки» (AUTO_LISTS / «Лёгкий режим»): the list is rebuilt by its button only
+    If Not WmsSettings.FeatOn("AUTO_LISTS") Then Exit Sub
     seq = CLng(SysNum(SK_LAST_SEQ))
     If seq = gTlSeq And gTlSeq > 0 Then Exit Sub
     ToolRefresh(ToolFind())

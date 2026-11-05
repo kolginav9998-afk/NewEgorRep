@@ -1789,23 +1789,55 @@ SETTINGS_ROWS = [
     ("Артикул на этикетке: у кого печатать", "детали",
      "детали — у деталей и у ЕИ с серийным номером (деталь: категория «Детали» в реестре, в «Номенклатуре» или по словам листа «Категории»; приход типа «Детали»); все — у всех, у кого артикул есть; "
      "нет — не печатать (серийный номер остаётся). Артикул печатается, только если он записан у ЕИ.", "LABEL_ART"),
+    # 1.4.0: the switches of the helpers (WmsSettings.FeatOn). «да»/«нет»; the posting, the journal, the checks of integrity and the copies have no switch and never will
+    ("Лёгкий режим: выключить все помощники сразу", "нет",
+     "да — разом выключаются все помощники ниже (подсказки, автоисправления, обновление списков при заходе на лист): включите на время, если программа стала тормозить. "
+     "Проведение, журнал, проверки целостности и копии не выключаются никогда. Верните «нет» — помощники заработают так, как отмечено ниже. Меняется сразу, перезапуск не нужен.", "LITE"),
+    ("Помощник: исправлять название при вводе", "да",
+     "Название, набранное в несколько строк, с лишними пробелами или разорванным размером («Винт» / «м3х25» / «Din 912»), записывается одной строкой на «Заказах» и «Ином приходе». "
+     "Нет — остаётся как набрано (в списках и поиске такие названия будут «грязнее»; найти их можно на листе «Проверка названий»).", "NAME_FIX"),
+    ("Помощник: писать поставщика как в справочнике", "да",
+     "Поставщик, набранный иначе, чем в «Поставщиках» (регистр, пробелы, кавычки, латинские буквы), записывается как в справочнике. "
+     "Нет — остаётся как набрано; позже лист «Написания поставщиков» приведёт все написания к одному.", "SUP_FIX"),
+    ("Помощник: подсказывать категорию по названию", "да",
+     "При вводе названия на «Заказах» и «Ином приходе» пустая категория заполняется подсказкой по словам листа «Категории» (можно изменить). Нет — категорию вы вписываете сами.", "HINT_CAT"),
+    ("Помощник: подставлять по прошлому приходу", "да",
+     "Пустые артикул, единица и место берутся из прошлого прихода того же товара (подставленное можно изменить). Нет — вписываете сами. В большой книге это одно из самых заметных по времени.", "HINT_PAST"),
+    ("Помощник: предупреждать «уже ожидается»", "да",
+     "Если тот же товар того же поставщика уже заказан и ещё не пришёл, в «Контроле» строки появится предупреждение (отказа нет, только подсказка). Нет — предупреждения не будет.", "HINT_WAIT"),
+    ("Помощник: пояснение про столбцы M и N на «Выдачах»", "да",
+     "Когда вы впервые за сеанс пишете в столбцы M или N «Выдач» (там заметки старой таблицы, программа их не читает и не заполняет), показывается пояснение. Нет — без пояснения.", "RET_HINT"),
+    ("Обновлять списки при заходе на лист", "да",
+     "«Метизы», «Инструмент ЧПУ», «Металл», «Остаток деталей», «Наличие по названию», «Без категории», «Категории», «Операции дня», «ABC-анализ», «Без движения», «Серийные детали», «Написания поставщиков». "
+     "Нет — список не пересчитывается сам: он виден таким, каким был при последнем обновлении (время — в строке состояния), свежий — кнопкой «Обновить».", "AUTO_LISTS"),
+    ("Обновлять «Дашборд» при заходе", "да", "Нет — «Дашборд» показывает то, что было при последнем обновлении; свежий — кнопкой «Обновить».", "AUTO_DASH"),
+    ("Обновлять «Карту склада» при заходе", "да", "Нет — карта показывает то, что было при последнем обновлении; свежая — кнопкой «Обновить».", "AUTO_MAP"),
+    ("Заполнять сведения на «Наличии» при заходе", "да",
+     "Колонки L…V со сведениями о товаре (сколько пришло, откуда, фасовка, серийный номер, срок годности, резерв) заполняются при заходе на «Наличие» после операций; "
+     "первое заполнение в большой книге может занять несколько секунд. Нет — только кнопкой «Обновить сведения».", "AUTO_STOCKINFO"),
 ]
+
+# the rows of «Настройки» (the hidden column D is the code): a limit that the book, the macros and the upgrade agree on (it was 40, 1.4.0: 120)
+SETTINGS_MAX = 120
+# the choice of a setting that is a word (a list in the cell); a row with «да» / «нет» has «да» / «нет»
+SETTINGS_CHOICES = {"LABEL_ART": ("детали", "все", "нет")}
 
 
 def build_settings(doc, sh):
     header(sh, SETTINGS_HEADERS, SETTINGS_WIDTHS, height=900)
     text = number_format(doc, "@", ("ru", "RU"))
-    sh.getCellRangeByPosition(0, 0, 3, 60).NumberFormat = text
-    sh.getCellRangeByPosition(1, 1, 1, 40).CellBackColor = INPUT_HEAD_10
-    sh.getCellRangeByPosition(1, 1, 1, 40).HoriJustify = 3
-    sh.getCellRangeByPosition(0, 1, 2, 40).IsTextWrapped = True
+    sh.getCellRangeByPosition(0, 0, 3, SETTINGS_MAX + 20).NumberFormat = text
+    sh.getCellRangeByPosition(1, 1, 1, SETTINGS_MAX).CellBackColor = INPUT_HEAD_10
+    sh.getCellRangeByPosition(1, 1, 1, SETTINGS_MAX).HoriJustify = 3
+    sh.getCellRangeByPosition(0, 1, 2, SETTINGS_MAX).IsTextWrapped = True
     for r, row in enumerate(SETTINGS_ROWS, start=1):
         settings_row(sh, r, row)
     sh.getColumns().getByIndex(3).IsVisible = False
+    bind_event(sh.Events, "OnChange", "WmsSettings.OnSettingsChange")
 
 
 def settings_row(sh, r, row):
-    """a row of «Настройки»: what to set, the value (a number or a word), the explanation, the code (hidden)"""
+    """a row of «Настройки»: what to set, the value (a number or a word), the explanation, the code (hidden); a word with a choice gets a list in its cell"""
     a, v, e, code = row
     sh.getCellByPosition(0, r).setString(a)
     if isinstance(v, str):
@@ -1816,19 +1848,45 @@ def settings_row(sh, r, row):
     sh.getCellByPosition(2, r).setString(e)
     sh.getCellByPosition(2, r).CharColor = MUTED
     sh.getCellByPosition(3, r).setString(code)
+    choices = SETTINGS_CHOICES.get(code) or (("да", "нет") if v in ("да", "нет") else None)
+    if choices:
+        cell = sh.getCellByPosition(1, r)
+        val = cell.Validation
+        val.Type = uno.Enum("com.sun.star.sheet.ValidationType", "LIST")
+        val.ShowList = 1
+        val.IgnoreBlankCells = True
+        val.ShowErrorMessage = False
+        val.setFormula1(";".join(f'"{t}"' for t in choices))
+        cell.Validation = val
 
 
 def settings_130(doc, sheets):
-    """1.3.0: the settings of this release that «Настройки» of an earlier book does not have are added in the first free rows (what is written there is not touched); a new book has them already"""
+    """1.3.0 (1.4.0: more rows, up to SETTINGS_MAX): the settings of this release that «Настройки» of an earlier book does not have are added in the first free rows (what is written there is not touched); a new book has them already"""
     if not sheets.hasByName(SETTINGS):
         return
     sh = sheets.getByName(SETTINGS)
-    d = sh.getCellRangeByPosition(0, 1, 3, 40).getDataArray()
+    d = sh.getCellRangeByPosition(0, 1, 3, SETTINGS_MAX).getDataArray()
     have = {str(x[3]) for x in d}
     free = [i + 1 for i, x in enumerate(d) if all(str(c) == "" for c in x)]
     for row in SETTINGS_ROWS:
         if row[3] not in have and free:
             settings_row(sh, free.pop(0), row)
+
+
+def release_140(doc, sheets):
+    """1.4.0, what the release adds to a book that has not got it yet — idempotent, called by both ways of the upgrade (the chain of steps of a book of 1.x and step_08 of a book of 0.7): the switches of the helpers in «Настройки»
+    (the rows are written into the first free ones, what the storekeeper wrote is not touched), the event that resets the cache of them when the sheet changes, the format of the rows added"""
+    if not sheets.hasByName(SETTINGS):
+        return
+    settings_130(doc, sheets)
+    sh = sheets.getByName(SETTINGS)
+    # the rows 42…SETTINGS_MAX are new for a book of an earlier release (it formatted 40): the same format as the rows above; the rows that exist are not touched
+    text = number_format(doc, "@", ("ru", "RU"))
+    sh.getCellRangeByPosition(0, 41, 3, SETTINGS_MAX + 20).NumberFormat = text
+    sh.getCellRangeByPosition(1, 41, 1, SETTINGS_MAX).CellBackColor = INPUT_HEAD_10
+    sh.getCellRangeByPosition(1, 41, 1, SETTINGS_MAX).HoriJustify = 3
+    sh.getCellRangeByPosition(0, 41, 2, SETTINGS_MAX).IsTextWrapped = True
+    bind_event(sh.Events, "OnChange", "WmsSettings.OnSettingsChange")
 
 
 # 1.1: «Без категории» (WmsCat SH_NOCAT) — the names of the registry with no category in the registry nor in «Номенклатура», with the hint; the column «Категория» is filled with the hint and

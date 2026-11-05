@@ -56,9 +56,9 @@ import build_ods as B  # noqa: E402
 
 SCHEMA_06 = "WMS-SYS-3"
 SCHEMA_07 = "WMS-SYS-4"
-# 1.0.0, 1.0.1, 1.0.2, 1.1.0, 1.1.1, 1.2.0, 1.2.1: the cores of the schema of this release whose books are carried over too (the same data, the modules and the views new); the core of this release is not among them
+# 1.0.0, 1.0.1, 1.0.2, 1.1.0, 1.1.1, 1.2.0, 1.2.1, 1.3.0: the cores of the schema of this release whose books are carried over too (the same data, the modules and the views new); the core of this release is not among them
 # («книга уже версии …» — обновлять нечего)
-CORES_SAME_SCHEMA = ("1.0.0", "1.0.1", "1.0.2", "1.1.0", "1.1.1", "1.2.0", "1.2.1")
+CORES_SAME_SCHEMA = ("1.0.0", "1.0.1", "1.0.2", "1.1.0", "1.1.1", "1.2.0", "1.2.1", "1.3.0")
 OLD_SCHEMA = SCHEMA_06                 # the in-place upgrade (release 0.7 called it so)
 JOURNAL_DIR = "WMS_Journal"
 BACKUP_DIR = "WMS_Backups"
@@ -364,6 +364,8 @@ def step_08(doc, leg, from_text, done):
     B.metal_130(doc, sheets)
     B.buttons_130(doc, sheets)
     B.settings_130(doc, sheets)
+    # 1.4.0: what the release adds to every book — the same function as the chain of steps of a book of 1.x calls (step_140); a new release adds its lines to release_NNN and here nothing else
+    B.release_140(doc, sheets)
     done.append(f"страницы «{B.DASH}», «{B.FIND}», «{B.MAP}» и лист «{B.TOPO}» (вставьте туда схему склада); «{B.MAIN}» этого выпуска (кнопки к страницам)")
     done.append(f"1.3.0: листы «{B.SPELL}» (написания поставщиков книги; кнопка «Одно написание…» на «{B.SUPPLIERS}») и «{B.METAL}» (металлопрокат из «{B.STOCK}»); списки строятся при первом открытии листа; данные не менялись")
     done.append(f"1.0: справочники «{B.SUPPLIERS}» и «{B.GOODS}» (пополняются кнопками из «{B.ORDERS}» и «{B.STOCK}»), страницы «{B.SUPPLY}» и «{B.PRINT}»")
@@ -423,6 +425,7 @@ def upgrade_doc(doc, test_book, schema, leg, from_text):
         new += step_111(doc, done)
         new += step_120(doc, done)
         new += step_130(doc, done)
+        new += step_140(doc, done)
     else:
         if schema == SCHEMA_06:
             new += step_07(doc, done)
@@ -508,6 +511,13 @@ def step_130(doc, done):
     done.append(f"1.3.0: лист «{B.METAL}» (справочник металлопроката из «Наличия» — лист, круг, труба, профиль, уголок, швеллер …: вид, марка, размер, длина, остаток в метрах и килограммах, куски и обрезки; список появится при первом открытии листа; данные не менялись)")
     done.append(f"1.3.0: списки «{B.FAST}», «{B.TOOL}» (столбец «Какие ЕИ» — номера ЕИ с остатком) и «{B.PARTS}» (столбцы «Категория» и «Какие ЕИ») построены заново; список появится при первом открытии листа; данные не менялись")
     done.append(f"1.3.0: в «{B.SETTINGS}» добавлена настройка «Артикул на этикетке: у кого печатать» (детали / все / нет); то, что вы там писали, не тронуто")
+    return []
+
+
+def step_140(doc, done):
+    """1.3.0 and earlier → 1.4.0: the switches of the helpers in «Настройки» (written into the first free rows; what the storekeeper wrote is not touched) and the event that resets their cache; no cell of the data is written"""
+    B.release_140(doc, doc.Sheets)
+    done.append(f"1.4.0: в «{B.SETTINGS}» добавлены переключатели помощников и «Лёгкий режим» (если программа тормозит — «да»); подсказки и пересчёты списков можно выключить по одному; проведение, журнал и копии не выключаются; данные не менялись")
     return []
 
 

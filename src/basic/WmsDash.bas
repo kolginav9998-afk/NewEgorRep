@@ -56,6 +56,8 @@ Sub OnDashFocus(Optional oEvent As Variant)
     On Error GoTo EH
     WmsInit()
     If gDbBusy Then Exit Sub
+    ' 1.4.0: «Настройки» (AUTO_DASH / «Лёгкий режим»): the page is refreshed by «Обновить» only
+    If Not WmsSettings.FeatOn("AUTO_DASH") Then Exit Sub
     sh = gDoc.Sheets.getByName(SH_DASH)
     If CStr(sh.getCellByPosition(DB_SVC_COL, 1).getValue()) = CStr(SysNum(SK_LAST_SEQ)) And sh.getCellByPosition(DB_SVC_COL, 2).getValue() = Today0() _
         And sh.getCellByPosition(DB_SVC_COL, 0).getString() = gState & "|" & gBlock Then Exit Sub

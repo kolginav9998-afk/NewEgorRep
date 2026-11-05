@@ -642,6 +642,8 @@ End Function
 Function WaitingHint(r As Long) As String
     Dim sh As Object, sup As String, art As String, nm As String, last As Long, cond As String, x As String, k As Long, ok As Boolean
     On Error GoTo EH
+    ' 1.4.0: a helper — «Настройки» (HINT_WAIT / «Лёгкий режим») can switch it off
+    If Not WmsSettings.FeatOn("HINT_WAIT") Then Exit Function
     sh = WmsOrders.OrdersSheet()
     sup = Trim(sh.getCellByPosition(OC_SUPPLIER, r).getString())
     art = Trim(sh.getCellByPosition(OC_ART, r).getString())

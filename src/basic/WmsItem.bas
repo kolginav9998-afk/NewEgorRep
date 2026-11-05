@@ -1103,6 +1103,8 @@ Global gSiDirty As String
 
 Sub OnStockFocus(Optional oEvent As Variant)
     On Error Resume Next
+    ' 1.4.0: «Настройки» (AUTO_STOCKINFO / «Лёгкий режим»): the information L…V is filled by «Обновить сведения» only
+    If Not WmsSettings.FeatOn("AUTO_STOCKINFO") Then Exit Sub
     StockInfoRefresh(False)
 End Sub
 

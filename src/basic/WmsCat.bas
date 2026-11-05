@@ -181,6 +181,8 @@ Sub OnCatsFocus(Optional oEvent As Variant)
     Dim seq As Long
     On Error GoTo EH
     WmsInit()
+    ' 1.4.0: «Настройки» (AUTO_LISTS / «Лёгкий режим»): the list is rebuilt by its button only
+    If Not WmsSettings.FeatOn("AUTO_LISTS") Then Exit Sub
     seq = CLng(SysNum(SK_LAST_SEQ))
     If seq = gCtStatSeq And gCtStatSeq > 0 Then Exit Sub
     CatsStat()
@@ -625,6 +627,8 @@ End Function
 Sub CategoryHint(sSheet As String, r As Long, nameCol As Integer, catCol As Integer)
     Dim sh As Object, nm As String, c As String, nRow As Long
     On Error Resume Next
+    ' 1.4.0: a helper — «Настройки» (HINT_CAT / «Лёгкий режим») can switch it off; the category is then written by the storekeeper
+    If Not WmsSettings.FeatOn("HINT_CAT") Then Exit Sub
     sh = gDoc.Sheets.getByName(sSheet)
     If Trim(sh.getCellByPosition(catCol, r).getString()) <> "" Then Exit Sub
     nm = Trim(sh.getCellByPosition(nameCol, r).getString())
@@ -642,6 +646,8 @@ Function PastHint(sSheet As String, r As Long, nameCol As Integer, artCol As Int
     Dim sh As Object, st As Object, last As Long, d As Variant, names() As String, i As Long, key As String, found As Long, nm As String, row As Variant, filled As String
     Dim cEi As Long, cNm As Long, cArt As Long, cUn As Long, cPl As Long, folded As Variant, needArt As Boolean, needPlace As Boolean
     On Error GoTo EH
+    ' 1.4.0: a helper — «Настройки» (HINT_PAST / «Лёгкий режим») can switch it off; it reads the whole registry, in a big book it is one of the slowest
+    If Not WmsSettings.FeatOn("HINT_PAST") Then Exit Function
     sh = gDoc.Sheets.getByName(sSheet)
     nm = Trim(sh.getCellByPosition(nameCol, r).getString())
     If nm = "" Then Exit Function
@@ -900,6 +906,8 @@ Sub OnFastFocus(Optional oEvent As Variant)
     If gFsBusy Then Exit Sub
     On Error GoTo EH
     WmsInit()
+    ' 1.4.0: «Настройки» (AUTO_LISTS / «Лёгкий режим»): the list is rebuilt by its button only
+    If Not WmsSettings.FeatOn("AUTO_LISTS") Then Exit Sub
     seq = CLng(SysNum(SK_LAST_SEQ))
     If seq = gFsSeq And gFsSeq > 0 Then Exit Sub
     FastRefresh(FastFind())
@@ -1289,6 +1297,8 @@ Sub OnNoCatFocus(Optional oEvent As Variant)
     If gNkBusy Then Exit Sub
     On Error GoTo EH
     WmsInit()
+    ' 1.4.0: «Настройки» (AUTO_LISTS / «Лёгкий режим»): the list is rebuilt by its button only
+    If Not WmsSettings.FeatOn("AUTO_LISTS") Then Exit Sub
     seq = CLng(SysNum(SK_LAST_SEQ))
     If seq = gNkSeq And gNkSeq > 0 Then Exit Sub
     NoCatRefresh(NoCatFind())
