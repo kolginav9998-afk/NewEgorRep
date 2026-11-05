@@ -106,7 +106,7 @@ Function DashRefresh() As String
     Dim unposted As Long, attention As Long, recent() As Boolean, nSt As Long, stN(DB_STALE_CAND - 1) As Long, nStShown As Long, stDay As Variant
     Dim osh As Object, rows(), mx As Double, ord As Variant, tIdx() As Long, d As Variant, cond As String, dq As String, rg As String, rd As String
     Dim row As Variant, cD As Integer, cW As Integer, cN As Integer, cU As Integer, cQ As Integer, nList As Long, stKey() As Double, stOrd() As Long
-    Dim tails As Variant, nTails As Long, tRows(), money As Variant, kPrev As Long, sPrev As String
+    Dim tails As Variant, nTails As Long, tRows(), kPrev As Long, sPrev As String
     If gDbBusy Then Exit Function
     gDbBusy = True
     On Error GoTo EH
@@ -297,10 +297,8 @@ Function DashRefresh() As String
     sh.getCellByPosition(8, DB_TITLE_ROW).setString(s)
     sh.getCellByPosition(DB_SVC_COL, 0).setString(gState & "|" & gBlock)
     ' the tiles: value, line under it
-    ' 1.0 (А2): the money of the stock by the price of the order (cached until the next operation)
-    money = WmsLedger.StockMoney()
-    PutTile(sh, 0, nPos, "на сумму " & WmsPrint.Money(money(0)) & IIf(nPos > money(1), " (без цены " & NumText(nPos - money(1)) & ")", "") _
-        & " · всего ЕИ " & NumText(nEI) & " · требует разбора " & NumText(nReview))
+    ' 1.5.0: no money on the page (the stock is counted, not valued — the accounting does that): what is under the number is the count of all the EIs and those to sort out
+    PutTile(sh, 0, nPos, "всего ЕИ " & NumText(nEI) & " · требует разбора " & NumText(nReview))
     ' 1.0 (З10): the goods of «Номенклатура» below their minimum
     nNeed = 0
     If gDoc.Sheets.hasByName(WmsSupply.SH_GOODS) Then

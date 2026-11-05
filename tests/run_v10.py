@@ -46,6 +46,12 @@ def select(s, sheet, ref):
     s.goto(sheet, ref)
 
 
+def no_money(t):
+    """a printed text, a file or a line of a page without sums and prices (1.5.0: WMS counts, the accounting values): no «руб», «сумм», «₽» and no word that begins with «цен» (цена, цены)"""
+    low = str(t).lower()
+    return not (re.search(r"руб|сумм|₽", low) or re.search(r"\bцен", low))
+
+
 def oracle(c, s, name):
     P, inf, _ = s.adjcheck(0)
     R.add(c, "оракул (журнал воспроизведён независимо): " + name, not P, f"{inf.get('ops')} операций; {P[:4]}")
@@ -1176,10 +1182,10 @@ def print_text(s, n=120):
 
 @case
 def v22_control_documents():
-    """К3 «Акт списания» по выделенным проведённым списаниям — номер, причины, позиции частями, цена и сумма, подписи;
+    """К3 «Акт списания» по выделенным проведённым списаниям — номер, причины, позиции частями (без цены и суммы), подписи;
     К11/К12 «Накладная» — выделенные выдачи или «всё, что выдано <кому> сегодня», количество частями, номер накладной ставится в
     выдачи (операция ISSUE_DOC в журнале); К14 «Печать карточки» — движения и исправления «было → стало» с причиной; К4 опись с
-    пустым «Факт» по порядку мест и сличительная ведомость (излишки, недостачи, суммы); К5 «Пересчитать место» — строки «Инвентаризация»"""
+    пустым «Факт» по порядку мест и сличительная ведомость (излишки и недостачи, без сумм); К5 «Пересчитать место» — строки «Инвентаризация»"""
     c = "V22"
     s = ready(Session(new_wms("v22")))
     try:
@@ -1198,10 +1204,10 @@ def v22_control_documents():
         s.goto("Корректировки", "$A$2:$A$3")
         res = s.B("WriteOffAct", module="WmsPrint")
         t = print_text(s)
-        R.add(c, "К3: акт списания по двум выделенным строкам — «АКТ СПИСАНИЯ № 1–2», причины «протечка; ржавчина», антифриз «1 кан (0,25 шт)» "
-                 "по 100,00 на 25,00, болт 2 × 12,50 = 25,00, итого 50,00; подписи «Списал», «Проверил», «Утвердил»",
+        R.add(c, "К3: акт списания по двум выделенным строкам — «АКТ СПИСАНИЯ № 1–2», причины «протечка; ржавчина», антифриз «1 кан (0,25 шт)», «Списано позиций: 2»; "
+                 "цен и сумм в акте нет (хотя в заказах цены записаны); подписи «Списал», «Проверил», «Утвердил»",
               all(x.startswith("OK") for x in w) and res == "OK:Акт списания 1" and "АКТ СПИСАНИЯ № 1–2" in t and "протечка; ржавчина" in t
-              and "1 кан (0,25 шт)" in t and "100,00" in t and "12,50" in t and "Итого на сумму: 50,00" in t and "Проверил" in t and "Утвердил" in t,
+              and "1 кан (0,25 шт)" in t and "Списано позиций: 2" in t and no_money(t) and "100,00" not in t and "12,50" not in t and "Проверил" in t and "Утвердил" in t,
               f"{w}; {res}; {t[:700]}")
         s.goto("Корректировки", "$A$5")
         e3 = s.B("WriteOffAct", module="WmsPrint")
@@ -1264,9 +1270,9 @@ def v22_control_documents():
         q = [s.A("AdjustPostRow", 3), s.A("AdjustPostRow", 4)]
         res = s.B("InventoryCompare", serial(), module="WmsPrint")
         t = print_text(s)
-        R.add(c, "К4: сличительная ведомость за сегодня — антифриз «совпало», болт «недостача 1 шт» на 12,50; итог «недостачи на сумму 12,50»; подписи комиссии",
+        R.add(c, "К4: сличительная ведомость за сегодня — антифриз «совпало», болт «недостача 1 шт»; итог «излишков 0 · недостач 1»; сумм и цен нет; подписи комиссии",
               all(x.startswith("OK") for x in q) and res.startswith("OK:Сличительная ведомость") and "совпало" in t and "недостача 1 шт" in t
-              and "недостачи на сумму 12,50" in t and "Председатель комиссии" in t, f"{q}; {res}; {t[:700]}")
+              and "излишков 0 · недостач 1" in t and no_money(t) and "12,50" not in t and "Председатель комиссии" in t, f"{q}; {res}; {t[:700]}")
         sc = s.B("ActionSelfCheck")
         R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:300])
         oracle(c, s, "документы контроля ничего не провели, кроме номера накладной (ISSUE_DOC)")
@@ -1282,8 +1288,8 @@ def print_rows(s, n=400):
 
 @case
 def v23_accounting():
-    """К7 остаток на прошедшую дату; К8 оборотная ведомость за период (начало, приход, выдано, возвращено, списано, конец — в единицах
-    и рублях), на странице и в файле; К9 выгрузка движений в CSV с ценами и суммами; К10 сверка с файлом 1С (CSV в Windows-1251);
+    """К7 остаток на прошедшую дату; К8 оборотная ведомость за период (начало, приход, выдано, возвращено, списано, конец — в единицах,
+    без денег), на странице и в файле; К9 выгрузка движений в CSV без цен и сумм; К10 сверка с файлом 1С (CSV в Windows-1251);
     К13 закрытие месяца: файлы, _CLOSE, MONTH_CLOSE; операция задним числом — только с причиной (BACKDATED, BACKWHY); открыть месяц"""
     import csv
     import datetime as dt_
@@ -1310,10 +1316,15 @@ def v23_accounting():
         res = s.B("StockOnDate", ser(p0 + dt_.timedelta(days=6)), False, module="WmsLedger")
         rows = print_rows(s)
         brow = next((x for x in rows if x[1] == b), None)
-        R.add(c, "К7: остаток на дату после первой выдачи — болт 7 шт по 12,50 на 87,50 (сейчас 4); заголовок «ОСТАТОК НА …»",
+        flat7 = " | ".join(" ".join(x) for x in rows)
+        R.add(c, "К7: остаток на дату после первой выдачи — болт 7 шт (сейчас 4); заголовок «ОСТАТОК НА …»; пять столбцов, ни цены, ни суммы, ни «на сумму»",
               all(x.startswith("OK") for x in (r, i1, w1, i2)) and res.startswith("OK:Остаток на") and rows[0][0].startswith("ОСТАТОК НА ")
-              and brow is not None and brow[3] == "7 шт" and brow[5] == "12,50" and brow[6] == "87,50" and s.stock(int(b[3:])) == 4.0,
+              and brow is not None and brow[3] == "7 шт" and brow[5:] == ["", ""] and no_money(flat7) and "12,50" not in flat7 and s.stock(int(b[3:])) == 4.0,
               f"{(r, i1, w1, i2)}; {res}; {brow}")
+        res7 = s.B("StockOnDate", ser(p0 + dt_.timedelta(days=6)), True, module="WmsLedger")
+        path7 = res7[5:]
+        txt7 = open(path7, encoding="utf-8-sig").read() if res7.startswith("FILE:") and os.path.isfile(path7) else ""
+        R.add(c, "К7 в файл: заголовок «ЕИ;Наименование;Артикул;Ед.;Количество;Место (сейчас)» — без цены и суммы", txt7.splitlines()[1:2] == ["ЕИ;Наименование;Артикул;Ед.;Количество;Место (сейчас)"] and no_money(txt7), f"{res7}; {txt7[:200]}")
         res0 = s.B("StockOnDate", ser(p0), False, module="WmsLedger")
         rows0 = print_rows(s)
         R.add(c, "К7: на дату до прихода болта нет", res0.startswith("OK") and not any(x[1] == b for x in rows0), res0)
@@ -1321,27 +1332,28 @@ def v23_accounting():
         res = s.B("Turnover", ser(p0), ser(p_end), False, module="WmsLedger")
         rows = print_rows(s, 600)
         tr = next((x for x in rows if x[0] == "Болт М8 (Б-8), шт"), None)
-        money = next((x for x in rows if x[0] == "Итого, руб."), None)
-        R.add(c, "К8: оборотная ведомость прошлого месяца — болт: начало 0, приход 10, выдано 3, списано 1, конец 6; в рублях приход 125,00, "
-                 "выдано 37,50, списано 12,50, конец 75,00 (синтетические ЕИ без цены не в рублях)",
-              res.startswith("OK:Оборотная ведомость") and tr == ["Болт М8 (Б-8), шт", "", "10", "3", "", "1", "6"] and money is not None
-              and money[2] == "125,00" and money[3] == "37,50" and money[5] == "12,50" and money[6].endswith("75,00"), f"{res}; {tr}; {money}")
+        flat8 = " | ".join(" ".join(x) for x in rows)
+        R.add(c, "К8: оборотная ведомость прошлого месяца — болт: начало 0, приход 10, выдано 3, списано 1, конец 6; таблицы «В рублях» и «Итого, руб.» нет, ни одной суммы",
+              res.startswith("OK:Оборотная ведомость") and tr == ["Болт М8 (Б-8), шт", "", "10", "3", "", "1", "6"] and no_money(flat8)
+              and not any(x[0] == "Итого, руб." for x in rows), f"{res}; {tr}")
         res = s.B("Turnover", ser(p0), ser(p_end), True, module="WmsLedger")
         path = res[5:]
         lines = list(csv.reader(open(path, encoding="utf-8-sig"), delimiter=";")) if res.startswith("FILE:") and os.path.isfile(path) else []
         bl = next((x for x in lines if x[:1] == ["Болт М8"]), [])
-        R.add(c, "К8 в файл: CSV в «WMS_Документы» (UTF-8 с меткой, «;»), строка болта с единицами и рублями",
-              "WMS_Документы" in path and lines[1][:4] == ["Товар", "Артикул", "Ед.", "Партий"] and bl[3:10] == ["1", "0", "10", "3", "0", "1", "6"]
-              and bl[11] == "125,00" and bl[15] == "75,00", f"{res}; {bl}")
+        R.add(c, "К8 в файл: CSV в «WMS_Документы» (UTF-8 с меткой, «;»), строка болта с единицами; столбцов в рублях и строки «Итого» нет",
+              "WMS_Документы" in path and lines[1] == ["Товар", "Артикул", "Ед.", "Партий", "Начало", "Приход", "Выдано", "Возвращено", "Списано", "Конец"]
+              and bl[3:10] == ["1", "0", "10", "3", "0", "1", "6"] and len(bl) == 10 and not any(x[:1] == ["Итого"] for x in lines)
+              and no_money(open(path, encoding="utf-8-sig").read()), f"{res}; {bl}")
         # К9
         res = s.B("ExportMoves", ser(p0), serial(), module="WmsLedger")
         path = res[5:].split("\n")[0]
         lines = list(csv.reader(open(path, encoding="utf-8-sig"), delimiter=";")) if res.startswith("FILE:") and os.path.isfile(path) else []
         mv = [x for x in lines[2:] if len(x) > 3 and x[3] == b]
-        R.add(c, "К9: выгрузка движений — 4 движения болта по датам: приход 10 (УПД-1), выдача 3, списание 1, выдача 2; цена 12,50, суммы 125,00 / 37,50 / 12,50 / 25,00",
+        R.add(c, "К9: выгрузка движений — 4 движения болта по датам: приход 10 (УПД-1), выдача 3, списание 1, выдача 2; без цены, суммы и строки «Итого»",
               res.startswith("FILE:") and [x[1].split(" № ")[0] for x in mv] == ["Приход по заказу", "Выдача", "Списание", "Выдача"]
-              and [x[7] or x[8] for x in mv] == ["10", "3", "1", "2"] and [x[10] for x in mv] == ["125,00", "37,50", "12,50", "25,00"]
-              and mv[0][2] == "УПД-1" and mv[1][11] == "Иванов Иван Андреевич", f"{res[:200]}; {mv}")
+              and [x[7] or x[8] for x in mv] == ["10", "3", "1", "2"] and lines[1] == ["Дата", "Операция", "Документ", "ЕИ", "Наименование", "Артикул", "Ед.", "Приход", "Расход", "Контрагент / получатель / причина"]
+              and mv[0][2] == "УПД-1" and mv[1][9] == "Иванов Иван Андреевич" and not any(x[:1] == ["Итого"] for x in lines) and no_money(open(path, encoding="utf-8-sig").read())
+              and "Движений: " in res and no_money(res.replace("Движений", "")), f"{res[:200]}; {mv}")
         # К10
         f1c = os.path.join(s.dir, "остатки_1с.csv")
         with open(f1c, "w", encoding="cp1251", newline="") as f:
@@ -1366,7 +1378,7 @@ def v23_accounting():
         files = sorted(os.listdir(docs)) if os.path.isdir(docs) else []
         R.add(c, "К13: «Закрыть месяц» прошлого месяца — строка _CLOSE (по последнему дню, CLOSED, файлы), MONTH_CLOSE в журнале, файлы "
                  "«Закрытие … оборотная ведомость» и «Остаток на …», ClosedTo — последний день",
-              res.startswith("OK:") and cl[0] == f"{p0.year:04d}-{p0.month:02d}" and cl[1] == ser(p_end) and cl[3] == "CLOSED" and len(ent) == 1
+              res.startswith("OK:") and no_money(res) and cl[0] == f"{p0.year:04d}-{p0.month:02d}" and cl[1] == ser(p_end) and cl[3] == "CLOSED" and len(ent) == 1
               and ent[0]["fields"].get("TO") == p_end.isoformat() and any(x.startswith(f"Закрытие {p0.year:04d}-{p0.month:02d}") for x in files)
               and s.B("ClosedTo", module="WmsLedger") == ser(p_end) and int(s.sysv("LAST_SEQ")) == nseq + 1, f"{res}; {cl}; {ent}; {files}")
         again = s.B("CloseMonth", p0.year, p0.month, module="WmsLedger")
@@ -1404,7 +1416,7 @@ def v23_accounting():
 
 @case
 def v24_reports():
-    """А1 отчёт руководителю за день; А2 «на сумму» на плитке «Дашборда» и цена со стоимостью в карточке ЕИ; А3 расход по получателям и
+    """А1 отчёт руководителю за день; А2 плитка «Дашборда» и карточка ЕИ без денег (1.5.0); А3 расход по получателям и
     подразделениям; А4 полный список мёртвого груза (порог, сортировка, итог); А6 переходы двойным щелчком и «Все…»; А7 «Внимание»
     списком с переходами"""
     c = "V24"
@@ -1432,10 +1444,9 @@ def v24_reports():
         sub0 = dsh.getCellByPosition(1, 5).getString()
         s.B("CardShow", int(b[3:]), module="WmsFind")
         info = s.doc.Sheets.getByName("Поиск").getCellByPosition(1, 8).getString()
-        R.add(c, "А2: плитка «На складе» — «на сумму 112,50» (болт 7 × 12,50 + гайка 10 × 2 + шайба 5 × 1; ЕИ без цены — отдельно); "
-                 "в карточке болта «цена 12,50, на сумму 87,50»",
-              all(x.startswith("OK") for x in (i1, r1, w1, db)) and sub0.startswith("на сумму 112,50 (без цены ") and "цена 12,50, на сумму 87,50" in info,
-              f"{(i1, r1, w1, db)}; {sub0}; {info}")
+        R.add(c, "А2: на плитке «На складе» и в карточке ЕИ нет денег (хотя в заказах цены записаны) — под числом «всего ЕИ … · требует разбора …», в карточке болта нет «цена …, на сумму …»",
+              all(x.startswith("OK") for x in (i1, r1, w1, db)) and sub0.startswith("всего ЕИ ") and "требует разбора" in sub0 and no_money(sub0)
+              and "движений" in info and "на сумму" not in info and "цена" not in info.lower(), f"{(i1, r1, w1, db)}; {sub0}; {info}")
         # А1
         res = s.B("ManagerReport", serial(), serial(), module="WmsLedger")
         rows = print_rows(s, 300)
@@ -1444,33 +1455,41 @@ def v24_reports():
         loss = next((x for x in rows if x[1] == "брак"), None)
         sups = [x[1] for x in rows if x[1] in ("Ромашка", "Лютик")]
         flat = " | ".join(" ".join(x) for x in rows)
-        R.add(c, "А1: отчёт руководителю за сегодня — приходы 2 на 145,00 (шайба — 200 дней назад, не в периоде), выдача 37,50, возврат 12,50, "
-                 "списание 12,50; остаток на сумму 112,50; получатель — выдано 37,50, возвращено 12,50, на руках 25,00; потери «брак» 12,50; "
-                 "поставщики по сумме: Ромашка, Лютик",
-              res.startswith("OK:Отчёт руководителю") and op.get("Приход по заказам", [""] * 3)[1:3] == ["2", "145,00"]
-              and op.get("Выдачи", [""] * 3)[1:3] == ["1", "37,50"] and op.get("Возвраты на склад", [""] * 3)[1:3] == ["1", "12,50"]
-              and op.get("Списания", [""] * 3)[1:3] == ["1", "12,50"] and "на сумму 112,50" in flat and who is not None
-              and who[2:6] == ["1", "37,50", "12,50", "25,00"] and loss is not None and loss[3] == "12,50" and sups == ["Ромашка", "Лютик"], f"{res}; {op}; {who}; {loss}; {sups}")
+        R.add(c, "А1: отчёт руководителю за сегодня — приходов 2 (шайба — 200 дней назад, не в периоде), выдача 1, возврат 1, списание 1; «позиций с остатком»; "
+                 "получатель — выдач 1, возвратов 1; потери «брак» — 1 запись; поставщики Лютик и Ромашка по 1; ни сумм, ни цен, ни «Без цены»",
+              res.startswith("OK:Отчёт руководителю") and op.get("Приход по заказам", [""] * 3)[1] == "2" and op.get("Выдачи", [""] * 3)[1] == "1"
+              and op.get("Возвраты на склад", [""] * 3)[1] == "1" and op.get("Списания", [""] * 3)[1] == "1" and "позиций с остатком" in flat and who is not None
+              and who[2:4] == ["1", "1"] and loss is not None and loss[2] == "1" and sorted(sups) == ["Лютик", "Ромашка"] and no_money(flat),
+              f"{res}; {op}; {who}; {loss}; {sups}")
         # А3
         res = s.B("Consumers", serial(), serial(), module="WmsLedger")
         rows = print_rows(s, 300)
         who = next((x for x in rows if x[1].startswith("Иванов Иван Андреевич")), None)
         dep = next((x for x in rows if x[1] == "Цех 1"), None)
-        R.add(c, "А3: расход по получателям — «Иванов Иван Андреевич (Цех 1)»: выдач 1, 37,50 / 12,50 / на руках 25,00; таблица подразделений с «Цех 1»",
-              res.startswith("OK:Расход по получателям") and who is not None and who[1] == "Иванов Иван Андреевич (Цех 1)" and who[2:6] == ["1", "37,50", "12,50", "25,00"]
-              and dep is not None and dep[2:6] == ["1", "37,50", "12,50", "25,00"], f"{res}; {who}; {dep}")
+        flat3 = " | ".join(" ".join(x) for x in rows)
+        R.add(c, "А3: расход по получателям — «Иванов Иван Андреевич (Цех 1)»: выдач 1, возвратов 1; таблица подразделений с «Цех 1»; ни сумм, ни «на руках на сумму»",
+              res.startswith("OK:Расход по получателям") and who is not None and who[1] == "Иванов Иван Андреевич (Цех 1)" and who[2:4] == ["1", "1"]
+              and dep is not None and dep[2:4] == ["1", "1"] and no_money(flat3), f"{res}; {who}; {dep}")
         # А4
         res = s.B("DeadStock", 180, True, module="WmsLedger")
         rows = print_rows(s, 400)
         tab = [x for x in rows if x[1].startswith("ЕИ-")]
+        flat4 = " | ".join(" ".join(x) for x in rows)
+        res3 = s.B("DeadStock", 180, False, module="WmsLedger")
+        rows3 = print_rows(s, 400)
+        tab3 = [x for x in rows3 if x[1].startswith("ЕИ-")]
+        flat3b = " | ".join(" ".join(x) for x in rows3)
         res2 = s.B("DeadStock", 365, False, module="WmsLedger")
         rows2 = print_rows(s, 400)
         tab2 = [x for x in rows2 if x[1].startswith("ЕИ-")]
-        R.add(c, "А4: мёртвый груз 180 дней по сумме — первой шайба (200 дней, 5,00), затем ЕИ без движений; итог «на сумму 5,00»; при пороге 365 "
-                 "шайбы нет, болт и гайка (двигались сегодня) — нигде",
-              res.startswith("OK:Залежавшиеся товары 180") and tab[0][1] == w and tab[0][5] == "200" and tab[0][6] == "5,00"
-              and any(x[0] == "Итого на сумму: 5,00" for x in rows) and not any(x[1] in (b, g) for x in tab) and not any(x[1] == w for x in tab2)
-              and all(x[5] == "нет движений" for x in tab2) and res2.startswith("OK"), f"{res}; {tab[:2]}; {res2}; {tab2[:2]}")
+        qty = lambda x: float(re.match(r"[\d,.]+", x[3]).group(0).replace(",", "."))      # noqa: E731
+        wrow = next((x for x in tab3 if x[1] == w), None)
+        R.add(c, "А4: мёртвый груз 180 дней — по остатку (самые большие остатки выше) и по дням: шайба — 200 дней, в таблице шесть столбцов, ни «Сумма», ни «Итого на сумму»; "
+                 "болт и гайка (двигались сегодня) — нигде; при пороге 365 шайбы нет, остальные — «нет движений»",
+              res.startswith("OK:Залежавшиеся товары 180") and "по остатку" in flat4 and tab[0][6] == "" and qty(tab[0]) >= qty(tab[-1]) and no_money(flat4)
+              and wrow is not None and wrow[5] == "200" and "по дням" in flat3b and no_money(flat3b) and res3.startswith("OK")
+              and not any(x[1] in (b, g) for x in tab) and not any(x[1] == w for x in tab2) and all(x[5] == "нет движений" for x in tab2) and res2.startswith("OK"),
+              f"{res}; {tab[:2]}; {wrow}; {res2}; {tab2[:2]}")
         # А7 and А6
         put(s, "Выдачи", 2, L=g, E="1", H=serial(), I="ива")
         at = s.B("AttentionShow", module="WmsDash")
@@ -1566,12 +1585,11 @@ def v25_kits():
               and arows[3][16] == "Проведено · комплект из 3 поз." and arows[3][9] == "8-1-1" and [r[0] for r in arows] == [float(nadj + i) for i in range(4)]
               and krow[:8] == [k, "Набор электрика", "", "компл", 1.0, "8-1-1", "Комплект", "Активен"] and len(ent) == 1
               and [s.stock(int(x[3:])) for x in (a2, b, w)] == [8.0, 1.0, 1.0] and int(s.sysv("NEXT_ADJ")) == nadj + 4, f"{res}; {arows}; {krow}")
-        price = s.B("EiPrice", nxt, module="WmsPrint")
         card = s.B("CardShow", nxt, module="WmsFind")
         info = s.doc.Sheets.getByName("Поиск").getCellByPosition(1, 8).getString()
         bc = s.B("BalanceCheck", module="WmsLegacy")
-        R.add(c, "цена комплекта — из позиций: 10 × 50 + 2 × 100 + 1 × 30 = 730; карточка: «Сборка», остаток сходится; «остаток = движения» — без расхождений",
-              abs(price - 730.0) < 1e-6 and "= «Наличие»" in card and "цена 730,00" in info and bc == "", f"{price}; {card}; {info}; {bc!r}")
+        R.add(c, "карточка комплекта: «Сборка», остаток сходится, цены и суммы в карточке нет (1.5.0); «остаток = движения» — без расхождений",
+              "= «Наличие»" in card and "движений 1" in info and no_money(info) and bc == "", f"{card}; {info}; {bc!r}")
         fx = s.B("AdjustFixRow", 4, "2", serial(), "x", module="WmsAdjust")
         put(s, "Корректировки", 6, B="Сборка", C=b, G="1", K=serial(), L="вручную")
         man = s.A("AdjustPostRow", 6)
@@ -2156,7 +2174,7 @@ def v29_help():
         choose(s, 9)
         wn = s.B("WhatsNew", module="WmsHelp")
         act = s.doc.getCurrentController().getActiveSheet().getName()
-        R.add(c, "П2: «Что нового» — 13 карточек (первая — 1.4.0, вторая — 1.3.0, третья — 1.2.1, четвёртая — 1.2.0, пятая — 1.1), «Показать» открывает лист карточки", len(s.B("WhatsNewCards", module="WmsHelp")) == 13 and wn == 9
+        R.add(c, "П2: «Что нового» — 13 карточек (первая — 1.5.0, вторая — 1.3.0, третья — 1.2.1, четвёртая — 1.2.0, пятая — 1.1), «Показать» открывает лист карточки", len(s.B("WhatsNewCards", module="WmsHelp")) == 13 and wn == 9
               and act == "Поиск", f"{wn}; {act}")
         col0 = s.B("ButtonModel", "Заказы", "btnReceiveWin", module="WmsHelp").BackgroundColor
         tr = s.B("Tour", module="WmsHelp")
@@ -6988,8 +7006,8 @@ def v87_report_fix_del():
 
 @case
 def v88_overstate():
-    """1.4.0: «Завышение остатков» — что покажет учёт, если загрузить все поступления за всю историю без выдач: по товару поступило, лежит, завышение (штуки и рубли), крупнее — выше;
-    итог: поступило на сумму, лежит на сумму, во сколько раз больше; товары, по которым приход был, а остатка нет; файл CSV; ничего не проводится; на странице нет слов «WMS», «ЕИ», «журнал»"""
+    """1.4.0, 1.5.0: «Завышение остатков» — что покажет учёт, если загрузить все поступления за всю историю без выдач: по товару поступило, лежит, завышение (в единицах товара, без денег), большее — выше;
+    клетка «Разобрано» у каждого товара; сколько товаров с завышением и сколько без остатка; файл CSV с пустым столбцом «Разобрано»; ничего не проводится; на странице нет слов «WMS», «ЕИ», «журнал», сумм и цен"""
     import csv
     c = "V88"
     s = ready(Session(new_wms("v88")))
@@ -7013,22 +7031,21 @@ def v88_overstate():
         flat = " | ".join(" ".join(x) for x in rows)
         bolt = next((x for x in rows if x[1].startswith("Болт М8")), None)
         washer = next((x for x in rows if x[1].startswith("Шайба М8")), None)
-        R.add(c, "справка: болт — поступило 10, лежит 7, завышение 3, 15,00 руб.; шайба — 4, 0, 4, 10,00 руб.; болт выше шайбы (по сумме)",
-              res.startswith("OK:Завышение остатков") and bolt is not None and bolt[3:7] == ["10", "7", "3", "15,00"] and washer is not None and washer[3:7] == ["4", "0", "4", "10,00"]
-              and bolt[0] == "1" and washer[0] == "2", f"{res}; {bolt}; {washer}")
-        R.add(c, "итог: поступило на 60,00, лежит на 35,00, завышение 25,00 (в 1,7 раза); товаров с завышением 2, без остатка 1",
-              "поступило за всю историю на сумму 60,00" in flat and "лежит сейчас на сумму 35,00" in flat and "завышение 25,00" in flat and "раза больше, чем лежит" in flat
-              and "Товаров с завышением: 2" in flat and "а на складе ничего нет: 1" in flat
-              and not any(x[1].startswith("Кабель") for x in rows), flat[:700])
+        R.add(c, "справка: болт — поступило 10, лежит 7, завышение 3; шайба — 4, 0, 4; шайба выше болта (завышение 4 больше 3); у каждой строки клетка «Разобрано» («[  ]»); денег нет",
+              res.startswith("OK:Завышение остатков") and bolt is not None and bolt[3:7] == ["10", "7", "3", "[  ]"] and washer is not None and washer[3:7] == ["4", "0", "4", "[  ]"]
+              and washer[0] == "1" and bolt[0] == "2" and no_money(flat), f"{res}; {bolt}; {washer}")
+        R.add(c, "итог: товаров с завышением 2, без остатка 1; в заголовке таблицы «Разобрано»; объяснение «Как разбирать» и рекомендация; ни сумм, ни цен, ни «в раза больше»",
+              "товаров с завышением: 2" in flat and "а на складе ничего нет: 1" in flat and "Как разбирать" in flat and "Разобрано" in flat and "раза больше" not in flat
+              and not any(x[1].startswith("Кабель") for x in rows) and no_money(flat), flat[:700])
         bad = [w for w in ("WMS", "ЕИ", "журнал", "Журнал") if w in flat]
         R.add(c, "в справке нет слов «WMS», «ЕИ», «журнал»; есть рекомендация про ввод остатков", not bad and "Рекомендация" in flat and "ввода остатков" in flat, f"{bad}")
         res2 = s.B("Overstate", True, module="WmsLedger")
         path = res2[5:]
         lines = list(csv.reader(open(path, encoding="utf-8-sig"), delimiter=";")) if res2.startswith("FILE:") and os.path.isfile(path) else []
         bl = next((x for x in lines if x[:1] == ["Болт М8"]), [])
-        R.add(c, "в файл: строка болта — поступило 10, выдано 3, возвращено 1, списано 1, остаток 7, завышение 3; в рублях 50,00 / 35,00 / 15,00",
-              len(lines) > 3 and lines[0][3] == "Поступило" and bl[3:12] == ["10", "3", "1", "1", "7", "3", "50,00", "35,00", "15,00"]
-              and lines[1][0] == "Болт М8" and lines[2][0] == "Шайба М8", f"{res2}; {bl}; {lines[:3]}")
+        R.add(c, "в файл: строка болта — поступило 10, выдано 3, возвращено 1, списано 1, остаток 7, завышение 3 и пустое «Разобрано»; столбцов в рублях нет; первой шайба (завышение 4)",
+              len(lines) > 3 and lines[0][3] == "Поступило" and lines[0][-1] == "Разобрано" and len(lines[0]) == 10 and bl[3:9] == ["10", "3", "1", "1", "7", "3"] and bl[9] == ""
+              and len(bl) == 10 and lines[1][0] == "Шайба М8" and lines[2][0] == "Болт М8" and no_money(open(path, encoding="utf-8-sig").read()), f"{res2}; {bl}; {lines[:3]}")
         R.add(c, "справка ничего не проводит", int(s.sysv("LAST_SEQ")) == seq0, f"{seq0} → {s.sysv('LAST_SEQ')}")
         oracle(c, s, "справка о завышении")
     finally:
@@ -7333,6 +7350,92 @@ def v92_simple_ways():
         oracle(c, s, "приход через «Я хочу…» и выдача")
         sc = s.B("ActionSelfCheck")
         R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:200])
+    finally:
+        s.close()
+
+
+@case
+def v93_no_money():
+    '''1.5.0: в отчётах, ведомостях, актах, выгрузках, на «Дашборде» и в карточке ЕИ нет сумм и цен (решение владельца 05.11.2026: склад считает количество, деньги считает 1С), хотя в «Заказах»
+    цены записаны; количества на месте; описания отчётов на листе «Отчёты» без «сумм», «цен» и «рублей»; закрытие месяца, акт списания и сличительная ведомость — тоже; отчёты ничего не проводят'''
+    import csv
+    c = "V93"
+    s = ready(Session(new_wms("v93")))
+    try:
+        order(s, 1, "1", "Болт М8", qty="10", art="Б-8", J=12.5)
+        receive(s, 1, "10", place="5-1-1")
+        order(s, 2, "2", "Гайка М8", qty="10", supplier="Лютик", J=2.0)
+        receive(s, 2, "10", place="5-1-2")
+        order(s, 3, "3", "Шайба М8", qty="5", J=1.0)
+        receive(s, 3, "5", place="6-1-1", k=-200)
+        b, g, w = ords(s, 1)[21], ords(s, 2)[21], ords(s, 3)[21]
+        put(s, "Выдачи", 1, L=b, E="3", H=serial(), I="ива")
+        i1 = s.I("IssuePostRow", 1)
+        put(s, "Возврат", 1, B="1", F="1", H=serial(), I="ива")
+        r1 = s.B("ReturnPostRow", 1, module="WmsReturn")
+        put(s, "Корректировки", 1, B="Списание", C=b, G="1", K=serial(), L="брак")
+        w1 = s.A("AdjustPostRow", 1)
+        R.add(c, "день подготовлен: в заказах цены 12,50 / 2,00 / 1,00; болт — приход 10, выдано 3, возврат 1, списание 1", all(str(x).startswith("OK") for x in (i1, r1, w1)), f"{[str(x)[:60] for x in (i1, r1, w1)]}")
+        seq0 = int(s.sysv("LAST_SEQ"))
+        bad = []
+        pages = {}
+
+        def page(name, res, n=400):
+            rows = print_rows(s, n)
+            flat = " | ".join(" ".join(x) for x in rows)
+            pages[name] = flat
+            if not str(res).startswith("OK") or not no_money(flat):
+                bad.append((name, str(res)[:60], flat[:120]))
+
+        def csv_of(name, res):
+            path = str(res)[5:].split("\n")[0]
+            txt = open(path, encoding="utf-8-sig").read() if str(res).startswith("FILE:") and os.path.isfile(path) else ""
+            pages[name] = txt
+            if not txt or not no_money(txt):
+                bad.append((name, str(res)[:60], txt[:120]))
+
+        page("остаток на дату", s.B("StockOnDate", serial(), False, module="WmsLedger"))
+        csv_of("остаток на дату, файл", s.B("StockOnDate", serial(), True, module="WmsLedger"))
+        page("оборотная ведомость", s.B("Turnover", serial(-30), serial(), False, module="WmsLedger"))
+        csv_of("оборотная ведомость, файл", s.B("Turnover", serial(-30), serial(), True, module="WmsLedger"))
+        csv_of("выгрузка движений", s.B("ExportMoves", serial(-30), serial(), module="WmsLedger"))
+        page("завышение остатков", s.B("Overstate", False, module="WmsLedger"))
+        csv_of("завышение остатков, файл", s.B("Overstate", True, module="WmsLedger"))
+        page("отчёт руководителю", s.B("ManagerReport", serial(), serial(), module="WmsLedger"))
+        page("расход по получателям", s.B("Consumers", serial(-30), serial(), module="WmsLedger"))
+        page("мёртвый груз по дням", s.B("DeadStock", 90, False, module="WmsLedger"))
+        page("мёртвый груз по остатку", s.B("DeadStock", 90, True, module="WmsLedger"))
+        s.goto("Корректировки", "$A$2")
+        page("акт списания", s.B("WriteOffAct", module="WmsPrint"), 60)
+        R.add(c, "в одиннадцати отчётах и документах (остаток на дату и файл, оборотная и файл, выгрузка движений, завышение и файл, отчёт руководителю, расход по получателям, мёртвый груз двух сортировок, акт списания) "
+                 "нет ни «руб», ни «сумм», ни «цен…» — хотя цены в заказах записаны", not bad and len(pages) == 12, f"{bad}; {len(pages)}")
+        flat = pages["остаток на дату"] + pages["оборотная ведомость"] + pages["завышение остатков"]
+        R.add(c, "количества на месте: болт 7 шт в остатке, в оборотной «10» приходом и «3» выдачей, в завышении «Разобрано»; в отчёте руководителю «позиций с остатком» и «Выдач»; в акте «Списано позиций: 1»",
+              "7 шт" in pages["остаток на дату"] and "Разобрано" in pages["завышение остатков"] and "позиций с остатком" in pages["отчёт руководителю"] and "Выдач" in pages["отчёт руководителю"]
+              and "Списано позиций: 1" in pages["акт списания"] and "Болт М8" in flat, f"{pages['акт списания'][:200]}")
+        # the dashboard and the card
+        db = s.B("DashRefresh", module="WmsDash")
+        dsh = s.doc.Sheets.getByName("Дашборд")
+        dflat = " | ".join(str(x) for r in dsh.getCellRangeByPosition(0, 0, 12, 67).getDataArray() for x in r if x != "")
+        s.B("CardShow", int(b[3:]), module="WmsFind")
+        cflat = " | ".join(str(x) for r in s.doc.Sheets.getByName("Поиск").getCellRangeByPosition(0, 0, 12, 30).getDataArray() for x in r if x != "")
+        R.add(c, "«Дашборд» (все плитки и списки) и карточка болта — без «руб», «на сумму», «цена»", str(db).startswith("OK") and "всего ЕИ" in dflat and not re.search(r"руб|на сумму|₽|\bцен", (dflat + " " + cflat).lower()),
+              f"{db}; {dflat[:200]}")
+        # the descriptions of the reports and the closing of a month
+        rsh = s.doc.Sheets.getByName("Отчёты")
+        desc = [str(x[0]) for x in rsh.getCellRangeByPosition(2, 3, 2, 20).getDataArray() if x[0]]
+        R.add(c, "описания отчётов на листе «Отчёты» (девять строк и больше) — без «сумм», «цен» и «рублей»", len(desc) >= 10 and no_money(" ".join(desc)), f"{len(desc)}; {desc[:3]}")
+        month = T - datetime.timedelta(days=200)
+        cm = s.B("CloseMonth", month.year, month.month, module="WmsLedger")
+        docs = os.path.join(os.path.dirname(s.path), "WMS_Документы")
+        files = [f for f in sorted(os.listdir(docs)) if f.startswith("Закрытие") and f.endswith(".csv")] if os.path.isdir(docs) else []
+        ftxt = " ".join(open(os.path.join(docs, f), encoding="utf-8-sig").read() for f in files)
+        R.add(c, "закрытие месяца: сообщение и оба файла («Закрытие … оборотная ведомость», остаток на конец) без денег; операция MONTH_CLOSE записана, как прежде (поле SUM_END в журнале на месте)",
+              str(cm).startswith("OK:") and no_money(cm) and len(files) >= 1 and no_money(ftxt)
+              and any(e["type"] == "MONTH_CLOSE" and "SUM_END" in e["fields"] for e in s.journal()[0]), f"{cm[:200]}; {files}")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок; отчёты ничего не проводили (в журнале только операции дня и закрытие месяца)", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0") and int(s.sysv("LAST_SEQ")) == seq0 + 1, f"{sc[:200]}; {seq0} → {s.sysv('LAST_SEQ')}")
+        oracle(c, s, "отчёты без денег")
     finally:
         s.close()
 

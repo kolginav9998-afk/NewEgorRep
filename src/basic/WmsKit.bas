@@ -814,31 +814,3 @@ Function KitDelete(rd As Variant) As String
     KitDelete = ApplyOperation(0, 0)
 End Function
 
-' ================================================================ the price of a kit
-
-' the price of one kit of EI canonK: the money of its components (their prices) ÷ the number of kits; −1 when a component has
-' no price or canonK is not a kit
-Function KitPrice(canonK As String, Optional depth As Variant) As Double
-    Dim nums() As Long, nKit As Long, cnt As Long, i As Long, ad As Object, d As Variant, e As Long, p As Double, sum As Double, dp As Integer
-    KitPrice = -1
-    dp = 0
-    If Not IsMissing(depth) Then dp = depth
-    If dp > 5 Then Exit Function
-    On Error GoTo EH
-    If Not gDoc.Sheets.hasByName(SH_ADJ) Then Exit Function
-    cnt = KtGroup(canonK, nums, nKit)
-    If cnt < 2 Or nKit = 0 Then Exit Function
-    ad = gDoc.Sheets.getByName(SH_ADJ)
-    For i = 0 To cnt - 1
-        If nums(i) <> nKit Then
-            d = ad.getCellRangeByPosition(0, nums(i), AJ_LAST, nums(i)).getDataArray()(0)
-            If Not WmsOrders.StrictEI(CStr(d(AJ_EI)), e) Then Exit Function
-            p = WmsPrint.EiPrice(e)
-            If p < 0 Then p = KitPrice(CStr(d(AJ_EI)), dp + 1)
-            If p < 0 Then Exit Function
-            sum = sum - d(AJ_QTY) * p
-        End If
-    Next i
-    If ad.getCellByPosition(AJ_QTY, nKit).getValue() > 0 Then KitPrice = sum / ad.getCellByPosition(AJ_QTY, nKit).getValue()
-EH:
-End Function

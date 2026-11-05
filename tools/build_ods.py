@@ -157,11 +157,11 @@ REPORTS = "Отчёты"
 REPORT_GROUPS = [
     ("Учёт и бухгалтерия", [
         ("btnStockOnDate", "Остаток на дату…", "WmsLedger.BtnStockOnDate",
-         "Остаток всех ЕИ на любую прошедшую дату, с ценой и суммой — на печать или в файл."),
+         "Остаток всех ЕИ на любую прошедшую дату — на печать или в файл."),
         ("btnTurnover", "Оборотная ведомость…", "WmsLedger.BtnTurnover",
-         "За период по товарам: начало, приход, выдано, возвращено, списано, конец — в единицах и рублях."),
+         "За период по товарам: начало, приход, выдано, возвращено, списано, конец — в единицах товара."),
         ("btnExportAcc", "Выгрузка для бухгалтерии…", "WmsLedger.BtnExport",
-         "Файл CSV всех движений за период: документы, ЕИ, цены, суммы, получатели (открывается в Excel, загружается в 1С)."),
+         "Файл CSV всех движений за период: документы, ЕИ, получатели (открывается в Excel)."),
         ("btnCompare1C", "Сверка с 1С…", "WmsLedger.BtnCompare1C",
          "Выберите файл остатков из 1С (CSV, XLSX, ODS) — список расхождений с WMS. Ничего не проводится."),
         ("btnCloseMonth", "Закрыть месяц…", "WmsLedger.BtnCloseMonth",
@@ -171,15 +171,25 @@ REPORT_GROUPS = [
     ]),
     ("Руководителю", [
         ("btnManagerReport", "Отчёт руководителю…", "WmsLedger.BtnManagerReport",
-         "Сегодня, неделя, месяц или период: операции и суммы, остаток на сумму, получатели, потери, поставщики, машины."),
+         "Сегодня, неделя, месяц или период: операции, остаток (позиций), получатели, потери, поставщики, машины."),
         ("btnConsumers", "Расход по получателям…", "WmsLedger.BtnConsumers",
-         "Сколько выдано, возвращено и на руках — у каждого получателя и подразделения (колонка C «Получателей»), на какую сумму."),
+         "Сколько выдач и возвратов — у каждого получателя и подразделения (колонка C «Получатели»)."),
         ("btnDeadStock", "Мёртвый груз…", "WmsLedger.BtnDeadStock",
-         "Все ЕИ без движения дольше 90, 180 или 365 дней — по дням или по сумме, итог «на сумму …»."),
+         "Все ЕИ без движения дольше 90, 180 или 365 дней — по дням или по остатку."),
         ("btnOverstate", "Завышение остатков…", "WmsLedger.BtnOverstate",
-         "Что покажет учёт (например, 1С), если загрузить в него все поступления за всю историю без выдач: по каждому товару поступило, лежит, завышение — в штуках и рублях."),
+         "Что покажет учёт (например, 1С), если загрузить в него все поступления за всю историю без выдач: по каждому товару поступило, лежит, завышение — в единицах товара; на странице клетка «Разобрано» для отметок."),
     ]),
 ]
+# 1.5.0: the descriptions of the reports had sums, prices and rubles; WMS counts, the accounting values. What an earlier book has in these cells (the old texts) is replaced by reports_150
+REPORT_DESC_OLD = {
+    "btnStockOnDate": ["Остаток всех ЕИ на любую прошедшую дату, с ценой и суммой — на печать или в файл."],
+    "btnTurnover": ["За период по товарам: начало, приход, выдано, возвращено, списано, конец — в единицах и рублях."],
+    "btnExportAcc": ["Файл CSV всех движений за период: документы, ЕИ, цены, суммы, получатели (открывается в Excel, загружается в 1С)."],
+    "btnManagerReport": ["Сегодня, неделя, месяц или период: операции и суммы, остаток на сумму, получатели, потери, поставщики, машины."],
+    "btnConsumers": ["Сколько выдано, возвращено и на руках — у каждого получателя и подразделения (колонка C «Получателей»), на какую сумму."],
+    "btnDeadStock": ["Все ЕИ без движения дольше 90, 180 или 365 дней — по дням или по сумме, итог «на сумму …»."],
+    "btnOverstate": ["Что покажет учёт (например, 1С), если загрузить в него все поступления за всю историю без выдач: по каждому товару поступило, лежит, завышение — в штуках и рублях."],
+}
 PRINT_WIDTHS = [900, 2600, 6300, 2300, 1500, 2000, 2400]        # A..G = 18 cm: an A4 page with margins of 1,5 cm
 # 1.0 (Ф8): «Комплекты» — the storekeeper's own directory of the kits (WmsKit SH_KITS, KT_*): not protected, not journaled
 KITS = "Комплекты"
@@ -1883,6 +1893,7 @@ def release_140(doc, sheets):
     """1.4.0, what the release adds to a book that has not got it yet — idempotent, called by both ways of the upgrade (the chain of steps of a book of 1.x and step_08 of a book of 0.7): the switches of the helpers in «Настройки»
     (the rows are written into the first free ones, what the storekeeper wrote is not touched), the event that resets the cache of them when the sheet changes, the format of the rows added"""
     reports_140(doc, sheets)
+    reports_150(doc, sheets)
     closeday_140(doc, sheets)
     dash_140(doc, sheets)
     props_140(doc, sheets)
@@ -2039,6 +2050,23 @@ def reports_140(doc, sheets):
                 y = sh.getCellByPosition(1, r).Position.Y
                 add_button(doc, sh, name, label, macro, x, y + 80, 6400, 740, back=0xDDEBF7)
                 return
+            r += 1
+        r += 1
+
+
+def reports_150(doc, sheets):
+    """1.5.0: the descriptions of the reports on «Отчёты» without sums, prices and rubles — only the cells that hold exactly an old text (REPORT_DESC_OLD) are rewritten,
+    in the rows where a new book has them (the same walk as the page is built by); nothing else of the sheet is touched"""
+    if not sheets.hasByName(REPORTS):
+        return
+    sh = sheets.getByName(REPORTS)
+    r = 3
+    for caption, items in REPORT_GROUPS:
+        r += 1
+        for name, label, macro, desc in items:
+            cell = sh.getCellByPosition(2, r)
+            if cell.getString() in REPORT_DESC_OLD.get(name, []):
+                cell.setString(desc)
             r += 1
         r += 1
 

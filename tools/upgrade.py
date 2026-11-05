@@ -58,7 +58,7 @@ SCHEMA_06 = "WMS-SYS-3"
 SCHEMA_07 = "WMS-SYS-4"
 # 1.0.0, 1.0.1, 1.0.2, 1.1.0, 1.1.1, 1.2.0, 1.2.1, 1.3.0: the cores of the schema of this release whose books are carried over too (the same data, the modules and the views new); the core of this release is not among them
 # («книга уже версии …» — обновлять нечего)
-CORES_SAME_SCHEMA = ("1.0.0", "1.0.1", "1.0.2", "1.1.0", "1.1.1", "1.2.0", "1.2.1", "1.3.0")
+CORES_SAME_SCHEMA = ("1.0.0", "1.0.1", "1.0.2", "1.1.0", "1.1.1", "1.2.0", "1.2.1", "1.3.0", "1.4.0")
 OLD_SCHEMA = SCHEMA_06                 # the in-place upgrade (release 0.7 called it so)
 JOURNAL_DIR = "WMS_Journal"
 BACKUP_DIR = "WMS_Backups"
@@ -755,8 +755,9 @@ def allowed_change(sheet, r, c, old=""):
         # 1.4.0: the column «Цвет» of «Серийные детали»: its header (K4) and the hint that moves from L1 to M1
         return (r, c) in ((3, 10), (0, 11), (0, 12))
     if sheet == B.REPORTS:
-        # 1.4.0: the line of text beside the new button «Завышение остатков…» (column C of the row after the last report of the manager, a cell that was empty)
-        return c == 2 and old == ""
+        # 1.4.0: the line of text beside the new button «Завышение остатков…» (column C of the row after the last report of the manager, a cell that was empty);
+        # 1.5.0: the descriptions of the reports without sums and rubles (a cell that holds exactly an old text)
+        return c == 2 and (old == "" or any(old == t for texts in B.REPORT_DESC_OLD.values() for t in texts))
     return sheet == B.HELP
 
 

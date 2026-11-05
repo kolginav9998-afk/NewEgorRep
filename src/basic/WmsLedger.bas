@@ -1,6 +1,7 @@
 ' WmsLedger — 1.0 (этап G «Контроль»): учёт для бухгалтерии и ревизора, страница «Отчёты». Остаток на любую прошедшую дату
-' (К7), оборотная ведомость за период в единицах и рублях (К8), выгрузка движений с документами, ценами и суммами в файл (К9),
-' сверка остатков с файлом из 1С (К10), закрытие месяца (К13): итоги месяца — в файлах и в _CLOSE (операция MONTH_CLOSE),
+' (К7), оборотная ведомость за период в единицах (К8), выгрузка движений с документами в файл (К9), сверка остатков с файлом
+' из 1С (К10), закрытие месяца (К13): итоги месяца — в файлах и в _CLOSE (операция MONTH_CLOSE), 1.5.0: в отчётах нет сумм и цен —
+' склад считает количество, деньги считает 1С (решение владельца 05.11.2026);
 ' операция с датой в закрытом месяце проводится только после предупреждения и с причиной (BACKDATED, BACKWHY в журнале).
 ' Отчёты только читают книгу; файлы — в «WMS_Документы» рядом с книгой, без интернета. Library WmsPlus.
 Option Explicit
@@ -55,11 +56,6 @@ Global gLdUnit() As String
 Global gLdPlace() As String
 ' test seam: the file of «Сверка с 1С» instead of the file picker
 Global gLdFileTest As String
-' А2: the money of the stock, valid for LAST_SEQ gLdMoneySeq
-Global gLdMoneyOk As Boolean
-Global gLdMoneySeq As Long
-Global gLdMoney As Double
-Global gLdMoneyN As Long
 
 ' ================================================================ the movements of the book
 
@@ -466,8 +462,8 @@ Sub BtnStockOnDate(Optional oEvent As Variant)
     WmsInit()
     v(0) = Format(WmsOrders.Today() - 1, "DD.MM.YYYY")
     v(1) = "на страницу «Печать»"
-    If Not WmsPrimeUi.UiForm("Остаток на дату", "Остаток всех ЕИ на конец выбранного дня: сегодняшний остаток минус всё, что было позже. " _
-        & "Цена — из заказа; где цены нет, так и написано.", Array("Дата", "Куда"), v, Array("", "на страницу «Печать»;в файл CSV (Excel, 1С)"), "Показать") Then Exit Sub
+    If Not WmsPrimeUi.UiForm("Остаток на дату", "Остаток всех ЕИ на конец выбранного дня: сегодняшний остаток минус всё, что было позже.", _
+        Array("Дата", "Куда"), v, Array("", "на страницу «Печать»;в файл CSV (Excel)"), "Показать") Then Exit Sub
     d = LdFormDay(v(0), "дата", msg)
     If d = 0 Then
         WmsUi.UiMessage(msg)
@@ -486,10 +482,10 @@ Private Sub LdReport(s As String)
     End If
 End Sub
 
-' the balance of every EI at the end of day dt = the balance now minus every movement after dt. On «Печать» (by EI, the price
-' and the sum, the total) or into a CSV file. OK:<document> / FILE:<path> / ERR:…
+' the balance of every EI at the end of day dt = the balance now minus every movement after dt. On «Печать» (by EI) or into a CSV file.
+' No money: the report counts the goods, it does not value them. OK:<document> / FILE:<path> / ERR:…
 Function StockOnDate(dt As Double, bFile As Boolean) As String
-    Dim aft() As Double, k As Long, n As Long, b As Double, rows() As Variant, nr As Long, sum As Double, nNoPrice As Long, nNeg As Long, p As Double
+    Dim aft() As Double, k As Long, n As Long, b As Double, rows() As Variant, nr As Long, nNeg As Long
     Dim lines() As String, sh As Object, shown As Long, t0 As Long
     On Error GoTo EH
     t0 = GetSystemTicks()
@@ -501,17 +497,14 @@ Function StockOnDate(dt As Double, bFile As Boolean) As String
     ReDim rows(IIf(gLdMax > 0, gLdMax - 1, 0))
     ReDim lines(gLdMax + 1)
     lines(0) = "Остаток на " & Format(dt, "DD.MM.YYYY")
-    lines(1) = "ЕИ;Наименование;Артикул;Ед.;Количество;Цена;Сумма;Место (сейчас)"
+    lines(1) = "ЕИ;Наименование;Артикул;Ед.;Количество;Место (сейчас)"
     For n = 1 To gLdMax
         b = WmsIssue.Round3(gLdNow(n) - aft(n))
         If b < -0.0000005 Then nNeg = nNeg + 1
         If b > 0.0000005 Then
-            p = gLdPrice(n)
-            If p >= 0 Then sum = sum + b * p Else nNoPrice = nNoPrice + 1
-            rows(nr) = Array(nr + 1, gLdCanon(n), LdGoodsText(n), WmsPrint.PartsFirst(n, b, gLdUnit(n)), gLdPlace(n), IIf(p >= 0, WmsPrint.Money(p), "—"), _
-                IIf(p >= 0, WmsPrint.Money(b * p), "—"))
+            rows(nr) = Array(nr + 1, gLdCanon(n), LdGoodsText(n), WmsPrint.PartsFirst(n, b, gLdUnit(n)), gLdPlace(n))
             lines(nr + 2) = LdCsv(gLdCanon(n)) & ";" & LdCsv(gLdName(n)) & ";" & LdCsv(gLdArt(n)) & ";" & LdCsv(gLdUnit(n)) & ";" & WmsIssue.QtyText(b) & ";" _
-                & IIf(p >= 0, WmsPrint.MoneyCsv(p), "") & ";" & IIf(p >= 0, WmsPrint.MoneyCsv(b * p), "") & ";" & LdCsv(gLdPlace(n))
+                & LdCsv(gLdPlace(n))
             nr = nr + 1
         End If
     Next n
@@ -524,12 +517,11 @@ Function StockOnDate(dt As Double, bFile As Boolean) As String
     shown = nr
     If shown > PR_MAX - 80 Then shown = PR_MAX - 80
     sh = WmsPrint.PrintBegin("ОСТАТОК НА " & Format(dt, "DD.MM.YYYY"), "Остаток на " & Format(dt, "YYYY-MM-DD"))
-    WmsPrint.PrintLine(sh, "Позиций с остатком: " & nr & " · на сумму " & WmsPrint.Money(sum) & IIf(nNoPrice > 0, " (без цены: " & nNoPrice & " поз.)", "") & ". Место — текущее.", True)
+    WmsPrint.PrintLine(sh, "Позиций с остатком: " & nr & ". Место — текущее.", True)
     If nNeg > 0 Then WmsPrint.PrintLine(sh, "Внимание: у " & nNeg & " позиций остаток на эту дату получился меньше нуля — движения не сходятся с «" & SH_STOCK _
         & "»; откройте их карточки («Поиск») или «Самопроверку».")
-    WmsPrint.PrintTable(sh, Array("№", "Код", "Наименование (артикул)", "Количество", "Место", "Цена", "Сумма"), rows, shown, "0,5,6")
+    WmsPrint.PrintTable(sh, Array("№", "Код", "Наименование (артикул)", "Количество", "Место"), rows, shown, "0")
     If shown < nr Then WmsPrint.PrintLine(sh, "Показаны первые " & shown & " позиций из " & nr & " — полный список: «Остаток на дату» → «в файл CSV».", True)
-    WmsPrint.PrintLine(sh, "Итого на сумму: " & WmsPrint.Money(sum), True)
     WmsPrint.PrintSign(sh, Array("Кладовщик", "Проверил"))
     StockOnDate = WmsPrint.PrintDone(sh)
     Exit Function
@@ -550,7 +542,7 @@ Sub BtnTurnover(Optional oEvent As Variant)
     v(1) = Format(t, "DD.MM.YYYY")
     v(2) = "на страницу «Печать»"
     If Not WmsPrimeUi.UiForm("Оборотная ведомость", "За период по товарам: остаток на начало, приход, выдано, возвращено, списано, остаток на конец — " _
-        & "в единицах и в рублях (по цене из заказа).", Array("С", "По", "Куда"), v, Array("", "", "на страницу «Печать»;в файл CSV (Excel, 1С)"), "Показать") Then Exit Sub
+        & "в единицах товара.", Array("С", "По", "Куда"), v, Array("", "", "на страницу «Печать»;в файл CSV (Excel)"), "Показать") Then Exit Sub
     d0 = LdFormDay(v(0), "дата начала", msg)
     If d0 > 0 Then d1 = LdFormDay(v(1), "дата конца", msg)
     If d0 = 0 Or d1 = 0 Then
@@ -562,8 +554,8 @@ Sub BtnTurnover(Optional oEvent As Variant)
 End Sub
 
 ' the turnover of [d0, d1] by goods (name, article, unit): the start, the receipts (with the surplus of a count and the splits),
-' the issues, the returns, the write-offs (with the returns to the supplier and the shortage of a count), the end; the money by
-' the price of every EI. Start + receipts − issues + returns − write-offs = end, by construction. OK:… / FILE:… / ERR:…
+' the issues, the returns, the write-offs (with the returns to the supplier and the shortage of a count), the end. No money is shown (the sum
+' of the end of a month is counted for MONTH_CLOSE only). Start + receipts − issues + returns − write-offs = end, by construction. OK:… / FILE:… / ERR:…
 Function Turnover(d0 As Double, d1 As Double, bFile As Boolean) As String
     Dim res As Variant
     On Error GoTo EH
@@ -666,43 +658,28 @@ Private Function LdTurnoverData(d0 As Double, d1 As Double) As Variant
     LdTurnoverData = Array(g + 1, gFirst, gq, gm, gN, tq, tm, nNoPrice, ne)
 End Function
 
-' the turnover on «Печать» (quantities by goods, the money in a table of totals) or into a CSV (both, by goods)
+' the turnover on «Печать» or into a CSV (the quantities by goods; no money: the goods are counted, not valued)
 Private Function LdTurnoverOut(res As Variant, d0 As Double, d1 As Double, bFile As Boolean, sName As String) As String
-    Dim ng As Long, gFirst As Variant, gq As Variant, gm As Variant, gN As Variant, tq As Variant, tm As Variant, nNoPrice As Long, rows() As Variant
+    Dim ng As Long, gFirst As Variant, gq As Variant, gN As Variant, rows() As Variant
     Dim g As Long, n As Long, lines() As String, j As Integer, s As String, sh As Object, shown As Long, heads As Variant
     ng = res(0)
     gFirst = res(1)
     gq = res(2)
-    gm = res(3)
     gN = res(4)
-    tq = res(5)
-    tm = res(6)
-    nNoPrice = res(7)
     heads = Array("Начало", "Приход", "Выдано", "Возвращено", "Списано", "Конец")
     If bFile Then
-        ReDim lines(ng + 2)
+        ReDim lines(ng + 1)
         lines(0) = "Оборотная ведомость " & Format(d0, "DD.MM.YYYY") & " — " & Format(d1, "DD.MM.YYYY")
-        lines(1) = "Товар;Артикул;Ед.;Партий;Начало;Приход;Выдано;Возвращено;Списано;Конец;Начало, руб;Приход, руб;Выдано, руб;Возвращено, руб;Списано, руб;Конец, руб"
+        lines(1) = "Товар;Артикул;Ед.;Партий;Начало;Приход;Выдано;Возвращено;Списано;Конец"
         For g = 0 To ng - 1
             n = gFirst(g)
             s = LdCsv(gLdName(n)) & ";" & LdCsv(gLdArt(n)) & ";" & LdCsv(gLdUnit(n)) & ";" & gN(g)
             For j = 0 To 5
                 s = s & ";" & WmsIssue.QtyText(gq(g, j))
             Next j
-            For j = 0 To 5
-                s = s & ";" & WmsPrint.MoneyCsv(gm(g, j))
-            Next j
             lines(g + 2) = s
         Next g
-        s = "Итого;;;"
-        For j = 0 To 5
-            s = s & ";"
-        Next j
-        For j = 0 To 5
-            s = s & ";" & WmsPrint.MoneyCsv(tm(j))
-        Next j
-        lines(ng + 2) = s
-        LdTurnoverOut = CsvSave(sName, lines, ng + 3)
+        LdTurnoverOut = CsvSave(sName, lines, ng + 2)
         If Left(LdTurnoverOut, 3) = "OK:" Then LdTurnoverOut = "FILE:" & Mid(LdTurnoverOut, 4)
         gUiLastMsg = LdTurnoverOut
         Exit Function
@@ -716,15 +693,11 @@ Private Function LdTurnoverOut(res As Variant, d0 As Double, d1 As Double, bFile
     shown = ng
     If shown > PR_MAX - 100 Then shown = PR_MAX - 100
     sh = WmsPrint.PrintBegin("ОБОРОТНАЯ ВЕДОМОСТЬ за " & Format(d0, "DD.MM.YYYY") & " — " & Format(d1, "DD.MM.YYYY"), sName)
-    WmsPrint.PrintLine(sh, "Товаров: " & ng & " · позиций учёта: " & res(8) & IIf(nNoPrice > 0, " · без цены: " & nNoPrice & " поз. (в рублях не учтены)", "") _
-        & ". Начало + приход − выдано + возвращено − списано = конец.", True)
+    WmsPrint.PrintLine(sh, "Товаров: " & ng & " · позиций учёта: " & res(8) & ". Начало + приход − выдано + возвращено − списано = конец.", True)
     WmsPrint.PrintLine(sh, "Приход — с излишками пересчёта и собранными комплектами; списано — с возвратами поставщику, недостачами пересчёта и " _
         & "позициями, ушедшими в комплекты.")
     WmsPrint.PrintTable(sh, Array("Товар, ед.", heads(0), heads(1), heads(2), heads(3), heads(4), heads(5)), rows, shown, "1,2,3,4,5,6")
     If shown < ng Then WmsPrint.PrintLine(sh, "Показаны первые " & shown & " товаров из " & ng & " — полностью: «Оборотная ведомость» → «в файл CSV».", True)
-    WmsPrint.PrintLine(sh, "В рублях:", True)
-    WmsPrint.PrintTable(sh, Array("", heads(0), heads(1), heads(2), heads(3), heads(4), heads(5)), Array(Array("Итого, руб.", WmsPrint.Money(tm(0)), _
-        WmsPrint.Money(tm(1)), WmsPrint.Money(tm(2)), WmsPrint.Money(tm(3)), WmsPrint.Money(tm(4)), WmsPrint.Money(tm(5)))), 1, "1,2,3,4,5,6")
     WmsPrint.PrintSign(sh, Array("Кладовщик", "Бухгалтер"))
     LdTurnoverOut = WmsPrint.PrintDone(sh)
 End Function
@@ -740,7 +713,8 @@ Sub BtnOverstate(Optional oEvent As Variant)
     Dim s As String, k As Integer
     WmsInit()
     k = WmsPrimeUi.UiButtons("Завышение остатков", "Что покажет учёт, если загрузить в него все поступления за всю историю, а выдачи, возвраты и списания не загружать." _
-        & Chr(10) & "Справка считает это по данным книги: поступило минус лежит сейчас — по каждому товару, в штуках и в рублях. Ничего не проводится.", _
+        & Chr(10) & "Справка считает это по данным книги: поступило минус лежит сейчас — по каждому товару, в единицах товара (цен в загруженных остатках нет, поэтому сумм в справке нет). " _
+        & "На странице у каждого товара есть клетка «Разобрано» — отмечайте по мере исправления в 1С. Ничего не проводится.", _
         Array("На страницу «Печать»", "В файл CSV", "Отмена"), Array(1, 2, 0))
     If k <= 0 Then Exit Sub
     s = Overstate(k = 2)
@@ -749,48 +723,41 @@ End Sub
 
 ' The accounting that was filled with all the receipts of the whole history — and not with the issues, the returns and the write-offs — shows more
 ' goods than there is. By every goods: all that came in (the receipts by orders and the other ones, with the corrections and the storno), what lies
-' now, the difference (quantity and money by the price of the order), the biggest money first. On «Печать» or into a CSV (all the goods). Nothing is
+' now, the difference in the units of the goods (no money: there are no prices in what is loaded), the biggest difference first. The page has a box
+' «Разобрано» to tick on the paper while the accounting is put right; the file has all the goods and an empty column for the same. Nothing is
 ' changed. OK:<document> / FILE:<path> / ERR:…
 Function Overstate(bFile As Boolean) As String
-    Dim res As Variant, ng As Long, gFirst As Variant, gq As Variant, gm As Variant, gN As Variant, nNoPrice As Long, g As Long, n As Long, i As Long
-    Dim key() As Double, ord() As Long, rows() As Variant, shown As Long, sh As Object, lines() As String, s As String, today As Double
-    Dim rcv As Double, ov As Double, ovM As Double, rcvM As Double, sumR As Double, sumF As Double, nZero As Long, nOv As Long
+    Dim res As Variant, ng As Long, gFirst As Variant, gq As Variant, g As Long, n As Long, i As Long
+    Dim key() As Double, ord() As Long, rows() As Variant, shown As Long, sh As Object, lines() As String, today As Double
+    Dim rcv As Double, ov As Double, nZero As Long, nOv As Long
     On Error GoTo EH
     today = WmsOrders.Today()
     res = LdTurnoverData(0, today)
     ng = res(0)
     gFirst = res(1)
     gq = res(2)
-    gm = res(3)
-    gN = res(4)
-    nNoPrice = res(7)
     ReDim key(IIf(ng > 0, ng - 1, 0))
     ReDim ord(IIf(ng > 0, ng - 1, 0))
     For g = 0 To ng - 1
         rcv = gq(g, 0) + gq(g, 1)
         ov = WmsIssue.Round3(rcv - gq(g, 5))
-        ovM = gm(g, 0) + gm(g, 1) - gm(g, 5)
-        sumR = sumR + gm(g, 0) + gm(g, 1)
-        sumF = sumF + gm(g, 5)
         If ov > 0.0000005 Then nOv = nOv + 1
         If rcv > 0.0000005 Then
             If gq(g, 5) < 0.0000005 Then nZero = nZero + 1
         End If
-        key(g) = ovM + ov / 1000000
+        key(g) = ov - 0.000000001 * g
         ord(g) = g
     Next g
     WmsView.SortIdx(key, ord, ng, True)
     If bFile Then
         ReDim lines(ng + 1)
-        lines(0) = "Товар;Артикул;Ед.;Поступило;Выдано;Возвращено;Списано;Остаток;Завышение;Поступило, руб;Остаток, руб;Завышение, руб"
+        lines(0) = "Товар;Артикул;Ед.;Поступило;Выдано;Возвращено;Списано;Остаток;Завышение;Разобрано"
         For i = 0 To ng - 1
             g = ord(i)
             n = gFirst(g)
             rcv = gq(g, 0) + gq(g, 1)
-            s = LdCsv(gLdName(n)) & ";" & LdCsv(gLdArt(n)) & ";" & LdCsv(gLdUnit(n)) & ";" & WmsIssue.QtyText(rcv) & ";" & WmsIssue.QtyText(gq(g, 2)) & ";" _
-                & WmsIssue.QtyText(gq(g, 3)) & ";" & WmsIssue.QtyText(gq(g, 4)) & ";" & WmsIssue.QtyText(gq(g, 5)) & ";" & WmsIssue.QtyText(WmsIssue.Round3(rcv - gq(g, 5)))
-            s = s & ";" & WmsPrint.MoneyCsv(gm(g, 0) + gm(g, 1)) & ";" & WmsPrint.MoneyCsv(gm(g, 5)) & ";" & WmsPrint.MoneyCsv(gm(g, 0) + gm(g, 1) - gm(g, 5))
-            lines(i + 1) = s
+            lines(i + 1) = LdCsv(gLdName(n)) & ";" & LdCsv(gLdArt(n)) & ";" & LdCsv(gLdUnit(n)) & ";" & WmsIssue.QtyText(rcv) & ";" & WmsIssue.QtyText(gq(g, 2)) & ";" _
+                & WmsIssue.QtyText(gq(g, 3)) & ";" & WmsIssue.QtyText(gq(g, 4)) & ";" & WmsIssue.QtyText(gq(g, 5)) & ";" & WmsIssue.QtyText(WmsIssue.Round3(rcv - gq(g, 5))) & ";"
         Next i
         Overstate = CsvSave("Завышение остатков " & Format(today, "YYYY-MM-DD"), lines, ng + 1)
         If Left(Overstate, 3) = "OK:" Then Overstate = "FILE:" & Mid(Overstate, 4)
@@ -805,32 +772,25 @@ Function Overstate(bFile As Boolean) As String
         n = gFirst(g)
         rcv = gq(g, 0) + gq(g, 1)
         ov = WmsIssue.Round3(rcv - gq(g, 5))
-        ovM = gm(g, 0) + gm(g, 1) - gm(g, 5)
         If ov > 0.0000005 And shown < PR_MAX - 100 Then
-            rows(shown) = Array(shown + 1, LdGoodsText(n), gLdUnit(n), WmsIssue.QtyText(rcv), WmsIssue.QtyText(gq(g, 5)), WmsIssue.QtyText(ov), _
-                IIf(Abs(gm(g, 0) + gm(g, 1)) > 0.0000005 Or Abs(ovM) > 0.0000005, WmsPrint.Money(ovM), "—"))
+            rows(shown) = Array(shown + 1, LdGoodsText(n), gLdUnit(n), WmsIssue.QtyText(rcv), WmsIssue.QtyText(gq(g, 5)), WmsIssue.QtyText(ov), "[  ]")
             shown = shown + 1
         End If
     Next i
     sh = WmsPrint.PrintBegin("СПРАВКА О ЗАВЫШЕНИИ ОСТАТКОВ на " & Format(today, "DD.MM.YYYY"), "Завышение остатков " & Format(today, "YYYY-MM-DD"))
     WmsPrint.PrintLine(sh, "Если загрузить в 1С все поступления за всю историю, а выдачи, возвраты и списания не загружать, остатки в 1С окажутся больше, чем лежит на складе. " _
-        & "Справка показывает, насколько.", True)
-    s = "Товаров с движением: " & ng & " · поступило за всю историю на сумму " & WmsPrint.Money(sumR) & " · лежит сейчас на сумму " & WmsPrint.Money(sumF) _
-        & " · завышение " & WmsPrint.Money(sumR - sumF)
-    If sumF > 0.005 Then
-        If sumR / sumF >= 1.05 Then s = s & " (в " & Format(sumR / sumF, "0.0") & " раза больше, чем лежит)"
-    End If
-    WmsPrint.PrintLine(sh, s & ".", True)
-    WmsPrint.PrintLine(sh, "Товаров с завышением: " & nOv & " · товаров, по которым приход был, а на складе ничего нет: " & nZero _
-        & IIf(nNoPrice > 0, " · позиций учёта без цены: " & nNoPrice & " (в рубли не вошли)", "") & ".")
+        & "Справка показывает, насколько, — по каждому товару, в его единицах.", True)
+    WmsPrint.PrintLine(sh, "Товаров с движением: " & ng & " · товаров с завышением: " & nOv & " · товаров, по которым приход был, а на складе ничего нет: " & nZero & ".", True)
     WmsPrint.PrintLine(sh, "Поступило — приход по заказам и иной приход за всю историю с учётом исправлений и сторно; остаток — по складскому учёту на сегодня. " _
-        & "Завышение = поступило − остаток = выдано − возвращено + списано.")
+        & "Завышение = поступило − остаток = выдано − возвращено + списано. Единицы у товаров разные: сравнивайте только внутри одного товара.")
     If nOv > 0 Then
-        WmsPrint.PrintTable(sh, Array("№", "Товар", "Ед.", "Поступило", "Остаток", "Завышение", "Сумма, руб."), rows, shown, "0,3,4,5,6")
-        If shown < nOv Then WmsPrint.PrintLine(sh, "Показаны первые " & shown & " товаров из " & nOv & " (по убыванию суммы завышения) — полностью: «в файл CSV».", True)
+        WmsPrint.PrintTable(sh, Array("№", "Товар", "Ед.", "Поступило", "Остаток", "Завышение", "Разобрано"), rows, shown, "0,3,4,5")
+        If shown < nOv Then WmsPrint.PrintLine(sh, "Показаны первые " & shown & " товаров из " & nOv & " (самое большое завышение — выше) — полностью: «в файл CSV».", True)
     Else
         WmsPrint.PrintLine(sh, "Завышения нет: всё, что поступило, лежит на складе.", True)
     End If
+    WmsPrint.PrintLine(sh, "Как разбирать: открыть товар в 1С, сравнить его остаток со столбцом «Поступило», привести остаток к столбцу «Остаток» (документом инвентаризации " _
+        & "или списания — как принято у вас) и отметить товар в столбце «Разобрано».", True)
     WmsPrint.PrintLine(sh, "Рекомендация: в 1С загрузить справочник номенклатуры без остатков, а остатки — фактические на дату перехода, одним документом ввода остатков; " _
         & "историю движений хранить архивом. Порядок согласуйте с бухгалтером и специалистом по внедрению 1С.", True)
     WmsPrint.PrintSign(sh, Array("Кладовщик", "Бухгалтер"))
@@ -851,8 +811,8 @@ Sub BtnExport(Optional oEvent As Variant)
     t = WmsOrders.Today()
     v(0) = Format(DateSerial(Year(t), Month(t), 1), "DD.MM.YYYY")
     v(1) = Format(t, "DD.MM.YYYY")
-    If Not WmsPrimeUi.UiForm("Выгрузка для бухгалтерии", "Файл CSV (открывается в Excel и загружается в 1С): каждое движение за период — дата, " _
-        & "операция, документ, ЕИ и товар, приход или расход, цена, сумма, контрагент.", Array("С", "По"), v, Array("", ""), "Сохранить файл") Then Exit Sub
+    If Not WmsPrimeUi.UiForm("Выгрузка для бухгалтерии", "Файл CSV (открывается в Excel): каждое движение за период — дата, " _
+        & "операция, документ, ЕИ и товар, приход или расход, контрагент. Цен и сумм в файле нет.", Array("С", "По"), v, Array("", ""), "Сохранить файл") Then Exit Sub
     d0 = LdFormDay(v(0), "дата начала", msg)
     If d0 > 0 Then d1 = LdFormDay(v(1), "дата конца", msg)
     If d0 = 0 Or d1 = 0 Then
@@ -863,10 +823,9 @@ Sub BtnExport(Optional oEvent As Variant)
     LdReport(s)
 End Sub
 
-' every movement of [d0, d1] by date into a CSV of «WMS_Документы». FILE:<path> (and the count) / ERR:…
+' every movement of [d0, d1] by date into a CSV of «WMS_Документы» (no money). FILE:<path> (and the count) / ERR:…
 Function ExportMoves(d0 As Double, d1 As Double) As String
-    Dim k As Long, keys() As Double, idx() As Long, m As Long, ord As Variant, i As Long, lines() As String, n As Long, q As Double, p As Double
-    Dim sIn As Double, sOut As Double, res As String
+    Dim k As Long, keys() As Double, idx() As Long, m As Long, ord As Variant, i As Long, lines() As String, n As Long, q As Double, res As String
     On Error GoTo EH
     If d1 < d0 Then
         ExportMoves = "ERR:дата конца раньше даты начала"
@@ -884,24 +843,18 @@ Function ExportMoves(d0 As Double, d1 As Double) As String
         End If
     Next k
     ord = SortByCalc(keys, m)
-    ReDim lines(m + 2)
+    ReDim lines(m + 1)
     lines(0) = "Движения склада " & Format(d0, "DD.MM.YYYY") & " — " & Format(d1, "DD.MM.YYYY")
-    lines(1) = "Дата;Операция;Документ;ЕИ;Наименование;Артикул;Ед.;Приход;Расход;Цена;Сумма;Контрагент / получатель / причина"
+    lines(1) = "Дата;Операция;Документ;ЕИ;Наименование;Артикул;Ед.;Приход;Расход;Контрагент / получатель / причина"
     For i = 0 To m - 1
         k = idx(ord(i))
         n = gLdEi(k)
         q = gLdQty(k)
-        p = gLdPrice(n)
         lines(i + 2) = Format(gLdDate(k), "DD.MM.YYYY") & ";" & LdCsv(gLdOp(k)) & ";" & LdCsv(gLdDoc(k)) & ";" & LdCsv(gLdCanon(n)) & ";" & LdCsv(gLdName(n)) & ";" _
-            & LdCsv(gLdArt(n)) & ";" & LdCsv(gLdUnit(n)) & ";" & IIf(q > 0, WmsIssue.QtyText(q), "") & ";" & IIf(q < 0, WmsIssue.QtyText(-q), "") & ";" _
-            & IIf(p >= 0, WmsPrint.MoneyCsv(p), "") & ";" & IIf(p >= 0, WmsPrint.MoneyCsv(Abs(q) * p), "") & ";" & LdCsv(gLdWho(k))
-        If p >= 0 Then
-            If q > 0 Then sIn = sIn + q * p Else sOut = sOut - q * p
-        End If
+            & LdCsv(gLdArt(n)) & ";" & LdCsv(gLdUnit(n)) & ";" & IIf(q > 0, WmsIssue.QtyText(q), "") & ";" & IIf(q < 0, WmsIssue.QtyText(-q), "") & ";" & LdCsv(gLdWho(k))
     Next i
-    lines(m + 2) = "Итого;;;;;;;;;;приход " & WmsPrint.MoneyCsv(sIn) & " / расход " & WmsPrint.MoneyCsv(sOut) & ";"
-    res = CsvSave("Движения " & Format(d0, "YYYY-MM-DD") & " — " & Format(d1, "YYYY-MM-DD"), lines, m + 3)
-    If Left(res, 3) = "OK:" Then res = "FILE:" & Mid(res, 4) & Chr(10) & "Движений: " & m & " · приход на " & WmsPrint.Money(sIn) & " · расход на " & WmsPrint.Money(sOut)
+    res = CsvSave("Движения " & Format(d0, "YYYY-MM-DD") & " — " & Format(d1, "YYYY-MM-DD"), lines, m + 2)
+    If Left(res, 3) = "OK:" Then res = "FILE:" & Mid(res, 4) & Chr(10) & "Движений: " & m
     ExportMoves = res
     gUiLastMsg = res
     Exit Function
@@ -1425,8 +1378,8 @@ Function CloseMonth(y As Integer, m As Integer) As String
         Exit Function
     End If
     LdTurnoverOut(res, d0, d1, False, "Закрытие " & sMonth & " — оборотная ведомость")
-    CloseMonth = "OK:" & LdMonthWord(m) & " " & y & " закрыт (по " & Format(d1, "DD.MM.YYYY") & "). Остаток на конец на сумму " & WmsPrint.Money(sumEnd) _
-        & ". Файлы:" & Chr(10) & Mid(f1, 6) & Chr(10) & Mid(f2, 6)
+    ' (the sum of the end stays a field of MONTH_CLOSE as it was — the journal is not changed — but it is not shown)
+    CloseMonth = "OK:" & LdMonthWord(m) & " " & y & " закрыт (по " & Format(d1, "DD.MM.YYYY") & "). Файлы:" & Chr(10) & Mid(f1, 6) & Chr(10) & Mid(f2, 6)
     gUiLastMsg = CloseMonth
     Exit Function
 EH:
@@ -1500,66 +1453,6 @@ EH:
     WmsView.ViewDone(gDoc.Sheets.getByName(SH_PRINT))
 End Function
 
-' ================================================================ А2 the money on the stock
-
-' the money of the stock by the price of the order, cached until the next operation (LAST_SEQ): the receipts of «Заказы»
-' (J × X — the balance their EI shows there; a copy does not count) by the engine of Calc, the EIs split off by the price of
-' their source. Array(sum, EIs with a balance and a price)
-Function StockMoney() As Variant
-    Dim seq As Long, osh As Object, last As Long, cond As String, a As Variant, sum As Double, nP As Long, ash As Object, items As Variant
-    Dim nItems As Long, i As Long, d As Variant, m As Long, q As Double, p As Double, st As Object, J As String, X As String, nextEI As Long
-    seq = CLng(SysNum(SK_LAST_SEQ))
-    If gLdMoneyOk And gLdMoneySeq = seq Then
-        StockMoney = Array(gLdMoney, gLdMoneyN)
-        Exit Function
-    End If
-    osh = WmsOrders.OrdersSheet()
-    last = WmsOrders.LastRow(osh)
-    If last >= 1 Then
-        J = WmsView.ColRng(SH_ORDERS, OC_PRICE, 1, last)
-        X = WmsView.ColRng(SH_ORDERS, OC_STOCK, 1, last)
-        cond = "(LEFT(" & WmsView.ColRng(SH_ORDERS, OC_CTL, 1, last) & ";5)<>""КОПИЯ"")*ISNUMBER(" & J & ")*ISNUMBER(" & X & ")*(" _
-            & WmsView.ColRng(SH_ORDERS, OC_EI, 1, last) & "<>"""")"
-        a = Split(WmsView.Eng("SUMPRODUCT(IF(" & cond & ";" & J & "*" & X & ";0))&""|""&SUMPRODUCT(" & cond & "*(" & X & ">0.0000005))"), "|")
-        If UBound(a) >= 1 Then
-            sum = Val(Replace(a(0), ",", "."))
-            nP = Val(a(1))
-        End If
-    End If
-    If gDoc.Sheets.hasByName(SH_ADJ) Then
-        ash = gDoc.Sheets.getByName(SH_ADJ)
-        last = WmsOrders.LastRow(ash)
-        If last >= 1 Then
-            ' the split EIs and (1.0, Ф8) the kits — their own build row (AJ_EI = AJ_NEW)
-            items = WmsView.EngList("TEXTJOIN("";"";1;IF(((" & WmsView.ColRng(SH_ADJ, AJ_KIND, 1, last) & "=""SPLIT"")+(" & WmsView.ColRng(SH_ADJ, AJ_KIND, 1, last) _
-                & "=""KIT"")*(" & WmsView.ColRng(SH_ADJ, AJ_EI, 1, last) & "=" & WmsView.ColRng(SH_ADJ, AJ_NEW, 1, last) & "))*(" & WmsView.ColRng(SH_ADJ, AJ_STATE, 1, last) _
-                & "=""" & RV_LIVE & """);ROW(" & WmsView.ColRng(SH_ADJ, AJ_KIND, 1, last) & ")-1;""""))", nItems)
-            st = WmsIssue.StockSheet()
-            nextEI = CLng(SysNum(SK_NEXT_EI))
-            For i = 0 To nItems - 1
-                d = ash.getCellRangeByPosition(0, CLng(items(i)), AJ_LAST, CLng(items(i))).getDataArray()(0)
-                m = WmsView.EiNo(CStr(d(AJ_NEW)), nextEI)
-                If m >= 1 Then
-                    q = 0
-                    If st.getCellByPosition(SC_QTY, m).getType() = com.sun.star.table.CellContentType.VALUE Then q = st.getCellByPosition(SC_QTY, m).getValue()
-                    If q > 0.0000005 Then
-                        p = WmsPrint.EiPrice(m)
-                        If p >= 0 Then
-                            sum = sum + q * p
-                            nP = nP + 1
-                        End If
-                    End If
-                End If
-            Next i
-        End If
-    End If
-    gLdMoney = sum
-    gLdMoneyN = nP
-    gLdMoneySeq = seq
-    gLdMoneyOk = True
-    StockMoney = Array(sum, nP)
-End Function
-
 ' ================================================================ А1 the report of the manager
 
 Sub BtnManagerReport(Optional oEvent As Variant)
@@ -1594,12 +1487,12 @@ Sub BtnManagerReport(Optional oEvent As Variant)
     LdReport(s)
 End Sub
 
-' «Отчёт руководителю» for [d0, d1] on «Печать»: the operations and their money, the stock at the end, the recipients, the
-' losses by reason, the suppliers, the vehicles. OK:… / ERR:…
+' «Отчёт руководителю» for [d0, d1] on «Печать»: the operations (how many records), the stock at the end (how many positions), the recipients, the
+' losses by reason, the suppliers, the vehicles. No money: the report counts, it does not value. OK:… / ERR:…
 Function ManagerReport(d0 As Double, d1 As Double) As String
-    Dim k As Long, n As Long, q As Double, p As Double, cnt(10) As Long, mon(10) As Double, noP(10) As Long, sh As Object, rows() As Variant, i As Long
-    Dim aft() As Double, b As Double, nStock As Long, sumStock As Double, names As Variant, kk As Integer, g As Variant, ng As Long, csh As Object
-    Dim last As Long, cd As Variant, nCar As Long, nGone As Long, durSum As Double, nCancel As Long, plus As Double, minus As Double, s As String
+    Dim k As Long, n As Long, q As Double, cnt(10) As Long, sh As Object, rows() As Variant, i As Long
+    Dim aft() As Double, b As Double, nStock As Long, names As Variant, kk As Integer, g As Variant, ng As Long, csh As Object
+    Dim last As Long, cd As Variant, nCar As Long, nGone As Long, durSum As Double, nCancel As Long, nPlus As Long, nMinus As Long, s As String
     On Error GoTo EH
     If d1 < d0 Then
         ManagerReport = "ERR:дата конца раньше даты начала"
@@ -1614,23 +1507,16 @@ Function ManagerReport(d0 As Double, d1 As Double) As String
         If gLdDate(k) >= d0 And gLdDate(k) <= d1 Then
             kk = gLdKind(k)
             q = gLdQty(k)
-            p = gLdPrice(n)
             ' a kit build counts its kits (the rows of the components are inside them)
-            If kk <> LK_KIT Or q > 0 Then
-                cnt(kk) = cnt(kk) + 1
-                If p >= 0 Then mon(kk) = mon(kk) + Abs(q) * p Else noP(kk) = noP(kk) + 1
-            End If
-            If kk = LK_INV And p >= 0 Then
-                If q > 0 Then plus = plus + q * p Else minus = minus - q * p
+            If kk <> LK_KIT Or q > 0 Then cnt(kk) = cnt(kk) + 1
+            If kk = LK_INV Then
+                If q > 0 Then nPlus = nPlus + 1 Else nMinus = nMinus + 1
             End If
         End If
     Next k
     For n = 1 To gLdMax
         b = WmsIssue.Round3(gLdNow(n) - aft(n))
-        If b > 0.0000005 Then
-            nStock = nStock + 1
-            If gLdPrice(n) >= 0 Then sumStock = sumStock + b * gLdPrice(n)
-        End If
+        If b > 0.0000005 Then nStock = nStock + 1
     Next n
     names = Array("", "Приход по заказам", "Иной приход", "Выдачи", "Возвраты на склад", "Списания", "Пересчёты", "Возвраты поставщику", "Разделение позиций на части", _
         "Расход прошлых периодов (до начала учёта)", "Собрано комплектов")
@@ -1638,31 +1524,29 @@ Function ManagerReport(d0 As Double, d1 As Double) As String
     i = 0
     For kk = 1 To 10
         If cnt(kk) > 0 And kk <> LK_SPLIT Then
-            rows(i) = Array(names(kk), cnt(kk), IIf(kk = LK_INV, "излишки " & WmsPrint.Money(plus) & " · недостачи " & WmsPrint.Money(minus), WmsPrint.Money(mon(kk))), _
-                IIf(noP(kk) > 0, "без цены: " & noP(kk), ""))
+            rows(i) = Array(names(kk), cnt(kk), IIf(kk = LK_INV, "излишков: " & nPlus & " · недостач: " & nMinus, ""))
             i = i + 1
         End If
     Next kk
     sh = WmsPrint.PrintBegin("ОТЧЁТ РУКОВОДИТЕЛЮ за " & Format(d0, "DD.MM.YYYY") & IIf(d1 <> d0, " — " & Format(d1, "DD.MM.YYYY"), ""), _
         "Отчёт руководителю " & Format(d0, "YYYY-MM-DD") & IIf(d1 <> d0, " — " & Format(d1, "YYYY-MM-DD"), ""))
-    WmsPrint.PrintLine(sh, "На складе на " & Format(d1, "DD.MM.YYYY") & ": позиций с остатком " & nStock & " на сумму " & WmsPrint.Money(sumStock) _
-        & " (по цене из заказа; позиции без цены в сумму не входят).", True)
+    WmsPrint.PrintLine(sh, "На складе на " & Format(d1, "DD.MM.YYYY") & ": позиций с остатком " & nStock & ".", True)
     WmsPrint.PrintLine(sh, "Операции за период:", True)
     If i > 0 Then
-        WmsPrint.PrintTable(sh, Array("Операция", "Записей", "На сумму", "Примечание"), rows, i, "1,2")
+        WmsPrint.PrintTable(sh, Array("Операция", "Записей", "Примечание"), rows, i, "1")
     Else
         WmsPrint.PrintLine(sh, "операций нет")
     End If
     ' the recipients and the losses (the first ten), the suppliers
     g = LdGroupBy(d0, d1, "WHO", ng)
-    WmsPrint.PrintLine(sh, "Получатели — больше всего выдано (на сумму):", True)
-    LdPrintGroups(sh, g, ng, 10, Array("№", "Получатель", "Выдач", "Выдано на сумму", "Возвращено на сумму", "На руках на сумму", "Без цены"))
+    WmsPrint.PrintLine(sh, "Получатели — больше всего выдач:", True)
+    LdPrintGroups(sh, g, ng, 10, Array("№", "Получатель", "Выдач", "Возвратов"))
     g = LdGroupBy(d0, d1, "LOSS", ng)
     WmsPrint.PrintLine(sh, "Потери — списания и недостачи пересчёта по причинам:", True)
-    LdPrintGroups(sh, g, ng, 10, Array("№", "Причина", "Записей", "На сумму", "", "", "Без цены"))
+    LdPrintGroups(sh, g, ng, 10, Array("№", "Причина", "Записей"))
     g = LdGroupBy(d0, d1, "SUP", ng)
     WmsPrint.PrintLine(sh, "Поставщики — принято за период:", True)
-    LdPrintGroups(sh, g, ng, 10, Array("№", "Поставщик", "Позиций", "На сумму", "", "", "Без цены"))
+    LdPrintGroups(sh, g, ng, 10, Array("№", "Поставщик", "Позиций"))
     ' the vehicles of «Приход авто»
     If gDoc.Sheets.hasByName(SH_CARS) Then
         csh = gDoc.Sheets.getByName(SH_CARS)
@@ -1700,12 +1584,11 @@ EH:
 End Function
 
 ' the movements of [d0, d1] grouped: "WHO" — the recipients (issues, returns), "LOSS" — the reasons of the write-offs and the
-' shortages of a count, "SUP" — the suppliers of the receipts by order. Array of Array(name, count, money1, money2, money3,
-' no price), the biggest money first; ng — their number
+' shortages of a count, "SUP" — the suppliers of the receipts by order. Array of Array(name, count, returns), the most records first
+' (a return is not counted in the count, only in the returns); ng — their number. No money
 Private Function LdGroupBy(d0 As Double, d1 As Double, sBy As String, ByRef ng As Long) As Variant
-    Dim k As Long, m As Long, keys() As String, idx() As Long, ord As Variant, i As Long, g As Long, kk As String, prev As String, out() As Variant
-    Dim q As Double, p As Double, n As Long, take As Boolean, nm() As String, c() As Long, m1() As Double, m2() As Double, np() As Long, okey() As Double
-    Dim ord2 As Variant, res() As Variant
+    Dim k As Long, m As Long, keys() As String, idx() As Long, ord As Variant, i As Long, g As Long, kk As String, prev As String
+    Dim take As Boolean, nm() As String, c() As Long, nRet() As Long, okey() As Double, ord2 As Variant, res() As Variant
     ReDim keys(IIf(gLdN > 0, gLdN - 1, 0))
     ReDim idx(IIf(gLdN > 0, gLdN - 1, 0))
     For k = 0 To gLdN - 1
@@ -1734,9 +1617,7 @@ Private Function LdGroupBy(d0 As Double, d1 As Double, sBy As String, ByRef ng A
     ord = SortByCalc(keys, m)
     ReDim nm(m - 1)
     ReDim c(m - 1)
-    ReDim m1(m - 1)
-    ReDim m2(m - 1)
-    ReDim np(m - 1)
+    ReDim nRet(m - 1)
     g = -1
     prev = Chr(1)
     For i = 0 To m - 1
@@ -1747,33 +1628,23 @@ Private Function LdGroupBy(d0 As Double, d1 As Double, sBy As String, ByRef ng A
             prev = kk
             nm(g) = IIf(Trim(gLdWho(k)) <> "", Trim(gLdWho(k)), "—")
         End If
-        n = gLdEi(k)
-        q = gLdQty(k)
-        p = gLdPrice(n)
-        If gLdKind(k) <> LK_RET Then c(g) = c(g) + 1
-        If p < 0 Then
-            np(g) = np(g) + 1
-        ElseIf gLdKind(k) = LK_RET Then
-            m2(g) = m2(g) + q * p
-        Else
-            m1(g) = m1(g) + Abs(q) * p
-        End If
+        If gLdKind(k) = LK_RET Then nRet(g) = nRet(g) + 1 Else c(g) = c(g) + 1
     Next i
     ng = g + 1
     ReDim okey(ng - 1)
     For g = 0 To ng - 1
-        okey(g) = -(m1(g) + 0.000001 * c(g))
+        okey(g) = -(c(g) + 0.000001 * nRet(g))
     Next g
     ord2 = SortByCalc(okey, ng)
     ReDim res(ng - 1)
     For i = 0 To ng - 1
         g = ord2(i)
-        res(i) = Array(nm(g), c(g), m1(g), m2(g), m1(g) - m2(g), np(g))
+        res(i) = Array(nm(g), c(g), nRet(g))
     Next i
     LdGroupBy = res
 End Function
 
-' the first nMax groups as a table (the money columns of heads that are "" are left out of the rows)
+' the first nMax groups as a table (heads: №, the name, the records and — if there are four — the returns)
 Private Sub LdPrintGroups(sh As Object, g As Variant, ng As Long, nMax As Long, heads As Variant)
     Dim rows() As Variant, i As Long, n As Long, r As Variant
     If ng = 0 Then
@@ -1784,10 +1655,13 @@ Private Sub LdPrintGroups(sh As Object, g As Variant, ng As Long, nMax As Long, 
     ReDim rows(n - 1)
     For i = 0 To n - 1
         r = g(i)
-        rows(i) = Array(i + 1, r(0), r(1), WmsPrint.Money(r(2)), IIf(heads(4) <> "", WmsPrint.Money(r(3)), ""), IIf(heads(5) <> "", WmsPrint.Money(r(4)), ""), _
-            IIf(r(5) > 0, r(5), ""))
+        If UBound(heads) >= 3 Then
+            rows(i) = Array(i + 1, r(0), r(1), IIf(r(2) > 0, r(2), ""))
+        Else
+            rows(i) = Array(i + 1, r(0), r(1))
+        End If
     Next i
-    WmsPrint.PrintTable(sh, heads, rows, n, "0,2,3,4,5,6")
+    WmsPrint.PrintTable(sh, heads, rows, n, "0,2,3")
     If ng > nMax Then WmsPrint.PrintLine(sh, "… и ещё " & (ng - nMax))
 End Sub
 
@@ -1799,8 +1673,8 @@ Sub BtnConsumers(Optional oEvent As Variant)
     t = WmsOrders.Today()
     v(0) = Format(CDbl(DateSerial(Year(t), Month(t), 1)), "DD.MM.YYYY")
     v(1) = Format(t, "DD.MM.YYYY")
-    If Not WmsPrimeUi.UiForm("Расход по получателям", "Сколько выдано, возвращено и на руках у каждого получателя и подразделения (колонка C «" _
-        & SH_RCPT & "») — на какую сумму.", Array("С", "По"), v, Array("", ""), "Показать") Then Exit Sub
+    If Not WmsPrimeUi.UiForm("Расход по получателям", "Сколько выдач и возвратов у каждого получателя и подразделения (колонка C «" _
+        & SH_RCPT & "»).", Array("С", "По"), v, Array("", ""), "Показать") Then Exit Sub
     d0 = LdFormDay(v(0), "дата начала", msg)
     If d0 > 0 Then d1 = LdFormDay(v(1), "дата конца", msg)
     If d0 = 0 Or d1 = 0 Then
@@ -1811,12 +1685,11 @@ Sub BtnConsumers(Optional oEvent As Variant)
     LdReport(s)
 End Sub
 
-' the recipients of [d0, d1] (every one) and their departments (C of «Получатели»): issues, the money issued, returned and in
-' hand. OK:… / ERR:…
+' the recipients of [d0, d1] (every one) and their departments (C of «Получатели»): how many issues and how many returns. No money. OK:… / ERR:…
 Function Consumers(d0 As Double, d1 As Double) As String
     Dim g As Variant, ng As Long, sh As Object, rows() As Variant, i As Long, r As Variant, shown As Long, dep As Object, a As Variant, rs As Object
-    Dim last As Long, j As Long, dn() As String, dc() As Long, d1m() As Double, d2m() As Double, nd As Long, k As Long, dk As String, t1 As Double
-    Dim t2 As Double, tc As Long, depName() As String
+    Dim last As Long, j As Long, dn() As String, dc() As Long, dRet() As Long, nd As Long, k As Long, dk As String
+    Dim tc As Long, tRet As Long, depName() As String
     On Error GoTo EH
     If d1 < d0 Then
         Consumers = "ERR:дата конца раньше даты начала"
@@ -1844,14 +1717,13 @@ Function Consumers(d0 As Double, d1 As Double) As String
     ReDim rows(IIf(ng > 0, ng - 1, 0))
     ReDim dn(IIf(ng > 0, ng, 0))
     ReDim dc(IIf(ng > 0, ng, 0))
-    ReDim d1m(IIf(ng > 0, ng, 0))
-    ReDim d2m(IIf(ng > 0, ng, 0))
+    ReDim dRet(IIf(ng > 0, ng, 0))
     For i = 0 To ng - 1
         r = g(i)
         j = WmsView.CollGet(dep, LCase(Trim(CStr(r(0)))))
         dk = ""
         If j >= 0 Then dk = depName(j)
-        rows(i) = Array(i + 1, r(0) & IIf(dk <> "", " (" & dk & ")", ""), r(1), WmsPrint.Money(r(2)), WmsPrint.Money(r(3)), WmsPrint.Money(r(4)), IIf(r(5) > 0, r(5), ""))
+        rows(i) = Array(i + 1, r(0) & IIf(dk <> "", " (" & dk & ")", ""), r(1), IIf(r(2) > 0, r(2), ""))
         If dk = "" Then dk = "без подразделения"
         For k = 0 To nd - 1
             If dn(k) = dk Then Exit For
@@ -1861,30 +1733,27 @@ Function Consumers(d0 As Double, d1 As Double) As String
             nd = nd + 1
         End If
         dc(k) = dc(k) + r(1)
-        d1m(k) = d1m(k) + r(2)
-        d2m(k) = d2m(k) + r(3)
+        dRet(k) = dRet(k) + r(2)
         tc = tc + r(1)
-        t1 = t1 + r(2)
-        t2 = t2 + r(3)
+        tRet = tRet + r(2)
     Next i
     shown = ng
     If shown > PR_MAX - 120 Then shown = PR_MAX - 120
     sh = WmsPrint.PrintBegin("РАСХОД ПО ПОЛУЧАТЕЛЯМ за " & Format(d0, "DD.MM.YYYY") & " — " & Format(d1, "DD.MM.YYYY"), "Расход по получателям " _
         & Format(d0, "YYYY-MM-DD") & " — " & Format(d1, "YYYY-MM-DD"))
-    WmsPrint.PrintLine(sh, "Получателей: " & ng & " · выдач " & tc & " на сумму " & WmsPrint.Money(t1) & " · возвращено на " & WmsPrint.Money(t2) _
-        & " · на руках на " & WmsPrint.Money(t1 - t2) & ". По цене из заказа.", True)
+    WmsPrint.PrintLine(sh, "Получателей: " & ng & " · выдач " & tc & " · возвратов " & tRet & ".", True)
     If ng > 0 Then
-        WmsPrint.PrintTable(sh, Array("№", "Получатель (подразделение)", "Выдач", "Выдано на сумму", "Возвращено", "На руках", "Без цены"), rows, shown, "0,2,3,4,5,6")
+        WmsPrint.PrintTable(sh, Array("№", "Получатель (подразделение)", "Выдач", "Возвратов"), rows, shown, "0,2,3")
     Else
         WmsPrint.PrintLine(sh, "выдач и возвратов за период нет")
     End If
     If nd > 1 Or (nd = 1 And dn(0) <> "без подразделения") Then
         ReDim rows(nd - 1)
         For k = 0 To nd - 1
-            rows(k) = Array(k + 1, dn(k), dc(k), WmsPrint.Money(d1m(k)), WmsPrint.Money(d2m(k)), WmsPrint.Money(d1m(k) - d2m(k)), "")
+            rows(k) = Array(k + 1, dn(k), dc(k), IIf(dRet(k) > 0, dRet(k), ""))
         Next k
         WmsPrint.PrintLine(sh, "По подразделениям:", True)
-        WmsPrint.PrintTable(sh, Array("№", "Подразделение", "Выдач", "Выдано на сумму", "Возвращено", "На руках", ""), rows, nd, "0,2,3,4,5")
+        WmsPrint.PrintTable(sh, Array("№", "Подразделение", "Выдач", "Возвратов"), rows, nd, "0,2,3")
     End If
     Consumers = WmsPrint.PrintDone(sh)
     Exit Function
@@ -1902,21 +1771,21 @@ Sub BtnDeadStock(Optional oEvent As Variant)
     WmsInit()
     v(0) = "90"
     v(1) = "по дням"
-    If Not WmsPrimeUi.UiForm("Мёртвый груз", "ЕИ с остатком, у которых не было движения дольше порога (приход, выдача, возврат, корректировка), с суммой.", _
-        Array("Порог, дней", "Сортировка"), v, Array("90;180;365", "по дням;по сумме"), "Показать") Then Exit Sub
+    If Not WmsPrimeUi.UiForm("Мёртвый груз", "ЕИ с остатком, у которых не было движения дольше порога (приход, выдача, возврат, корректировка).", _
+        Array("Порог, дней", "Сортировка"), v, Array("90;180;365", "по дням;по остатку"), "Показать") Then Exit Sub
     If Not IsNumeric(Trim(v(0))) Then
         WmsUi.UiMessage("Порог — число дней: 90, 180 или 365.")
         Exit Sub
     End If
-    s = DeadStock(CLng(Trim(v(0))), Left(v(1), 8) = "по сумме")
+    s = DeadStock(CLng(Trim(v(0))), v(1) = "по остатку")
     LdReport(s)
 End Sub
 
-' every EI with a balance that did not move for more than nDays (no movement at all in the book — the longest), the days and the
-' money; sorted by the days or by the money; the total. OK:… / ERR:…
-Function DeadStock(nDays As Long, bByMoney As Boolean) As String
+' every EI with a balance that did not move for more than nDays (no movement at all in the book — the longest) and the days; sorted by the days
+' (the longest lying first) or by the balance (the biggest first). No money. OK:… / ERR:…
+Function DeadStock(nDays As Long, bByQty As Boolean) As String
     Dim lastMv() As Double, k As Long, n As Long, today As Double, keys() As Double, idx() As Long, m As Long, ord As Variant, rows() As Variant, i As Long
-    Dim sum As Double, p As Double, b As Double, sh As Object, shown As Long, nNo As Long, dd As Variant
+    Dim b As Double, sh As Object, shown As Long, nNo As Long, dd As Variant
     On Error GoTo EH
     If nDays < 1 Then
         DeadStock = "ERR:порог — число дней больше нуля"
@@ -1934,11 +1803,9 @@ Function DeadStock(nDays As Long, bByMoney As Boolean) As String
     For n = 1 To gLdMax
         b = gLdNow(n)
         If b > 0.0000005 And (lastMv(n) = 0 Or today - lastMv(n) > nDays) Then
-            p = gLdPrice(n)
-            If p >= 0 Then sum = sum + b * p
             If lastMv(n) = 0 Then nNo = nNo + 1
-            If bByMoney Then
-                keys(m) = -(IIf(p >= 0, b * p, 0)) - 0.000000001 * n
+            If bByQty Then
+                keys(m) = -b - 0.000000001 * n
             Else
                 keys(m) = lastMv(n) + 0.000000001 * n
             End If
@@ -1950,22 +1817,20 @@ Function DeadStock(nDays As Long, bByMoney As Boolean) As String
     ReDim rows(IIf(m > 0, m - 1, 0))
     For i = 0 To m - 1
         n = idx(ord(i))
-        p = gLdPrice(n)
         dd = IIf(lastMv(n) > 0, CLng(today - lastMv(n)), "нет движений")
-        rows(i) = Array(i + 1, gLdCanon(n), LdGoodsText(n), WmsPrint.PartsFirst(n, gLdNow(n), gLdUnit(n)), gLdPlace(n), dd, IIf(p >= 0, WmsPrint.Money(gLdNow(n) * p), "—"))
+        rows(i) = Array(i + 1, gLdCanon(n), LdGoodsText(n), WmsPrint.PartsFirst(n, gLdNow(n), gLdUnit(n)), gLdPlace(n), dd)
     Next i
     shown = m
     If shown > PR_MAX - 80 Then shown = PR_MAX - 80
     sh = WmsPrint.PrintBegin("ЗАЛЕЖАВШИЕСЯ ТОВАРЫ — без движения больше " & nDays & " дней", "Залежавшиеся товары " & nDays & " дней")
-    WmsPrint.PrintLine(sh, "Позиций: " & m & IIf(nNo > 0, " (из них без движений в книге: " & nNo & ")", "") & " · на сумму " & WmsPrint.Money(sum) _
-        & " · сортировка " & IIf(bByMoney, "по сумме", "по дням") & ". На " & Format(today, "DD.MM.YYYY") & ".", True)
+    WmsPrint.PrintLine(sh, "Позиций: " & m & IIf(nNo > 0, " (из них без движений в книге: " & nNo & ")", "") _
+        & " · сортировка " & IIf(bByQty, "по остатку", "по дням") & ". На " & Format(today, "DD.MM.YYYY") & ".", True)
     If m > 0 Then
-        WmsPrint.PrintTable(sh, Array("№", "Код", "Наименование (артикул)", "Остаток", "Место", "Дней", "Сумма"), rows, shown, "0,5,6")
+        WmsPrint.PrintTable(sh, Array("№", "Код", "Наименование (артикул)", "Остаток", "Место", "Дней"), rows, shown, "0,5")
         If shown < m Then WmsPrint.PrintLine(sh, "Показаны первые " & shown & " из " & m & ".", True)
     Else
         WmsPrint.PrintLine(sh, "Мёртвого груза нет.", True)
     End If
-    WmsPrint.PrintLine(sh, "Итого на сумму: " & WmsPrint.Money(sum), True)
     DeadStock = WmsPrint.PrintDone(sh)
     Exit Function
 EH:

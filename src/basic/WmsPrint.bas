@@ -350,61 +350,6 @@ Function SelRows(sName As String) As Variant
 EH:
 End Function
 
-' the price of EI n (the price J of its receipt; a split EI — that of its source); -1 when there is none
-Function EiPrice(ByVal n As Long) As Double
-    Dim rv As Variant, r As Long, canon As String, k As Integer, m As Long, c As Object
-    EiPrice = -1
-    On Error GoTo EH
-    For k = 0 To 5
-        canon = WmsIssue.EiCanon(n)
-        If WmsOrders.RcvRegistered(n, rv) Then
-            r = WmsOrders.ReceiptRowOf(canon, rv(RV_ROW))
-            If r >= 1 Then
-                c = WmsOrders.OrdersSheet().getCellByPosition(OC_PRICE, r)
-                If c.getType() = com.sun.star.table.CellContentType.VALUE Then EiPrice = c.getValue()
-            End If
-            Exit Function
-        End If
-        m = WmsSupply.SplitSourceOf(canon)
-        If m < 1 Then
-            ' 1.0 (Ф8): a kit — the money of its components ÷ the number of kits
-            EiPrice = WmsKit.KitPrice(canon)
-            Exit Function
-        End If
-        n = m
-    Next k
-EH:
-End Function
-
-' the money of q at price p as text («125,50»); "" without a price
-Function MoneyText(q As Double, p As Double) As String
-    If p < 0 Then Exit Function
-    MoneyText = Money(q * p)
-End Function
-
-' money for people, whatever the language of the PC: «1 250,50», «−3,00»
-Function Money(x As Double) As String
-    Dim m As Double, ip As Double, fr As Long, s As String, g As String
-    m = Int(Abs(x) * 100 + 0.5)
-    ip = Int(m / 100)
-    fr = CLng(m - ip * 100)
-    s = Format(ip, "0")
-    Do While Len(s) > 3
-        g = " " & Right(s, 3) & g
-        s = Left(s, Len(s) - 3)
-    Loop
-    Money = IIf(x < 0 And m > 0, "−", "") & s & g & "," & Right("0" & fr, 2)
-End Function
-
-' money for a file (a CSV of the accounting): «1250,50» — no spaces, a comma
-Function MoneyCsv(x As Double) As String
-    Dim m As Double, ip As Double, fr As Long
-    m = Int(Abs(x) * 100 + 0.5)
-    ip = Int(m / 100)
-    fr = CLng(m - ip * 100)
-    MoneyCsv = IIf(x < 0 And m > 0, "-", "") & Format(ip, "0") & "," & Right("0" & fr, 2)
-End Function
-
 ' a quantity in the parts first when the EI has a packing («1 кан (0,25 шт)»), otherwise «2 шт» (К12)
 Function PartsFirst(n As Long, q As Double, sUnit As String) As String
     Dim pu As String, pn As Double
@@ -427,10 +372,10 @@ Sub BtnWriteOffAct(Optional oEvent As Variant)
 End Sub
 
 ' «Акт списания»: the posted rows «Списание» of the selection on «Корректировки» (one row — that one): the number, the date, the
-' reasons, the positions in their parts, the price and the sum, the signatures. OK:… / ERR:…
+' reasons, the positions in their parts, the signatures. No money. OK:… / ERR:…
 Function WriteOffAct() As String
-    Dim ash As Object, sel As Variant, i As Long, r As Long, d As Variant, rows() As Variant, n As Long, en As Long, p As Double, sum As Double
-    Dim no0 As String, no1 As String, dt As String, reasons As String, sh As Object, q As Double, noPrice As Long
+    Dim ash As Object, sel As Variant, i As Long, r As Long, d As Variant, rows() As Variant, n As Long, en As Long
+    Dim no0 As String, no1 As String, dt As String, reasons As String, sh As Object, q As Double
     ash = gDoc.Sheets.getByName(SH_ADJUST)
     sel = SelRows(SH_ADJUST)
     If UBound(sel) < 0 Then
@@ -445,11 +390,9 @@ Function WriteOffAct() As String
         If CStr(d(AC_KIND)) = "Списание" And Left(CStr(d(AC_CTL)), Len(ST_POSTED)) = ST_POSTED And VarType(d(AC_QTY)) = 5 Then
             en = WmsView.EiNo(CStr(d(AC_EI)), CLng(SysNum(SK_NEXT_EI)))
             q = d(AC_QTY)
-            p = EiPrice(en)
-            If p < 0 Then noPrice = noPrice + 1 Else sum = sum + q * p
             n = n + 1
             rows(n - 1) = Array(n, CStr(d(AC_EI)), CStr(d(AC_NAME)) & IIf(CStr(d(AC_ART)) <> "", " (" & d(AC_ART) & ")", ""), PartsFirst(en, q, CStr(d(AC_UNIT))), _
-                CStr(d(AC_UNIT)), IIf(p >= 0, Money(p), "—"), IIf(p >= 0, MoneyText(q, p), "—"))
+                CStr(d(AC_UNIT)))
             If no0 = "" Then no0 = CStr(d(AC_NO))
             no1 = CStr(d(AC_NO))
             If dt = "" Then dt = DayText(d(AC_DATE))
@@ -463,9 +406,8 @@ Function WriteOffAct() As String
     End If
     sh = PrintBegin("АКТ СПИСАНИЯ № " & no0 & IIf(no1 <> no0, "–" & no1, "") & " от " & dt, "Акт списания " & no0)
     PrintLine(sh, "Основание (причина): " & Replace(reasons, "|", "; "))
-    PrintLine(sh, "Списано позиций: " & n & " · на сумму " & Money(sum) & IIf(noPrice > 0, " (без цены: " & noPrice & ")", ""), True)
-    PrintTable(sh, Array("№", "Код", "Наименование (артикул)", "Количество", "Ед.", "Цена", "Сумма"), rows, n, "0,5,6")
-    PrintLine(sh, "Итого на сумму: " & Money(sum), True)
+    PrintLine(sh, "Списано позиций: " & n, True)
+    PrintTable(sh, Array("№", "Код", "Наименование (артикул)", "Количество", "Ед."), rows, n, "0")
     PrintSign(sh, Array("Списал (кладовщик)", "Проверил", "Утвердил"))
     WriteOffAct = PrintDone(sh)
 End Function
@@ -892,7 +834,7 @@ Sub BtnInventoryCompare(Optional oEvent As Variant)
     Dim s As String, v(0) As String, d As Double, msg As String
     WmsInit()
     v(0) = Format(WmsOrders.Today(), "DD.MM.YYYY")
-    If Not WmsPrimeUi.UiForm("Сличительная ведомость", "Проведённые строки «Инвентаризация» за день: излишки и недостачи с суммами.", Array("Дата пересчёта"), v, _
+    If Not WmsPrimeUi.UiForm("Сличительная ведомость", "Проведённые строки «Инвентаризация» за день: излишки и недостачи.", Array("Дата пересчёта"), v, _
         Array(""), "Сделать ведомость") Then Exit Sub
     If Not WmsOrders.ParseDateTextAs(Trim(v(0)), "дата", d, msg) Then
         WmsUi.UiMessage(msg)
@@ -902,10 +844,10 @@ Sub BtnInventoryCompare(Optional oEvent As Variant)
     If Left(s, 4) = "ERR:" Then WmsUi.UiMessage(Mid(s, 5))
 End Sub
 
-' the posted counts («Инвентаризация») of day dt: book, actual, the surplus or the shortage, the price and the sum. OK:… / ERR:…
+' the posted counts («Инвентаризация») of day dt: book, actual, the surplus or the shortage. No money. OK:… / ERR:…
 Function InventoryCompare(dt As Double) As String
-    Dim ash As Object, last As Long, d As Variant, i As Long, rows() As Variant, n As Long, en As Long, p As Double, diff As Double
-    Dim plus As Double, minus As Double, nEq As Long, sh As Object
+    Dim ash As Object, last As Long, d As Variant, i As Long, rows() As Variant, n As Long, diff As Double
+    Dim nPlus As Long, nMinus As Long, nEq As Long, sh As Object
     ash = gDoc.Sheets.getByName(SH_ADJUST)
     last = WmsOrders.LastRow(ash)
     If last < 1 Then
@@ -918,21 +860,18 @@ Function InventoryCompare(dt As Double) As String
     For i = 0 To last - 1
         If CStr(d(i)(AC_KIND)) = "Инвентаризация" And Left(CStr(d(i)(AC_CTL)), Len(ST_POSTED)) = ST_POSTED And VarType(d(i)(AC_DATE)) = 5 Then
             If Int(d(i)(AC_DATE)) = dt Then
-                en = WmsView.EiNo(CStr(d(i)(AC_EI)), CLng(SysNum(SK_NEXT_EI)))
                 diff = 0
                 If VarType(d(i)(AC_DIFF)) = 5 Then diff = d(i)(AC_DIFF)
-                p = EiPrice(en)
                 If Abs(diff) < 0.0000005 Then
                     nEq = nEq + 1
                 ElseIf diff > 0 Then
-                    If p >= 0 Then plus = plus + diff * p
+                    nPlus = nPlus + 1
                 Else
-                    If p >= 0 Then minus = minus - diff * p
+                    nMinus = nMinus + 1
                 End If
                 n = n + 1
                 rows(n - 1) = Array(n, CStr(d(i)(AC_EI)), CStr(d(i)(AC_NAME)), WmsIssue.QtyText(CDbl(d(i)(AC_BOOK))) & " / " & WmsIssue.QtyText(CDbl(d(i)(AC_FACT))), _
-                    IIf(Abs(diff) < 0.0000005, "совпало", IIf(diff > 0, "излишек ", "недостача ") & WmsIssue.QtyText(Abs(diff)) & " " & d(i)(AC_UNIT)), _
-                    IIf(p >= 0, Money(p), "—"), IIf(p >= 0 And Abs(diff) > 0.0000005, MoneyText(Abs(diff), p), ""))
+                    IIf(Abs(diff) < 0.0000005, "совпало", IIf(diff > 0, "излишек ", "недостача ") & WmsIssue.QtyText(Abs(diff)) & " " & d(i)(AC_UNIT)))
             End If
         End If
     Next i
@@ -942,8 +881,8 @@ Function InventoryCompare(dt As Double) As String
         Exit Function
     End If
     sh = PrintBegin("СЛИЧИТЕЛЬНАЯ ВЕДОМОСТЬ от " & Format(dt, "DD.MM.YYYY"), "Сличительная ведомость " & Format(dt, "YYYY-MM-DD"))
-    PrintLine(sh, "Пересчитано позиций: " & n & " · совпало " & nEq & " · излишки на сумму " & Money(plus) & " · недостачи на сумму " & Money(minus), True)
-    PrintTable(sh, Array("№", "Код", "Наименование", "Учёт / факт", "Результат", "Цена", "Сумма"), rows, n, "0,5,6")
+    PrintLine(sh, "Пересчитано позиций: " & n & " · совпало " & nEq & " · излишков " & nPlus & " · недостач " & nMinus, True)
+    PrintTable(sh, Array("№", "Код", "Наименование", "Учёт / факт", "Результат"), rows, n, "0")
     PrintSign(sh, Array("Председатель комиссии", "Члены комиссии", "Материально ответственное лицо"))
     InventoryCompare = PrintDone(sh)
 End Function
