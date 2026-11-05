@@ -349,6 +349,26 @@ def form_buttons(sh):
     return {f.getByIndex(i).Name: f.getByIndex(i) for i in range(f.getCount())}
 
 
+def dash_misplaced(sh):
+    """the buttons of «Дашборд» that do not stand on their rows (the shapes stand on the page, not in the cells: a row made taller must move them): name → (the top of the button, the rows it must stay in)"""
+    want = {"btnWant": (2, 2), "btnSheets": (2, 2), "btnHomeClose": (2, 2), "btnAllWait": (7, 7), "btnAllOps": (7, 7), "btnAllIssued": (22, 22), "btnAllStale": (22, 22), "btnTails": (54, 54)}
+    bad = {}
+    dp = sh.getDrawPage()
+    for i in range(dp.getCount()):
+        shp = dp.getByIndex(i)
+        try:
+            n = shp.getControl().Name
+        except Exception:
+            continue
+        if n in want:
+            r0, r1 = want[n]
+            top = sh.getCellByPosition(0, r0).Position.Y
+            bottom = sh.getCellByPosition(0, r1 + 1).Position.Y
+            if not (top <= shp.Position.Y < bottom and shp.Position.Y + shp.Size.Height <= bottom + 30):
+                bad[n] = (shp.Position.Y, top, bottom)
+    return bad
+
+
 @case
 def v08_look():
     """В1 input columns light / WMS columns grey; В2 the colour of a button by its meaning; В3 the help of a column (input help
@@ -3043,8 +3063,8 @@ def v39_serial_parts():
         s.B("TestPrimeForm", "W-1\tW-2", module="WmsPrimeUi")
         w = s.B("SerialWindow", n1, module="WmsParts")
         labels2, probs2 = label_layout_var(s.doc.Sheets.getByName("Печать"), [5, 5])
-        R.add(c, "окно «Серийные…»: в ЕИ осталось 2 детали, вписаны W-1, W-2 — остался один ЕИ с W-2 и один новый с W-1; этикетки напечатаны (ответ «Напечатать» по умолчанию)",
-              w.startswith("OK:2|") and not probs2 and sorted(x["text"][3] for x in labels2) == ["Арт.: GR-40 · S/N: W-1", "Арт.: GR-40 · S/N: W-2"], f"{w}; {[x['text'] for x in labels2]}")
+        R.add(c, "окно «Серийные…»: в ЕИ осталось 2 детали, вписаны W-1, W-2 — остался один ЕИ с W-2 и один новый с W-1; вопрос о цветах — ответ по умолчанию (у каждой свой: красный, синий); этикетки напечатаны (ответ «Напечатать» по умолчанию)",
+              w.startswith("OK:2|") and not probs2 and sorted(x["text"][3] for x in labels2) == ["Арт.: GR-40 · S/N: W-1 · цвет красный", "Арт.: GR-40 · S/N: W-2 · цвет синий"], f"{w}; {[x['text'] for x in labels2]}")
         sc = s.B("ActionSelfCheck")
         R.add(c, "самопроверка — без ошибок («остаток = движения» у всех новых ЕИ)", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:300])
         oracle(c, s, "серийные детали")
@@ -6495,6 +6515,21 @@ def v81_upgrade_121_130():
         R.add(c, "книга 1.2.1 → текущий выпуск: переключатели (LITE, NAME_FIX, HINT_WAIT, AUTO_DASH…) в «Настройках», событие листа, кнопки «Завышение остатков…» и «Закрыть день»; настройка «Артикул на этикетке» на месте",
               all(k in codes for k in ("LITE", "NAME_FIX", "SUP_FIX", "HINT_WAIT", "AUTO_LISTS", "AUTO_DASH", "EDATE_AUTO", "LABEL_ART")) and bool(ev) and "btnOverstate" in rb and "btnCloseDay" in db,
               f"{[k for k in ('LITE', 'NAME_FIX', 'HINT_WAIT', 'AUTO_DASH', 'LABEL_ART') if k not in codes]}; {ev}; {'btnOverstate' in rb}; {'btnCloseDay' in db}")
+        # the colour of a serial part in the upgraded book: column E of the hidden _PROP, the column «Цвет» of «Серийные детали», the hint of that sheet moved from L1 to M1
+        ppr = sh.getByName("_PROP")
+        szs = sh.getByName("Серийные детали")
+        pe, kh, l1, m1 = ppr.getCellByPosition(4, 0).getString(), szs.getCellByPosition(10, 3).getString(), szs.getCellByPosition(11, 0).getString(), szs.getCellByPosition(12, 0).getString()
+        R.add(c, "книга 1.2.1 → текущий выпуск: цвет серийной детали — заголовок «Цвет» в служебных свойствах и в «Серийных деталях» (K4), подсказка листа переехала из L1 в M1",
+              pe == "Цвет" and kh == "Цвет" and l1 == "" and m1 != "", f"{pe!r}; {kh!r}; {l1!r}; {m1[:30]!r}")
+        # «Я хочу…», «Все листы…», the colours of the tabs and of the state in the upgraded book
+        mb = form_buttons(sh.getByName("Главная"))
+        db = form_buttons(sh.getByName("Дашборд"))
+        nocol = [sh.getByIndex(i).Name for i in range(sh.getCount()) if sh.getByIndex(i).IsVisible and not sh.getByIndex(i).Name.startswith("_") and sh.getByIndex(i).TabColor == -1]
+        cf = sh.getByName("Главная").getCellByPosition(1, 7).ConditionalFormat
+        bad = dash_misplaced(sh.getByName("Дашборд"))
+        R.add(c, "книга 1.2.1 → текущий выпуск: «Я хочу…», «Все листы…», «Закрыть день» на «Главной» и «Дашборде», цвет состояния, у каждого показанного листа цвет вкладки; кнопки «Дашборда» остались на своих строках",
+              all(n in mb for n in ("btnWant", "btnSheets", "btnHomeClose")) and all(n in db for n in ("btnWant", "btnSheets", "btnHomeClose")) and cf.getCount() == 4 and not nocol and not bad,
+              f"{[n for n in ('btnWant', 'btnSheets', 'btnHomeClose') if n not in mb]}; {cf.getCount()}; {nocol}; {bad}")
         sc = s.B("ActionSelfCheck")
         R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:200])
         P, inf, _ = s.adjcheck(0)
@@ -7082,6 +7117,222 @@ def v90_default_edate():
         R.add(c, "переключатели вернули в «да» — ставит снова", q7[0] == today + 5, f"{q7}")
         P_, inf, _ = s.adjcheck(0)
         R.add(c, "независимая проверка журнала — без замечаний (ввод заказа ничего не проводит)", not P_ and int(s.sysv("LAST_SEQ")) == 0, f"{P_[:3]}; {s.sysv('LAST_SEQ')}")
+    finally:
+        s.close()
+
+
+@case
+def v91_serial_colors():
+    """1.4.0: у серийной детали, кроме номера, свой цвет — колонка E «_PROP» и поле COLOR операции EI_PROP (без новых операций); окно прихода: «Каждой детали — свой цвет» (по умолчанию: красный, синий,
+    зелёный …), «Один цвет для всех…», «Впишу цвета сам…» (список «номер — цвет»), «Без цвета»; лист «Серийные детали»: столбец «Цвет», ячейки номера и цвета закрашены; этикетка «цвет …»,
+    карточка «цвет: …»; цвет, которого не назвали, не стирается; независимая проверка журнала сходится"""
+    c = "V91"
+    s = ready(Session(new_wms("v91")))
+    try:
+        def comps(v):
+            return (v >> 16 & 255, v >> 8 & 255, v & 255)
+        pal = [s.B("ColorAuto", i, module="WmsItem") for i in (0, 1, 9, 10, 20, 30, 31, 40)]
+        base, light, dark = (s.B("ColorRgb", w, module="WmsItem") for w in ("синий", "Светло-синий", "тёмно-синий"))
+        red, red2, unk, emp = (s.B("ColorRgb", w, module="WmsItem") for w in ("красный", "красный с белой полосой", "абракадабра", ""))
+        ink_b, ink_y = s.B("ColorInk", s.B("ColorRgb", "чёрный", module="WmsItem"), module="WmsItem"), s.B("ColorInk", s.B("ColorRgb", "жёлтый", module="WmsItem"), module="WmsItem")
+        R.add(c, "палитра: красный, синий … серый, потом «светло-…», «тёмно-…», потом с номером; слово — цвет (светлее / темнее / первое слово побеждает), чужое слово — не цвет; буквы чёрные на светлом и белые на тёмном",
+              pal == ["красный", "синий", "серый", "светло-красный", "тёмно-красный", "красный 2", "синий 2", "светло-красный 2"]
+              and all(a >= b for a, b in zip(comps(light), comps(base))) and light != base and all(a <= b for a, b in zip(comps(dark), comps(base))) and dark != base
+              and red >= 0 and red2 == red and unk == -1 and emp == -1 and ink_b == 0xFFFFFF and ink_y == 0x1F1F1F, f"{pal}; {base} {light} {dark}; {red} {red2} {unk} {emp}; {ink_b} {ink_y}")
+        # the window of the receipt: the default — every part its own colour, one after another
+        seq0 = int(s.sysv("LAST_SEQ"))
+        spc_line(s, 1, "Детали", name="Шестерня Z-40", qty=None, art="GR-40", place="A-1")
+        s.goto("Иной приход", "$B$2")
+        s.B("TestPrimeForm", "SN-101\nSN-102\nSN-103", module="WmsPrimeUi")
+        s.B("BtnSerialSpecial", module="WmsSerial")
+        n1 = [int(s.B("SerialEI", x, module="WmsItem")) for x in ("SN-101", "SN-102", "SN-103")]
+        cols = [s.B("PropOf", n, module="WmsItem")[3] for n in n1]
+        ent = [e for e in s.journal()[0] if e["type"] == "EI_PROP"]
+        pr = " ".join(str(x) for r in s.doc.Sheets.getByName("Печать").getCellRangeByPosition(0, 0, 0, 40).getDataArray() for x in r)
+        card = s.B("PropText", n1[0], module="WmsItem")
+        R.add(c, "три номера, окно по умолчанию: цвета красный, синий, зелёный; в журнале три EI_PROP с COLOR (новых видов операций нет), на этикетках «цвет красный…», в карточке «цвет: красный»",
+              cols == ["красный", "синий", "зелёный"] and sorted(e["fields"].get("COLOR", "") for e in ent) == sorted(cols) and all(e["fields"].get("OLD_COLOR", None) == "" for e in ent)
+              and "цвет красный" in pr and "цвет синий" in pr and "цвет зелёный" in pr and "цвет: красный" in card and int(s.sysv("LAST_SEQ")) == seq0 + 6, f"{cols}; {len(ent)}; {pr[:160]}; {card}")
+        # the sheet
+        r1 = s.B("SerialsRefresh", "", True, module="WmsSerial")
+        sh = s.doc.Sheets.getByName("Серийные детали")
+        rows = [list(r) for r in sh.getCellRangeByPosition(0, 4, 10, 10).getDataArray() if r[0] != ""]
+        want = [s.B("ColorRgb", w, module="WmsItem") for w in ("красный", "синий", "зелёный")]
+        paint = [(sh.getCellByPosition(0, 4 + i).CellBackColor, sh.getCellByPosition(10, 4 + i).CellBackColor) for i in range(3)]
+        h = sh.getCellByPosition(10, 3).getString()
+        R.add(c, "лист «Серийные детали»: колонка K «Цвет» (красный, синий, зелёный), ячейки номера и цвета закрашены цветом детали",
+              r1 == "OK:3" and h == "Цвет" and [r[10] for r in rows] == ["красный", "синий", "зелёный"] and paint == [(w, w) for w in want], f"{r1}; {h}; {[r[10] for r in rows]}; {paint}; {want}")
+        r2 = s.B("SerialsRefresh", "синий", True, module="WmsSerial")
+        rows2 = [r[0] for r in sh.getCellRangeByPosition(0, 4, 0, 10).getDataArray() if r[0] != ""]
+        clear = (sh.getCellByPosition(0, 5).IsCellBackgroundTransparent, sh.getCellByPosition(10, 6).IsCellBackgroundTransparent)
+        R.add(c, "поиск по цвету «синий» — одна строка; краска прежних строк снята", r2 == "OK:1" and rows2 == ["SN-102"] and clear == (True, True), f"{r2}; {rows2}; {clear}")
+        # the colour is changed by the properties; a call that does not name it keeps it
+        e2 = f"ЕИ-{n1[1]:08d}"
+        p1 = s.B("PropSet", e2, "SN-102", "", "", "светло-синий", module="WmsItem")
+        p2 = s.B("PropSet", e2, "SN-102", "", "после ремонта", module="WmsItem")
+        p3 = s.B("PropSet", e2, "SN-102", "", "после ремонта", "светло-синий", module="WmsItem")
+        pp = s.B("PropOf", n1[1], module="WmsItem")
+        last = [e for e in s.journal()[0] if e["type"] == "EI_PROP"][-2]
+        R.add(c, "«Свойства ЕИ»: цвет «светло-синий»; вызов без цвета его не стирает; тот же цвет повторно — «не изменились»; в журнале OLD_COLOR",
+              p1.startswith("OK:") and p2.startswith("OK:") and p3.startswith("SKIP:") and pp[3] == "светло-синий" and pp[2] == "после ремонта" and last["fields"].get("OLD_COLOR") == "синий"
+              and last["fields"].get("COLOR") == "светло-синий", f"{p1[:30]}; {p2[:30]}; {p3[:40]}; {pp}; {last['fields']}")
+        # one colour for all, a list written by hand, no colour
+        spc_line(s, 2, "Детали", name="Втулка", qty=None, art="VT-1", place="A-2")
+        s.goto("Иной приход", "$B$3")
+        s.B("TestPrimeChoice", 1, module="WmsPrimeUi")
+        s.B("TestPrimeForm", "SN-201\nSN-202" + chr(2) + "светло-синий", module="WmsPrimeUi")
+        s.B("BtnSerialSpecial", module="WmsSerial")
+        c2 = [s.B("PropOf", int(s.B("SerialEI", x, module="WmsItem")), module="WmsItem")[3] for x in ("SN-201", "SN-202")]
+        spc_line(s, 3, "Детали", name="Гайка", qty=None, art="GK-1", place="A-3")
+        s.goto("Иной приход", "$B$4")
+        s.B("TestPrimeChoice", 2, module="WmsPrimeUi")
+        s.B("TestPrimeForm", "SN-301\nSN-302\nSN-303" + chr(2) + "SN-301 — оранжевый\nsn-302 — \nSN-303 —", module="WmsPrimeUi")
+        s.B("BtnSerialSpecial", module="WmsSerial")
+        c3 = [s.B("PropOf", int(s.B("SerialEI", x, module="WmsItem")), module="WmsItem")[3] for x in ("SN-301", "SN-302", "SN-303")]
+        spc_line(s, 4, "Детали", name="Шайба", qty=None, art="SH-1", place="A-4")
+        s.goto("Иной приход", "$B$5")
+        s.B("TestPrimeChoice", 3, module="WmsPrimeUi")
+        s.B("TestPrimeForm", "SN-401\nSN-402", module="WmsPrimeUi")
+        s.B("BtnSerialSpecial", module="WmsSerial")
+        c4 = [s.B("PropOf", int(s.B("SerialEI", x, module="WmsItem")), module="WmsItem")[3] for x in ("SN-401", "SN-402")]
+        R.add(c, "«Один цвет для всех» — оба «светло-синий»; «Впишу сам» — SN-301 оранжевый, у SN-302 и SN-303 цвета нет; «Без цвета» — цвета нет",
+              c2 == ["светло-синий", "светло-синий"] and c3 == ["оранжевый", "", ""] and c4 == ["", ""], f"{c2}; {c3}; {c4}")
+        # the second batch of the same article (GR-40 already has three coloured parts) goes on from the palette: жёлтый, оранжевый, фиолетовый — the colours of an article stay different
+        used0 = s.B("ColorsUsed", "GR-40", module="WmsSerial")
+        used1 = s.B("ColorsUsed", "gr-40", module="WmsSerial")
+        usedx = s.B("ColorsUsed", "Нет-такого", module="WmsSerial")
+        spc_line(s, 5, "Детали", name="Шестерня Z-40", qty=None, art="GR-40", place="A-1")
+        s.goto("Иной приход", "$B$6")
+        s.B("TestPrimeForm", "SN-111\nSN-112\nSN-113", module="WmsPrimeUi")
+        s.B("BtnSerialSpecial", module="WmsSerial")
+        c5 = [s.B("PropOf", int(s.B("SerialEI", x, module="WmsItem")), module="WmsItem")[3] for x in ("SN-111", "SN-112", "SN-113")]
+        used2 = s.B("ColorsUsed", "GR-40", module="WmsSerial")
+        R.add(c, "вторая партия того же артикула продолжает палитру (жёлтый, оранжевый, фиолетовый), а не начинает с красного; число занятых цветов артикула считается без различия регистра, чужой артикул — 0",
+              used0 == 3 and used1 == 3 and usedx == 0 and c5 == ["жёлтый", "оранжевый", "фиолетовый"] and used2 == 6, f"{used0} {used1} {usedx}; {c5}; {used2}")
+        oracle(c, s, "серийные детали с цветом")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:200])
+    finally:
+        s.close()
+
+
+@case
+def v92_simple_ways():
+    """1.4.0: простота и вид — «Я хочу…» (десять задач простыми словами: приём поставки из списка ожидаемых позиций с готовым окном, выдача из любого листа, возврат, поиск, карта, «Что делать, если…», «Закрыть день», отчёты),
+    «Все листы…» (все видимые листы по назначению, каждый ровно один раз, с пояснением; переход так же, как у кнопки листа), цвета вкладок у всех листов, три кнопки и цвет состояния на «Главной»;
+    ничего не пишется, кроме того, что провёл сам кладовщик через окна; независимая проверка журнала сходится"""
+    c = "V92"
+    s = ready(Session(new_wms("v92")))
+    try:
+        sh = s.doc.Sheets
+        ctl = s.doc.getCurrentController()
+        wl = list(s.B("WantList", module="WmsNav"))
+        R.add(c, "«Я хочу…»: десять задач — принять поставку, принять без заказа, выдать, возврат, найти, где лежит, исправить ошибку, закрыть день, отчёты, другой лист",
+              len(wl) == 10 and "поставку" in wl[0] and "без заказа" in wl[1] and wl[2].startswith("выдать") and "возврат" in wl[3] and wl[4].startswith("найти") and "где лежит" in wl[5]
+              and "ошибку" in wl[6] and "закрыть день" in wl[7] and "отчёт" in wl[8] and "другой лист" in wl[9], f"{wl}")
+        # every shown sheet is in exactly one purpose, with a line of what it is for
+        shown = [sh.getByIndex(i).Name for i in range(sh.getCount()) if sh.getByIndex(i).IsVisible and not sh.getByIndex(i).Name.startswith("_")]
+        got = []
+        for g in range(8):
+            t = s.B("SheetsOf", g, module="WmsNav")
+            got += [x.split("|")[0] for x in t.split("\n") if x]
+        nohint = [x for g in range(7) for x in s.B("SheetsOf", g, module="WmsNav").split("\n") if x and x.split("|")[1] == ""]
+        R.add(c, "«Все листы…»: показанные листы книги разложены по назначению — каждый ровно один раз, у каждого есть пояснение; прочих листов нет",
+              sorted(got) == sorted(shown) and len(got) == len(set(got)) and not nohint and s.B("SheetsOf", 7, module="WmsNav") == "", f"{len(got)} из {len(shown)}; {set(shown) ^ set(got)}; {nohint}")
+        bad = []
+        for name in shown:
+            r = s.B("SheetsGo", name, module="WmsNav")
+            if r != "OK:" + name or ctl.getActiveSheet().Name != name:
+                bad.append((name, r, ctl.getActiveSheet().Name))
+        R.add(c, "переход на каждый показанный лист (как кнопкой этого листа или «Главной») — открывается именно он", not bad, f"{bad[:4]}")
+        nolist = s.B("SheetsGo", "Нет такого", module="WmsNav")
+        R.add(c, "листа нет — «ERR», книга остаётся на месте", nolist.startswith("ERR:") and ctl.getActiveSheet().Name == shown[-1], nolist)
+        # the window: first the purpose (with the number of the sheets), then the sheets of the purpose
+        m0 = s.B("SheetsMenu", module="WmsNav")
+        first = s.B("TestPrimeShown", module="WmsPrimeUi")
+        choose(s, 0)
+        m1 = s.B("SheetsMenu", module="WmsNav")
+        shown_text = s.B("TestPrimeShown", module="WmsPrimeUi")
+        R.add(c, "окно «Все листы…»: сначала назначение с числом листов («Каждый день … (6)», «Склад … (10)», пустых и «Прочих» нет), потом листы назначения с пояснением; закрыли — «SKIP»",
+              m0.startswith("SKIP") and "Каждый день — приход, выдача, возврат, исправления  (6)" in first and "Склад — что есть и где лежит  (10)" in first and "Прочие" not in first
+              and m1.startswith("SKIP") and "Заказы — заказы поставщикам и приёмка по ним" in shown_text and "Корректировки — " in shown_text, f"{m0}; {first[:300]!r}; {m1}; {shown_text[:200]!r}")
+        # the tasks that open windows
+        s.goto("Наличие", "$A$2")
+        form(s, "2", "1,5", "ива", "")
+        w = s.B("WantRun", 2, module="WmsNav")
+        r1 = iss_row(s, 1)
+        R.add(c, "«выдать со склада» с любого листа («Наличие»): окно выдачи, выдача проведена, книга показывает «Выдачи»",
+              w.startswith("OK:выдано 1") and r1[11] == "ЕИ-00000002" and r1[4] == 1.5 and ctl.getActiveSheet().Name == "Выдачи", f"{w}; {r1[:12]}; {ctl.getActiveSheet().Name}")
+        w0 = s.B("WantRun", 0, module="WmsNav")
+        R.add(c, "«принять поставку» без ожидаемых позиций: объяснение, «Заказы» открыты, ничего не принято", w0.startswith("SKIP:ожидаемых") and ctl.getActiveSheet().Name == "Заказы", w0)
+        order(s, 1, "1", "Болт М10", qty="100", U="A-1")
+        order(s, 2, "2", "Гайка М10", qty="50", U="A-2", supplier="Берёзка")
+        order(s, 3, "3", "Шайба М10", qty="70", U="A-3")
+        choose(s, 3)
+        w2 = s.B("WantRun", 0, module="WmsNav")
+        lst = s.B("TestPrimeShown", module="WmsPrimeUi")
+        R.add(c, "«принять поставку»: список ожидаемых — «№ — наименование — ждём … — поставщик» и «другая позиция…»; выбрали её — открыты «Заказы», окон приёмки нет, ничего не принято",
+              w2 == "OK:Заказы" and "№ 1 — Болт М10 — ждём 100 шт" in lst and "№ 2 — Гайка М10 — ждём 50 шт — Берёзка" in lst and "№ 3 — Шайба М10 — ждём 70 шт" in lst and "другая позиция" in lst
+              and all(ords(s, r)[21] == "" for r in (1, 2, 3)) and ctl.getActiveSheet().Name == "Заказы", f"{w2}; {lst[:300]!r}")
+        choose(s, 1)
+        form(s, "<как предложено>", "УПД-7", "", "<как предложено>", "<как предложено>", "")
+        w1 = s.B("WantRun", 0, module="WmsNav")
+        o1, o2, o3 = ords(s, 1), ords(s, 2), ords(s, 3)
+        R.add(c, "выбрана вторая позиция — окно приёмки открылось на ней и приход проведён (ЕИ присвоен), первая и третья ждут",
+              w1.startswith("OK") and o2[2] == "УПД-7" and str(o2[21]).startswith("ЕИ-") and o1[21] == "" and o3[21] == "" and ctl.getActiveSheet().Name == "Заказы", f"{w1}; {o1[:3]}{o1[21]}; {o2[:3]}{o2[21]}")
+        choose(s, 2)
+        w2b = s.B("WantRun", 0, module="WmsNav")
+        lst2 = s.B("TestPrimeShown", module="WmsPrimeUi")
+        R.add(c, "принятая позиция из списка ожидаемых ушла, остальные на месте", w2b == "OK:Заказы" and "Гайка М10" not in lst2 and "Болт М10" in lst2 and "Шайба М10" in lst2, f"{w2b}; {lst2[:300]!r}")
+        choose(s, 0)
+        w3 = s.B("WantRun", 3, module="WmsNav")
+        a3 = ctl.getActiveSheet().Name
+        choose(s, 1)
+        w4 = s.B("WantRun", 3, module="WmsNav")
+        a4 = ctl.getActiveSheet().Name
+        choose(s, 2)
+        w5 = s.B("WantRun", 3, module="WmsNav")
+        R.add(c, "«принять возврат»: «по человеку» — «Поиск», «по № выдачи» — «Возврат», «Отмена» — никуда",
+              w3 == "OK:Поиск" and a3 == "Поиск" and w4 == "OK:Возврат" and a4 == "Возврат" and w5.startswith("SKIP"), f"{w3}; {a3}; {w4}; {a4}; {w5}")
+        pairs = [(1, "Иной приход"), (4, "Поиск"), (5, "Карта склада"), (8, "Отчёты")]
+        bad = []
+        for k, name in pairs:
+            r = s.B("WantRun", k, module="WmsNav")
+            if r != "OK:" + name or ctl.getActiveSheet().Name != name:
+                bad.append((k, r, ctl.getActiveSheet().Name))
+        w6 = s.B("WantRun", 6, module="WmsNav")
+        w7 = s.B("WantRun", 7, module="WmsNav")
+        w99 = s.B("WantRun", 99, module="WmsNav")
+        R.add(c, "остальные задачи: «без заказа» → «Иной приход», «найти» → «Поиск», «где лежит» → «Карта склада», «отчёты» → «Отчёты»; «исправить ошибку» и «закрыть день» работают; чужой номер — ERR",
+              not bad and w6.startswith("OK") and w7.startswith("OK") and w99.startswith("ERR"), f"{bad}; {w6}; {w7}; {w99}")
+        # the look: tabs and «Главная»
+        nocol = [sh.getByIndex(i).Name for i in range(sh.getCount()) if sh.getByIndex(i).IsVisible and not sh.getByIndex(i).Name.startswith("_") and sh.getByIndex(i).TabColor == -1]
+        R.add(c, "у каждого показанного листа есть цвет вкладки (умные списки — фиолетовые, отчёты и документы — золотые, справочники — оранжевые, «Настройки» — серые)",
+              not nocol and sh.getByName("Металл").TabColor == 0x8064A2 and sh.getByName("Календарь").TabColor == 0xFFC000 and sh.getByName("Стандарты").TabColor == 0xED7D31 and sh.getByName("Настройки").TabColor == 0xA5A5A5
+              and sh.getByName("Заказы").TabColor == 0x70AD47, f"{nocol}")
+        main = sh.getByName("Главная")
+        mb = form_buttons(main)
+        form0 = main.getDrawPage().getForms().getByIndex(0)
+        names = [form0.getByIndex(i).Name for i in range(form0.getCount())]
+        code = {n: form0.getScriptEvents(names.index(n))[0].ScriptCode for n in ("btnWant", "btnSheets", "btnHomeClose")}
+        cf = main.getCellByPosition(1, 7).ConditionalFormat
+        R.add(c, "«Главная»: кнопки «Я хочу…», «Все листы…», «Закрыть день» в строке заголовка, каждая вызывает свою процедуру; состояние окрашено (4 правила: зелёное, жёлтое, красное)",
+              all(n in mb for n in code) and mb["btnWant"].Label == "Я хочу…" and mb["btnSheets"].Label == "Все листы…" and mb["btnHomeClose"].Label == "Закрыть день"
+              and "WmsNav.BtnWant" in code["btnWant"] and "WmsNav.BtnSheets" in code["btnSheets"] and "WmsDocs.BtnCloseDay" in code["btnHomeClose"]
+              and cf.getCount() == 4, f"{list(mb)[:6]}; {code}; {cf.getCount()}")
+        dash = sh.getByName("Дашборд")
+        db = form_buttons(dash)
+        dform = dash.getDrawPage().getForms().getByIndex(0)
+        dnames = [dform.getByIndex(i).Name for i in range(dform.getCount())]
+        dcode = {n: dform.getScriptEvents(dnames.index(n))[0].ScriptCode for n in ("btnWant", "btnSheets", "btnHomeClose") if n in dnames}
+        R.add(c, "«Дашборд» (на нём открывается книга): «Я хочу…», «Все листы…», «Закрыть день» в своей строке под полосой переходов, каждая вызывает свою процедуру",
+              all(n in db for n in ("btnWant", "btnSheets", "btnHomeClose")) and db["btnWant"].Label == "Я хочу…" and db["btnSheets"].Label == "Все листы…" and db["btnHomeClose"].Label == "Закрыть день"
+              and "WmsNav.BtnWant" in dcode.get("btnWant", "") and "WmsNav.BtnSheets" in dcode.get("btnSheets", "") and "WmsDocs.BtnCloseDay" in dcode.get("btnHomeClose", ""), f"{list(db)[:20]}; {dcode}")
+        bad = dash_misplaced(dash)
+        R.add(c, "«Дашборд»: каждая кнопка на своей строке — три кнопки в строке под полосой, «Все…» у заголовков списков, «Списать хвосты…» у «Хвостов»", not bad, f"{bad}")
+        oracle(c, s, "приход через «Я хочу…» и выдача")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:200])
     finally:
         s.close()
 

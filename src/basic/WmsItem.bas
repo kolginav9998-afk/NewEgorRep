@@ -13,7 +13,9 @@ Private Const PR_EI = 0
 Private Const PR_SERIAL = 1
 Private Const PR_EXPIRY = 2
 Private Const PR_NOTE = 3
-Private Const PR_LAST = 3
+' 1.4.0: the colour of a part (every serial part may have its own: a word — «красный», «светло-синий»); the column E of _PROP
+Private Const PR_COLOR = 4
+Private Const PR_LAST = 4
 ' Ф7: «Резервы» — the storekeeper's own sheet: EI, quantity, for whom, until, note
 Public Const SH_RESERVES = "Резервы"
 Private Const RS_EI = 0
@@ -368,6 +370,8 @@ Private Function LbExtra(n As Long, row As Variant, goods As Variant, sMode As S
     End If
     If bArt Then l1 = "Арт.: " & art
     If CStr(p(0)) <> "" Then l1 = l1 & IIf(l1 <> "", " · ", "") & "S/N: " & p(0)
+    ' 1.4.0: the colour of a part — a word on its label
+    If CStr(p(3)) <> "" Then l1 = l1 & IIf(l1 <> "", " · ", "") & "цвет " & LCase(CStr(p(3)))
     If WmsPack.PackOf(n, pu, pn) Then
         l2 = "Выдача по 1 " & pu & " · в 1 " & unit & " — " & WmsIssue.QtyText(pn) & " " & pu
     ElseIf UBound(goods) >= 0 Then
@@ -629,15 +633,15 @@ End Sub
 
 ' ================================================================ Ф5 the properties of an EI
 
-' the properties of EI n: Array(serial, expiry (a date or 0), note); empty strings when none
+' the properties of EI n: Array(serial, expiry (a date or 0), note, colour); empty strings when none
 Function PropOf(n As Long) As Variant
     Dim d As Variant, x As Double
-    PropOf = Array("", 0, "")
+    PropOf = Array("", 0, "", "")
     On Error GoTo EH
     If Not gDoc.Sheets.hasByName(SH_PROP) Then Exit Function
     d = gDoc.Sheets.getByName(SH_PROP).getCellRangeByPosition(0, n, PR_LAST, n).getDataArray()(0)
     If VarType(d(PR_EXPIRY)) = 5 Then x = d(PR_EXPIRY)
-    PropOf = Array(CStr(d(PR_SERIAL)), x, CStr(d(PR_NOTE)))
+    PropOf = Array(CStr(d(PR_SERIAL)), x, CStr(d(PR_NOTE)), Trim(CStr(d(PR_COLOR))))
 EH:
 End Function
 
@@ -646,13 +650,14 @@ Function PropText(n As Long) As String
     Dim p As Variant, s As String
     p = PropOf(n)
     If p(0) <> "" Then s = "сер./инв. № " & p(0)
+    If p(3) <> "" Then s = s & IIf(s <> "", " · ", "") & "цвет: " & p(3)
     If p(1) > 0 Then s = s & IIf(s <> "", " · ", "") & "годен до " & Format(p(1), "DD.MM.YYYY") & IIf(p(1) < WmsOrders.Today(), " (срок прошёл)", "")
     If p(2) <> "" Then s = s & IIf(s <> "", " · ", "") & p(2)
     PropText = s
 End Function
 
 Sub BtnProps(Optional oEvent As Variant)
-    Dim eis As Variant, v(2) As String, p As Variant, s As String, n As Long
+    Dim eis As Variant, v(3) As String, p As Variant, s As String, n As Long
     WmsInit()
     eis = CursorEIs()
     If UBound(eis) < 0 Then
@@ -663,11 +668,12 @@ Sub BtnProps(Optional oEvent As Variant)
     p = PropOf(n)
     v(0) = p(0)
     If p(1) > 0 Then v(1) = Format(p(1), "DD.MM.YYYY")
-    v(2) = p(2)
+    v(2) = p(3)
+    v(3) = p(2)
     If Not WmsPrimeUi.UiForm("Свойства ЕИ", WmsIssue.EiCanon(n) & " — " & WmsIssue.StockSheet().getCellByPosition(SC_NAME, n).getString() _
-        & ". Серийный или инвентарный номер (по нему «Поиск» найдёт ЕИ), срок годности, примечание. Пусто — убрать.", _
-        Array("Серийный / инвентарный №", "Годен до", "Примечание"), v, Array("", "", ""), "Записать") Then Exit Sub
-    s = PropSet(WmsIssue.EiCanon(n), Trim(v(0)), Trim(v(1)), Trim(v(2)))
+        & ". Серийный или инвентарный номер (по нему «Поиск» найдёт ЕИ), срок годности, цвет (красный, светло-синий …), примечание. Пусто — убрать.", _
+        Array("Серийный / инвентарный №", "Годен до", "Цвет", "Примечание"), v, Array("", "", ColorList(), ""), "Записать") Then Exit Sub
+    s = PropSet(WmsIssue.EiCanon(n), Trim(v(0)), Trim(v(1)), Trim(v(3)), Trim(v(2)))
     If Left(s, 3) = "OK:" Then
         ' 1.0.1: the serial number and «годен до» of «Наличие» follow at once when the window was opened there
         If gDoc.getCurrentController().getActiveSheet().getName() = SH_STOCK Then StockInfoRefresh(False)
@@ -679,8 +685,8 @@ End Sub
 
 ' the properties of EI sEI written by the operation EI_PROP (the old values in the journal too); a serial number another EI
 ' already has is asked about. OK:<seq> / SKIP:… / ERR:…
-Function PropSet(sEI As String, sSerial As String, sExpiry As String, sNote As String) As String
-    Dim n As Long, canon As String, msg As String, p As String, old As Variant, dExp As Double, why As String, other As Long, k As Integer
+Function PropSet(sEI As String, sSerial As String, sExpiry As String, sNote As String, Optional vColor As Variant) As String
+    Dim n As Long, canon As String, msg As String, p As String, old As Variant, dExp As Double, why As String, other As Long, k As Integer, sColor As String
     WmsInit()
     On Error GoTo EH
     If Not gDoc.Sheets.hasByName(SH_PROP) Then
@@ -708,7 +714,13 @@ Function PropSet(sEI As String, sSerial As String, sExpiry As String, sNote As S
         Exit Function
     End If
     old = PropOf(n)
-    If old(0) = sSerial And old(1) = dExp And old(2) = sNote Then
+    ' 1.4.0: the colour is kept as it is when the caller does not name it (the receipts of the parts and the old callers)
+    If IsMissing(vColor) Then sColor = CStr(old(3)) Else sColor = Trim(CStr(vColor))
+    If Len(sColor) > 40 Then
+        PropSet = "ERR:цвет — до 40 знаков"
+        Exit Function
+    End If
+    If old(0) = sSerial And old(1) = dExp And old(2) = sNote And CStr(old(3)) = sColor Then
         PropSet = "SKIP:свойства " & canon & " не изменились"
         Exit Function
     End If
@@ -736,10 +748,13 @@ Function PropSet(sEI As String, sSerial As String, sExpiry As String, sNote As S
     PlanField("NOTE", sNote)
     PlanField("OLD_SERIAL", CStr(old(0)))
     PlanField("OLD_EXPIRY", IIf(old(1) > 0, Format(old(1), "YYYY-MM-DD"), ""))
-    PlanSetValue(SH_PROP, n, PR_EI, IIf(sSerial = "" And dExp = 0 And sNote = "", "", canon), False)
+    PlanField("COLOR", sColor)
+    PlanField("OLD_COLOR", CStr(old(3)))
+    PlanSetValue(SH_PROP, n, PR_EI, IIf(sSerial = "" And dExp = 0 And sNote = "" And sColor = "", "", canon), False)
     PlanSetValue(SH_PROP, n, PR_SERIAL, sSerial, False)
     PlanSetValue(SH_PROP, n, PR_EXPIRY, IIf(dExp > 0, dExp, ""), False)
     PlanSetValue(SH_PROP, n, PR_NOTE, sNote, False)
+    PlanSetValue(SH_PROP, n, PR_COLOR, sColor, False)
     PropSet = ApplyOperation(0, 0)
     ' 1.0.1: the serial number and «годен до» of «Наличие» follow at the next opening of the sheet (the balance did not move)
     If Left(PropSet, 3) = "OK:" Then SiMark(n)
@@ -748,6 +763,78 @@ Function PropSet(sEI As String, sSerial As String, sExpiry As String, sNote As S
 EH:
     PropSet = "ERR-SYS:свойства не записаны: " & Error$ & " (строка " & Erl & ")"
     gUiLastMsg = PropSet
+End Function
+
+' ---------------------------------------------------------------- 1.4.0: the colour of a part
+
+' the words of the palette the parts get one after another («Каждой детали — свой цвет»): ten colours, then the same lighter («светло-…»), then darker («тёмно-…»): thirty different
+' ones; after that the words go round again with a number («красный 2»)
+Private Function ColorBase() As Variant
+    ColorBase = Array("красный", "синий", "зелёный", "жёлтый", "оранжевый", "фиолетовый", "голубой", "розовый", "коричневый", "серый")
+End Function
+
+' the colour of the part number i (0-based) in the order of the palette
+Function ColorAuto(i As Long) As String
+    Dim b As Variant, lap As Long, k As Long, w As String
+    b = ColorBase()
+    k = i Mod 10
+    lap = (i \ 10) Mod 3
+    w = CStr(b(k))
+    If lap = 1 Then w = "светло-" & w
+    If lap = 2 Then w = "тёмно-" & w
+    If i >= 30 Then w = w & " " & (i \ 30 + 1)
+    ColorAuto = w
+End Function
+
+' the list of the palette for the cell of the window (a drop-down: a word of it or one's own, «|» between the words)
+Function ColorList() As String
+    ColorList = "красный|оранжевый|жёлтый|зелёный|голубой|синий|фиолетовый|розовый|коричневый|серый|чёрный|белый"
+End Function
+
+' the colour of a word as a number for the cell (-1 — the word is not a known colour: nothing is painted). The word is read as a person writes it: «Светло-синий», «тёмно-зелёный», «красный с белой полосой»
+Function ColorRgb(ByVal sWord As String) As Long
+    Dim t As String, stems As Variant, rgbs As Variant, i As Long, p As Long, best As Long, bestP As Long, c As Long, r As Long, g As Long, b As Long
+    ColorRgb = -1
+    t = LCase(Trim(sWord))
+    If t = "" Then Exit Function
+    t = Replace(t, "ё", "е")
+    stems = Array("красн", "син", "зелен", "желт", "оранж", "фиолет", "голуб", "розов", "коричн", "сер", "черн", "бел")
+    rgbs = Array(&HD32F2F, &H1976D2, &H388E3C, &HFBC02D, &HF57C00, &H7B1FA2, &H29B6F6, &HEC407A, &H795548, &H9E9E9E, &H212121, &HFFFFFF)
+    best = -1
+    bestP = 0
+    For i = 0 To UBound(stems)
+        p = InStr(t, CStr(stems(i)))
+        If p > 0 Then
+            If best < 0 Or p < bestP Then
+                best = i
+                bestP = p
+            End If
+        End If
+    Next i
+    If best < 0 Then Exit Function
+    c = CLng(rgbs(best))
+    r = (c \ 65536) And 255
+    g = (c \ 256) And 255
+    b = c And 255
+    If InStr(t, "светл") > 0 Then
+        r = r + (255 - r) * 0.45
+        g = g + (255 - g) * 0.45
+        b = b + (255 - b) * 0.45
+    ElseIf InStr(t, "темн") > 0 Then
+        r = r * 0.6
+        g = g * 0.6
+        b = b * 0.6
+    End If
+    ColorRgb = CLng(Int(r)) * 65536 + CLng(Int(g)) * 256 + CLng(Int(b))
+End Function
+
+' the colour of the letters over the colour c (white over a dark one, black over a light one)
+Function ColorInk(c As Long) As Long
+    Dim r As Long, g As Long, b As Long
+    r = (c \ 65536) And 255
+    g = (c \ 256) And 255
+    b = c And 255
+    If 0.3 * r + 0.59 * g + 0.11 * b < 140 Then ColorInk = &HFFFFFF Else ColorInk = &H1F1F1F
 End Function
 
 ' the EI number of serial number s (the whole cell, without regard to case); 0 — none

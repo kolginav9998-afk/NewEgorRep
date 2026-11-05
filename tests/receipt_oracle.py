@@ -789,11 +789,11 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
         if e["seq"] in abandoned or e["type"] != "EI_PROP":
             continue
         f = e["fields"]
-        props[f.get("EI")] = (f.get("SERIAL", ""), f.get("EXPIRY", ""), f.get("NOTE", ""))
+        props[f.get("EI")] = (f.get("SERIAL", ""), f.get("EXPIRY", ""), f.get("NOTE", ""), f.get("COLOR", ""))
     if doc.Sheets.hasByName("_PROP"):
         rsh = doc.Sheets.getByName("_PROP")
         rlast = max([ei_num(k) or 0 for k in props] + [used_rows(rsh)])
-        rows = rsh.getCellRangeByPosition(0, 0, 3, rlast).getDataArray() if rlast >= 1 else ()
+        rows = rsh.getCellRangeByPosition(0, 0, 4, rlast).getDataArray() if rlast >= 1 else ()
         for r in range(1, len(rows)):
             cn = canon(r)
             want = props.get(cn)
@@ -806,8 +806,8 @@ def check(doc, jdir, initial, expect_tail=0, today=None, base=None, out=None):
             if want is None:
                 if any(x != "" for x in got) and base is None:
                     bad(f"_PROP строка {r + 1}: свойства «{got[1]} {got_exp} {got[3]}» без операции EI_PROP", "K")
-            elif (got[1], got_exp, got[3]) != want or got[0] != (cn if any(want) else ""):
-                bad(f"{cn}: свойства в _PROP «{got[0]} {got[1]} {got_exp} {got[3]}», по журналу «{want}»", "K")
+            elif (got[1], got_exp, got[3], got[4]) != want or got[0] != (cn if any(want) else ""):
+                bad(f"{cn}: свойства в _PROP «{got[0]} {got[1]} {got_exp} {got[3]} {got[4]}», по журналу «{want}»", "K")
     elif props:
         bad("в журнале есть EI_PROP, а листа _PROP нет", "K")
 

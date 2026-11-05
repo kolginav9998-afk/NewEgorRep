@@ -12,9 +12,11 @@ Private Const SZ_FIND_ROW = 1
 Private Const SZ_ALL_COL = 5
 Private Const SZ_STAT_ROW = 2
 Private Const SZ_ROW0 = 4
-Private Const SZ_COLS = 10
+Private Const SZ_COLS = 11
+' 1.4.0: the column «Цвет» (the last one) and the properties read from _PROP: the number, the date, the note and the colour
+Private Const SZ_COL_COLOR = 10
 Private Const SZ_MAX = 200
-Private Const SZ_PROP_COLS = 3
+Private Const SZ_PROP_COLS = 4
 Private Const SZ_AGAIN = "ранее № "
 
 ' the text typed last (kept when the receipt was refused: the window opens with it again), the serial number a base EI lost, the journal position of the last build of the sheet
@@ -78,7 +80,7 @@ End Function
 ' number (on «Заказы» the quantity of the fact F may be bigger — the parts left stay in the EI without a number), the category «Детали» is put when it is empty. The result:
 ' OK:<how many>|ЕИ-…,ЕИ-… / PARTIAL:<EI>|<why the numbers are not written> (the receipt is posted) / any refusal of the posting as it is (ERR:…, SKIP:…, BLOCKED:…) —
 ' then the cells that were changed are put back
-Function ReceiveSerial(bOrders As Boolean, r As Long, sers As Variant) As String
+Function ReceiveSerial(bOrders As Boolean, r As Long, sers As Variant, Optional colors As Variant) As String
     Dim sh As Object, qc As Long, ec As Long, cc As Long, ac As Long, nc As Long, n As Long, kind As String, qOld As String, qNow As Double, catOld As String
     Dim res As String, canon As String, nEI As Long
     WmsInit()
@@ -149,7 +151,11 @@ Function ReceiveSerial(bOrders As Boolean, r As Long, sers As Variant) As String
         ReceiveSerial = "PARTIAL:" & canon & "|приход проведён, но ЕИ строки не определён"
         Exit Function
     End If
-    ReceiveSerial = SerialApply(canon, nEI, sers)
+    If IsMissing(colors) Then
+        ReceiveSerial = SerialApply(canon, nEI, sers)
+    Else
+        ReceiveSerial = SerialApply(canon, nEI, sers, colors)
+    End If
     gUiLastMsg = ReceiveSerial
     Exit Function
 EH:
@@ -160,11 +166,15 @@ End Function
 ' 1.2.0: the EI canon (number nEI) holds the parts that came (a receipt, a build of a part) and the serial numbers sers are written to them: the parts with a number are taken apart by
 ' WmsParts.SerialSplit. OK:<how many>|ЕИ-…,ЕИ-… / PARTIAL:<EI>|<why the numbers are not written>. An EI that was empty and carried the number of a part given out keeps its old number in the
 ' note («ранее № …»), the pair «EI|old number» goes to gSzReplaced
-Function SerialApply(canon As String, nEI As Long, sers As Variant) As String
+Function SerialApply(canon As String, nEI As Long, sers As Variant, Optional colors As Variant) As String
     Dim old As Variant, p As Variant, r2 As String, sNote As String, sExp As String
     gSzReplaced = ""
     old = WmsItem.PropOf(nEI)
-    r2 = WmsParts.SerialSplit(canon, sers)
+    If IsMissing(colors) Then
+        r2 = WmsParts.SerialSplit(canon, sers)
+    Else
+        r2 = WmsParts.SerialSplit(canon, sers, colors)
+    End If
     If Left(r2, 3) <> "OK:" Then
         SerialApply = "PARTIAL:" & canon & "|" & Mid(r2, InStr(r2, ":") + 1)
         Exit Function
@@ -192,7 +202,7 @@ End Sub
 ' the window of the button: the row under the cursor, the numbers (a big field), the count to be checked, the receipt, the labels
 Private Sub SerialUi(bOrders As Boolean)
     Dim r As Long, why As String, ok As Boolean, sh As Object, ac As Long, nc As Long, pc As Long, info As String, sers As Variant, k As Integer, res As String
-    Dim eis As String, a As Variant, msg As String, shown As Boolean
+    Dim eis As String, a As Variant, msg As String, shown As Boolean, colors As Variant, sCols As String, i As Long
     WmsInit()
     On Error GoTo EH
     If bOrders Then
@@ -223,7 +233,14 @@ Private Sub SerialUi(bOrders As Boolean)
     Do
         If Not WmsPrimeUi.UiMemo("Серийные детали — приход", info, gSzText, "Дальше") Then Exit Sub
         If SerialsParse(gSzText, sers, why) Then
-            k = WmsPrimeUi.UiButtons("Серийные детали", "Деталей: " & (UBound(sers) + 1) & ". Первый номер: " & sers(0) & ", последний: " & sers(UBound(sers)) & "." & Chr(10) & Chr(10) _
+            ' 1.4.0: the colour of the parts
+            If Not ColorsAsk(sers, colors, ColorsUsed(Trim(sh.getCellByPosition(ac, r).getString()))) Then Exit Sub
+            sCols = ""
+            For i = 0 To UBound(colors)
+                If CStr(colors(i)) <> "" And i < 6 Then sCols = sCols & IIf(sCols <> "", ", ", "") & CStr(colors(i))
+            Next i
+            k = WmsPrimeUi.UiButtons("Серийные детали", "Деталей: " & (UBound(sers) + 1) & ". Первый номер: " & sers(0) & ", последний: " & sers(UBound(sers)) & "." & Chr(10) _
+                & IIf(sCols <> "", "Цвета: " & sCols & IIf(UBound(colors) > 5, " …", "") & "." & Chr(10), "") & Chr(10) _
                 & "Приход будет проведён на " & (UBound(sers) + 1) & " шт и разделён на отдельные ЕИ — по одной детали с каждым номером.", _
                 Array("Провести приход и записать номера", "Назад — поправить список"), Array(1, 0))
             If k = 1 Then Exit Do
@@ -232,7 +249,7 @@ Private Sub SerialUi(bOrders As Boolean)
             WmsUi.UiMessage("Список номеров: " & why & ".")
         End If
     Loop
-    res = ReceiveSerial(bOrders, r, sers)
+    res = ReceiveSerial(bOrders, r, sers, colors)
     gUiLastMsg = res
     If Left(res, 3) = "OK:" Then
         gSzText = ""
@@ -254,6 +271,135 @@ Private Sub SerialUi(bOrders As Boolean)
 EH:
     WmsUi.UiMessage("Серийный приход не выполнен: " & Error$ & " (строка " & Erl & ")")
 End Sub
+
+' ---------------------------------------------------------------- 1.4.0: the colour of the parts
+
+' 1.4.0: how many parts of the article already have a colour — the next batch of the article goes on from the palette (the colours of one article stay different)
+Function ColorsUsed(sArt As String) As Long
+    Dim st As Object, ps As Object, last As Long, d As Variant, pd As Variant, i As Long, key As String
+    On Error GoTo EH
+    ColorsUsed = 0
+    If Trim(sArt) = "" Then Exit Function
+    If Not gDoc.Sheets.hasByName(SH_PROP) Then Exit Function
+    last = CLng(SysNum(SK_NEXT_EI)) - 1
+    If last < 1 Then Exit Function
+    key = WmsSpecial.ArticleKeyFast(sArt)
+    st = WmsIssue.StockSheet()
+    d = st.getCellRangeByPosition(SC_ART, 1, SC_ART, last).getDataArray()
+    ps = gDoc.Sheets.getByName(SH_PROP)
+    pd = ps.getCellRangeByPosition(SZ_PROP_COLS, 1, SZ_PROP_COLS, last).getDataArray()
+    For i = 0 To UBound(pd)
+        If Trim(CStr(pd(i)(0))) <> "" And i <= UBound(d) Then
+            If WmsSpecial.ArticleKeyFast(CStr(d(i)(0))) = key Then ColorsUsed = ColorsUsed + 1
+        End If
+    Next i
+    Exit Function
+EH:
+End Function
+
+' The colour of the parts that are taken in: «Каждой детали — свой цвет» (the palette one after another: красный, синий, зелёный …), «Один цвет для всех…», «Впишу цвета сам…» (a list
+' «номер — цвет» with the palette put in, to correct) or «Без цвета». sers — the serial numbers (an empty one is a part without a number: it gets no colour); colors — what comes back:
+' an array of the colours by the position of the numbers ("" — none). False — the window was closed
+Function ColorsAsk(sers As Variant, ByRef colors As Variant, iStart As Long) As Boolean
+    Dim n As Long, cnt As Long, i As Long, j As Long, k As Integer, out() As String, v(0) As String, t As String, a As Variant, p As Long, who As String, col As String, bad As String, hit As Boolean
+    n = UBound(sers) + 1
+    ReDim out(n - 1)
+    For i = 0 To n - 1
+        If Trim(CStr(sers(i))) <> "" Then cnt = cnt + 1
+    Next i
+    colors = out
+    ColorsAsk = True
+    If cnt = 0 Then Exit Function
+    k = WmsPrimeUi.UiButtons("Цвет деталей", "У каждой детали, кроме серийного номера, может быть свой цвет: его видно на листе «" & SZ_SHEET & "» (цветной ячейкой), на этикетке и в карточке. " _
+        & "Деталей: " & cnt & "." & IIf(iStart > 0, Chr(10) & "У деталей этого артикула цвета уже записаны (" & iStart & ") — новые пойдут дальше по списку, чтобы цвета не повторялись.", "") _
+        & Chr(10) & "Потом цвет можно поменять: «Свойства ЕИ…».", _
+        Array("Каждой детали — свой цвет (красный, синий, зелёный …)", "Один цвет для всех…", "Впишу цвета сам…", "Без цвета"), Array(1, 2, 3, 0))
+    If k < 0 Then
+        ColorsAsk = False
+        Exit Function
+    End If
+    Select Case k
+    Case 1
+        j = 0
+        For i = 0 To n - 1
+            If Trim(CStr(sers(i))) <> "" Then
+                out(i) = WmsItem.ColorAuto(iStart + j)
+                j = j + 1
+            End If
+        Next i
+    Case 2
+        If Not WmsPrimeUi.UiForm("Цвет деталей", "Один цвет для всех " & cnt & " деталей (слово из списка или своё: «светло-синий», «красный с белой полосой»).", Array("Цвет"), v, Array(WmsItem.ColorList()), "Дальше") Then
+            ColorsAsk = False
+            Exit Function
+        End If
+        t = Trim(v(0))
+        For i = 0 To n - 1
+            If Trim(CStr(sers(i))) <> "" Then out(i) = t
+        Next i
+    Case 3
+        j = 0
+        t = ""
+        For i = 0 To n - 1
+            If Trim(CStr(sers(i))) <> "" Then
+                t = t & IIf(t <> "", Chr(10), "") & Trim(CStr(sers(i))) & " — " & WmsItem.ColorAuto(iStart + j)
+                j = j + 1
+            End If
+        Next i
+        Do
+            If Not WmsPrimeUi.UiMemo("Цвета деталей", "Одна деталь — одна строка: «номер — цвет». Поправьте цвета как нужно; строку без цвета («номер —») оставьте — деталь будет без цвета.", t, "Дальше") Then
+                ColorsAsk = False
+                Exit Function
+            End If
+            bad = ""
+            ReDim out(n - 1)
+            a = Split(Replace(t, Chr(13), ""), Chr(10))
+            For i = 0 To UBound(a)
+                If Trim(CStr(a(i))) <> "" Then
+                    p = SzLastPos(CStr(a(i)), " — ")
+                    col = ""
+                    If p > 0 Then
+                        who = Trim(Left(CStr(a(i)), p - 1))
+                        col = Trim(Mid(CStr(a(i)), p + 3))
+                    ElseIf Right(Trim(CStr(a(i))), 2) = " —" Then
+                        ' «номер —» — the colour was taken away: the part has none
+                        who = Trim(Left(Trim(CStr(a(i))), Len(Trim(CStr(a(i)))) - 2))
+                    Else
+                        bad = "строка " & (i + 1) & ": нужно «номер — цвет»"
+                        Exit For
+                    End If
+                    hit = False
+                    For j = 0 To n - 1
+                        If LCase(Trim(CStr(sers(j)))) = LCase(who) And who <> "" Then
+                            out(j) = col
+                            hit = True
+                            Exit For
+                        End If
+                    Next j
+                    If Not hit Then
+                        bad = "строка " & (i + 1) & ": номера «" & who & "» нет среди введённых"
+                        Exit For
+                    End If
+                End If
+            Next i
+            If bad = "" Then Exit Do
+            WmsUi.UiMessage("Список цветов: " & bad & ".")
+        Loop
+    End Select
+    For i = 0 To n - 1
+        If Len(out(i)) > 40 Then out(i) = Left(out(i), 40)
+    Next i
+    colors = out
+End Function
+
+' the place of the last «sPat» in s (0 — none; no InStrRev here)
+Private Function SzLastPos(s As String, sPat As String) As Long
+    Dim p As Long
+    p = InStr(s, sPat)
+    Do While p > 0
+        SzLastPos = p
+        p = InStr(p + 1, s, sPat)
+    Loop
+End Function
 
 ' the labels of the EIs "ЕИ-…,ЕИ-…", one of each (the page «Печать»)
 Private Sub LabelsOf(sEis As String)
@@ -358,7 +504,7 @@ Function SerialsRefresh(sFind As String, bAll As Boolean) As String
     Dim sh As Object, st As Object, ps As Object, last As Long, d As Variant, pd As Variant, iss As Variant, idx As Object, i As Long, n As Long, nOut As Long, q As Double
     Dim out() As Variant, hays() As String, folded As Variant, words As Variant, bWords As Boolean, ser As String, note As String, canon As String, state As String, who As String
     Dim dt As Variant, k As Long, place As String, src As String, p As Long, q2 As Long, tail As String, again As String, hasIss As Boolean, nStock As Long, nAll As Long
-    Dim cEi As Long, cNm As Long, cArt As Long, cQ As Long, cPl As Long, cSrc As Long, cWho As Long, cDt As Long
+    Dim cEi As Long, cNm As Long, cArt As Long, cQ As Long, cPl As Long, cSrc As Long, cWho As Long, cDt As Long, sColor As String
     On Error GoTo EH
     If Not gDoc.Sheets.hasByName(SZ_SHEET) Then
         SerialsRefresh = "ERR:в книге нет листа «" & SZ_SHEET & "» — книга не обновлена до 1.1.1"
@@ -390,6 +536,7 @@ Function SerialsRefresh(sFind As String, bAll As Boolean) As String
         For i = 0 To UBound(pd)
             ser = Trim(CStr(pd(i)(1)))
             note = CStr(pd(i)(3))
+            sColor = Trim(CStr(pd(i)(4)))
             If (ser <> "" Or InStr(note, SZ_AGAIN) > 0) And i <= UBound(d) Then
                 canon = CStr(d(i)(cEi))
                 If canon <> "" Then
@@ -417,8 +564,8 @@ Function SerialsRefresh(sFind As String, bAll As Boolean) As String
                             End If
                         End If
                         If (bAll Or q > 0.0000005) And nOut < UBound(out) Then
-                            out(nOut) = Array(ser, Trim(CStr(d(i)(cArt))), WmsNames.NormNameFast(CStr(d(i)(cNm))), canon, place, q, state, who, dt, SrcNote(src, note))
-                            hays(nOut) = ser & " " & CStr(d(i)(cArt)) & " " & CStr(d(i)(cNm)) & " " & canon & " " & place & " " & who
+                            out(nOut) = Array(ser, Trim(CStr(d(i)(cArt))), WmsNames.NormNameFast(CStr(d(i)(cNm))), canon, place, q, state, who, dt, SrcNote(src, note), sColor)
+                            hays(nOut) = ser & " " & CStr(d(i)(cArt)) & " " & CStr(d(i)(cNm)) & " " & canon & " " & place & " " & who & " " & sColor
                             nOut = nOut + 1
                         End If
                     End If
@@ -429,7 +576,7 @@ Function SerialsRefresh(sFind As String, bAll As Boolean) As String
                         q2 = InStr(tail, " · ")
                         If q2 > 0 Then again = Trim(Left(tail, q2 - 1)) Else again = Trim(tail)
                         If again <> "" And bAll And nOut < UBound(out) Then
-                            out(nOut) = Array(again, Trim(CStr(d(i)(cArt))), WmsNames.NormNameFast(CStr(d(i)(cNm))), canon, place, 0, "заменён в ЕИ", "", "", "номер деталь уже не несёт: ЕИ получил новую партию (сейчас № " & ser & ")")
+                            out(nOut) = Array(again, Trim(CStr(d(i)(cArt))), WmsNames.NormNameFast(CStr(d(i)(cNm))), canon, place, 0, "заменён в ЕИ", "", "", "номер деталь уже не несёт: ЕИ получил новую партию (сейчас № " & ser & ")", "")
                             hays(nOut) = again & " " & CStr(d(i)(cArt)) & " " & CStr(d(i)(cNm)) & " " & canon
                             nOut = nOut + 1
                         End If
@@ -477,7 +624,12 @@ Private Sub SzWrite(sh As Object, rowsOut As Variant, n As Long)
     cur.gotoEndOfUsedArea(False)
     e = cur.getRangeAddress().EndRow
     If SZ_ROW0 + n - 1 > e Then e = SZ_ROW0 + n - 1
-    If e >= SZ_ROW0 Then sh.getCellRangeByPosition(0, SZ_ROW0, SZ_COLS - 1, e).clearContents(1 + 2 + 4 + 16)
+    If e >= SZ_ROW0 Then
+        sh.getCellRangeByPosition(0, SZ_ROW0, SZ_COLS - 1, e).clearContents(1 + 2 + 4 + 16)
+        ' 1.4.0: the colours of the rows before are taken off (the cell of the number and the cell «Цвет»)
+        SzUnpaint(sh, 0, e)
+        SzUnpaint(sh, SZ_COL_COLOR, e)
+    End If
     If n = 0 Then Exit Sub
     ReDim out(n - 1)
     For i = 0 To n - 1
@@ -497,6 +649,31 @@ Private Sub SzWrite(sh As Object, rowsOut As Variant, n As Long)
     pv(1).Name = "ContainsHeader"
     pv(1).Value = False
     rng.sort(pv())
+    SzPaint(sh, n)
+End Sub
+
+Private Sub SzUnpaint(sh As Object, c As Long, e As Long)
+    Dim rg As Object
+    rg = sh.getCellRangeByPosition(c, SZ_ROW0, c, e)
+    rg.IsCellBackgroundTransparent = True
+    rg.CharColor = -1
+End Sub
+
+' 1.4.0: the colour of every part: the cell of its serial number and the cell «Цвет» are painted in it (a word that is not a colour is only text), the letters black or white
+Private Sub SzPaint(sh As Object, n As Long)
+    Dim d As Variant, i As Long, c As Long, a As Object, k As Object
+    d = sh.getCellRangeByPosition(SZ_COL_COLOR, SZ_ROW0, SZ_COL_COLOR, SZ_ROW0 + n - 1).getDataArray()
+    For i = 0 To n - 1
+        c = WmsItem.ColorRgb(CStr(d(i)(0)))
+        If c >= 0 Then
+            a = sh.getCellByPosition(0, SZ_ROW0 + i)
+            a.CellBackColor = c
+            a.CharColor = WmsItem.ColorInk(c)
+            k = sh.getCellByPosition(SZ_COL_COLOR, SZ_ROW0 + i)
+            k.CellBackColor = c
+            k.CharColor = WmsItem.ColorInk(c)
+        End If
+    Next i
 End Sub
 
 ' «Этикетки выбранных»: the labels of the EIs of the rows selected on the sheet (one of each, with the article and the serial number); a number replaced earlier has no label

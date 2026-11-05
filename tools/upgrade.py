@@ -368,6 +368,7 @@ def step_08(doc, leg, from_text, done):
     B.release_140(doc, sheets)
     done.append(f"страницы «{B.DASH}», «{B.FIND}», «{B.MAP}» и лист «{B.TOPO}» (вставьте туда схему склада); «{B.MAIN}» этого выпуска (кнопки к страницам)")
     done.append(f"1.3.0: листы «{B.SPELL}» (написания поставщиков книги; кнопка «Одно написание…» на «{B.SUPPLIERS}») и «{B.METAL}» (металлопрокат из «{B.STOCK}»); списки строятся при первом открытии листа; данные не менялись")
+    done.append(f"1.4.0: переключатели помощников в «{B.SETTINGS}» и «Лёгкий режим»; цвет серийной детали; на «{B.MAIN}» и «{B.DASH}» кнопки «Я хочу…» и «Все листы…», на «{B.MAIN}» ещё «Закрыть день»; цвета вкладок; данные не менялись")
     done.append(f"1.0: справочники «{B.SUPPLIERS}» и «{B.GOODS}» (пополняются кнопками из «{B.ORDERS}» и «{B.STOCK}»), страницы «{B.SUPPLY}» и «{B.PRINT}»")
     done.append(f"1.0: справочник «{B.KITS}» (состав комплектов: «Собрать комплект…», «Выдать комплект…»)")
     done.append(f"1.0: лист «{B.RESERVES}» (резерв ЕИ под получателя или объект), служебный {B.PROP} (серийный номер, «годен до») и колонка Q "
@@ -518,6 +519,8 @@ def step_140(doc, done):
     """1.3.0 and earlier → 1.4.0: the switches of the helpers in «Настройки» (written into the first free rows; what the storekeeper wrote is not touched) and the event that resets their cache; no cell of the data is written"""
     B.release_140(doc, doc.Sheets)
     done.append(f"1.4.0: в «{B.SETTINGS}» добавлены переключатели помощников и «Лёгкий режим» (если программа тормозит — «да»); подсказки и пересчёты списков можно выключить по одному; проведение, журнал и копии не выключаются; данные не менялись")
+    done.append(f"1.4.0: у серийной детали можно записать цвет (столбец «Цвет» в «{B.SERIALS}», в свойствах ЕИ, на этикетке и в карточке); на «{B.MAIN}» и «{B.DASH}» — кнопки «Я хочу…» и «Все листы…», на «{B.MAIN}» ещё «Закрыть день»; "
+                f"у листов без цвета вкладки появился цвет; состояние на «{B.MAIN}» окрашено; данные не менялись")
     return []
 
 
@@ -745,6 +748,12 @@ def allowed_change(sheet, r, c, old=""):
     if sheet == B.SERVICE:
         # 1.1: the line of text beside the new button «Справочники из копии…» (column C, a cell that was empty)
         return c == 2 and old == ""
+    if sheet == B.PROP:
+        # 1.4.0: the header «Цвет» (E1) of the properties of the EIs
+        return (r, c) == (0, 4)
+    if sheet == B.SERIALS:
+        # 1.4.0: the column «Цвет» of «Серийные детали»: its header (K4) and the hint that moves from L1 to M1
+        return (r, c) in ((3, 10), (0, 11), (0, 12))
     if sheet == B.REPORTS:
         # 1.4.0: the line of text beside the new button «Завышение остатков…» (column C of the row after the last report of the manager, a cell that was empty)
         return c == 2 and old == ""

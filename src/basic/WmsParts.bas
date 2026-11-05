@@ -24,7 +24,7 @@ End Sub
 ' the window of the serial numbers of EI n: a field for every part (page by page), «Записать» → SerialSplit, then the labels
 Function SerialWindow(n As Long) As String
     Dim d As Variant, nParts As Long, sers() As String, p0 As Long, p1 As Long, i As Long, nF As Long, labels() As String, v() As String, lists() As String
-    Dim msg As String, canon As String, p As Variant, res As String, info As String, k As Integer, eis As Variant, counts() As Long, a As Variant
+    Dim msg As String, canon As String, p As Variant, res As String, info As String, k As Integer, eis As Variant, counts() As Long, a As Variant, colors As Variant
     d = WmsIssue.StockData(n)
     canon = CStr(d(SC_EI))
     If Abs(CDbl(d(SC_QTY)) - Int(CDbl(d(SC_QTY)) + 0.5)) > 0.0000001 Or CDbl(d(SC_QTY)) < 1 Then
@@ -64,7 +64,13 @@ Function SerialWindow(n As Long) As String
         Next i
         p0 = p1 + 1
     Loop
-    res = SerialSplit(canon, sers)
+    ' 1.4.0: the colour of the parts — every one its own, one for all, written by hand or none
+    If Not WmsSerial.ColorsAsk(sers, colors, WmsSerial.ColorsUsed(Trim(CStr(d(SC_ART))))) Then
+        SerialWindow = "SKIP:окно закрыто"
+        gUiLastMsg = SerialWindow
+        Exit Function
+    End If
+    res = SerialSplit(canon, sers, colors)
     gUiLastMsg = res
     If Left(res, 3) <> "OK:" Then
         SerialWindow = res
@@ -91,7 +97,8 @@ End Function
 ' its own (SPLIT of one, then EI_PROP with the number; the «годен до» and the note of the EI go along); when every part has
 ' a number the last one stays in the EI itself and gets its number. A number written twice, or one that another EI has — refused
 ' before anything is posted. OK:<EIs with a number>|ЕИ-…,ЕИ-… / ERR:…
-Function SerialSplit(sEI As String, sers As Variant) As String
+Function SerialSplit(sEI As String, sers As Variant, Optional colors As Variant) As String
+    Dim sCol0 As String, sCol As String, bCol As Boolean
     Dim n As Long, canon As String, msg As String, d As Variant, nParts As Long, k As Long, i As Long, j As Long, other As Long, why As String
     Dim p As Variant, sExp As String, sNote As String, place As String, last As Long, done As Long, r As String, newEI As String, eis As String, ser As String
     Dim pu As String, pn As Double, sErrTxt As String, nErrLine As Long
@@ -154,14 +161,23 @@ Function SerialSplit(sEI As String, sers As Variant) As String
     p = WmsItem.PropOf(n)
     sExp = IIf(p(1) > 0, Format(p(1), "DD.MM.YYYY"), "")
     sNote = CStr(p(2))
+    ' 1.4.0: the colour of every part (its own, the colours go by the position of the numbers); a part without one gets the colour of the EI it was taken from
+    sCol0 = CStr(p(3))
+    bCol = Not IsMissing(colors)
     place = CStr(d(SC_PLACE))
     WmsView.ProgressStart("Серийные детали " & canon, k)
     For i = 0 To UBound(sers)
         ser = Trim(CStr(sers(i)))
         If ser <> "" Then
+            sCol = sCol0
+            If bCol Then
+                If i <= UBound(colors) Then
+                    If Trim(CStr(colors(i))) <> "" Then sCol = Trim(CStr(colors(i)))
+                End If
+            End If
             If k = nParts And i = last Then
                 ' every part has a number: the last one is the EI itself
-                r = WmsItem.PropSet(canon, ser, sExp, sNote)
+                r = WmsItem.PropSet(canon, ser, sExp, sNote, sCol)
                 newEI = canon
             Else
                 r = WmsDaily.SplitPost(canon, "1", place, "серийная деталь " & ser, True)
@@ -173,7 +189,7 @@ Function SerialSplit(sEI As String, sers As Variant) As String
                 End If
                 newEI = Mid(r, 4)
                 newEI = Left(newEI, InStr(newEI, "|") - 1)
-                r = WmsItem.PropSet(newEI, ser, sExp, sNote)
+                r = WmsItem.PropSet(newEI, ser, sExp, sNote, sCol)
             End If
             If Left(r, 3) <> "OK:" Then
                 WmsView.ProgressEnd()

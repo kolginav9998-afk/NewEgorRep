@@ -387,8 +387,9 @@ Function DashRefresh() As String
         sh.getCellByPosition(DB_SVC_COL + 1, DB_LIST2 + i).setString("EI|" & d(SC_EI))
     Next i
     If nSt = 0 Then sh.getCellByPosition(8, DB_LIST2).setString("ЕИ без движения " & DB_STALE_DAYS & "+ дней нет")
+    ' (the title is short: it stands beside the button «Все…» — the longest-lying are the first rows)
     sh.getCellByPosition(7, DB_LIST2_HEAD).setString("Лежит без движения " & DB_STALE_DAYS & "+ дней" & IIf(nSt > 0, " — ЕИ: " & NumText(nSt) _
-        & ", дольше всех лежащие первыми" & IIf(nSt > DB_STALE_CAND, " (из первых " & DB_STALE_CAND & ")", ""), ""))
+        & IIf(nSt > DB_STALE_CAND, " (первые " & DB_STALE_CAND & ")", ""), ""))
     ' 1.0 (Ч5): the tails, the smallest first
     sh.getCellRangeByPosition(1, DB_TAILS, 12, DB_TAILS + DB_TAILS_N - 1).clearContents(1 + 2 + 4)
     For i = 0 To nTails - 1

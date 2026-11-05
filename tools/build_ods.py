@@ -186,7 +186,7 @@ KITS = "Комплекты"
 KITS_HEADERS = ["Комплект", "Позиция (наименование)", "Артикул", "Количество на 1 комплект", "Ед.", "Примечание"]
 # 1.0 (Ф5): _PROP — the properties of the EIs, one row per EI (row = EI number; WmsItem SH_PROP, PR_*), written only by EI_PROP
 PROP = "_PROP"
-PROP_HEADERS = ["ЕИ", "Серийный / инв. №", "Годен до", "Примечание"]
+PROP_HEADERS = ["ЕИ", "Серийный / инв. №", "Годен до", "Примечание", "Цвет"]
 # 1.0 (Ф7): «Резервы» — the storekeeper's own sheet of the reserves (WmsItem SH_RESERVES, RS_*): not protected, not journaled
 RESERVES = "Резервы"
 RESERVE_HEADERS = ["ЕИ", "Количество", "Для кого / объект", "До (дата)", "Примечание"]
@@ -811,7 +811,7 @@ def build_dash(doc, sh):
         sh.getColumns().getByIndex(c).Width = 2500
     sh.getColumns().getByIndex(13).Width = 400
     sh.getColumns().getByIndex(14).IsVisible = False            # WmsDash.DB_SVC_COL
-    heights = {0: 1150, 1: 950, 2: 250, 3: 520, 4: 1250, 5: 1000, 6: 350, 7: 650, 8: 480, 21: 350, 22: 650, 23: 480, 34: 350, 35: 650, 36: 480}
+    heights = {0: 1150, 1: 950, 2: 800, 3: 520, 4: 1250, 5: 1000, 6: 350, 7: 650, 8: 480, 21: 350, 22: 650, 23: 480, 34: 350, 35: 650, 36: 480}
     for r, h in heights.items():
         sh.getRows().getByIndex(r).Height = h
     for r in list(range(9, 21)) + list(range(24, 34)) + list(range(37, 51)):
@@ -1397,7 +1397,7 @@ def items_10(doc, sheets):
         for c, h in enumerate(PROP_HEADERS):
             sh.getCellByPosition(c, 0).setString(h)
         text = number_format(doc, "@", ("ru", "RU"))
-        for c in (0, 1, 3):
+        for c in (0, 1, 3, 4):
             sh.getCellRangeByPosition(c, 1, c, LAST_ROW).NumberFormat = text
         sh.getCellRangeByPosition(2, 1, 2, LAST_ROW).NumberFormat = number_format(doc, "DD.MM.YYYY")
         sh.IsVisible = False
@@ -1885,6 +1885,10 @@ def release_140(doc, sheets):
     reports_140(doc, sheets)
     closeday_140(doc, sheets)
     dash_140(doc, sheets)
+    props_140(doc, sheets)
+    serials_140(doc, sheets)
+    home_140(doc, sheets)
+    design_140(doc, sheets)
     if not sheets.hasByName(SETTINGS):
         return
     settings_130(doc, sheets)
@@ -1899,11 +1903,113 @@ def release_140(doc, sheets):
 
 
 def dash_140(doc, sheets):
-    """1.4.0: the line under the tiles of «Дашборд» is taller (it holds the comparison with the previous working day)"""
-    if sheets.hasByName(DASH):
-        sh = sheets.getByName(DASH)
-        if sh.getRows().getByIndex(5).Height < 1000:
-            sh.getRows().getByIndex(5).Height = 1000
+    """1.4.0: the row under the strip of «Дашборд» is a strip of its own (the buttons «Я хочу…», «Все листы…», «Закрыть день»: 8 mm) and the line under the tiles is taller (it holds the comparison with
+    the previous working day). The buttons stand on the page, not in the cells: what stands lower moves down with the rows; a book that has the heights is not touched"""
+    if not sheets.hasByName(DASH):
+        return
+    sh = sheets.getByName(DASH)
+    for r, h in ((2, 800), (5, 1000)):
+        row = sh.getRows().getByIndex(r)
+        if row.Height < h:
+            top = sh.getCellByPosition(0, r + 1).Position.Y
+            d = h - row.Height
+            row.Height = h
+            dp = sh.getDrawPage()
+            for i in range(dp.getCount()):
+                shp = dp.getByIndex(i)
+                if shp.Position.Y >= top:
+                    shp.setPosition(Point(shp.Position.X, shp.Position.Y + d))
+
+
+def props_140(doc, sheets):
+    """1.4.0: the column E «Цвет» of _PROP (the colour of a part, written by EI_PROP): the header and the text format; what is in the sheet is not touched"""
+    if not sheets.hasByName(PROP):
+        return
+    sh = sheets.getByName(PROP)
+    if sh.getCellByPosition(4, 0).getString().strip() == "":
+        sh.getCellByPosition(4, 0).setString(PROP_HEADERS[4])
+    sh.getCellRangeByPosition(4, 1, 4, LAST_ROW).NumberFormat = number_format(doc, "@", ("ru", "RU"))
+
+
+def serials_140(doc, sheets):
+    """1.4.0: the column K «Цвет» of «Серийные детали» (the colour of a part): the header with the look of the others, the width; the hint of the sheet that stood in L1 moves to M1 with its look
+    (a new book has it there: the sheet has 11 columns, then the narrow one, then the hint). Nothing else of the sheet is touched; the list is built again at the next opening"""
+    if not sheets.hasByName(SERIALS):
+        return
+    sh = sheets.getByName(SERIALS)
+    if sh.getCellByPosition(10, 3).getString().strip() != "":
+        return
+    old = sh.getCellByPosition(11, 0)
+    new = sh.getCellByPosition(12, 0)
+    if old.getString().strip() != "" and new.getString().strip() == "":
+        new.setString(old.getString())
+        new.IsTextWrapped = True
+        new.VertJustify = 1
+        new.CharHeight = 9
+        new.CharColor = MUTED
+        old.setString("")
+    ref = sh.getCellByPosition(9, 3)
+    h = sh.getCellByPosition(10, 3)
+    h.setString(SERIALS_HEADERS[10])
+    h.CharWeight = 150
+    h.IsTextWrapped = True
+    h.VertJustify = 2
+    h.CellBackColor = ref.CellBackColor
+    sh.getCellByPosition(10, 0).CellBackColor = 0xFFFFFF
+    sh.getColumns().getByIndex(10).Width = SERIALS_WIDTHS[10]
+    sh.getColumns().getByIndex(11).Width = 600
+    sh.getColumns().getByIndex(12).Width = 12000
+
+
+# 1.4.0: the three buttons — the tasks in plain words, every sheet by its purpose, the end of the day (name, label, macro, width, colour); «Главная» has them in its title row,
+# «Дашборд» (the book opens on it) in the row under its strip
+HOME_140 = [("btnWant", "Я хочу…", "WmsNav.BtnWant", 4200, 0xFFE699), ("btnSheets", "Все листы…", "WmsNav.BtnSheets", 3200, 0xDDEBF7),
+            ("btnHomeClose", "Закрыть день", "WmsDocs.BtnCloseDay", 3200, 0xFFE699)]
+
+
+def home_140(doc, sheets):
+    """1.4.0: «Главная» (its title row is 10 mm high, the version text stands at its right end) and «Дашборд» (the row under its strip) get the buttons «Я хочу…», «Все листы…», «Закрыть день»,
+    and the state line of «Главная» gets a colour (green — work is allowed, amber — with a remark or not started yet, red — blocked); only the missing ones are added,
+    nothing of what WMS writes into the pages is moved or changed. The row of «Дашборд» is made 8 mm high by dash_140 (call it first)"""
+    for sheet, x, row, dy, h in ((MAIN, MAIN_LEFT + 100, 0, 80, 840), (DASH, 150, 2, 60, 680)):
+        if not sheets.hasByName(sheet):
+            continue
+        sh = sheets.getByName(sheet)
+        y = sh.getCellByPosition(0, row).Position.Y + dy
+        for name, label, macro, w, back in HOME_140:
+            if not has_button(sh, name):
+                add_button(doc, sh, name, label, macro, x, y, w, h, bold=True, back=back)
+            x += w + 60
+    if not sheets.hasByName(MAIN):
+        return
+    sh = sheets.getByName(MAIN)
+    rng = sh.getCellRangeByPosition(1, MAIN_ROWS, 1, MAIN_ROWS)
+    if rng.ConditionalFormat.getCount() == 0:
+        cell_style(doc, "ST_Done", CellBackColor=0xE3F4E6, CharColor=0x1E6B34)
+        cell_style(doc, "ST_Part", CellBackColor=0xFFF1D6, CharColor=0x8A5A00)
+        cell_style(doc, "ST_Bad", CellBackColor=0xFDE2DD, CharColor=0xB3261E)
+        ref = "$B$%d" % (MAIN_ROWS + 1)
+        for test, style in ((f'LEFT({ref};21)="Работа разрешена — но"', "ST_Part"), (f'LEFT({ref};16)="Работа разрешена"', "ST_Done"),
+                            (f'LEFT({ref};13)="ЗАБЛОКИРОВАНО"', "ST_Bad"), (f'LEFT({ref};3)="WMS"', "ST_Part")):
+            add_cond(sh, rng, test, style, 1, MAIN_ROWS)
+
+
+# 1.4.0: the colour of the tabs that have none (the existing ones — pages blue, the sheets of work green, registers and directories orange, help grey — are not changed):
+# smart lists WMS builds from the data — purple, reports and documents — gold, directories — orange, «Настройки» — grey
+TAB_140 = [(0x8064A2, ("Наличие по названию", "Остаток деталей", "Серийные детали", "Металл", "Метизы", "Инструмент ЧПУ", "Без категории", "Проверка названий", "Написания поставщиков")),
+           (0xFFC000, ("Операции дня", "Календарь", "Отчёт дня", "ABC-анализ", "Без движения", "Акты")),
+           (0xED7D31, ("Категории", "Стандарты", "Синонимы")),
+           (0xA5A5A5, ("Настройки",))]
+
+
+def design_140(doc, sheets):
+    """1.4.0: the colour of the tabs of the sheets that have none (a tab the storekeeper coloured himself is left as it is); nothing else of the sheets is touched"""
+    for color, names in TAB_140:
+        for name in names:
+            if sheets.hasByName(name):
+                sh = sheets.getByName(name)
+                if sh.TabColor == -1:
+                    sh.TabColor = color
 
 
 def closeday_140(doc, sheets):
@@ -2306,8 +2412,8 @@ def buttons_110(doc, sheets):
 # 1.1.1: «Серийные детали» (WmsSerial) — the directory of the parts that have a serial number, one row per number: it only shows (built from «Наличия», its properties and «Выдач»);
 # «Серийные детали…» on «Иной приход» and «Заказы» — the receipt of such parts with the numbers in one action
 SERIALS = "Серийные детали"
-SERIALS_HEADERS = ["Серийный №", "Артикул", "Наименование", "ЕИ", "Место", "Остаток", "Состояние", "Кому выдана", "Дата выдачи", "Откуда / примечание"]
-SERIALS_WIDTHS = [4200, 3200, 8000, 2800, 2600, 1800, 3000, 4000, 2600, 9000]
+SERIALS_HEADERS = ["Серийный №", "Артикул", "Наименование", "ЕИ", "Место", "Остаток", "Состояние", "Кому выдана", "Дата выдачи", "Откуда / примечание", "Цвет"]
+SERIALS_WIDTHS = [4200, 3200, 8000, 2800, 2600, 1800, 3000, 4000, 2600, 9000, 3200]
 SERIALS_HINT = ("Серийные детали: справочник деталей с серийным номером — одна строка на номер: артикул, наименование, ЕИ, место, остаток, состояние (на складе / выдана — кому и когда / заменён), откуда пришла. "
                 "Впишите в «Найти» часть номера, артикул, место или фамилию — останутся строки, где есть все слова; «Показывать выданные» — «нет» скрывает выданные. Строки можно сортировать и фильтровать; «Обновить» строит список заново. "
                 "«Этикетки выбранных» — этикетки (ЕИ, артикул, серийный номер) для выделенных строк. Принять детали с номерами: на «Ином приходе» или «Заказах» заполните строку (артикул, наименование, место, документ) и нажмите «Серийные детали…». "
@@ -3632,6 +3738,8 @@ def build(office, out_path, test=False, instance_id=None):
     buttons_130(doc, sheets)
     settings_130(doc, sheets)
     main_buttons_110(doc, sheets)
+    home_140(doc, sheets)
+    design_140(doc, sheets)
     hotkeys_10(doc)
     build_service(doc, sheets)
     order = [sheets.getByIndex(i).Name for i in range(sheets.getCount())]
