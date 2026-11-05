@@ -88,7 +88,7 @@ Private Function NvReceive() As String
     End If
     sh = WmsOrders.OrdersSheet()
     n = gSpN
-    If n > 25 Then n = 25
+    If n > 15 Then n = 15
     ReDim opts(n)
     ReDim rws(n)
     For i = 0 To n - 1

@@ -157,6 +157,15 @@ def pick_button(label):
     return act
 
 
+def pick_button_with(label, must):
+    """presses the button only when the window shows the text `must` (a line of a list, a prompt): the window of another task is left alone"""
+    def act(ctx):
+        if must not in " | ".join(str(c.getAccessibleName()) for c in descendants(ctx)):
+            return False
+        return pick_button(label)(ctx)
+    return act
+
+
 def goto(o, doc, sheet, ref):
     doc.getCurrentController().setActiveSheet(doc.Sheets.getByName(sheet))
     o.dispatch(doc, ".uno:GoToCell", ToPoint=f"${sheet}.{ref}")
@@ -269,12 +278,12 @@ def main():
         # the window opens with the numbers already in its big field (the field shows them and gives them back); the keys of the field itself are LibreOffice's
         o.basic(doc, "WmsSerial", "TestSerialSetText", "SN-1\nSN-2\nSN-3")
         done, rs = drive(o, doc, "WmsSerial", "BtnSerialSpecial", (),
-                         [("Серийные детали — приход", press_memo("SN-1\nSN-2\nSN-3")), ("Серийные детали", pick_button("Провести приход и записать номера")),
-                          ("Серийные детали", pick_button("Не сейчас"))])
+                         [("Серийные детали — приход", press_memo("SN-1\nSN-2\nSN-3")), ("Цвет деталей", pick_button("Каждой детали — свой цвет (красный, синий, зелёный …)")),
+                          ("Серийные детали", pick_button("Провести приход и записать номера")), ("Серийные детали", pick_button("Не сейчас"))])
         o.basic(doc, "WmsUi", "TestUiAuto", 1)
         ser = [int(o.basic(doc, "WmsItem", "SerialEI", x)) for x in ("SN-1", "SN-2", "SN-3")]
-        step("1.1.1: «Серийные детали…» — настоящее окно с большим полем (номера по строкам), подтверждение «Деталей: 3» и вопрос про этикетки; в «Наличии» три ЕИ по 1 шт",
-             done == [True, True, True] and len(set(ser)) == 3 and min(ser) > 0 and all(stock(doc, n) == 1.0 for n in ser), f"{done}; {rs}; {ser}")
+        step("1.1.1: «Серийные детали…» — настоящее окно с большим полем (номера по строкам), вопрос про цвета (1.4.0: каждой детали свой), подтверждение «Деталей: 3» и вопрос про этикетки; в «Наличии» три ЕИ по 1 шт",
+             done == [True, True, True, True] and len(set(ser)) == 3 and min(ser) > 0 and all(stock(doc, n) == 1.0 for n in ser), f"{done}; {rs}; {ser}")
         # ---------------------------------------------------------------- 7. «Собрать деталь…» — the real windows (1.2.0)
         o.basic(doc, "WmsUi", "TestUiAuto", 1)
         for r, (nm_, art_, q_) in enumerate((("Болт М8", "B-8", "40"), ("Гайка М8", "N-8", "40")), start=2):
@@ -418,6 +427,18 @@ def main():
         step("1.2.1: сбой при настоящей полосе хода — сообщение называет причину («Invalid procedure call», код 5, шаг «разбор названий»), а не «(строка 0)»; то же — на листе; после сбоя список строится",
              r10.startswith("ERR:") and "Invalid procedure call" in r10 and "код 5" in r10 and "шаг «разбор названий»" in r10 and "(строка 0)" not in r10 and "Invalid procedure call" in stat10
              and str(o.basic(doc, "WmsTool", "ToolRefresh", "")).startswith("OK:"), f"{r10[:200]}; {stat10[:100]}")
+        # ---------------------------------------------------------------- 1.4.0: «Все листы…» and «Я хочу…» — the real windows
+        o.basic(doc, "WmsUi", "TestUiAuto", 0)
+        goto(o, doc, "Главная", "$A$1")
+        d1, r1 = drive(o, doc, "WmsNav", "BtnSheets", (), [("WMS — все листы", pick_button("Выбрать")), ("WMS — Каждый день", pick_button("Выбрать"))])
+        a1 = doc.getCurrentController().getActiveSheet().Name
+        goto(o, doc, "Главная", "$A$1")
+        d2, r2 = drive(o, doc, "WmsNav", "BtnWant", (), [("WMS — я хочу", pick_button("Выбрать")),
+                                                          ("WMS — принять поставку", pick_button_with("Отмена", "другая позиция — выберу сам"))])
+        a2 = doc.getCurrentController().getActiveSheet().Name
+        o.basic(doc, "WmsUi", "TestUiAuto", 1)
+        step("1.4.0: «Все листы…» (назначение → лист) — открыт «Заказы»; «Я хочу…» (первая задача) — список ожидаемых позиций с «другая позиция…» в настоящем окне, «Отмена» — никуда не переходит, ничего не принято",
+             d1 == [True, True] and a1 == "Заказы" and d2 == [True, True] and a2 == "Главная", f"{d1}; {a1}; {d2}; {a2}")
         o.basic(doc, "WmsUi", "TestUiAuto", 1)
         doc.setModified(False)
         o.dispatch(doc, ".uno:CloseDoc")
