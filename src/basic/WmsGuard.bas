@@ -52,7 +52,7 @@ End Function
 
 ' the book is being saved (OnSave: the file on the disk is still the previous save): a registry out of order is not allowed to replace it unnoticed
 Sub SaveGuard()
-    Dim p As String, r As String
+    Dim p As String, r As String, sBad As String
     On Error GoTo EH
     If gState = "" Then Exit Sub
     p = RegistryProblem()
@@ -61,9 +61,21 @@ Sub SaveGuard()
     If WmsSafe.StGet("RED") = "" Then
         ' the file on the disk was copied right after its own (good) save: the same copy is not made twice (the few copies of this kind are kept in turn)
         If WmsSafe.StGet("GOODSIZE") <> CStr(gSfa.getSize(gDoc.getURL())) Then r = WmsBackup.BackupNow("good")
-        WmsSafe.StSet("RED", Format(Now(), "YYYY-MM-DD HH:MM"))
+        ' 1.4.0: the answer of the copy is read — a copy that was not made is not said to be made (BackupNow answers «ОШИБКА резервной копии…» / «резервная копия невозможна…»)
+        If r <> "" And (InStr(r, "ОШИБКА") > 0 Or InStr(r, "невозможна") > 0) Then
+            sBad = r
+        Else
+            WmsSafe.StSet("RED", Format(Now(), "YYYY-MM-DD HH:MM"))
+        End If
     End If
     If gBlock = "" Then WmsCore.SetBlocked(BLK_REGISTRY, p)
+    If sBad <> "" Then
+        WmsUi.UiMessage("ВНИМАНИЕ: " & p & "." & Chr(10) & Chr(10) _
+            & "Копию «последняя без ошибок» сделать НЕ удалось: " & sBad & Chr(10) _
+            & "Если сохранить книгу сейчас, прежний хороший файл на диске будет заменён этим состоянием, проводить в нём нельзя." & Chr(10) _
+            & "Лучше закрыть книгу БЕЗ сохранения: тогда на диске останется прежний, хороший файл.")
+        Exit Sub
+    End If
     WmsUi.UiMessage("ВНИМАНИЕ: " & p & "." & Chr(10) & Chr(10) _
         & "Эта книга сейчас сохраняется, но после этого проводить в ней нельзя." & Chr(10) _
         & "Последнее хорошее состояние сохранено как копия «последняя без ошибок»: «Обслуживание» → «Вернуться к копии…» вернёт его, " _

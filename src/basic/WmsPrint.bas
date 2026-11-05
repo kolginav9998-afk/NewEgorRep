@@ -550,7 +550,8 @@ Function IssueNote() As String
     ' the number of the note: the document of the issues, or «Н-<№ первой выдачи>» written into B where it was empty (К12)
     If docNo = "" Then docNo = "Н-" & ish.getCellByPosition(IC_NO, rs(0)).getString()
     res = NoteNumber(ish, rs, n, docNo)
-    If Left(res, 4) = "ERR:" Or Left(res, 4) = "ERR-" Then
+    ' 1.4.0: anything but «OK:…» (and the empty answer — nothing to number) is a refusal: BLOCKED:/BUSY:/ERR-… must not let the note be printed without its number in the journal
+    If res <> "" And Left(res, 2) <> "OK" Then
         IssueNote = "ERR:номер накладной не записан в выдачи — " & Mid(res, InStr(res, ":") + 1)
         gUiLastMsg = IssueNote
         Exit Function

@@ -401,7 +401,8 @@ Function ActMake(rs As Variant, kind As Integer, bShow As Boolean) As String
     no = AkNextNo()
     ' the number into the issues that had none (the operation of the journal ISSUE_DOC: recovery and the self-check know it)
     res = WmsPrint.NoteNumber(ish, rr, n, "А-" & no)
-    If Left(res, 4) = "ERR:" Or Left(res, 4) = "ERR-" Then
+    ' 1.4.0: anything but «OK:…» (and the empty answer — nothing to number) is a refusal (BLOCKED:/BUSY:/ERR-…): no act is made without its number in the journal
+    If res <> "" And Left(res, 2) <> "OK" Then
         ActMake = "ERR:номер акта не записан в выдачи — " & Mid(res, InStr(res, ":") + 1)
         Exit Function
     End If
@@ -897,6 +898,20 @@ Private Sub DrFill(dt As Double)
                             iUnit(nIss) = un
                             iNo(nIss) = WmsView.JField(fields, "NO")
                             nIss = nIss + 1
+                        Case "ISSUE_FIX"
+                            ' 1.4.0: an issue of the day that was corrected on the same day is reported as corrected — its new date, recipient, quantity and unit replace the posted ones
+                            ' (a correction of an issue of an earlier day is only counted among the corrections below)
+                            w = WmsView.JField(fields, "NO")
+                            If w <> "" Then
+                                For k = 0 To nIss - 1
+                                    If iNo(k) = w Then
+                                        iDate(k) = DrIsoDate(WmsView.JField(fields, "DATE"))
+                                        iWho(k) = WmsView.JField(fields, "WHO")
+                                        iQty(k) = q
+                                        iUnit(k) = un
+                                    End If
+                                Next k
+                            End If
                         Case "ISSUE_DEL"
                             delNos = delNos & ";" & WmsView.JField(fields, "NO") & ";"
                         Case "ISSUE_DOC"

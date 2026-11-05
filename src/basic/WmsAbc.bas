@@ -62,6 +62,7 @@ Function Aggregate(dSince As Double) As String
     Dim gN() As String, gA() As String, gU() As String, gB() As Double, gP() As String, gR() As Double, gI() As Double, gT() As Double, gC() As Long, gQ() As Double
     Dim eiG() As Long, fl As Variant, f As Long, txt As String, lines As Variant, seq As Long, ts As String, inst As String, sType As String, fields As Variant, canon As String, en As Long
     Dim iG() As Long, iQ() As Double, iD() As Double, iNo() As String, nIss As Long, delNos As String, k As Long, c10 As String, c13 As String, c9 As String, c160 As String
+    Dim sFixNo As String, kFix As Long
     On Error GoTo EH
     gAgN = 0
     st = WmsIssue.StockSheet()
@@ -151,7 +152,7 @@ Function Aggregate(dSince As Double) As String
                                                 End If
                                             End If
                                         End If
-                                    ElseIf sType = "ISSUE" Or sType = "ISSUE_DEL" Or sType = "RETURN" Then
+                                    ElseIf sType = "ISSUE" Or sType = "ISSUE_DEL" Or sType = "ISSUE_FIX" Or sType = "RETURN" Then
                                         canon = WmsView.JField(fields, "EI")
                                         If sType = "ISSUE_DEL" Then
                                             delNos = delNos & ";" & WmsView.JField(fields, "NO") & ";"
@@ -162,6 +163,18 @@ Function Aggregate(dSince As Double) As String
                                                     dt = AbIsoDate(WmsView.JField(fields, "DATE"))
                                                     If sType = "RETURN" Then
                                                         If dt > gT(g) Then gT(g) = dt
+                                                    ElseIf sType = "ISSUE_FIX" Then
+                                                        ' 1.4.0: a corrected issue counts as corrected — its new EI (position), quantity and date replace the posted ones
+                                                        sFixNo = WmsView.JField(fields, "NO")
+                                                        If sFixNo <> "" Then
+                                                            For kFix = 0 To nIss - 1
+                                                                If iNo(kFix) = sFixNo Then
+                                                                    iG(kFix) = g
+                                                                    iQ(kFix) = Val(WmsView.JField(fields, "QTY"))
+                                                                    iD(kFix) = dt
+                                                                End If
+                                                            Next kFix
+                                                        End If
                                                     ElseIf nIss < UBound(iG) Then
                                                         iG(nIss) = g
                                                         iQ(nIss) = Val(WmsView.JField(fields, "QTY"))

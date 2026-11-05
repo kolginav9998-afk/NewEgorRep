@@ -214,6 +214,20 @@ EH:
 End Sub
 
 ' the copies that can be returned to, newest first: rows Array(name, operations, kind, label, when, size MB)
+' 1.4.0: the age in days of the newest copy of the list of copies (-1 — none or not readable)
+Function NewestCopyAge() As Double
+    Dim a As Variant, t As Variant
+    NewestCopyAge = -1
+    On Error GoTo EH
+    a = CopyList()
+    If UBound(a) < 0 Then Exit Function
+    t = gSfa.getDateTimeModified(gBDir & a(0)(0))
+    NewestCopyAge = CDbl(Now()) - (CDbl(DateSerial(t.Year, t.Month, t.Day)) + CDbl(TimeSerial(t.Hours, t.Minutes, t.Seconds)))
+    Exit Function
+EH:
+    NewestCopyAge = -1
+End Function
+
 Function CopyList() As Variant
     Dim s As String, a As Variant, i As Long, n As Long, out() As Variant, f As Variant, j As Long, url As String
     CopyList = Array()
@@ -1316,7 +1330,7 @@ End Function
 
 ' Т6: one light for the whole WMS — 0 green, 1 yellow (do it soon), 2 red (do it now); sText — what and what to do
 Function Health(ByRef sText As String) As Integer
-    Dim red As String, yel As String, a As Variant, x As String, free As Double
+    Dim red As String, yel As String, a As Variant, x As String, free As Double, ageCopy As Double
     On Error GoTo EH
     If gState <> "CLEAN" Then red = "работа остановлена (" & gState & IIf(gBlock <> "", " " & gBlock, "") & ") — «Проверка перед работой», затем «Восстановить»"
     a = Split(StGet("DAILY"), "|")
@@ -1333,6 +1347,9 @@ Function Health(ByRef sText As String) As Integer
     x = FlashNote()
     If x <> "" Then yel = yel & IIf(yel <> "", " · ", "") & x
     If UBound(CopyList()) < 0 Then yel = yel & IIf(yel <> "", " · ", "") & "копий книги в «" & BACKUP_DIR & "» нет — сохраните книгу"
+    ' 1.4.0: an old copy is said too — a daily copy that was not made was an ordinary line of the notes and the light stayed green (three and a half days: a weekend is not a fault)
+    ageCopy = NewestCopyAge()
+    If ageCopy > 3.5 Then yel = yel & IIf(yel <> "", " · ", "") & "последней копии книги " & Int(ageCopy) & " дн. — нажмите «Резервная копия»"
     If DrillAge() >= DRILL_DAYS Then
         yel = yel & IIf(yel <> "", " · ", "") & "учебное восстановление " & IIf(DrillAge() >= 999, "ещё не делалось", "было " & Int(DrillAge()) & " дн. назад") _
             & " — раз в месяц: «Учебное восстановление»"

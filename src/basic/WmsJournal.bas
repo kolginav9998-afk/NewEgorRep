@@ -318,6 +318,12 @@ Private Sub MirrorAppend(fn As String, txt As String, szBefore As Double)
     If Not gSfa.exists(gJMirror) Then gSfa.createFolder(gJMirror)
     msz = -1
     If gSfa.exists(url) Then msz = gSfa.getSize(url)
+    ' 1.4.0: a mirror that holds MORE than the journal (the journal lost its end) is the only copy of that end — it is never written over here
+    ' (the start says the same in MirrorSync); «Журнал из зеркала» puts the end back
+    If msz > szBefore Then
+        gJMirrorErr = "в зеркале больше записей, чем в журнале (" & fn & ") — журнал мог потерять конец: «Журнал из зеркала»"
+        Exit Sub
+    End If
     If msz = szBefore Then
         xs = gSfa.openFileReadWrite(url)
         xs.seek(xs.getLength())

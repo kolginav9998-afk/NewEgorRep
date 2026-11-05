@@ -161,6 +161,19 @@ Function PeriodTotals(d0 As Double, d1 As Double, ByRef nDays As Long) As String
                                         iUn(nIss) = un
                                         nIss = nIss + 1
                                     End If
+                                Case "ISSUE_FIX"
+                                    ' 1.4.0: an issue of the period that was corrected counts as corrected — its new quantity, unit and recipient replace the posted ones
+                                    ' (a correction of an issue posted before the period is only counted below)
+                                    w = WmsView.JField(fields, "NO")
+                                    If w <> "" Then
+                                        For k = 0 To nIss - 1
+                                            If iNo(k) = w Then
+                                                iWho(k) = WmsView.JField(fields, "WHO")
+                                                iQty(k) = q
+                                                iUn(k) = un
+                                            End If
+                                        Next k
+                                    End If
                                 Case "ISSUE_DEL"
                                     delNos = delNos & ";" & WmsView.JField(fields, "NO") & ";"
                                     nIssDel = nIssDel + 1
