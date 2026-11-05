@@ -7440,6 +7440,111 @@ def v93_no_money():
         s.close()
 
 
+@case
+def v94_upgrade_140_150():
+    '''1.5.0 для пользователя 1.4.0: рабочая книга 1.4.0 (собрана исходниками выпуска 1.4.0; в «Заказах» записаны цены; в ней оборотная ведомость и описания отчётов говорят о рублях) — мастер обновляет её
+    в 1.5.0 (проверка, сборка со сверкой каждой ячейки, «сделать рабочей»): данные, журнал и каждый ЕИ те же, старая книга и журнал побайтно те же, описания на листе «Отчёты» без сумм и цен,
+    отчёты новой книги на данных старой — без «руб», «сумм» и «цен…»'''
+    import run_prime
+    import subprocess
+    from harness import git_sources
+    c = "V94"
+    src = os.path.join(OUT, "src_140")
+    why = "" if os.path.isdir(os.path.join(src, "tools")) else git_sources("86e879f", src)
+    if why:
+        R.add(c, "исходники выпуска 1.4.0", "SKIP", why)
+        return
+    d = os.path.join(OUT, "cases", "v94 Склад")
+    shutil.rmtree(d, ignore_errors=True)
+    work = os.path.join(d, "WMS_RELEASE_1.4.0", "WMS_WORK")
+    os.makedirs(work)
+    p = os.path.join(work, "WMS_PROD.ods")
+    b = subprocess.run([sys.executable, os.path.join(src, "tools", "build_ods.py"), p, "--test"], capture_output=True, text=True, timeout=900)
+    if b.returncode != 0 or not os.path.exists(p):
+        R.add(c, "книга 1.4.0 собрана исходниками 1.4.0", False, (b.stdout + b.stderr)[-300:])
+        return
+    s = ready(Session(p))
+    try:
+        core0 = s.sysv("CORE_VERSION")
+        order(s, 1, "1", "Болт М8", qty="10", art="Б-8", J=12.5)
+        r1 = receive(s, 1, "10", place="5-1-1", doc="УПД-1")
+        order(s, 2, "2", "Гайка М8", qty="20", supplier="Лютик", J=2.0)
+        r2 = receive(s, 2, "20", place="5-1-2", doc="УПД-2")
+        b1 = ords(s, 1)[21]
+        put(s, "Выдачи", 1, L=b1, E="3", H=serial(), I="ива")
+        i1 = s.I("IssuePostRow", 1)
+        put(s, "Возврат", 1, B="1", F="1", H=serial(), I="ива")
+        rt = s.B("ReturnPostRow", 1, module="WmsReturn")
+        stk = s.doc.Sheets.getByName("Наличие")
+        n_ei = int(s.sysv("NEXT_EI")) - 1
+        before = [tuple(r[:8]) for r in stk.getCellRangeByPosition(0, 1, 7, n_ei).getDataArray()]
+        seq_old = int(s.sysv("LAST_SEQ"))
+        old_turn = s.B("Turnover", serial(-30), serial(), False, module="WmsLedger")
+        old_flat = " | ".join(" ".join(x) for x in print_rows(s, 400))
+        old_desc = " ".join(str(x[0]) for x in s.doc.Sheets.getByName("Отчёты").getCellRangeByPosition(2, 3, 2, 20).getDataArray() if x[0])
+        ok_old = all(str(x).startswith("OK") for x in (r1, r2, i1, rt))
+    finally:
+        s.close(save=True)
+    R.add(c, "в книге 1.4.0 всё проведено; оборотная ведомость и описания отчётов 1.4.0 говорят о рублях и суммах (так и было)",
+          core0 == "1.4.0" and ok_old and str(old_turn).startswith("OK") and not no_money(old_flat) and not no_money(old_desc), f"{core0}; {ok_old}; {old_flat[:120]}; {old_desc[:80]}")
+    h0 = run_prime.sha(p)
+    j0 = {f: run_prime.sha(f) for f in glob.glob(os.path.join(work, "WMS_Journal", "*.csv"))}
+    rc0, o0 = run_prime.upgrade("check", p)
+    new = os.path.join(d, f"WMS_RELEASE_{run_prime.VERS['WMS_PRODUCT_VERSION']}", "WMS_WORK")
+    rc1, o1 = run_prime.upgrade("build", p, "--to", new)
+    rc2, o2 = run_prime.upgrade("promote", "--to", new)
+    rep = open(os.path.join(new, "UPGRADE_REPORT.md"), encoding="utf-8").read() if os.path.exists(os.path.join(new, "UPGRADE_REPORT.md")) else ""
+    R.add(c, "книга 1.4.0: проверка «можно обновить», сборка — 0 расхождений ячеек, «сделать рабочей»; старая книга и журнал побайтно те же, старая заперта",
+          rc0 == 0 and rc1 == 0 and rc2 == 0 and "расхождений: 0" in rep and run_prime.sha(p) == h0
+          and {f: run_prime.sha(f) for f in glob.glob(os.path.join(work, "WMS_Journal", "*.csv"))} == j0 and os.path.exists(os.path.join(work, "WMS_Journal", "wms.lock")),
+          f"{o0[-160:]}; {o1[-200:]}; {o2[-160:]}; {rep[-300:]}")
+    s = ready(Session(os.path.join(new, "WMS_PROD.ods")))
+    try:
+        sh = s.doc.Sheets
+        stk = sh.getByName("Наличие")
+        after = [tuple(r[:8]) for r in stk.getCellRangeByPosition(0, 1, 7, n_ei).getDataArray()]
+        R.add(c, "новая книга — выпуск 1.5.0: «работа разрешена», тот же журнал и каждый ЕИ; цены в «Заказах» на месте (12,50 и 2,00)",
+              s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == run_prime.VERS["WMS_CORE_VERSION"] == "1.5.0" and before == after and int(s.sysv("LAST_SEQ")) == seq_old
+              and ords(s, 1)[9] == 12.5 and ords(s, 2)[9] == 2.0, f"{s.state()}; {s.sysv('CORE_VERSION')}; {before == after}; {ords(s, 1)[9]}; {ords(s, 2)[9]}")
+        desc = " ".join(str(x[0]) for x in sh.getByName("Отчёты").getCellRangeByPosition(2, 3, 2, 20).getDataArray() if x[0])
+        R.add(c, "описания отчётов на листе «Отчёты» после обновления — без «сумм», «цен» и «рублей» (прежние тексты заменены)", len(desc) > 300 and no_money(desc), desc[:200])
+        bad = []
+        pages = {}
+
+        def page(name, res, n=400):
+            rows = print_rows(s, n)
+            flat = " | ".join(" ".join(x) for x in rows)
+            pages[name] = flat
+            if not str(res).startswith("OK") or not no_money(flat):
+                bad.append((name, str(res)[:60], flat[:120]))
+
+        def csv_of(name, res):
+            path = str(res)[5:].split("\n")[0]
+            txt = open(path, encoding="utf-8-sig").read() if str(res).startswith("FILE:") and os.path.isfile(path) else ""
+            pages[name] = txt
+            if not txt or not no_money(txt):
+                bad.append((name, str(res)[:60], txt[:120]))
+
+        page("остаток на дату", s.B("StockOnDate", serial(), False, module="WmsLedger"))
+        page("оборотная ведомость", s.B("Turnover", serial(-30), serial(), False, module="WmsLedger"))
+        csv_of("оборотная ведомость, файл", s.B("Turnover", serial(-30), serial(), True, module="WmsLedger"))
+        csv_of("выгрузка движений", s.B("ExportMoves", serial(-30), serial(), module="WmsLedger"))
+        page("завышение остатков", s.B("Overstate", False, module="WmsLedger"))
+        page("отчёт руководителю", s.B("ManagerReport", serial(), serial(), module="WmsLedger"))
+        page("мёртвый груз по остатку", s.B("DeadStock", 90, True, module="WmsLedger"))
+        R.add(c, "отчёты на данных книги 1.4.0 — без «руб», «сумм» и «цен…»; количества те же: болт в остатке 8 шт (10 − 3 + 1), в оборотной «10» приходом, «Разобрано» в завышении",
+              not bad and len(pages) == 7 and "8 шт" in pages["остаток на дату"] and "Болт М8" in pages["оборотная ведомость"] and "Разобрано" in pages["завышение остатков"], f"{bad}; {len(pages)}; {pages['остаток на дату'][:200]}")
+        dsh = sh.getByName("Дашборд")
+        db = s.B("DashRefresh", module="WmsDash")
+        dflat = " | ".join(str(x) for r in dsh.getCellRangeByPosition(0, 0, 12, 67).getDataArray() for x in r if x != "")
+        R.add(c, "«Дашборд» обновлённой книги — без денег, плитка «всего ЕИ … требует разбора …»", str(db).startswith("OK") and "всего ЕИ" in dflat and not re.search(r"руб|на сумму|₽|\bцен", dflat.lower()), f"{db}; {dflat[:200]}")
+        sc = s.B("ActionSelfCheck")
+        R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:200])
+        oracle(c, s, "книга 1.4.0, обновлённая до 1.5.0")
+    finally:
+        s.close()
+
+
 # ================================================================ runner
 
 def main():
