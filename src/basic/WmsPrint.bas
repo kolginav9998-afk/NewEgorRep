@@ -130,7 +130,7 @@ Function PrintDone(sh As Object) As String
     pr(0).EndColumn = PR_COLS - 1
     pr(0).EndRow = gPrRow
     sh.setPrintAreas(pr())
-    sh.getCellByPosition(0, gPrRow + 1).setString("WMS · " & Format(Now(), "DD.MM.YYYY HH:MM"))
+    sh.getCellByPosition(0, gPrRow + 1).setString("Сформировано " & Format(Now(), "DD.MM.YYYY HH:MM"))
     sh.getCellByPosition(0, gPrRow + 1).CharHeight = 7
     sh.getCellByPosition(0, gPrRow + 1).CharColor = RGB(150, 150, 150)
     On Error GoTo 0
@@ -300,10 +300,10 @@ Function DiscrepancyAct() As String
         & IIf(rdate <> "", " · принято " & rdate, ""))
     PrintLine(sh, "Позиций в поставке: " & n & IIf(nDiff > 0, " · с расхождением по количеству: " & nDiff, " · по количеству расхождений нет") _
         & IIf(nr > 0, " · возвращено как брак / пересорт: " & nr, ""), True)
-    PrintTable(sh, Array("№", "Наименование (артикул)", "ЕИ", "По документу", "Фактически", "Расхождение", "Ед."), rows, n, "0,3,4")
+    PrintTable(sh, Array("№", "Наименование (артикул)", "Код", "По документу", "Фактически", "Расхождение", "Ед."), rows, n, "0,3,4")
     If nr > 0 Then
         PrintLine(sh, "Брак, пересорт — возвращено поставщику:", True)
-        PrintTable(sh, Array("№", "Наименование", "ЕИ", "Количество", "Дата", "Причина", "Документ"), rr, nr, "0,3")
+        PrintTable(sh, Array("№", "Наименование", "Код", "Количество", "Дата", "Причина", "Документ"), rr, nr, "0,3")
     End If
     PrintLine(sh, "Претензия: прошу допоставить недостающий товар, заменить бракованный или уменьшить сумму к оплате.")
     PrintSign(sh, Array("Представитель склада", "Представитель поставщика (водитель)"))
@@ -464,7 +464,7 @@ Function WriteOffAct() As String
     sh = PrintBegin("АКТ СПИСАНИЯ № " & no0 & IIf(no1 <> no0, "–" & no1, "") & " от " & dt, "Акт списания " & no0)
     PrintLine(sh, "Основание (причина): " & Replace(reasons, "|", "; "))
     PrintLine(sh, "Списано позиций: " & n & " · на сумму " & Money(sum) & IIf(noPrice > 0, " (без цены: " & noPrice & ")", ""), True)
-    PrintTable(sh, Array("№", "ЕИ", "Наименование (артикул)", "Количество", "Ед.", "Цена", "Сумма"), rows, n, "0,5,6")
+    PrintTable(sh, Array("№", "Код", "Наименование (артикул)", "Количество", "Ед.", "Цена", "Сумма"), rows, n, "0,5,6")
     PrintLine(sh, "Итого на сумму: " & Money(sum), True)
     PrintSign(sh, Array("Списал (кладовщик)", "Проверил", "Утвердил"))
     WriteOffAct = PrintDone(sh)
@@ -559,7 +559,7 @@ Function IssueNote() As String
     sh = PrintBegin("НАКЛАДНАЯ НА ВЫДАЧУ № " & docNo & " от " & Format(IIf(dt > 0, dt, WmsOrders.Today()), "DD.MM.YYYY"), "Накладная " & docNo)
     PrintLine(sh, "Получатель: " & IIf(who <> "", who, "—"))
     PrintLine(sh, "Позиций: " & n & ". Количество — как выдано: в частях фасовки, в скобках — в единицах учёта.", True)
-    PrintTable(sh, Array("№", "ЕИ", "Наименование (артикул)", "Количество", "Кому", "Дата", "Выдача"), rows, n, "0")
+    PrintTable(sh, Array("№", "Код", "Наименование (артикул)", "Количество", "Кому", "Дата", "Выдача"), rows, n, "0")
     PrintSign(sh, Array("Выдал (кладовщик)", "Получил"))
     IssueNote = PrintDone(sh)
 End Function
@@ -645,7 +645,7 @@ Function CardPrint(canon As String) As String
     PrintLine(sh, info)
     PrintTable(sh, Array("Дата", "Операция", "Документ / кому", "Приход", "Расход", "Остаток", "Подробно"), rows, nr, "3,4,5")
     If nf > 0 Then
-        PrintLine(sh, "Исправления и сторно (из журнала WMS): " & nf, True)
+        PrintLine(sh, "Исправления и сторно по этой позиции: " & nf, True)
         PrintTable(sh, Array("№", "Проведено", "Операция", "Было → стало, причина"), fx, nf, "0")
     Else
         PrintLine(sh, "Исправлений и сторно не было.")
@@ -716,9 +716,9 @@ Function InventoryList(sZone As String) As String
         Exit Function
     End If
     sh = PrintBegin("ИНВЕНТАРИЗАЦИОННАЯ ОПИСЬ от " & Format(WmsOrders.Today(), "DD.MM.YYYY"), "Опись " & IIf(sZone <> "", sZone, "склад"))
-    PrintLine(sh, "Зона: " & IIf(sZone <> "", "«" & sZone & "»", "весь склад") & " · ЕИ с остатком: " & n & ". Впишите в «Факт» пересчитанное количество " _
+    PrintLine(sh, "Зона: " & IIf(sZone <> "", "«" & sZone & "»", "весь склад") & " · позиций с остатком: " & n & ". Впишите в «Факт» пересчитанное количество " _
         & "(в тех же частях); найденное без этикетки — в конце листа.", True)
-    PrintTable(sh, Array("№", "Место", "ЕИ", "Наименование", "Учёт", "Факт", "Примечание"), tmp, n, "0")
+    PrintTable(sh, Array("№", "Место", "Код", "Наименование", "Учёт", "Факт", "Примечание"), tmp, n, "0")
     PrintSign(sh, Array("Пересчитал", "Проверил"))
     InventoryList = PrintDone(sh)
 End Function
@@ -942,8 +942,8 @@ Function InventoryCompare(dt As Double) As String
         Exit Function
     End If
     sh = PrintBegin("СЛИЧИТЕЛЬНАЯ ВЕДОМОСТЬ от " & Format(dt, "DD.MM.YYYY"), "Сличительная ведомость " & Format(dt, "YYYY-MM-DD"))
-    PrintLine(sh, "Пересчитано ЕИ: " & n & " · совпало " & nEq & " · излишки на сумму " & Money(plus) & " · недостачи на сумму " & Money(minus), True)
-    PrintTable(sh, Array("№", "ЕИ", "Наименование", "Учёт / факт", "Результат", "Цена", "Сумма"), rows, n, "0,5,6")
+    PrintLine(sh, "Пересчитано позиций: " & n & " · совпало " & nEq & " · излишки на сумму " & Money(plus) & " · недостачи на сумму " & Money(minus), True)
+    PrintTable(sh, Array("№", "Код", "Наименование", "Учёт / факт", "Результат", "Цена", "Сумма"), rows, n, "0,5,6")
     PrintSign(sh, Array("Председатель комиссии", "Члены комиссии", "Материально ответственное лицо"))
     InventoryCompare = PrintDone(sh)
 End Function

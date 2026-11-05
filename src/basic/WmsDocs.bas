@@ -634,6 +634,7 @@ Function DayReport(dt As Double, bShow As Boolean) As String
     WmsInit()
     gDrOut = ""
     gDrPeriod = False
+    WmsPeriod.RefsReset()
     DrFill(dt)
     a = Split(gDrOut, Chr(10))
     nwd = DrNextWork(dt)
@@ -643,8 +644,8 @@ Function DayReport(dt As Double, bShow As Boolean) As String
         If Trim(sh.getCellByPosition(1, DR_SIGN_ROW).getString()) <> "" Then sign = Trim(sh.getCellByPosition(1, DR_SIGN_ROW).getString())
     End If
     secs = Array("D", "T", "P", "C")
-    titles = Array("1. Завершено сегодня:", "2. Задачи на " & DrOnDay(nwd) & " (" & Format(CDate(nwd), "DD.MM.YYYY") & "):", "3. В процессе:", "4. Контроль данных (по журналу WMS):")
-    none = Array("операций в WMS за этот день не проведено", "задач не записано", "ничего не записано", "")
+    titles = Array("1. Завершено сегодня:", "2. Задачи на " & DrOnDay(nwd) & " (" & Format(CDate(nwd), "DD.MM.YYYY") & "):", "3. В процессе:", "4. Показатели склада:")
+    none = Array("складских операций за этот день не было", "задач не записано", "ничего не записано", "")
     doc = DcNewDoc(bShow)
     DcPara(doc, Format(CDate(dt), "DD.MM.YYYY") & " г.", 0, 12, False, 500)
     DcPara(doc, sign, 0, 12, False, 500)
@@ -737,6 +738,7 @@ Function PeriodReport(d0 As Double, d1 As Double, bShow As Boolean) As String
         sh = gDoc.Sheets.getByName(SH_DAYREP)
         If Trim(sh.getCellByPosition(1, DR_SIGN_ROW).getString()) <> "" Then sign = Trim(sh.getCellByPosition(1, DR_SIGN_ROW).getString())
     End If
+    WmsPeriod.RefsReset()
     doc = DcNewDoc(bShow)
     DcPara(doc, "Отчёт за период " & Format(CDate(d0), "DD.MM.YYYY") & " — " & Format(CDate(d1), "DD.MM.YYYY") & " г.", 0, 12, True, 100)
     DcPara(doc, sign, 0, 12, False, 400)
@@ -757,7 +759,7 @@ Function PeriodReport(d0 As Double, d1 As Double, bShow As Boolean) As String
                     n = n + 1
                 End If
             Next i
-            If n = 0 Then DcPara(doc, "• операций в WMS за этот день не проведено", 0, 12, False, 60, -500, 500)
+            If n = 0 Then DcPara(doc, "• складских операций за этот день не было", 0, 12, False, 60, -500, 500)
             For i = 0 To UBound(a)
                 If Left(a(i), 2) = "C|" Then
                     DcPara(doc, "• " & Mid(a(i), 3), 0, 12, False, 60, -500, 500)
@@ -775,7 +777,7 @@ Function PeriodReport(d0 As Double, d1 As Double, bShow As Boolean) As String
     DcPara(doc, "Итого за период:", 0, 12, True, 100)
     tot = WmsPeriod.PeriodTotals(d0, d1, n)
     If tot = "" Then
-        DcPara(doc, "• операций в WMS за период не проведено", 0, 12, False, 60, -500, 500)
+        DcPara(doc, "• складских операций за период не было", 0, 12, False, 60, -500, 500)
     Else
         b = Split(tot, Chr(10))
         For i = 0 To UBound(b)
@@ -813,12 +815,28 @@ Private Sub DrFill(dt As Double)
     Dim iDate() As Double, iWho() As String, iQty() As Double, iUnit() As String, iNo() As String, nIss As Long, delNos As String
     Dim nRet As Long, retU As String, nMove As Long, nWo As Long, nInv As Long, nSplit As Long, nSup As Long, nKit As Long, nAsm As Long
     Dim nSerial As Long, nPack As Long, nDocNo As Long, docNos As String, nCancel As Long, iLo As Long, iHi As Long
+    Dim iEi() As Long, rSup(40) As String, rSupC(40) As Long, nRSup As Long, j As Long, rcvSum As Double, nNoPr As Long, nDocChk As Long, nDiff As Long, shortU As String, overU As String, dq As Double
+    Dim rcEi() As Long, rcQ() As Double, rcU() As String, rcSp() As String, rcPr() As Double, rcDq() As Double, rcPl() As Boolean, rcDel() As Boolean, nRc As Long, slot As Long, k2 As Long
+    Dim rtNo() As Long, rtQ() As Double, rtU() As String, rtDel() As Boolean, nRt As Long
     On Error GoTo EH
+    ReDim rcEi(100)
+    ReDim rcQ(100)
+    ReDim rcU(100)
+    ReDim rcSp(100)
+    ReDim rcPr(100)
+    ReDim rcDq(100)
+    ReDim rcPl(100)
+    ReDim rcDel(100)
+    ReDim rtNo(100)
+    ReDim rtQ(100)
+    ReDim rtU(100)
+    ReDim rtDel(100)
     ReDim iDate(200)
     ReDim iWho(200)
     ReDim iQty(200)
     ReDim iUnit(200)
     ReDim iNo(200)
+    ReDim iEi(200)
     codes = Split(SRC_CODES, "|")
     names = Split(SRC_NAMES, "|")
     day = Format(CDate(dt), "YYYY-MM-DD")
@@ -865,11 +883,53 @@ Private Sub DrFill(dt As Double)
                         q = Val(WmsView.JField(fields, "QTY"))
                         un = WmsView.JField(fields, "UNIT")
                         Select Case sType
-                        Case "RECEIPT", "RECEIPT_ADD"
-                            nRcv = nRcv + 1
-                            rcvU = DrUnitAdd(rcvU, un, q)
-                            If WmsView.JField(fields, "PLACE") <> "" Then nPlaced = nPlaced + 1
-                            DrEiRange(WmsView.JField(fields, "EI"), eiMin, eiMax, nEiNew)
+                        Case "RECEIPT", "RECEIPT_ADD", "RECEIPT_FIX"
+                            ' 1.4.0: the receipts of the day are kept one by one: a correction of a receipt of the same day replaces its figures, a deleted one is not counted
+                            slot = -1
+                            If sType = "RECEIPT_FIX" Then
+                                k2 = WmsView.EiNo(WmsView.JField(fields, "EI"), 99999999)
+                                For j = nRc - 1 To 0 Step -1
+                                    If rcEi(j) = k2 And Not rcDel(j) Then
+                                        slot = j
+                                        Exit For
+                                    End If
+                                Next j
+                            Else
+                                If nRc > UBound(rcEi) Then
+                                    ReDim Preserve rcEi(2 * nRc)
+                                    ReDim Preserve rcQ(2 * nRc)
+                                    ReDim Preserve rcU(2 * nRc)
+                                    ReDim Preserve rcSp(2 * nRc)
+                                    ReDim Preserve rcPr(2 * nRc)
+                                    ReDim Preserve rcDq(2 * nRc)
+                                    ReDim Preserve rcPl(2 * nRc)
+                                    ReDim Preserve rcDel(2 * nRc)
+                                End If
+                                slot = nRc
+                                nRc = nRc + 1
+                                rcEi(slot) = WmsView.EiNo(WmsView.JField(fields, "EI"), 99999999)
+                                rcDel(slot) = False
+                            End If
+                            If slot >= 0 Then
+                                rcQ(slot) = q
+                                rcU(slot) = un
+                                rcSp(slot) = Trim(WmsView.JField(fields, "SUPPLIER"))
+                                w = WmsView.JField(fields, "PRICE")
+                                rcPr(slot) = -1
+                                If w <> "" Then rcPr(slot) = Val(w)
+                                w = WmsView.JField(fields, "DOC_QTY")
+                                rcDq(slot) = -1
+                                If w <> "" Then rcDq(slot) = Val(w)
+                                rcPl(slot) = (WmsView.JField(fields, "PLACE") <> "")
+                            End If
+                        Case "RECEIPT_DEL"
+                            k2 = WmsView.EiNo(WmsView.JField(fields, "EI"), 99999999)
+                            For j = nRc - 1 To 0 Step -1
+                                If rcEi(j) = k2 And Not rcDel(j) Then
+                                    rcDel(j) = True
+                                    Exit For
+                                End If
+                            Next j
                         Case "SP_RECEIPT"
                             k = DrIndexOf(codes, WmsView.JField(fields, "SRC"))
                             If k >= 0 Then nSp(k) = nSp(k) + 1
@@ -891,12 +951,14 @@ Private Sub DrFill(dt As Double)
                                 ReDim Preserve iQty(2 * nIss)
                                 ReDim Preserve iUnit(2 * nIss)
                                 ReDim Preserve iNo(2 * nIss)
+                                ReDim Preserve iEi(2 * nIss)
                             End If
                             iDate(nIss) = DrIsoDate(WmsView.JField(fields, "DATE"))
                             iWho(nIss) = WmsView.JField(fields, "WHO")
                             iQty(nIss) = q
                             iUnit(nIss) = un
                             iNo(nIss) = WmsView.JField(fields, "NO")
+                            iEi(nIss) = WmsView.EiNo(WmsView.JField(fields, "EI"), 99999999)
                             nIss = nIss + 1
                         Case "ISSUE_FIX"
                             ' 1.4.0: an issue of the day that was corrected on the same day is reported as corrected — its new date, recipient, quantity and unit replace the posted ones
@@ -909,6 +971,7 @@ Private Sub DrFill(dt As Double)
                                         iWho(k) = WmsView.JField(fields, "WHO")
                                         iQty(k) = q
                                         iUnit(k) = un
+                                        If WmsView.JField(fields, "EI") <> "" Then iEi(k) = WmsView.EiNo(WmsView.JField(fields, "EI"), 99999999)
                                     End If
                                 Next k
                             End If
@@ -918,9 +981,41 @@ Private Sub DrFill(dt As Double)
                             nDocNo = nDocNo + 1
                             w = WmsView.JField(fields, "DOC")
                             If w <> "" And InStr(";" & docNos & ";", ";" & w & ";") = 0 Then docNos = docNos & IIf(docNos <> "", ";", "") & w
-                        Case "RETURN"
-                            nRet = nRet + 1
-                            retU = DrUnitAdd(retU, un, q)
+                        Case "RETURN", "RETURN_FIX"
+                            slot = -1
+                            k2 = CLng(Val(WmsView.JField(fields, "RET")))
+                            If sType = "RETURN_FIX" Then
+                                For j = nRt - 1 To 0 Step -1
+                                    If rtNo(j) = k2 And Not rtDel(j) Then
+                                        slot = j
+                                        Exit For
+                                    End If
+                                Next j
+                            Else
+                                If nRt > UBound(rtNo) Then
+                                    ReDim Preserve rtNo(2 * nRt)
+                                    ReDim Preserve rtQ(2 * nRt)
+                                    ReDim Preserve rtU(2 * nRt)
+                                    ReDim Preserve rtDel(2 * nRt)
+                                End If
+                                slot = nRt
+                                nRt = nRt + 1
+                                rtNo(slot) = k2
+                                rtDel(slot) = False
+                            End If
+                            If slot >= 0 Then
+                                rtQ(slot) = q
+                                ' (the correction of a return has no unit of its own: the unit of the return stays)
+                                If un <> "" Then rtU(slot) = un
+                            End If
+                        Case "RETURN_DEL"
+                            k2 = CLng(Val(WmsView.JField(fields, "RET")))
+                            For j = nRt - 1 To 0 Step -1
+                                If rtNo(j) = k2 And Not rtDel(j) Then
+                                    rtDel(j) = True
+                                    Exit For
+                                End If
+                            Next j
                         Case "MOVE"
                             nMove = nMove + 1
                         Case "WRITE_OFF"
@@ -949,18 +1044,87 @@ Private Sub DrFill(dt As Double)
             End If
         Next i
     End If
-    ' ---- 1. done today
-    If nCars > 0 Then DrAdd("D", "Принято машин с поставками: " & nCars & IIf(carSup <> "", " (" & Replace(carSup, ";", ", ") & ")", ""))
-    If nRcv > 0 Then DrAdd("D", "Приёмка по заказам: принято позиций — " & nRcv & "; количество: " & DrUnitText(rcvU) & ". Товар пересчитан и принят в WMS")
+    ' ---- the receipts and the returns of the day, the corrected and the deleted ones taken into account
+    For k = 0 To nRc - 1
+        If Not rcDel(k) Then
+            nRcv = nRcv + 1
+            rcvU = DrUnitAdd(rcvU, rcU(k), rcQ(k))
+            If rcPl(k) Then nPlaced = nPlaced + 1
+            If rcEi(k) >= 1 Then
+                If eiMin = 0 Or rcEi(k) < eiMin Then eiMin = rcEi(k)
+                If rcEi(k) > eiMax Then eiMax = rcEi(k)
+                nEiNew = nEiNew + 1
+            End If
+            w = rcSp(k)
+            If w <> "" And nRSup <= UBound(rSup) Then
+                slot = -1
+                For j = 0 To nRSup - 1
+                    If WmsSup.SupId(rSup(j)) = WmsSup.SupId(w) Then slot = j
+                Next j
+                If slot < 0 Then
+                    slot = nRSup
+                    rSup(slot) = w
+                    nRSup = nRSup + 1
+                End If
+                rSupC(slot) = rSupC(slot) + 1
+            End If
+            If rcPr(k) >= 0 Then
+                rcvSum = rcvSum + rcPr(k) * rcQ(k)
+            Else
+                nNoPr = nNoPr + 1
+            End If
+            If rcDq(k) >= 0 Then
+                nDocChk = nDocChk + 1
+                If Abs(rcDq(k) - rcQ(k)) > 0.0000001 Then
+                    nDiff = nDiff + 1
+                    If rcDq(k) > rcQ(k) Then
+                        shortU = DrUnitAdd(shortU, rcU(k), rcDq(k) - rcQ(k))
+                    Else
+                        overU = DrUnitAdd(overU, rcU(k), rcQ(k) - rcDq(k))
+                    End If
+                End If
+            End If
+        End If
+    Next k
+    For k = 0 To nRt - 1
+        If Not rtDel(k) Then
+            nRet = nRet + 1
+            retU = DrUnitAdd(retU, rtU(k), rtQ(k))
+        End If
+    Next k
+    ' ---- 1. done today (1.4.0: the wording is that of a storekeeper's report — the reader of it does not use the table)
+    If nCars > 0 Then DrAdd("D", "Принято автомашин с грузом от поставщиков: " & nCars & IIf(carSup <> "", " (" & Replace(carSup, ";", ", ") & ")", ""))
+    If nRcv > 0 Then
+        u = "Приёмка товара по заказам: принято позиций — " & nRcv & "; количество: " & DrUnitText(rcvU)
+        If rcvSum > 0 Then u = u & "; на сумму около " & WmsPeriod.MoneyRub(rcvSum) & IIf(nNoPr > 0, " (по " & nNoPr & " поз. цена не указана)", "")
+        DrAdd("D", u & IIf(Right(u, 1) = ".", " ", ". ") & "Товар пересчитан и оприходован на склад")
+        If nRSup > 0 Then
+            u = ""
+            For j = 0 To nRSup - 1
+                u = u & IIf(u <> "", ", ", "") & rSup(j) & " — " & rSupC(j)
+            Next j
+            DrAdd("D", "Поставщики (число принятых позиций): " & u)
+        End If
+        If nDocChk > 0 Then
+            If nDiff = 0 Then
+                DrAdd("D", "Сверка с документами поставщиков: проверено позиций — " & nDocChk & ", расхождений нет")
+            Else
+                u = ""
+                If shortU <> "" Then u = "недопоставлено — " & DrUnitText(shortU)
+                If overU <> "" Then u = u & IIf(u <> "", "; ", "") & "излишек — " & DrUnitText(overU)
+                DrAdd("D", "Сверка с документами поставщиков: проверено позиций — " & nDocChk & ", расхождения по " & nDiff & " (" & u & ")")
+            End If
+        End If
+    End If
     If nSpAll > 0 Then
         u = ""
         For i = 0 To 4
             If nSp(i) > 0 Then u = u & IIf(u <> "", ", ", "") & names(i) & " — " & nSp(i)
         Next i
-        DrAdd("D", "Иной приход (инвентаризация текущих остатков, принятое от производства и др.): записей — " & nSpAll & " (" & u & ")")
+        DrAdd("D", "Прочее оприходование (остатки по результатам пересчёта, принятое от производства и др.): записей — " & nSpAll & " (" & u & ")")
     End If
-    If nEiNew > 0 Then DrAdd("D", "Присвоены внутренние коды (ЕИ) для складского учёта: " & nEiNew & IIf(eiMax > eiMin, " — от ЕИ-" & Format(eiMin, "00000000") & " до ЕИ-" & Format(eiMax, "00000000"), IIf(eiMin > 0, " — ЕИ-" & Format(eiMin, "00000000"), "")))
-    If nPlaced > 0 Then DrAdd("D", "Выставлено на адресное хранение (указано место): " & nPlaced)
+    If nEiNew > 0 Then DrAdd("D", "Новым поступлениям присвоены складские коды (позиции поставлены на учёт): " & nEiNew)
+    If nPlaced > 0 Then DrAdd("D", "Размещено на адресное хранение (указано место хранения): " & nPlaced & " " & WmsView.Plural(nPlaced, "позиция", "позиции", "позиций"))
     ' an issue posted and deleted (storno) on the same day is not an issue of the day: the deletion is counted below
     k = 0
     For i = 0 To nIss - 1
@@ -970,45 +1134,49 @@ Private Sub DrFill(dt As Double)
             iQty(k) = iQty(i)
             iUnit(k) = iUnit(i)
             iNo(k) = iNo(i)
+            iEi(k) = iEi(i)
             k = k + 1
         End If
     Next i
     nIss = k
-    DrIssues(dt, iDate, iWho, iQty, iUnit, nIss)
-    If nRet > 0 Then DrAdd("D", "Принято возвратов: " & nRet & " (" & DrUnitText(retU) & ")")
+    DrIssues(dt, iDate, iWho, iQty, iUnit, iEi, nIss)
+    If nRet > 0 Then DrAdd("D", "Принято возвратов от получателей: " & nRet & " " & WmsView.Plural(nRet, "позиция", "позиции", "позиций") & " (" & DrUnitText(retU) & ")")
     u = ""
-    If nMove > 0 Then u = u & IIf(u <> "", ", ", "") & "перемещений — " & nMove
-    If nWo > 0 Then u = u & IIf(u <> "", ", ", "") & "списаний — " & nWo
-    If nInv > 0 Then u = u & IIf(u <> "", ", ", "") & "позиций инвентаризации — " & nInv
-    If nSplit > 0 Then u = u & IIf(u <> "", ", ", "") & "разделений ЕИ — " & nSplit
-    If nSup > 0 Then u = u & IIf(u <> "", ", ", "") & "возвратов поставщику — " & nSup
-    If nKit > 0 Then u = u & IIf(u <> "", ", ", "") & "сборок комплектов — " & nKit
-    If nAsm > 0 Then u = u & IIf(u <> "", ", ", "") & "сборок деталей — " & nAsm
-    If u <> "" Then DrAdd("D", "Корректировки склада: " & u)
+    If nMove > 0 Then u = u & IIf(u <> "", "; ", "") & "перемещений между местами хранения — " & nMove
+    If nWo > 0 Then u = u & IIf(u <> "", "; ", "") & "списаний — " & nWo
+    If nInv > 0 Then u = u & IIf(u <> "", "; ", "") & "позиций пересчитано при инвентаризации — " & nInv
+    If nSplit > 0 Then u = u & IIf(u <> "", "; ", "") & "позиций разделено на части — " & nSplit
+    If nSup > 0 Then u = u & IIf(u <> "", "; ", "") & "возвратов поставщикам — " & nSup
+    If nKit > 0 Then u = u & IIf(u <> "", "; ", "") & "наборов скомплектовано — " & nKit
+    If nAsm > 0 Then u = u & IIf(u <> "", "; ", "") & "узлов собрано из деталей — " & nAsm
+    If u <> "" Then DrAdd("D", "Внутрискладские операции: " & u)
     If nSerial > 0 Then DrAdd("D", "Присвоены серийные номера: " & nSerial)
-    If nPack > 0 Then DrAdd("D", "Записана фасовка ЕИ: " & nPack)
+    If nPack > 0 Then DrAdd("D", "Указана фасовка (количество в упаковке): " & nPack & " " & WmsView.Plural(nPack, "позиция", "позиции", "позиций"))
     DrActsOfDay(dt)
-    If nDocNo > 0 Then DrAdd("D", "Оформлены накладные / документы выдачи: " & docNos)
-    If nFix + nDel + nCancel > 0 Then DrAdd("D", "Исправления учёта: исправлено операций — " & nFix & ", удалено (сторно) — " & nDel & IIf(nCancel > 0, ", отменено заказов — " & nCancel, ""))
+    If nDocNo > 0 Then DrAdd("D", "Оформлены накладные и документы на выдачу: " & docNos)
+    If nFix + nDel + nCancel > 0 Then DrAdd("D", "Внесены исправления в учёт: скорректировано записей — " & nFix & ", аннулировано (сторно) — " & nDel & IIf(nCancel > 0, ", отменено заказов — " & nCancel, ""))
     If Not gDrPeriod Then DrManual("D", DR_COL_DONE)
     ' ---- 2. tasks for the next working day
     If Not gDrPeriod Then
         DrBacklog(dt)
         DrManual("T", DR_COL_TASKS)
-        DrOpenWork()
+        DrOpenWork(dt)
         ' ---- 3. in progress
         DrManual("P", DR_COL_PROG)
         DrStockState()
     End If
     gDrOps = nOps
-    ' ---- 4. control
+    ' ---- 4. indicators of the warehouse
     If nOps > 0 Then
-        DrAdd("C", "Операций проведено за день: " & nOps & " (журнал № " & seqFirst & "–" & seqLast & ")")
+        u = "Складских операций за день: " & nOps
+        If Not gDrPeriod Then
+            k = DrOpsOfDay(DrPrevWork(dt))
+            u = u & " (предыдущий рабочий день, " & Format(CDate(DrPrevWork(dt)), "DD.MM") & " — " & k & ")"
+        End If
+        DrAdd("C", u)
     Else
-        DrAdd("C", "Операций в журнале за этот день нет")
+        DrAdd("C", "Складских операций за этот день не было")
     End If
-    u = WmsSafe.StGet("FLASH")
-    If u <> "" And Not gDrPeriod Then DrAdd("C", "Последняя копия на флешку: " & Left(u, InStr(u & "|", "|") - 1))
     Exit Sub
 EH:
     DrAdd("C", "Часть данных не прочитана: " & Error$ & " (строка " & Erl & ")")
@@ -1048,7 +1216,7 @@ Private Function DrIsoDate(s As String) As Double
 End Function
 
 ' the issues posted on the day, by the date of the issue: those of earlier days are the digitising of the previous working day(s)
-Private Sub DrIssues(dt As Double, iDate() As Double, iWho() As String, iQty() As Double, iUnit() As String, nIss As Long)
+Private Sub DrIssues(dt As Double, iDate() As Double, iWho() As String, iQty() As Double, iUnit() As String, iEi() As Long, nIss As Long)
     Dim dates() As Double, nDt As Long, i As Long, j As Long, g As Long, found As Boolean, tmp As Double
     If nIss = 0 Then Exit Sub
     ReDim dates(nIss)
@@ -1076,22 +1244,31 @@ Private Sub DrIssues(dt As Double, iDate() As Double, iWho() As String, iQty() A
     Next i
     ' earlier days first (the digitising), the day itself last
     For g = 0 To nDt - 1
-        If dates(g) <> dt Then DrIssueDay(dt, dates(g), iDate, iWho, iQty, iUnit, nIss)
+        If dates(g) <> dt Then DrIssueDay(dt, dates(g), iDate, iWho, iQty, iUnit, iEi, nIss)
     Next g
     For g = 0 To nDt - 1
-        If dates(g) = dt Then DrIssueDay(dt, dates(g), iDate, iWho, iQty, iUnit, nIss)
+        If dates(g) = dt Then DrIssueDay(dt, dates(g), iDate, iWho, iQty, iUnit, iEi, nIss)
     Next g
 End Sub
 
-Private Sub DrIssueDay(dt As Double, d As Double, iDate() As Double, iWho() As String, iQty() As Double, iUnit() As String, nIss As Long)
+Private Sub DrIssueDay(dt As Double, d As Double, iDate() As Double, iWho() As String, iQty() As Double, iUnit() As String, iEi() As Long, nIss As Long)
     Dim i As Long, j As Long, cnt As Long, un As String, who() As String, wc() As Long, nW As Long, s As String, found As Boolean
-    Dim tw As String, tc As Long, label As String, shown As Long
+    Dim tw As String, tc As Long, label As String, shown As Long, sum As Double, nNoPr As Long, price As Double, nm As String, items As String, head As String
     ReDim who(nIss)
     ReDim wc(nIss)
     For i = 0 To nIss - 1
         If iDate(i) = d Then
             cnt = cnt + 1
             un = DrUnitAdd(un, iUnit(i), iQty(i))
+            ' 1.4.0: the amount by the price of the order the position came with and the goods issued most
+            price = WmsPeriod.RefPrice(iEi(i), iUnit(i))
+            If price > 0 Then
+                sum = sum + price * iQty(i)
+            Else
+                nNoPr = nNoPr + 1
+            End If
+            nm = WmsPeriod.RefName(iEi(i))
+            If nm <> "" Then items = WmsPeriod.SumAdd(items, WmsPeriod.RefKey(nm), 1)
             found = False
             For j = 0 To nW - 1
                 If WmsAsk.WhoKey(who(j)) = WmsAsk.WhoKey(iWho(i)) Then
@@ -1127,13 +1304,16 @@ Private Sub DrIssueDay(dt As Double, d As Double, iDate() As Double, iWho() As S
     Next i
     If nW > shown Then s = s & " и ещё получателей: " & (nW - shown)
     If d = 0 Then
-        label = "Выдачи без даты выдачи"
+        label = "Выдачи без указания даты"
     ElseIf d = dt Then
-        label = "Выдачи сегодняшним числом (" & Format(CDate(d), "DD.MM.YYYY") & ")"
+        label = "Отпуск товара со склада за " & Format(CDate(d), "DD.MM.YYYY")
     Else
         label = "Оцифровка выдач за " & Format(CDate(d), "DD.MM.YYYY") & " (" & DrDayName(d) & ")"
     End If
-    DrAdd("D", label & ": проведено выдач — " & cnt & "; выдано: " & DrUnitText(un) & "; получатели: " & s)
+    head = label & ": оформлено выдач — " & cnt & "; отпущено: " & DrUnitText(un)
+    If sum > 0 Then head = head & "; на сумму около " & WmsPeriod.MoneyRub(sum) & IIf(nNoPr > 0, " (оценено без " & nNoPr & " поз.)", "")
+    DrAdd("D", head & "; получатели: " & s)
+    If items <> "" Then DrAdd("D", "  чаще всего выдавали: " & WmsPeriod.TopText(items, 3))
 End Sub
 
 ' the acts of the day from the register
@@ -1195,17 +1375,62 @@ Private Sub DrBacklog(dt As Double)
 EH:
 End Sub
 
-' what waits in the orders and in the stock: the positions expected, the goods below the minimum
-Private Sub DrOpenWork()
-    Dim res As String
+' what waits in the orders and in the stock: the positions expected (and those late), the goods below the minimum
+Private Sub DrOpenWork(dt As Double)
+    Dim res As String, i As Long, d As Variant, sh As Object, st As String, sup As String, edt As Double, nLate As Long, lateIds As String, lateNames As String, nLateSup As Long, oldest As Double, oldSup As String
+    Dim allSup As String, nSupAll As Long, id As String, gsh As Object, s As String
     On Error Resume Next
     res = WmsSupply.OpenPositions("")
-    If Left(res, 4) <> "ERR:" And gSpN > 0 Then DrAdd("T", "Принять поставки: ожидаются позиции заказов — " & gSpN)
+    If Left(res, 4) <> "ERR:" And gSpN > 0 Then
+        sh = WmsOrders.OrdersSheet()
+        For i = 0 To gSpN - 1
+            d = sh.getCellRangeByPosition(0, gSpRow(i), OC_EDATE, gSpRow(i)).getDataArray()(0)
+            sup = Trim(CStr(d(OC_SUPPLIER)))
+            id = "|" & WmsSup.SupId(sup) & "|"
+            If sup <> "" And InStr(allSup, id) = 0 Then
+                allSup = allSup & id
+                nSupAll = nSupAll + 1
+            End If
+            ' (the status of a position does not depend on the date: «late» is the expected date Q that has come or passed)
+            edt = 0
+            If VarType(d(OC_EDATE)) = 5 Then edt = Int(d(OC_EDATE))
+            If edt > 1 And edt <= dt Then
+                nLate = nLate + 1
+                If sup <> "" And InStr(lateIds, id) = 0 Then
+                    lateIds = lateIds & id
+                    nLateSup = nLateSup + 1
+                    If nLateSup <= 5 Then lateNames = lateNames & IIf(lateNames <> "", ", ", "") & sup
+                End If
+                If oldest = 0 Or edt < oldest Then
+                    oldest = edt
+                    oldSup = sup
+                End If
+            End If
+        Next i
+        s = "Принять поставки: ожидаются позиции заказов — " & gSpN & IIf(nSupAll > 0, " (поставщиков — " & nSupAll & ")", "")
+        DrAdd("T", s)
+        If nLate > 0 Then
+            s = "Не получено в срок: позиций — " & nLate
+            If oldest > 0 Then s = s & " (самая давняя — " & IIf(oldSup <> "", "«" & oldSup & "», ", "") & "ожидалась " & Format(CDate(oldest), "DD.MM.YYYY") & ")"
+            DrAdd("T", s)
+            If lateNames <> "" Then DrAdd("T", "Связаться с поставщиками, у которых поставка не получена в срок, и уточнить новые сроки: " & lateNames & IIf(nLateSup > 5, " и ещё " & (nLateSup - 5), ""))
+        End If
+    End If
     res = WmsSupply.NeedCompute("")
-    If Left(res, 3) = "OK:" And gNdN > 0 Then DrAdd("T", "Товаров ниже минимума (нужно заказать): " & gNdN)
+    If Left(res, 3) = "OK:" And gNdN > 0 Then
+        s = "Пополнить запас: позиций ниже минимального остатка — " & gNdN
+        gsh = gDoc.Sheets.getByName(WmsSupply.SH_GOODS)
+        st = ""
+        For i = 0 To gNdN - 1
+            If i >= 3 Then Exit For
+            st = st & IIf(st <> "", ", ", "") & Trim(gsh.getCellByPosition(WmsSupply.GD_NAME, gNdRow(i)).getString()) & " (заказать " & WmsIssue.QtyText(gNdQty(i)) & " " & Trim(gsh.getCellByPosition(WmsSupply.GD_UNIT, gNdRow(i)).getString()) & ")"
+        Next i
+        If st <> "" Then s = s & "; в первую очередь: " & st
+        DrAdd("T", s)
+    End If
 End Sub
 
-' the registry: the EIs with a balance, without a place, waiting for a decision — into «В процессе» and the control
+' the registry: the positions with a balance, without a place, waiting for a decision — into «В процессе» and the indicators
 Private Sub DrStockState()
     Dim st As Object, last As Long, d As Variant, i As Long, nBal As Long, nNoPlace As Long, nReview As Long, nAll As Long, cEi As Long, cQty As Long, cPl As Long, cSt As Long
     On Error GoTo EH
@@ -1229,12 +1454,38 @@ Private Sub DrStockState()
             If InStr(CStr(d(i)(cSt)), "разбора") > 0 Then nReview = nReview + 1
         End If
     Next i
-    If nReview > 0 Then DrAdd("P", "ЕИ, требующих разбора: " & nReview)
-    If nNoPlace > 0 Then DrAdd("P", "ЕИ с остатком без указанного места хранения: " & nNoPlace)
-    DrAdd("C", "ЕИ в учёте: " & nAll & ", из них с остатком — " & nBal)
+    If nReview > 0 Then DrAdd("P", "Позиций, по которым нужно разобраться с учётными данными: " & nReview)
+    If nNoPlace > 0 Then DrAdd("P", "Позиций в наличии, для которых не указано место хранения: " & nNoPlace)
+    DrAdd("C", "Позиций на учёте: " & nAll & ", из них в наличии — " & nBal)
     Exit Sub
 EH:
 End Sub
+
+' the previous working day before d
+Private Function DrPrevWork(d As Double) As Double
+    Dim n As Integer
+    DrPrevWork = d - 1
+    Do While Not DrIsWork(DrPrevWork) And n < 14
+        DrPrevWork = DrPrevWork - 1
+        n = n + 1
+    Loop
+End Function
+
+' how many operations the journal holds for day d (for the comparison of the day with the day before)
+Private Function DrOpsOfDay(d As Double) As Long
+    Dim url As String, a As Variant, i As Long, day As String, n As Long
+    On Error GoTo EH
+    url = gJDir & WmsJournal.JournalFileName(CDate(d))
+    If Not gSfa.exists(url) Then Exit Function
+    a = Split(Replace(WmsAudit.ReadText(url), Chr(13), ""), Chr(10))
+    day = Format(CDate(d), "YYYY-MM-DD")
+    For i = 0 To UBound(a)
+        If DrLineDay(CStr(a(i))) = day Then n = n + 1
+    Next i
+    DrOpsOfDay = n
+    Exit Function
+EH:
+End Function
 
 ' ================================================================ test seam (reads and closes the document built last)
 

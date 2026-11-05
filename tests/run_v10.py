@@ -1219,7 +1219,7 @@ def v22_control_documents():
         t = print_text(s)
         R.add(c, "К14: «Печать карточки» — шапка ЕИ, движения с остатком (приход 10, списание 2, выдача 4), исправление «Количество: 3 → 4 · причина: пересчитали»",
               res == f"OK:Карточка {b}" and f"КАРТОЧКА {b}" in t and "Болт М8" in t and "Количество: 3 → 4" in t and "причина: пересчитали" in t
-              and "Исправления и сторно (из журнала WMS): 1" in t, f"{res}; {t[:900]}")
+              and "Исправления и сторно по этой позиции: 1" in t, f"{res}; {t[:900]}")
         # К4 the inventory list
         res = s.B("InventoryList", "5", module="WmsPrint")
         t = print_text(s)
@@ -1311,7 +1311,7 @@ def v23_accounting():
         lines = list(csv.reader(open(path, encoding="utf-8-sig"), delimiter=";")) if res.startswith("FILE:") and os.path.isfile(path) else []
         bl = next((x for x in lines if x[:1] == ["Болт М8"]), [])
         R.add(c, "К8 в файл: CSV в «WMS_Документы» (UTF-8 с меткой, «;»), строка болта с единицами и рублями",
-              "WMS_Документы" in path and lines[1][:4] == ["Товар", "Артикул", "Ед.", "ЕИ"] and bl[3:10] == ["1", "0", "10", "3", "0", "1", "6"]
+              "WMS_Документы" in path and lines[1][:4] == ["Товар", "Артикул", "Ед.", "Партий"] and bl[3:10] == ["1", "0", "10", "3", "0", "1", "6"]
               and bl[11] == "125,00" and bl[15] == "75,00", f"{res}; {bl}")
         # К9
         res = s.B("ExportMoves", ser(p0), serial(), module="WmsLedger")
@@ -1333,9 +1333,9 @@ def v23_accounting():
         flat = " | ".join(" ".join(x) for x in rows)
         bolt = next((x for x in rows if x[1].startswith("Болт М8")), None)
         washer = next((x for x in rows if x[1].startswith("Шайба М8")), None)
-        R.add(c, "К10: сверка с 1С (CSV Windows-1251, шапка 1С выше таблицы) по наименованию — болт: 1С 5, WMS 4, разница −1; шайба — «нет в WMS»; "
+        R.add(c, "К10: сверка с 1С (CSV Windows-1251, шапка 1С выше таблицы) по наименованию — болт: 1С 5, на складе 4, разница −1; шайба — «нет на складе»; "
                  "Товар 7 совпал; итоговая строка 1С пропущена; ничего не проведено",
-              res.startswith("OK:Сверка с 1С") and bolt is not None and bolt[3:6] == ["5", "4", "-1"] and washer is not None and washer[6] == "нет в WMS"
+              res.startswith("OK:Сверка с 1С") and bolt is not None and bolt[3:6] == ["5", "4", "-1"] and washer is not None and washer[6] == "нет на складе"
               and "Совпало: 1" in flat and "Строк в файле: 3" in flat and not any(x[1].startswith("Товар 7 ") for x in rows), f"{res}; {bolt}; {washer}; {flat[:500]}")
         # К13
         nseq = int(s.sysv("LAST_SEQ"))
@@ -1448,7 +1448,7 @@ def v24_reports():
         tab2 = [x for x in rows2 if x[1].startswith("ЕИ-")]
         R.add(c, "А4: мёртвый груз 180 дней по сумме — первой шайба (200 дней, 5,00), затем ЕИ без движений; итог «на сумму 5,00»; при пороге 365 "
                  "шайбы нет, болт и гайка (двигались сегодня) — нигде",
-              res.startswith("OK:Мёртвый груз 180") and tab[0][1] == w and tab[0][5] == "200" and tab[0][6] == "5,00"
+              res.startswith("OK:Залежавшиеся товары 180") and tab[0][1] == w and tab[0][5] == "200" and tab[0][6] == "5,00"
               and any(x[0] == "Итого на сумму: 5,00" for x in rows) and not any(x[1] in (b, g) for x in tab) and not any(x[1] == w for x in tab2)
               and all(x[5] == "нет движений" for x in tab2) and res2.startswith("OK"), f"{res}; {tab[:2]}; {res2}; {tab2[:2]}")
         # А7 and А6
@@ -1477,7 +1477,7 @@ def v24_reports():
               and all(k in mb for k in ("btnAllWait", "btnAllOps", "btnAllIssued", "btnAllStale")), f"{refs}; {stale[:3]}; {head}; {head2}; {sorted(mb)[:8]}")
         s.B("BtnAllStale", module="WmsDash")
         t = print_text(s, 5)
-        R.add(c, "«Все…» у «Лежит без движения» — полный список мёртвого груза на «Печати»", "МЁРТВЫЙ ГРУЗ" in t, t[:200])
+        R.add(c, "«Все…» у «Лежит без движения» — полный список мёртвого груза на «Печати»", "ЗАЛЕЖАВШИЕСЯ ТОВАРЫ" in t, t[:200])
         rp = form_buttons(s.doc.Sheets.getByName("Отчёты"))
         R.add(c, "страница «Отчёты»: кнопки учёта и руководителя, «Главная»", all(k in rp for k in ("btnStockOnDate", "btnTurnover", "btnExportAcc", "btnCompare1C",
               "btnCloseMonth", "btnOpenMonth", "btnManagerReport", "btnConsumers", "btnDeadStock", "btnRepMain")), str(sorted(rp)))
@@ -3126,7 +3126,7 @@ def v40_acts():
 @case
 def v41_day_report():
     """1.0.2: отчёт дня — документ Writer по шаблону пользователя («1. Завершено сегодня», «2. Задачи на <следующий рабочий день>», «3. В
-    процессе», «4. Контроль данных»): приёмка (машины, позиции, количество, внутренние коды ЕИ, адресное хранение), иной приход, выдачи
+    процессе», «4. Показатели склада»): приёмка (машины, позиции, количество, складские коды, адресное хранение), прочее оприходование, выдачи
     — «Оцифровка выдач за <дата>» за прошлый рабочий день отдельно от выдач сегодняшним числом (выдача, проведённая и удалённая в тот
     же день, не считается), акты, исправления, свои строки с листа «Отчёт дня»; график 5/2: выходные пропускаются"""
     import datetime
@@ -3180,21 +3180,21 @@ def v41_day_report():
         lines = text.split("\n")
         R.add(c, "шаблон: дата «дд.мм.гггг г.», подпись с листа, четыре раздела; «Задачи на <следующий рабочий день> (дата)»; «в процессе» — по умолчанию «Работа над учётом склада»",
               res.startswith("OK:") and lines[0] == TODAY + " г." and lines[1] == "Иванов, кладовщик." and "1. Завершено сегодня:" in lines
-              and f"2. Задачи на {acc[nxt.weekday()]} ({nxt.strftime('%d.%m.%Y')}):" in lines and "3. В процессе:" in lines and "4. Контроль данных (по журналу WMS):" in lines
+              and f"2. Задачи на {acc[nxt.weekday()]} ({nxt.strftime('%d.%m.%Y')}):" in lines and "3. В процессе:" in lines and "4. Показатели склада:" in lines
               and "• Работа над учётом склада" in lines, f"{res}; {lines[:8]}")
         pd = prev.strftime("%d.%m.%Y")
         bul = [x[2:] for x in lines if x.startswith("• ")]
         want = {
-            "машины": "Принято машин с поставками: 1 (Петрович)",
-            "приёмка": "Приёмка по заказам: принято позиций — 3; количество: 105 шт, 3 м. Товар пересчитан и принят в WMS",
-            "иной": "Иной приход (инвентаризация текущих остатков, принятое от производства и др.): записей — 1 (Производство — 1)",
-            "коды": "Присвоены внутренние коды (ЕИ) для складского учёта: 4 — от ЕИ-00000201 до ЕИ-00000204",
-            "хранение": "Выставлено на адресное хранение (указано место): 4",
-            "оцифровка": f"Оцифровка выдач за {pd} ({names[prev.weekday()]}): проведено выдач — 2; выдано: 5 шт, 1 м; получатели: ",
-            "сегодня": f"Выдачи сегодняшним числом ({TODAY}): проведено выдач — 1; выдано: 1 шт; получатели: Ермолин Егор Павлович — 1",
+            "машины": "Принято автомашин с грузом от поставщиков: 1 (Петрович)",
+            "приёмка": "Приёмка товара по заказам: принято позиций — 3; количество: 105 шт, 3 м. Товар пересчитан и оприходован на склад",
+            "иной": "Прочее оприходование (остатки по результатам пересчёта, принятое от производства и др.): записей — 1 (Производство — 1)",
+            "коды": "Новым поступлениям присвоены складские коды (позиции поставлены на учёт): 4",
+            "хранение": "Размещено на адресное хранение (указано место хранения): 4 позиции",
+            "оцифровка": f"Оцифровка выдач за {pd} ({names[prev.weekday()]}): оформлено выдач — 2; отпущено: 5 шт, 1 м; получатели: ",
+            "сегодня": f"Отпуск товара со склада за {TODAY}: оформлено выдач — 1; отпущено: 1 шт; получатели: Ермолин Егор Павлович — 1",
             "акты": "Оформлены акты (документы и товар к отправке): 1 — № 1 (приёма-передачи (в офис), Офис, позиций — 1)",
-            "накладные": "Оформлены накладные / документы выдачи: А-1",
-            "исправления": "Исправления учёта: исправлено операций — 0, удалено (сторно) — 1",
+            "накладные": "Оформлены накладные и документы на выдачу: А-1",
+            "исправления": "Внесены исправления в учёт: скорректировано записей — 0, аннулировано (сторно) — 1",
             "вручную": "Оформление пропусков для курьеров",
         }
         got = {k: next((b for b in bul if b.startswith(v)), None) for k, v in want.items()}
@@ -3202,9 +3202,10 @@ def v41_day_report():
                  "оцифровка выдач за прошлый рабочий день (2 выдачи, 5 шт и 1 м) отдельно от сегодняшних (1; удалённая не считается), акты, накладные, исправления, "
                  "строка с листа «Отчёт дня»", all(v is not None for v in got.values()),
               f"{[k for k, v in got.items() if v is None]}; {[b for b in bul if 'выдач' in b.lower()]}")
-        ctl = [x for x in bul if x.startswith("Операций проведено за день:")]
-        R.add(c, "«Контроль данных»: операций за день — столько же, сколько в журнале (с № 1), число ЕИ в учёте",
-              len(ctl) == 1 and ctl[0] == f"Операций проведено за день: {seq} (журнал № 1–{seq})" and any(b.startswith("ЕИ в учёте: ") for b in bul), f"{ctl}; {seq}")
+        ctl = [x for x in bul if x.startswith("Складских операций за день:")]
+        R.add(c, "«Показатели склада»: операций за день — столько же, сколько в журнале (с № 1), с прошлым рабочим днём; позиций на учёте; без слов «журнал», «WMS», «ЕИ»",
+              len(ctl) == 1 and ctl[0].startswith(f"Складских операций за день: {seq} (предыдущий рабочий день, ") and any(b.startswith("Позиций на учёте: ") for b in bul)
+              and not any(w in text for w in ("WMS", "ЕИ", "журнал", "флешк")), f"{ctl}; {seq}; {[w for w in ('WMS', 'ЕИ', 'журнал', 'флешк') if w in text]}")
         s.B("DcDocClose", module="WmsDocs")
         # a later day: the digitising of the working days after the last date of an issue (5/2: the weekend is skipped)
         later = today + datetime.timedelta(days=4)
@@ -3220,9 +3221,9 @@ def v41_day_report():
             if d.weekday() < 5:
                 days.append(f"{d.strftime('%d.%m.%Y')} ({names[d.weekday()]})")
         want_line = "Оцифровка выдач за " + ", ".join(days) + f" (последняя оцифрованная дата выдачи — {TODAY})"
-        R.add(c, "задачи: «Оцифровка выдач за …» — рабочие дни после последней даты выдачи до дня отчёта, выходные пропущены; и «Операций в журнале за этот день нет»",
-              res2.startswith("OK:") and ("• " + want_line) in t2.split("\n") and "• операций в WMS за этот день не проведено" in t2.split("\n")
-              and "• Операций в журнале за этот день нет" in t2.split("\n"), f"{res2}; {want_line}; {[x for x in t2.split(chr(10)) if 'Оцифровка' in x]}")
+        R.add(c, "задачи: «Оцифровка выдач за …» — рабочие дни после последней даты выдачи до дня отчёта, выходные пропущены; и «Складских операций за этот день не было»",
+              res2.startswith("OK:") and ("• " + want_line) in t2.split("\n") and "• складских операций за этот день не было" in t2.split("\n")
+              and "• Складских операций за этот день не было" in t2.split("\n"), f"{res2}; {want_line}; {[x for x in t2.split(chr(10)) if 'Оцифровка' in x]}")
         s.B("DcDocClose", module="WmsDocs")
         fri = datetime.date(2026, 10, 23)
         r_work = [s.B("DrIsWork", float((fri + datetime.timedelta(days=k) - datetime.date(1899, 12, 30)).days), module="WmsDocs") for k in range(0, 4)]
@@ -3461,7 +3462,7 @@ def v43_upgrade_101_102():
         s.B("DcDocClose", module="WmsDocs")
         R.add(c, "после обновления: выдача проводится, акт оформляется (А-1 в реестре «Акты»), отчёт дня строится из журнала книги 1.0.1",
               i2.startswith("OK") and ak.startswith("OK") and rd.startswith("OK:") and TODAY + " г." in txt and "1. Завершено сегодня:" in txt
-              and "Приёмка по заказам: принято позиций — 3" in txt, f"{i2[:40]}; {ak[:80]}; {rd}; {txt[:200]!r}")
+              and "Приёмка товара по заказам: принято позиций — 3" in txt, f"{i2[:40]}; {ak[:80]}; {rd}; {txt[:200]!r}")
         sc = s.B("ActionSelfCheck")
         R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:200])
         P, inf, _ = s.adjcheck(0)
@@ -4424,11 +4425,11 @@ def v55_period_report():
         R.add(c, "отчёт за 7 дней: заголовок «Отчёт за период …», по заголовку на каждый рабочий день (понедельник–пятница) и ни одного выходного, в день с операциями — приёмка и выдачи; «Итого за период»",
               r1.startswith("OK:") and txt.startswith(f"Отчёт за период {d0.strftime('%d.%m.%Y')} — {today.strftime('%d.%m.%Y')} г.") and all(h in txt for h in heads)
               and not any(f"{d.strftime('%d.%m.%Y')}, {names[d.weekday()]}" in txt for d in work_days(d0, today) if False) and txt.count("(нерабочий день)") == 0
-              and "Приёмка по заказам: принято позиций — 2" in txt and "Итого за период:" in txt, f"{r1}; {txt[:300]!r}")
+              and "Приёмка товара по заказам: принято позиций — 2" in txt and "Итого за период:" in txt, f"{r1}; {txt[:300]!r}")
         i_tot = txt.index("Итого за период:")
         tot = txt[i_tot:]
         R.add(c, "итоги периода: операций, приёмка 2 позиции (150 шт), выдачи — 3 (17 шт), чаще всего «ива» — 2",
-              "Операций проведено: " in tot and "Приёмка по заказам: принято позиций — 2; количество: 150 шт" in tot and "Выдачи: 3; количество: 17 шт" in tot
+              "Проведено складских операций: " in tot and "Приёмка товара по заказам: принято позиций — 2; количество: 150 шт" in tot and "Отпуск товара со склада: выдач — 3; отпущено: 17 шт" in tot
               and "ива" in tot.lower() and "— 2" in tot, tot[:500].replace(chr(10), " ¶ "))
         # the calendar: yesterday is a holiday, the nearest Saturday works
         yest = today - datetime.timedelta(days=1)
@@ -4452,7 +4453,7 @@ def v55_period_report():
         r3 = s.B("PeriodReport", serial_of(today), serial_of(today), False, module="WmsDocs")
         txt3 = doc_of(s)
         s.B("DcDocClose", module="WmsDocs")
-        R.add(c, "сегодня объявлен выходным, но операции были — день показан с пометкой «(нерабочий день)»", "(нерабочий день)" in txt3 and "Приёмка по заказам" in txt3, txt3[:200])
+        R.add(c, "сегодня объявлен выходным, но операции были — день показан с пометкой «(нерабочий день)»", "(нерабочий день)" in txt3 and "Приёмка товара по заказам" in txt3, txt3[:200])
         cal.getCellRangeByPosition(0, 3, 1, 3).clearContents(1 + 2 + 4 + 16)
         # a period of more than 62 days
         r4 = s.B("PeriodReport", serial_of(today - datetime.timedelta(days=100)), serial_of(today), False, module="WmsDocs")
@@ -4474,7 +4475,7 @@ def v55_period_report():
         rd = s.B("DayReport", serial_of(today), False, module="WmsDocs")
         txtd = doc_of(s)
         s.B("DcDocClose", module="WmsDocs")
-        R.add(c, "отчёт дня после отчётов за период — как прежде: «1. Завершено сегодня», «2. Задачи на …», «4. Контроль данных»", rd.startswith("OK:") and "1. Завершено сегодня:" in txtd and "4. Контроль данных" in txtd, rd)
+        R.add(c, "отчёт дня после отчётов за период — как прежде: «1. Завершено сегодня», «2. Задачи на …», «4. Показатели склада»", rd.startswith("OK:") and "1. Завершено сегодня:" in txtd and "4. Показатели склада" in txtd, rd)
         sc = s.B("ActionSelfCheck")
         R.add(c, "журнал отчётами не менялся; самопроверка — без ошибок", int(s.sysv("LAST_SEQ")) == seq0 and sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), f"{seq0} → {s.sysv('LAST_SEQ')}; {sc[:100]}")
     finally:
@@ -5087,12 +5088,12 @@ def v66_assembly_views():
         # the day report and the report of the period
         s.B("DayReport", serial(0), False, module="WmsDocs")
         text = doc_of(s)
-        R.add(c, "отчёт дня: «Корректировки склада: … сборок деталей — 2»", "сборок деталей — 2" in text, text[-400:])
+        R.add(c, "отчёт дня: «Внутрискладские операции: … узлов собрано из деталей — 2»", "узлов собрано из деталей — 2" in text, text[-400:])
         today = T
         d0 = today - datetime.timedelta(days=6)
         s.B("PeriodReport", float((d0 - datetime.date(1899, 12, 30)).days), float((today - datetime.date(1899, 12, 30)).days), False, module="WmsDocs")
         text = doc_of(s)
-        R.add(c, "отчёт за период: «Корректировки склада: … сборок деталей — 2»", "сборок деталей — 2" in text, text[-400:])
+        R.add(c, "отчёт за период: «Внутрискладские операции: … узлов собрано из деталей — 2»", "узлов собрано из деталей — 2" in text, text[-400:])
         # the storno: «Удалить» of the second build — the history and the lists say so
         adj = s.doc.Sheets.getByName("Корректировки")
         rows_adj = [adj.getCellByPosition(16, r).getString() for r in range(1, 40)]
@@ -6285,9 +6286,9 @@ def v80_units_and_article_keys():
         res = s.B("DayReport", serial(0), False, module="WmsDocs")
         text = doc_of(s)
         s.B("DcDocClose", module="WmsDocs")
-        line = next((x[2:] for x in text.split("\n") if x.startswith("• Приёмка по заказам:")), "")
+        line = next((x[2:] for x in text.split("\n") if x.startswith("• Приёмка товара по заказам:")), "")
         R.add(c, "«Отчёт дня», приёмка: пять шт, три «Шт.» и две «штук» — «10 шт» одной суммой (первое написание), метры отдельно: «принято позиций — 4; количество: 10 шт, 1,5 м»",
-              all(str(x).startswith("OK") for x in rc) and res.startswith("OK:") and line.startswith("Приёмка по заказам: принято позиций — 4; количество: 10 шт, 1,5 м."), f"{rc}; {res}; {line}")
+              all(str(x).startswith("OK") for x in rc) and res.startswith("OK:") and line.startswith("Приёмка товара по заказам: принято позиций — 4; количество: 10 шт, 1,5 м."), f"{rc}; {res}; {line}")
         oracle(c, s, "приход четырёх позиций")
         # the registry of the lists (written straight into «Наличие», as the lists only read it)
         stk = s.doc.Sheets.getByName("Наличие")
@@ -6799,6 +6800,168 @@ def v85_feature_switches():
         switch("LITE", "нет")
         P, inf, _ = s.adjcheck(0)
         R.add(c, "в «Лёгком режиме» выдача проводится как обычно; независимая проверка журнала — без замечаний", str(i5).startswith("OK") and not P, f"{str(i5)[:80]}; {P[:3]}")
+    finally:
+        s.close()
+
+
+@case
+def v86_report_text():
+    """1.4.0: отчёт дня и итоги периода написаны для читателя, который таблицей не пользуется — ни «WMS», ни «ЕИ», ни «журнал», ни «флешка»; приёмка: поставщики,
+    сумма по цене заказа, сверка с документом поставщика (недопоставка); выдачи: сумма по цене заказа и самые выдаваемые позиции; задачи: что не получено в срок (по ожидаемой
+    дате Q) и каким поставщикам звонить, что ниже минимума; «Показатели склада»; отчёт ничего не проводит"""
+    import datetime
+    c = "V86"
+    s = ready(Session(new_wms("v86")))
+    try:
+        s.doc.Sheets.getByName("Календарь").getCellRangeByPosition(0, 1, 2, 400).clearContents(1 + 2 + 4 + 16)
+        today = T
+        order(s, 1, "1", "Краска белая 0,9 л", qty="10", art="КР-1", supplier="Альфа", J=50.0, G=10.0)
+        r1 = receive(s, 1, "8", place="4-1-1", doc="УПД-1")
+        order(s, 2, "2", "Болт М8", qty="5", supplier="Бета", J=20.0, G=5.0)
+        r2 = receive(s, 2, "5", place="4-1-2", doc="УПД-2")
+        order(s, 3, "3", "Фреза D10", qty="2", supplier="Гамма", Q=serial(-3))
+        e1, e2 = [ords(s, r)[21] for r in (1, 2)]
+        i1 = issue(s, 1, e1, "3", "офис")
+        i2 = issue(s, 2, e2, "2", "офис")
+        R.add(c, "день подготовлен: две приёмки с ценой и документом (одна с недопоставкой 8 из 10), два выдачи, один заказ не получен в срок",
+              all(str(x).startswith("OK") for x in (r1, r2, i1, i2)), f"{str(r1)[:40]}; {str(r2)[:40]}; {str(i1)[:40]}; {str(i2)[:40]}")
+        s.B("GoodsFill", module="WmsSupply")
+        gd = s.doc.Sheets.getByName("Номенклатура")
+        names_g = [x[0] for x in gd.getCellRangeByPosition(1, 0, 1, 400).getDataArray()]
+        rows = {nm: r for r, nm in enumerate(names_g) if nm}
+        gd.getCellByPosition(7, rows["Болт М8"]).setValue(20)
+        seq0 = int(s.sysv("LAST_SEQ"))
+        res = s.B("DayReport", serial(0), False, module="WmsDocs")
+        text = doc_of(s)
+        s.B("DcDocClose", module="WmsDocs")
+        bul = [x[2:] for x in text.split("\n") if x.startswith("• ")]
+        R.add(c, "приёмка: сумма 500 руб. (8×50 + 5×20), поставщики «Альфа — 1, Бета — 1», сверка с документами — проверено 2, расхождение по 1 (недопоставлено 2 шт)",
+              res.startswith("OK:") and any(b.startswith("Приёмка товара по заказам: принято позиций — 2; количество: 13 шт; на сумму около 500 руб.") for b in bul)
+              and "Поставщики (число принятых позиций): Альфа — 1, Бета — 1" in bul
+              and "Сверка с документами поставщиков: проверено позиций — 2, расхождения по 1 (недопоставлено — 2 шт)" in bul, f"{res}; {[b for b in bul if 'риёмк' in b or 'Сверка' in b or 'Поставщики' in b]}")
+        iss = [b for b in bul if b.startswith("Отпуск товара со склада")]
+        R.add(c, "выдачи: 2 выдачи, 5 шт, на сумму около 190 руб. (3×50 + 2×20); «чаще всего выдавали» — названия позиций",
+              len(iss) == 1 and "оформлено выдач — 2; отпущено: 5 шт; на сумму около 190 руб." in iss[0]
+              and any(b.startswith("чаще всего выдавали: ") and "Краска белая 0,9 л" in b and "Болт М8" in b for b in (x.strip() for x in bul)), f"{iss}; {[b for b in bul if 'чаще' in b]}")
+        want_t = f"Не получено в срок: позиций — 1 (самая давняя — «Гамма», ожидалась {(today - datetime.timedelta(days=3)).strftime('%d.%m.%Y')})"
+        R.add(c, "задачи: ожидаются 2 позиции (недопоставка «Альфа» и «Гамма»), не получена в срок — «Гамма» с датой; позвонить «Гамма»; пополнить запас — «Болт М8» (остаток 3, минимум 20 — заказать 17 шт)",
+              "Принять поставки: ожидаются позиции заказов — 2 (поставщиков — 2)" in bul and want_t in bul
+              and "Связаться с поставщиками, у которых поставка не получена в срок, и уточнить новые сроки: Гамма" in bul
+              and any(b.startswith("Пополнить запас: позиций ниже минимального остатка — 1; в первую очередь: Болт М8 (заказать 17 шт)") for b in bul),
+              f"{[b for b in bul if 'Принять' in b or 'срок' in b or 'Пополнить' in b]}")
+        bad = [w for w in ("WMS", "ЕИ", "журнал", "Журнал", "флешк", "WMS_") if w in text]
+        R.add(c, "в тексте отчёта дня нет слов «WMS», «ЕИ», «журнал», «флешка» и двойных точек", not bad and ".." not in text, f"{bad}; {text[:200]!r}")
+        d0 = today - datetime.timedelta(days=2)
+        rp = s.B("PeriodReport", float((d0 - datetime.date(1899, 12, 30)).days), float((today - datetime.date(1899, 12, 30)).days), False, module="WmsDocs")
+        tp = doc_of(s)
+        s.B("DcDocClose", module="WmsDocs")
+        tot = tp[tp.index("Итого за период:"):]
+        bad2 = [w for w in ("WMS", "ЕИ", "журнал", "Журнал", "флешк", "WMS_") if w in tp]
+        R.add(c, "итоги периода: сумма приёмки 500 руб., поставщики, сверка с документами (расхождение 2 шт), отпуск на 190 руб., «чаще всего выдавали»; нет слов «WMS», «ЕИ», «журнал»",
+              rp.startswith("OK:") and "на сумму около 500 руб." in tot and "Поставщики (по числу принятых позиций): Альфа — 1, Бета — 1" in tot
+              and "расхождения по 1 (недопоставлено — 2 шт)" in tot and "на сумму около 190 руб." in tot and "Чаще всего выдавали (по числу выдач):" in tot and not bad2, f"{rp}; {bad2}; {tot[:700]!r}")
+        # the report posts nothing
+        R.add(c, "отчёты ничего не проводят: номер последней операции прежний", int(s.sysv("LAST_SEQ")) == seq0, f"{seq0} → {s.sysv('LAST_SEQ')}")
+        oracle(c, s, "приёмка, выдачи, отчёты")
+    finally:
+        s.close()
+
+
+@case
+def v87_report_fix_del():
+    """1.4.0: исправленный в тот же день приход и возврат попадают в отчёт дня и в итоги периода с новыми цифрами, удалённые (сторно) — не считаются"""
+    import datetime
+    c = "V87"
+    s = ready(Session(new_wms("v87")))
+    try:
+        s.doc.Sheets.getByName("Календарь").getCellRangeByPosition(0, 1, 2, 400).clearContents(1 + 2 + 4 + 16)
+        today = T
+        order(s, 1, "1", "Краска белая 0,9 л", qty="10", art="КР-1", supplier="Альфа", J=50.0, G=10.0)
+        order(s, 2, "2", "Болт М8", qty="5", supplier="Бета", J=20.0, G=5.0)
+        order(s, 3, "3", "Гайка М8", qty="7", supplier="Бета", J=2.0, G=7.0)
+        rc = [receive(s, r, f, doc=f"УПД-{r}", place=f"4-1-{r}") for r, f in ((1, "10"), (2, "5"), (3, "7"))]
+        s.U("TestOpReason", "ошибка пересчёта")
+        fx = s.Rc("ReceiptFixRow", 2, "4", "5", "УПД-2", TODAY, TODAY, "4-1-2", "20")
+        dl = s.Rc("ReceiptDeleteRow", 3)
+        R.add(c, "день подготовлен: три прихода, у второго исправлен факт 5 → 4, третий удалён (сторно)",
+              all(str(x).startswith("OK") for x in rc) and str(fx).startswith("OK") and str(dl).startswith("OK"), f"{[str(x)[:40] for x in rc]}; {str(fx)[:200]}; {str(dl)[:200]}")
+        e1 = ords(s, 1)[21]
+        i1 = issue(s, 1, e1, "4", "ива")
+        put(s, "Возврат", 1, B="1", F="2", H=serial(), I="ива")
+        rt1 = s.B("ReturnPostRow", 1, module="WmsReturn")
+        put(s, "Возврат", 2, B="1", F="1", H=serial(), I="ива")
+        rt2 = s.B("ReturnPostRow", 2, module="WmsReturn")
+        rf = s.B("ReturnFixRow", 1, "1", TODAY, "", module="WmsReturn")
+        rd = s.B("ReturnDeleteRow", 2, module="WmsReturn")
+        R.add(c, "возвраты: первый (2 шт) исправлен на 1 шт, второй (1 шт) удалён",
+              all(str(x).startswith("OK") for x in (i1, rt1, rt2, rf, rd)), f"{[str(x)[:120] for x in (i1, rt1, rt2, rf, rd)]}")
+        seq0 = int(s.sysv("LAST_SEQ"))
+        res = s.B("DayReport", serial(0), False, module="WmsDocs")
+        text = doc_of(s)
+        s.B("DcDocClose", module="WmsDocs")
+        bul = [x[2:] for x in text.split("\n") if x.startswith("• ")]
+        R.add(c, "отчёт дня: приёмка — 2 позиции, 14 шт (10 + исправленные 4; удалённая не считается), 580 руб.; сверка — проверено 2, расхождение по 1 (недопоставлено 1 шт)",
+              res.startswith("OK:") and any(b.startswith("Приёмка товара по заказам: принято позиций — 2; количество: 14 шт; на сумму около 580 руб.") for b in bul)
+              and "Сверка с документами поставщиков: проверено позиций — 2, расхождения по 1 (недопоставлено — 1 шт)" in bul, f"{res}; {[b for b in bul if 'риёмк' in b or 'Сверка' in b]}")
+        R.add(c, "отчёт дня: возвраты — одна позиция, 1 шт (исправленный; удалённый не считается)",
+              any(b.startswith("Принято возвратов от получателей: 1 позиция (1 шт)") for b in bul), f"{[b for b in bul if 'озврат' in b]}")
+        d0 = today - datetime.timedelta(days=1)
+        rp = s.B("PeriodReport", float((d0 - datetime.date(1899, 12, 30)).days), float((today - datetime.date(1899, 12, 30)).days), False, module="WmsDocs")
+        tp = doc_of(s)
+        s.B("DcDocClose", module="WmsDocs")
+        tot = tp[tp.index("Итого за период:"):]
+        R.add(c, "итоги периода: приёмка — 2 позиции, 14 шт, 580 руб.; возвраты — 1, 1 шт; сверка — расхождение 1 шт",
+              rp.startswith("OK:") and "принято позиций — 2; количество: 14 шт; на сумму около 580 руб." in tot and "Принято возвратов от получателей: 1; количество: 1 шт" in tot
+              and "расхождения по 1 (недопоставлено — 1 шт)" in tot, f"{rp}; {tot[:700]!r}")
+        R.add(c, "отчёты ничего не проводят", int(s.sysv("LAST_SEQ")) == seq0, f"{seq0} → {s.sysv('LAST_SEQ')}")
+        oracle(c, s, "приходы, исправление и сторно, возвраты, отчёты")
+    finally:
+        s.close()
+
+
+@case
+def v88_overstate():
+    """1.4.0: «Завышение остатков» — что покажет учёт, если загрузить все поступления за всю историю без выдач: по товару поступило, лежит, завышение (штуки и рубли), крупнее — выше;
+    итог: поступило на сумму, лежит на сумму, во сколько раз больше; товары, по которым приход был, а остатка нет; файл CSV; ничего не проводится; на странице нет слов «WMS», «ЕИ», «журнал»"""
+    import csv
+    c = "V88"
+    s = ready(Session(new_wms("v88")))
+    try:
+        order(s, 1, "1", "Болт М8", qty="10", supplier="Альфа", J=5.0)
+        receive(s, 1, "10", place="4-1-1")
+        order(s, 2, "2", "Шайба М8", qty="4", supplier="Бета", J=2.5)
+        receive(s, 2, "4", place="4-1-2")
+        e1, e2 = ords(s, 1)[21], ords(s, 2)[21]
+        i1 = issue(s, 1, e1, "3", "ива")
+        put(s, "Возврат", 1, B="1", F="1", H=serial(), I="ива")
+        r1 = s.B("ReturnPostRow", 1, module="WmsReturn")
+        put(s, "Корректировки", 1, B="Списание", C=e1, G="1", K=serial(), L="брак")
+        w1 = s.A("AdjustPostRow", 1)
+        i2 = issue(s, 2, e2, "4", "ива")
+        R.add(c, "день подготовлен: болт — приход 10, выдано 3, возврат 1, списание 1 (лежит 7); шайба — приход 4, выдано 4 (лежит 0)",
+              all(str(x).startswith("OK") for x in (i1, r1, w1, i2)), f"{[str(x)[:80] for x in (i1, r1, w1, i2)]}")
+        seq0 = int(s.sysv("LAST_SEQ"))
+        res = s.B("Overstate", False, module="WmsLedger")
+        rows = print_rows(s, 60)
+        flat = " | ".join(" ".join(x) for x in rows)
+        bolt = next((x for x in rows if x[1].startswith("Болт М8")), None)
+        washer = next((x for x in rows if x[1].startswith("Шайба М8")), None)
+        R.add(c, "справка: болт — поступило 10, лежит 7, завышение 3, 15,00 руб.; шайба — 4, 0, 4, 10,00 руб.; болт выше шайбы (по сумме)",
+              res.startswith("OK:Завышение остатков") and bolt is not None and bolt[3:7] == ["10", "7", "3", "15,00"] and washer is not None and washer[3:7] == ["4", "0", "4", "10,00"]
+              and bolt[0] == "1" and washer[0] == "2", f"{res}; {bolt}; {washer}")
+        R.add(c, "итог: поступило на 60,00, лежит на 35,00, завышение 25,00 (в 1,7 раза); товаров с завышением 2, без остатка 1",
+              "поступило за всю историю на сумму 60,00" in flat and "лежит сейчас на сумму 35,00" in flat and "завышение 25,00" in flat and "раза больше, чем лежит" in flat
+              and "Товаров с завышением: 2" in flat and "а на складе ничего нет: 1" in flat, flat[:700])
+        bad = [w for w in ("WMS", "ЕИ", "журнал", "Журнал") if w in flat]
+        R.add(c, "в справке нет слов «WMS», «ЕИ», «журнал»; есть рекомендация про ввод остатков", not bad and "документом ввода остатков" in flat, f"{bad}")
+        res2 = s.B("Overstate", True, module="WmsLedger")
+        path = res2[5:]
+        lines = list(csv.reader(open(path, encoding="utf-8-sig"), delimiter=";")) if res2.startswith("FILE:") and os.path.isfile(path) else []
+        bl = next((x for x in lines if x[:1] == ["Болт М8"]), [])
+        R.add(c, "в файл: строка болта — поступило 10, выдано 3, возвращено 1, списано 1, остаток 7, завышение 3; в рублях 50,00 / 35,00 / 15,00",
+              len(lines) == 3 and bl[3:12] == ["10", "3", "1", "1", "7", "3", "50,00", "35,00", "15,00"], f"{res2}; {bl}")
+        R.add(c, "справка ничего не проводит", int(s.sysv("LAST_SEQ")) == seq0, f"{seq0} → {s.sysv('LAST_SEQ')}")
+        oracle(c, s, "справка о завышении")
     finally:
         s.close()
 

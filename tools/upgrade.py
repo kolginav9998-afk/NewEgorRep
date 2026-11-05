@@ -745,6 +745,9 @@ def allowed_change(sheet, r, c, old=""):
     if sheet == B.SERVICE:
         # 1.1: the line of text beside the new button «Справочники из копии…» (column C, a cell that was empty)
         return c == 2 and old == ""
+    if sheet == B.REPORTS:
+        # 1.4.0: the line of text beside the new button «Завышение остатков…» (column C of the row after the last report of the manager, a cell that was empty)
+        return c == 2 and old == ""
     return sheet == B.HELP
 
 

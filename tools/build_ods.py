@@ -176,6 +176,8 @@ REPORT_GROUPS = [
          "Сколько выдано, возвращено и на руках — у каждого получателя и подразделения (колонка C «Получателей»), на какую сумму."),
         ("btnDeadStock", "Мёртвый груз…", "WmsLedger.BtnDeadStock",
          "Все ЕИ без движения дольше 90, 180 или 365 дней — по дням или по сумме, итог «на сумму …»."),
+        ("btnOverstate", "Завышение остатков…", "WmsLedger.BtnOverstate",
+         "Что покажет учёт (например, 1С), если загрузить в него все поступления за всю историю без выдач: по каждому товару поступило, лежит, завышение — в штуках и рублях."),
     ]),
 ]
 PRINT_WIDTHS = [900, 2600, 6300, 2300, 1500, 2000, 2400]        # A..G = 18 cm: an A4 page with margins of 1,5 cm
@@ -1876,6 +1878,7 @@ def settings_130(doc, sheets):
 def release_140(doc, sheets):
     """1.4.0, what the release adds to a book that has not got it yet — idempotent, called by both ways of the upgrade (the chain of steps of a book of 1.x and step_08 of a book of 0.7): the switches of the helpers in «Настройки»
     (the rows are written into the first free ones, what the storekeeper wrote is not touched), the event that resets the cache of them when the sheet changes, the format of the rows added"""
+    reports_140(doc, sheets)
     if not sheets.hasByName(SETTINGS):
         return
     settings_130(doc, sheets)
@@ -1887,6 +1890,29 @@ def release_140(doc, sheets):
     sh.getCellRangeByPosition(1, 41, 1, SETTINGS_MAX).HoriJustify = 3
     sh.getCellRangeByPosition(0, 41, 2, SETTINGS_MAX).IsTextWrapped = True
     bind_event(sh.Events, "OnChange", "WmsSettings.OnSettingsChange")
+
+
+def reports_140(doc, sheets):
+    """1.4.0: the button «Завышение остатков…» and its line on «Отчёты» of a book that has not got it (the row where a new book puts it: after the last report of the group
+    «Руководителю»; the cell of the description was empty)"""
+    if not sheets.hasByName(REPORTS):
+        return
+    sh = sheets.getByName(REPORTS)
+    if has_button(sh, "btnOverstate"):
+        return
+    r = 3
+    for caption, items in REPORT_GROUPS:
+        r += 1
+        for name, label, macro, desc in items:
+            if name == "btnOverstate":
+                sh.getRows().getByIndex(r).Height = 900
+                text_cell(sh, 2, r, desc, size=10, color=TEXT, wrap=True, valign=2)
+                x = sh.getCellByPosition(1, r).Position.X
+                y = sh.getCellByPosition(1, r).Position.Y
+                add_button(doc, sh, name, label, macro, x, y + 80, 6400, 740, back=0xDDEBF7)
+                return
+            r += 1
+        r += 1
 
 
 # 1.1: «Без категории» (WmsCat SH_NOCAT) — the names of the registry with no category in the registry nor in «Номенклатура», with the hint; the column «Категория» is filled with the hint and
