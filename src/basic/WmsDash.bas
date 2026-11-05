@@ -106,7 +106,7 @@ Function DashRefresh() As String
     Dim unposted As Long, attention As Long, recent() As Boolean, nSt As Long, stN(DB_STALE_CAND - 1) As Long, nStShown As Long, stDay As Variant
     Dim osh As Object, rows(), mx As Double, ord As Variant, tIdx() As Long, d As Variant, cond As String, dq As String, rg As String, rd As String
     Dim row As Variant, cD As Integer, cW As Integer, cN As Integer, cU As Integer, cQ As Integer, nList As Long, stKey() As Double, stOrd() As Long
-    Dim tails As Variant, nTails As Long, tRows(), money As Variant
+    Dim tails As Variant, nTails As Long, tRows(), money As Variant, kPrev As Long, sPrev As String
     If gDbBusy Then Exit Function
     gDbBusy = True
     On Error GoTo EH
@@ -284,7 +284,7 @@ Function DashRefresh() As String
     End If
     ' ================================================================ the page
     sh.getCellRangeByPosition(1, DB_TILE_VAL, 12, DB_TILE_SUB).clearContents(1 + 2 + 4)
-    sh.getCellByPosition(1, DB_TITLE_ROW).setString("Склад сегодня · " & Format(Now(), "DD.MM.YYYY"))
+    sh.getCellByPosition(1, DB_TITLE_ROW).setString("Склад сегодня · " & Choose(WeekDay(Now()), "воскресенье", "понедельник", "вторник", "среда", "четверг", "пятница", "суббота") & ", " & Format(Now(), "DD.MM.YYYY"))
     If gState = "CLEAN" Then
         s = IIf(WmsHelp.BookRole() = WmsHelp.ROLE_TRAINING, "УЧЕБНАЯ WMS · ", "") & "●  Работа разрешена" & IIf(gOldNote <> "", " · ВНИМАНИЕ: в старой книге проводились операции — см. «" & SH_MAIN & "»", "") _
             & IIf(Left(WmsSafe.StGet("DAILY"), 10) = Format(Now(), "YYYY-MM-DD"), IIf(Mid(WmsSafe.StGet("DAILY"), 12, 2) = "OK", " · проверка дня ✓", _
@@ -308,8 +308,14 @@ Function DashRefresh() As String
     End If
     PutTile(sh, 1, nWait, "просрочено " & NumText(nLate) & " · сегодня " & NumText(nToday) & " · без даты " & NumText(nNoDate) _
         & IIf(nNeed > 0, " · заказать " & NumText(nNeed), ""))
-    PutTile(sh, 2, rcvToday + splToday, "по заказам " & NumText(rcvToday) & " · иной приход " & NumText(splToday))
-    PutTile(sh, 3, issToday, "получателей " & NumText(nWho) & " · возвратов " & NumText(retToday) & " · корректировок " & NumText(adjToday) _
+    ' 1.4.0: the previous working day for the comparison under the tiles of the day (the day is counted in the table of the last 14 days below)
+    kPrev = 1
+    Do While kPrev < 13 And Not WmsPeriod.IsWorkDay(today - kPrev)
+        kPrev = kPrev + 1
+    Loop
+    sPrev = Choose(WeekDay(CDate(today - kPrev)), "вс", "пн", "вт", "ср", "чт", "пт", "сб") & " " & Format(CDate(today - kPrev), "DD.MM")
+    PutTile(sh, 2, rcvToday + splToday, "по заказам " & NumText(rcvToday) & " · иной приход " & NumText(splToday) & " · " & sPrev & " — " & NumText(dayRcv(kPrev)))
+    PutTile(sh, 3, issToday, "получателей " & NumText(nWho) & " · возвратов " & NumText(retToday) & " · корректировок " & NumText(adjToday) & " · " & sPrev & " — " & NumText(dayIss(kPrev)) _
         & IIf(nToolLate > 0, " · не вернули вовремя " & NumText(nToolLate), ""))
     PutTile(sh, 4, carsIn, "приехало сегодня " & NumText(carsArr) & " · уехало " & NumText(carsDep))
     PutTile(sh, 5, attention, IIf(attention = 0, "всё в порядке", "непроведённых " & NumText(unposted) & " · требует разбора " & NumText(nReview) _
@@ -411,7 +417,7 @@ Function DashRefresh() As String
     sh.getCellByPosition(DB_SVC_COL, 2).setValue(today)
     sh.getCellByPosition(DB_SVC_COL, 3).setValue(ViewMs())
     sh.getCellByPosition(1, DB_FOOT).setString("Обновлено " & Format(Now(), "DD.MM.YYYY HH:MM") & " · считается по листам книги при " _
-        & "открытии страницы и после каждой операции; страница ничего не изменяет")
+        & "открытии страницы и после каждой операции; страница только считает и показывает — операции проводит лишь кнопка «Списать хвосты…» (с вопросом)")
     ViewDone(sh)
     gDbBusy = False
     DashRefresh = "OK:ЕИ " & nEI & ", с остатком " & nPos & ", ждём " & nWait & ", выдач сегодня " & issToday & ", внимание " & attention & ", " & ViewMs() & " мс"

@@ -1888,6 +1888,18 @@ def v27_safety():
                  "снова доступно — файл догоняется целиком",
               ms.startswith("OK:") and eq1 and i7.startswith("OK") and any("Зеркало журнала не пишется" == x[0] for x in err) and i8.startswith("OK") and eq2,
               f"{ms[:100]}; {eq1}; {i7[:40]}; {err}; {eq2}")
+        # 1.4.0: a mirror that holds MORE than the journal is the only copy of the journal's lost end — a posting never writes the journal over it
+        extra = "J1;999999;2026-01-01T00:00:00;TEST;TAIL;X=1\n"
+        with open(mf, "ab") as f_:
+            f_.write(extra.encode("utf-8"))
+        mirror_before = open(mf, "rb").read()
+        i9 = issue(s, 9, "ЕИ-00000009", "1", "ива")
+        mirror_after = open(mf, "rb").read()
+        bad_mirror = s.B("TestSafeAttention", module="WmsSafe")
+        shutil.copyfile(jf, mf)
+        R.add(c, "Н3 (1.4.0): зеркало длиннее журнала не затирается проводкой (оно хранит потерянный конец журнала); проводка идёт; на странице — «Зеркало журнала не пишется»",
+              str(i9).startswith("OK") and mirror_after == mirror_before and extra.encode("utf-8") in mirror_after and any("Зеркало журнала не пишется" == x[0] for x in bad_mirror),
+              f"{str(i9)[:60]}; {len(mirror_before)} → {len(mirror_after)}; {bad_mirror}")
         # the journal lost its end: «Журнал из зеркала»
         data = open(jf, encoding="utf-8").read()
         cut = data[:data.rstrip("\n").rfind("\n") + 1]
@@ -1917,6 +1929,18 @@ def v27_safety():
                  "строка во «Внимании»",
               dc.split("|")[1] == "OK" and "проверка дня ✓" in title and dc2.split("|")[1] == "FAIL" and "остаток не равен движениям" in dc2
               and any(x[0] == "Проверка дня: замечания" for x in att), f"{dc[:120]}; {title[:120]}; {dc2[:160]}")
+        # 1.4.0: the newest copy of the book older than three and a half days — the light is not green and the line says how many days
+        s.B("BackupNow", "manual", module="WmsBackup")
+        h_new = s.B("TestHealth", module="WmsSafe")
+        import time as time_
+        old_t = time_.time() - 5 * 86400 - 3600
+        for f_ in glob.glob(os.path.join(bdir, "*.ods")):
+            os.utime(f_, (old_t, old_t))
+        h_old = s.B("TestHealth", module="WmsSafe")
+        R.add(c, "Т6 (1.4.0): копия книги свежая — в «Здоровье» про возраст копии ничего; самой свежей копии 5 дн. — «последней копии книги 5 дн.», светофор не зелёный",
+              "последней копии книги" not in h_new and "последней копии книги 5 дн." in h_old and h_old.split("|")[0] in ("1", "2"), f"{h_new[:120]}; {h_old[:200]}")
+        for f_ in glob.glob(os.path.join(bdir, "*.ods")):
+            os.utime(f_, None)
         sv = s.B("ServiceRefresh", module="WmsSafe")
         page = [s.doc.Sheets.getByName("Обслуживание").getCellByPosition(2, r).getString() for r in range(3, 9)]
         R.add(c, "страница «Обслуживание»: состояние — копия на флешке, зеркало, проверка дня, копии, свободное место, книга и журнал",
@@ -2109,10 +2133,10 @@ def v29_help():
         pc = s.B("PcCheck", module="WmsHelp")
         R.add(c, "П1: «Проверить этот ПК» — LibreOffice, макросы, запись, место, Python — с «что сделать»",
               pc.startswith("Проверка этого ПК") and "LibreOffice" in pc and "запись в папку WMS" in pc and "место на диске" in pc and "Python" in pc, pc[:300])
-        choose(s, 8)
+        choose(s, 9)
         wn = s.B("WhatsNew", module="WmsHelp")
         act = s.doc.getCurrentController().getActiveSheet().getName()
-        R.add(c, "П2: «Что нового» — 12 карточек (первая — 1.3.0, вторая — 1.2.1, третья — 1.2.0, четвёртая — 1.1), «Показать» открывает лист карточки", len(s.B("WhatsNewCards", module="WmsHelp")) == 12 and wn == 8
+        R.add(c, "П2: «Что нового» — 13 карточек (первая — 1.4.0, вторая — 1.3.0, третья — 1.2.1, четвёртая — 1.2.0, пятая — 1.1), «Показать» открывает лист карточки", len(s.B("WhatsNewCards", module="WmsHelp")) == 13 and wn == 9
               and act == "Поиск", f"{wn}; {act}")
         col0 = s.B("ButtonModel", "Заказы", "btnReceiveWin", module="WmsHelp").BackgroundColor
         tr = s.B("Tour", module="WmsHelp")
@@ -5719,8 +5743,8 @@ def v73_upgrade_120_121():
     try:
         stk = s.doc.Sheets.getByName("Наличие")
         after = [tuple(r[:8]) for r in stk.getCellRangeByPosition(0, 1, 7, n_ei).getDataArray()]
-        R.add(c, "новая книга — WMS 1.3.0 (текущий выпуск): «работа разрешена», тот же журнал и каждый ЕИ",
-              s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == run_prime.VERS["WMS_CORE_VERSION"] == "1.3.0" and before == after and int(s.sysv("LAST_SEQ")) == seq_old,
+        R.add(c, "новая книга — текущий выпуск: «работа разрешена», тот же журнал и каждый ЕИ",
+              s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == run_prime.VERS["WMS_CORE_VERSION"] and before == after and int(s.sysv("LAST_SEQ")) == seq_old,
               f"{s.state()}; {s.sysv('CORE_VERSION')}; {before == after}")
         r = s.B("ToolRefresh", "", module="WmsTool")
         sh = s.doc.Sheets.getByName("Инструмент ЧПУ")
@@ -6421,8 +6445,8 @@ def v81_upgrade_121_130():
         sh = s.doc.Sheets
         stk = sh.getByName("Наличие")
         after = [tuple(r[:8]) for r in stk.getCellRangeByPosition(0, 1, 7, n_ei).getDataArray()]
-        R.add(c, "новая книга — WMS 1.3.0: «работа разрешена», тот же журнал и каждый ЕИ",
-              s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == run_prime.VERS["WMS_CORE_VERSION"] == "1.3.0" and before == after and int(s.sysv("LAST_SEQ")) == seq_old,
+        R.add(c, "новая книга — текущий выпуск: «работа разрешена», тот же журнал и каждый ЕИ",
+              s.state().get("STATE") == "CLEAN" and s.sysv("CORE_VERSION") == run_prime.VERS["WMS_CORE_VERSION"] and before == after and int(s.sysv("LAST_SEQ")) == seq_old,
               f"{s.state()}; {s.sysv('CORE_VERSION')}; {before == after}")
 
         def btn(sheet, name):
@@ -6463,10 +6487,18 @@ def v81_upgrade_121_130():
         after2 = [tuple(r[:8]) for r in stk.getCellRangeByPosition(0, 1, 7, n_ei).getDataArray()]
         R.add(c, "«Привести поставщиков»: все три строки «Заказов» и визит — одно написание; остатки и ЕИ те же; в журнале только исправления позиций и визита",
               ap.startswith("OK:") and len(set(sups)) == 1 and vis == sups[0] and after2 == before and int(s.sysv("LAST_SEQ")) > seq1, f"{ap[:200]}; {sups}; {vis!r}")
+        # 1.4.0 in the upgraded book: the switches of the helpers (rows of «Настройки» and the event that resets their cache), the button of the overstatement, «Закрыть день»
+        codes = [str(x[3]) for x in st.getCellRangeByPosition(0, 1, 3, 119).getDataArray()]
+        ev = [n for n in st.Events.getElementNames() if "OnChange" in n]
+        rb = form_buttons(sh.getByName("Отчёты"))
+        db = form_buttons(sh.getByName("Отчёт дня"))
+        R.add(c, "книга 1.2.1 → текущий выпуск: переключатели (LITE, NAME_FIX, HINT_WAIT, AUTO_DASH…) в «Настройках», событие листа, кнопки «Завышение остатков…» и «Закрыть день»; настройка «Артикул на этикетке» на месте",
+              all(k in codes for k in ("LITE", "NAME_FIX", "SUP_FIX", "HINT_WAIT", "AUTO_LISTS", "AUTO_DASH", "EDATE_AUTO", "LABEL_ART")) and bool(ev) and "btnOverstate" in rb and "btnCloseDay" in db,
+              f"{[k for k in ('LITE', 'NAME_FIX', 'HINT_WAIT', 'AUTO_DASH', 'LABEL_ART') if k not in codes]}; {ev}; {'btnOverstate' in rb}; {'btnCloseDay' in db}")
         sc = s.B("ActionSelfCheck")
         R.add(c, "самопроверка — без ошибок", sc.startswith("САМОПРОВЕРКА WMS: ошибок 0"), sc[:200])
         P, inf, _ = s.adjcheck(0)
-        R.add(c, "оракул (журнал воспроизведён независимо): книга 1.2.1, обновлённая до 1.3.0, и исправления поставщиков", not P, f"{inf.get('ops')} операций; {P[:4]}")
+        R.add(c, "оракул (журнал воспроизведён независимо): книга 1.2.1, обновлённая до текущего выпуска, и исправления поставщиков", not P, f"{inf.get('ops')} операций; {P[:4]}")
     finally:
         s.close()
 
@@ -6714,11 +6746,11 @@ def v85_feature_switches():
         codes = [r[3] for r in data if r[3]]
         vals = {r[3]: r[1] for r in data if r[3]}
         rowof = {r[3]: i + 1 for i, r in enumerate(data) if r[3]}
-        want = ["BIG_QTY", "LABEL_ART", "LITE", "NAME_FIX", "SUP_FIX", "HINT_CAT", "HINT_PAST", "HINT_WAIT", "RET_HINT", "AUTO_LISTS", "AUTO_DASH", "AUTO_MAP", "AUTO_STOCKINFO"]
+        want = ["BIG_QTY", "LABEL_ART", "LITE", "NAME_FIX", "SUP_FIX", "HINT_CAT", "HINT_PAST", "HINT_WAIT", "RET_HINT", "AUTO_LISTS", "AUTO_DASH", "AUTO_MAP", "AUTO_STOCKINFO", "EDATE_AUTO"]
         helpers = [k for k in want[3:]]
         script = [p_.Value for p_ in st.Events.getByName("OnChange") if p_.Name == "Script"]
         val = st.getCellByPosition(1, rowof["NAME_FIX"]).Validation
-        R.add(c, "«Настройки»: BIG_QTY, LABEL_ART и 11 новых строк (LITE, NAME_FIX, SUP_FIX, HINT_CAT, HINT_PAST, HINT_WAIT, RET_HINT, AUTO_LISTS, AUTO_DASH, AUTO_MAP, AUTO_STOCKINFO); помощники — «да», «Лёгкий режим» — «нет»; "
+        R.add(c, "«Настройки»: BIG_QTY, LABEL_ART и 12 новых строк (LITE, NAME_FIX, SUP_FIX, HINT_CAT, HINT_PAST, HINT_WAIT, RET_HINT, AUTO_LISTS, AUTO_DASH, AUTO_MAP, AUTO_STOCKINFO, EDATE_AUTO); помощники — «да», «Лёгкий режим» — «нет»; "
                  "в ячейке список «да/нет»; на листе событие OnChange (WmsSettings.OnSettingsChange)",
               codes == want and all(vals[k] == "да" for k in helpers if k != "LITE") and vals["LITE"] == "нет" and val.Type.value == "LIST"
               and any("OnSettingsChange" in str(x) for x in script), f"{codes}; {vals}; {script}; {val.Type}")
@@ -6747,7 +6779,7 @@ def v85_feature_switches():
         nm_lite = osh.getCellByPosition(1, 2).getString()
         switch("LITE", "нет")
         back = [s.B("FeatOn", k, module="WmsSettings") for k in helpers]
-        R.add(c, "«Лёгкий режим» = «да»: все 10 помощников выключены, название на «Заказах» не исправляется; «нет» — все снова работают",
+        R.add(c, "«Лёгкий режим» = «да»: все 11 помощников выключены, название на «Заказах» не исправляется; «нет» — все снова работают",
               not any(lite_all) and nm_lite == broken and all(back), f"{lite_all}; {nm_lite!r}; {back}")
         # the chain of the hints of «Заказы»: the name, the article or the supplier run it; the quantity does not
         put(s, "Заказы", 3, A="1", B=broken, H="10", I="шт", L="Ромашка")
@@ -6842,7 +6874,7 @@ def v86_report_text():
         iss = [b for b in bul if b.startswith("Отпуск товара со склада")]
         R.add(c, "выдачи: 2 выдачи, 5 шт, на сумму около 190 руб. (3×50 + 2×20); «чаще всего выдавали» — названия позиций",
               len(iss) == 1 and "оформлено выдач — 2; отпущено: 5 шт; на сумму около 190 руб." in iss[0]
-              and any(b.startswith("чаще всего выдавали: ") and "Краска белая 0,9 л" in b and "Болт М8" in b for b in (x.strip() for x in bul)), f"{iss}; {[b for b in bul if 'чаще' in b]}")
+              and any(b.startswith("Чаще всего выдавали сегодня (по числу выдач): ") and "Краска белая 0,9 л" in b and "Болт М8" in b for b in bul), f"{iss}; {[b for b in bul if 'Чаще' in b]}")
         want_t = f"Не получено в срок: позиций — 1 (самая давняя — «Гамма», ожидалась {(today - datetime.timedelta(days=3)).strftime('%d.%m.%Y')})"
         R.add(c, "задачи: ожидаются 2 позиции (недопоставка «Альфа» и «Гамма»), не получена в срок — «Гамма» с датой; позвонить «Гамма»; пополнить запас — «Болт М8» (остаток 3, минимум 20 — заказать 17 шт)",
               "Принять поставки: ожидаются позиции заказов — 2 (поставщиков — 2)" in bul and want_t in bul
@@ -6942,7 +6974,7 @@ def v88_overstate():
               all(str(x).startswith("OK") for x in (i1, r1, w1, i2)), f"{[str(x)[:80] for x in (i1, r1, w1, i2)]}")
         seq0 = int(s.sysv("LAST_SEQ"))
         res = s.B("Overstate", False, module="WmsLedger")
-        rows = print_rows(s, 60)
+        rows = print_rows(s, 120)
         flat = " | ".join(" ".join(x) for x in rows)
         bolt = next((x for x in rows if x[1].startswith("Болт М8")), None)
         washer = next((x for x in rows if x[1].startswith("Шайба М8")), None)
@@ -6951,17 +6983,105 @@ def v88_overstate():
               and bolt[0] == "1" and washer[0] == "2", f"{res}; {bolt}; {washer}")
         R.add(c, "итог: поступило на 60,00, лежит на 35,00, завышение 25,00 (в 1,7 раза); товаров с завышением 2, без остатка 1",
               "поступило за всю историю на сумму 60,00" in flat and "лежит сейчас на сумму 35,00" in flat and "завышение 25,00" in flat and "раза больше, чем лежит" in flat
-              and "Товаров с завышением: 2" in flat and "а на складе ничего нет: 1" in flat, flat[:700])
+              and "Товаров с завышением: 2" in flat and "а на складе ничего нет: 1" in flat
+              and not any(x[1].startswith("Кабель") for x in rows), flat[:700])
         bad = [w for w in ("WMS", "ЕИ", "журнал", "Журнал") if w in flat]
-        R.add(c, "в справке нет слов «WMS», «ЕИ», «журнал»; есть рекомендация про ввод остатков", not bad and "документом ввода остатков" in flat, f"{bad}")
+        R.add(c, "в справке нет слов «WMS», «ЕИ», «журнал»; есть рекомендация про ввод остатков", not bad and "Рекомендация" in flat and "ввода остатков" in flat, f"{bad}")
         res2 = s.B("Overstate", True, module="WmsLedger")
         path = res2[5:]
         lines = list(csv.reader(open(path, encoding="utf-8-sig"), delimiter=";")) if res2.startswith("FILE:") and os.path.isfile(path) else []
         bl = next((x for x in lines if x[:1] == ["Болт М8"]), [])
         R.add(c, "в файл: строка болта — поступило 10, выдано 3, возвращено 1, списано 1, остаток 7, завышение 3; в рублях 50,00 / 35,00 / 15,00",
-              len(lines) == 3 and bl[3:12] == ["10", "3", "1", "1", "7", "3", "50,00", "35,00", "15,00"], f"{res2}; {bl}")
+              len(lines) > 3 and lines[0][3] == "Поступило" and bl[3:12] == ["10", "3", "1", "1", "7", "3", "50,00", "35,00", "15,00"]
+              and lines[1][0] == "Болт М8" and lines[2][0] == "Шайба М8", f"{res2}; {bl}; {lines[:3]}")
         R.add(c, "справка ничего не проводит", int(s.sysv("LAST_SEQ")) == seq0, f"{seq0} → {s.sysv('LAST_SEQ')}")
         oracle(c, s, "справка о завышении")
+    finally:
+        s.close()
+
+
+@case
+def v89_close_day_dash():
+    """1.4.0: «Закрыть день» — непроведённая строка «Выдач» названа, проверка дня сделана, отчёт построен, напоминание сохранить; журнал не меняется; кнопка на «Отчёте дня»;
+    «Дашборд»: заголовок с днём недели, под плитками «Принято» и «Выдано» — прошлый рабочий день, подвал не обещает «ничего не изменяет», кнопка «Списать хвосты…» названа"""
+    import re
+    c = "V89"
+    s = ready(Session(new_wms("v89")))
+    try:
+        s.doc.Sheets.getByName("Календарь").getCellRangeByPosition(0, 1, 2, 400).clearContents(1 + 2 + 4 + 16)
+        order(s, 1, "1", "Болт М8", qty="10", J=5.0)
+        r1 = receive(s, 1, "10", place="4-1-1")
+        e1 = ords(s, 1)[21]
+        i1 = issue(s, 1, e1, "2", "ива")
+        put(s, "Выдачи", 2, L=e1, E="1", H=serial(), I="ива")
+        seq0 = int(s.sysv("LAST_SEQ"))
+        res = s.B("CloseDay", False, module="WmsDocs")
+        text = doc_of(s)
+        s.B("DcDocClose", module="WmsDocs")
+        R.add(c, "«Закрыть день»: OK; «Непроведённых строк «Выдачи»: 1»; «Проверка дня»; «Отчёт дня подготовлен»; напоминание про Ctrl+S; отчёт построен; журнал не менялся",
+              str(r1).startswith("OK") and str(i1).startswith("OK") and res.startswith("OK:") and "Непроведённых строк «Выдачи»: 1" in res and "Проверка дня" in res
+              and "Отчёт дня подготовлен" in res and "Ctrl+S" in res and "1. Завершено сегодня:" in text and int(s.sysv("LAST_SEQ")) == seq0,
+              f"{res}; {text[:80]!r}; {seq0} → {s.sysv('LAST_SEQ')}")
+        R.add(c, "на «Отчёте дня» есть кнопка «Закрыть день»", "btnCloseDay" in form_buttons(s.doc.Sheets.getByName("Отчёт дня")), "")
+        db = s.B("DashRefresh", module="WmsDash")
+        dsh = s.doc.Sheets.getByName("Дашборд")
+        days = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
+        title = dsh.getCellByPosition(1, 0).getString()
+        sub_in, sub_out = dsh.getCellByPosition(5, 5).getString(), dsh.getCellByPosition(7, 5).getString()
+        foot = dsh.getCellByPosition(1, 67).getString()
+        pat = r"(пн|вт|ср|чт|пт|сб|вс) \d\d\.\d\d — \d+"
+        R.add(c, "«Дашборд»: заголовок «Склад сегодня · <день недели>, <дата>»; под «Принято» и «Выдано» — «пн 03.11 — N»; подвал без «ничего не изменяет», с «Списать хвосты…»",
+              str(db).startswith("OK") and title == f"Склад сегодня · {days[T.weekday()]}, {TODAY}" and re.search(pat, sub_in) and re.search(pat, sub_out)
+              and "ничего не изменяет" not in foot and "Списать хвосты" in foot, f"{db}; {title!r}; {sub_in!r}; {sub_out!r}; {foot!r}")
+        oracle(c, s, "закрыть день, дашборд")
+    finally:
+        s.close()
+
+
+@case
+def v90_default_edate():
+    """1.4.0: ожидаемая дата Q строки «Заказов», набранной вручную, ставится сама — дата заказа (пусто — сегодня) плюс обычный срок поставщика («Поставщики» D); дата, которую вписал
+    кладовщик, не заменяется; у поставщика без срока дата остаётся пустой; EDATE_AUTO «нет» и «Лёгкий режим» её не ставят; в «Контроле» строки сказано откуда дата"""
+    c = "V90"
+    s = ready(Session(new_wms("v90")))
+    try:
+        sh = s.doc.Sheets
+        st = sh.getByName("Настройки")
+        data = st.getCellRangeByPosition(0, 1, 3, 30).getDataArray()
+        rowof = {r[3]: i + 1 for i, r in enumerate(data) if r[3]}
+        sup = sh.getByName("Поставщики")
+        sup.getCellByPosition(0, 1).setString("Ромашка")
+        sup.getCellByPosition(3, 1).setValue(5)
+        osh = sh.getByName("Заказы")
+
+        def switch(code, value):
+            st.getCellByPosition(1, rowof[code]).setString(value)
+            s.B("OnSettingsChange", module="WmsSettings")
+
+        def typed(r, **cols):
+            put(s, "Заказы", r, A=str(r), H="10", I="шт", **cols)
+            s.B("OnOrdersChange", osh.getCellByPosition(11, r), module="WmsOrders")
+            return osh.getCellByPosition(16, r).getValue(), osh.getCellByPosition(16, r).getString(), osh.getCellByPosition(24, r).getString()
+        today = serial(0)
+        q1 = typed(1, B="Болт М8", L="Ромашка")
+        R.add(c, "срок поставщика 5 дн., даты нет: Q = сегодня + 5; «Контроль» говорит откуда дата", q1[0] == today + 5 and "по сроку поставщика" in q1[2], f"{q1}; {today}")
+        q2 = typed(2, B="Гайка М8", L="Ромашка", P=serial(-2))
+        R.add(c, "есть дата заказа (2 дня назад): Q = дата заказа + 5", q2[0] == today + 3, f"{q2}")
+        q3 = typed(3, B="Шайба М8", L="Ромашка", Q=serial(20))
+        R.add(c, "дата, которую вписал кладовщик (через 20 дней), не заменяется", q3[0] == today + 20 and "по сроку поставщика" not in q3[2], f"{q3}")
+        q4 = typed(4, B="Винт М8", L="Лютик")
+        R.add(c, "поставщик без срока («Лютик» нет в «Поставщиках»): дата остаётся пустой", q4[1] == "" and q4[0] == 0, f"{q4}")
+        switch("EDATE_AUTO", "нет")
+        q5 = typed(5, B="Гвоздь", L="Ромашка")
+        switch("EDATE_AUTO", "да")
+        switch("LITE", "да")
+        q6 = typed(6, B="Саморез", L="Ромашка")
+        switch("LITE", "нет")
+        R.add(c, "EDATE_AUTO «нет» и «Лёгкий режим» — дату не ставят", q5[1] == "" and q6[1] == "", f"{q5}; {q6}")
+        q7 = typed(7, B="Скоба", L="Ромашка")
+        R.add(c, "переключатели вернули в «да» — ставит снова", q7[0] == today + 5, f"{q7}")
+        P_, inf, _ = s.adjcheck(0)
+        R.add(c, "независимая проверка журнала — без замечаний (ввод заказа ничего не проводит)", not P_ and int(s.sysv("LAST_SEQ")) == 0, f"{P_[:3]}; {s.sysv('LAST_SEQ')}")
     finally:
         s.close()
 

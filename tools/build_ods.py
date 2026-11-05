@@ -811,7 +811,7 @@ def build_dash(doc, sh):
         sh.getColumns().getByIndex(c).Width = 2500
     sh.getColumns().getByIndex(13).Width = 400
     sh.getColumns().getByIndex(14).IsVisible = False            # WmsDash.DB_SVC_COL
-    heights = {0: 1150, 1: 950, 2: 250, 3: 520, 4: 1250, 5: 820, 6: 350, 7: 650, 8: 480, 21: 350, 22: 650, 23: 480, 34: 350, 35: 650, 36: 480}
+    heights = {0: 1150, 1: 950, 2: 250, 3: 520, 4: 1250, 5: 1000, 6: 350, 7: 650, 8: 480, 21: 350, 22: 650, 23: 480, 34: 350, 35: 650, 36: 480}
     for r, h in heights.items():
         sh.getRows().getByIndex(r).Height = h
     for r in list(range(9, 21)) + list(range(24, 34)) + list(range(37, 51)):
@@ -905,7 +905,7 @@ def build_dash(doc, sh):
     y = sh.getCellByPosition(0, 54).Position.Y
     add_button(doc, sh, "btnTails", "Списать хвосты…", "WmsDash.BtnTails", sh.getCellByPosition(10, 54).Position.X, y + 40, 7400, 560, back=0xF4CCCC)
     merge(sh, 1, 67, 12, 67)
-    text_cell(sh, 1, 67, "Страница считается по листам книги при открытии и после каждой операции; она ничего не изменяет.", size=8, color=MUTED)
+    text_cell(sh, 1, 67, "Страница считается по листам книги при открытии и после каждой операции; она только считает и показывает — операции проводит лишь кнопка «Списать хвосты…» (с вопросом).", size=8, color=MUTED)
     view_nav(doc, sh, 1, "dbNav", DASH, total=26900)
     y = sh.getCellByPosition(0, 1).Position.Y
     add_button(doc, sh, "btnDashRefresh", "Обновить", "WmsDash.BtnDashRefresh", 150 + 27000, y + 70, 2850, 760, bold=True, back=0xC6E0B4)
@@ -1526,6 +1526,7 @@ def build_dayrep(doc, sh):
         sh.getCellByPosition(4, DAYREP_ROW0 + k).setString(t)
     add_button(doc, sh, "btnDayReport", "Подготовить отчёт", "WmsDocs.BtnDayReport", 150, 120, 5400, 760, bold=True, back=0xC6E0B4)
     add_button(doc, sh, "btnDrClear", "Очистить «Сделано вручную»", "WmsDocs.BtnDrClear", 5700, 120, 5700, 760, back=0xDDEBF7)
+    add_button(doc, sh, "btnCloseDay", "Закрыть день", "WmsDocs.BtnCloseDay", 150, 920, 5400, 520, back=0xFFE699)
     dayrep_period(doc, sh)
 
 
@@ -1817,6 +1818,9 @@ SETTINGS_ROWS = [
     ("Заполнять сведения на «Наличии» при заходе", "да",
      "Колонки L…V со сведениями о товаре (сколько пришло, откуда, фасовка, серийный номер, срок годности, резерв) заполняются при заходе на «Наличие» после операций; "
      "первое заполнение в большой книге может занять несколько секунд. Нет — только кнопкой «Обновить сведения».", "AUTO_STOCKINFO"),
+    ("Ожидаемая дата по сроку поставщика", "да",
+     "Когда вы вписываете в «Заказы» поставщика, а ожидаемая дата (столбец Q) пуста и в «Поставщиках» известен обычный срок поставки (столбец D), дата ставится сама: "
+     "дата заказа (пусто — сегодня) плюс этот срок. Ваша дата никогда не заменяется. Нет — дату вписываете только вы.", "EDATE_AUTO"),
 ]
 
 # the rows of «Настройки» (the hidden column D is the code): a limit that the book, the macros and the upgrade agree on (it was 40, 1.4.0: 120)
@@ -1879,6 +1883,8 @@ def release_140(doc, sheets):
     """1.4.0, what the release adds to a book that has not got it yet — idempotent, called by both ways of the upgrade (the chain of steps of a book of 1.x and step_08 of a book of 0.7): the switches of the helpers in «Настройки»
     (the rows are written into the first free ones, what the storekeeper wrote is not touched), the event that resets the cache of them when the sheet changes, the format of the rows added"""
     reports_140(doc, sheets)
+    closeday_140(doc, sheets)
+    dash_140(doc, sheets)
     if not sheets.hasByName(SETTINGS):
         return
     settings_130(doc, sheets)
@@ -1890,6 +1896,22 @@ def release_140(doc, sheets):
     sh.getCellRangeByPosition(1, 41, 1, SETTINGS_MAX).HoriJustify = 3
     sh.getCellRangeByPosition(0, 41, 2, SETTINGS_MAX).IsTextWrapped = True
     bind_event(sh.Events, "OnChange", "WmsSettings.OnSettingsChange")
+
+
+def dash_140(doc, sheets):
+    """1.4.0: the line under the tiles of «Дашборд» is taller (it holds the comparison with the previous working day)"""
+    if sheets.hasByName(DASH):
+        sh = sheets.getByName(DASH)
+        if sh.getRows().getByIndex(5).Height < 1000:
+            sh.getRows().getByIndex(5).Height = 1000
+
+
+def closeday_140(doc, sheets):
+    """1.4.0: the button «Закрыть день» on «Отчёт дня» of a book that has not got it"""
+    if sheets.hasByName(DAYREP):
+        sh = sheets.getByName(DAYREP)
+        if not has_button(sh, "btnCloseDay"):
+            add_button(doc, sh, "btnCloseDay", "Закрыть день", "WmsDocs.BtnCloseDay", 150, 920, 5400, 520, back=0xFFE699)
 
 
 def reports_140(doc, sheets):

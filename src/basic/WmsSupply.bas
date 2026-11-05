@@ -96,6 +96,26 @@ Function SupplierLead(s As String) As Long
     End If
 End Function
 
+' 1.4.0: the expected date Q of an open row of «Заказы» typed by hand: when it is empty and the usual delivery time of the supplier is known («Поставщики» D), Q = the date of the
+' order P (today when P is empty) + that time — as the rows of a replacement and of a repeat get it. A date the storekeeper wrote is never replaced. «Настройки» (EDATE_AUTO /
+' «Лёгкий режим») can switch it off. True when Q was written
+Function DefaultEdate(r As Long) As Boolean
+    Dim sh As Object, q As Object, lead As Long, d0 As Double
+    On Error GoTo EH
+    If Not WmsSettings.FeatOn("EDATE_AUTO") Then Exit Function
+    sh = WmsOrders.OrdersSheet()
+    q = sh.getCellByPosition(OC_EDATE, r)
+    If q.getType() <> com.sun.star.table.CellContentType.EMPTY Then Exit Function
+    lead = SupplierLead(Trim(sh.getCellByPosition(OC_SUPPLIER, r).getString()))
+    If lead < 1 Then Exit Function
+    d0 = WmsOrders.QSerial(sh.getCellByPosition(OC_ODATE, r).getDataArray()(0)(0))
+    If d0 <= 0 Then d0 = WmsOrders.Today()
+    q.setValue(d0 + lead)
+    DefaultEdate = True
+    Exit Function
+EH:
+End Function
+
 Sub BtnSuppliersFill(Optional oEvent As Variant)
     Dim s As String
     WmsInit()

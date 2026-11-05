@@ -1687,6 +1687,12 @@ Function TestJposSet(s As String) As String
 End Function
 
 ' test seam: the rows of SafeAttention
+Function TestHealth() As String
+    Dim t As String, k As Integer
+    k = Health(t)
+    TestHealth = k & "|" & t
+End Function
+
 Function TestSafeAttention() As Variant
     Dim rows As Variant
     SafeAttention(rows)

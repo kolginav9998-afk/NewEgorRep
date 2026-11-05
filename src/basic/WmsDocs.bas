@@ -1313,7 +1313,7 @@ Private Sub DrIssueDay(dt As Double, d As Double, iDate() As Double, iWho() As S
     head = label & ": оформлено выдач — " & cnt & "; отпущено: " & DrUnitText(un)
     If sum > 0 Then head = head & "; на сумму около " & WmsPeriod.MoneyRub(sum) & IIf(nNoPr > 0, " (оценено без " & nNoPr & " поз.)", "")
     DrAdd("D", head & "; получатели: " & s)
-    If items <> "" Then DrAdd("D", "  чаще всего выдавали: " & WmsPeriod.TopText(items, 3))
+    If items <> "" Then DrAdd("D", "Чаще всего выдавали" & IIf(d = dt, " сегодня", "") & " (по числу выдач): " & WmsPeriod.TopText(items, 3))
 End Sub
 
 ' the acts of the day from the register
@@ -1485,6 +1485,58 @@ Private Function DrOpsOfDay(d As Double) As Long
     DrOpsOfDay = n
     Exit Function
 EH:
+End Function
+
+' ================================================================ 1.4.0: «Закрыть день»
+
+' One button for the end of the day instead of three: the rows of «Выдачи» that are not posted yet (asked once), the check of the day (made
+' again now), the report of the day. It posts nothing and does not save the book: the saving (Ctrl+S) makes the copy by itself.
+Sub BtnCloseDay(Optional oEvent As Variant)
+    Dim s As String
+    WmsInit()
+    s = CloseDay(gUiAuto = 0)
+    If Left(s, 4) = "ERR:" Then
+        WmsUi.UiMessage(Mid(s, 5))
+    ElseIf gUiAuto = 0 Then
+        WmsUi.UiMessage("День закрыт:" & Chr(10) & Mid(s, 4))
+    End If
+End Sub
+
+' OK:<what was done, a line each> / ERR:<why the day is not closed>
+Function CloseDay(bShow As Boolean) As String
+    Dim nUn As Long, k As Integer, s As String, rep As String, chk As String
+    On Error GoTo EH
+    WmsInit()
+    nUn = WmsIssue.UnpostedCount()
+    If nUn > 0 And bShow Then
+        k = WmsPrimeUi.UiButtons("Закрыть день", "На листе «" & SH_ISSUES & "» остались строки, которые ещё не проведены: " & nUn & "." & Chr(10) _
+            & "Отчёт за сегодня не учтёт их.", Array("Закрыть день всё равно", "Вернуться к выдачам"), Array(1, 0))
+        If k <> 1 Then
+            CloseDay = "ERR:день не закрыт: проведите непроведённые строки «" & SH_ISSUES & "» («Провести выделенные») и нажмите «Закрыть день» ещё раз"
+            gUiLastMsg = CloseDay
+            Exit Function
+        End If
+    End If
+    chk = WmsSafe.DailyCheck(True)
+    rep = DayReport(DrDate(), bShow)
+    If nUn > 0 Then
+        s = "• Непроведённых строк «" & SH_ISSUES & "»: " & nUn & " (в отчёт не вошли)"
+    Else
+        s = "• Непроведённых выдач нет"
+    End If
+    s = s & Chr(10) & "• " & WmsSafe.DailyLine()
+    If Left(rep, 3) = "OK:" Then
+        s = s & Chr(10) & "• Отчёт дня подготовлен" & IIf(bShow, " и открыт в Writer", "")
+    Else
+        s = s & Chr(10) & "• Отчёт дня не построен: " & Mid(rep, 5)
+    End If
+    s = s & Chr(10) & "• Осталось сохранить книгу (Ctrl+S): при сохранении программа сама делает копию"
+    CloseDay = "OK:" & s
+    gUiLastMsg = CloseDay
+    Exit Function
+EH:
+    CloseDay = "ERR:день не закрыт: " & Error$ & " (строка " & Erl & ")"
+    gUiLastMsg = CloseDay
 End Function
 
 ' ================================================================ test seam (reads and closes the document built last)

@@ -797,16 +797,20 @@ Function Overstate(bFile As Boolean) As String
         gUiLastMsg = Overstate
         Exit Function
     End If
-    shown = ng
-    If shown > PR_MAX - 100 Then shown = PR_MAX - 100
-    ReDim rows(IIf(shown > 0, shown - 1, 0))
-    For i = 0 To shown - 1
+    ' the table of the page: the goods with an overstatement only (the file has all the goods)
+    shown = 0
+    ReDim rows(IIf(ng > 0, ng - 1, 0))
+    For i = 0 To ng - 1
         g = ord(i)
         n = gFirst(g)
         rcv = gq(g, 0) + gq(g, 1)
         ov = WmsIssue.Round3(rcv - gq(g, 5))
         ovM = gm(g, 0) + gm(g, 1) - gm(g, 5)
-        rows(i) = Array(i + 1, LdGoodsText(n), gLdUnit(n), WmsIssue.QtyText(rcv), WmsIssue.QtyText(gq(g, 5)), WmsIssue.QtyText(ov), IIf(Abs(gm(g, 0) + gm(g, 1)) > 0.0000005 Or Abs(ovM) > 0.0000005, WmsPrint.Money(ovM), "—"))
+        If ov > 0.0000005 And shown < PR_MAX - 100 Then
+            rows(shown) = Array(shown + 1, LdGoodsText(n), gLdUnit(n), WmsIssue.QtyText(rcv), WmsIssue.QtyText(gq(g, 5)), WmsIssue.QtyText(ov), _
+                IIf(Abs(gm(g, 0) + gm(g, 1)) > 0.0000005 Or Abs(ovM) > 0.0000005, WmsPrint.Money(ovM), "—"))
+            shown = shown + 1
+        End If
     Next i
     sh = WmsPrint.PrintBegin("СПРАВКА О ЗАВЫШЕНИИ ОСТАТКОВ на " & Format(today, "DD.MM.YYYY"), "Завышение остатков " & Format(today, "YYYY-MM-DD"))
     WmsPrint.PrintLine(sh, "Если загрузить в 1С все поступления за всю историю, а выдачи, возвраты и списания не загружать, остатки в 1С окажутся больше, чем лежит на складе. " _
@@ -821,11 +825,11 @@ Function Overstate(bFile As Boolean) As String
         & IIf(nNoPrice > 0, " · позиций учёта без цены: " & nNoPrice & " (в рубли не вошли)", "") & ".")
     WmsPrint.PrintLine(sh, "Поступило — приход по заказам и иной приход за всю историю с учётом исправлений и сторно; остаток — по складскому учёту на сегодня. " _
         & "Завышение = поступило − остаток = выдано − возвращено + списано.")
-    If ng > 0 Then
+    If nOv > 0 Then
         WmsPrint.PrintTable(sh, Array("№", "Товар", "Ед.", "Поступило", "Остаток", "Завышение", "Сумма, руб."), rows, shown, "0,3,4,5,6")
-        If shown < ng Then WmsPrint.PrintLine(sh, "Показаны первые " & shown & " товаров из " & ng & " (по убыванию суммы завышения) — полностью: «в файл CSV».", True)
+        If shown < nOv Then WmsPrint.PrintLine(sh, "Показаны первые " & shown & " товаров из " & nOv & " (по убыванию суммы завышения) — полностью: «в файл CSV».", True)
     Else
-        WmsPrint.PrintLine(sh, "Движений нет — завышения нет.", True)
+        WmsPrint.PrintLine(sh, "Завышения нет: всё, что поступило, лежит на складе.", True)
     End If
     WmsPrint.PrintLine(sh, "Рекомендация: в 1С загрузить справочник номенклатуры без остатков, а остатки — фактические на дату перехода, одним документом ввода остатков; " _
         & "историю движений хранить архивом. Порядок согласуйте с бухгалтером и специалистом по внедрению 1С.", True)
