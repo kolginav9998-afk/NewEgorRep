@@ -42,36 +42,24 @@ Function IsWorkDay(d As Double) As Boolean
     End If
 End Function
 
-' ================================================================ 1.4.0: names, prices and money for the texts of the reports
+' ================================================================ 1.4.0: the names of the goods for the texts of the reports
 
-' The reports are read by people who do not use the table: money is written in whole roubles, the goods by their names. The names of
-' the positions and the unit prices (of the order a position came with) are read from the sheets once for a report.
+' The reports are read by people who do not use the table: the goods are named by their names, and no sums of money are written (the storekeeper's
+' decision of 05.11.2026). The names of the positions are read from the sheet once for a report.
 Global gRfOk As Boolean
 Global gRfHi As Long
 Global gRfName() As String
-Global gRfPrice() As Double
-Global gRfUnit() As String
 
-' «12 340 руб.» — whole roubles with the groups of digits (the spaces, whatever the language of the PC)
-Function MoneyRub(x As Double) As String
-    Dim s As String
-    s = WmsPrint.Money(CDbl(Int(Abs(x) + 0.5)))
-    If Right(s, 3) = ",00" Then s = Left(s, Len(s) - 3)
-    MoneyRub = IIf(x < 0, "−", "") & s & " руб."
-End Function
-
-' a new report reads the names and the prices again
+' a new report reads the names again
 Sub RefsReset()
     gRfOk = False
 End Sub
 
 Private Sub RefsLoad()
-    Dim st As Object, sh As Object, last As Long, d As Variant, i As Long, n As Long, hi As Long, p As Variant
+    Dim st As Object, last As Long, d As Variant, i As Long, n As Long, hi As Long
     gRfOk = True
     gRfHi = 0
     ReDim gRfName(0)
-    ReDim gRfPrice(0)
-    ReDim gRfUnit(0)
     On Error GoTo EH
     st = WmsIssue.StockSheet()
     last = WmsOrders.LastRow(st)
@@ -84,28 +72,9 @@ Private Sub RefsLoad()
     Next i
     If hi < 1 Then Exit Sub
     ReDim gRfName(hi)
-    ReDim gRfPrice(hi)
-    ReDim gRfUnit(hi)
     gRfHi = hi
     For i = 0 To UBound(d)
         If WmsOrders.StrictEI(CStr(d(i)(SC_EI)), n) Then gRfName(n) = Trim(CStr(d(i)(SC_NAME)))
-    Next i
-    sh = WmsOrders.OrdersSheet()
-    last = WmsOrders.LastRow(sh)
-    If last < 1 Then Exit Sub
-    d = sh.getCellRangeByPosition(OC_UNIT, 1, OC_EI, last).getDataArray()
-    For i = 0 To UBound(d)
-        If WmsOrders.StrictEI(CStr(d(i)(OC_EI - OC_UNIT)), n) Then
-            If n <= hi Then
-                p = d(i)(OC_PRICE - OC_UNIT)
-                If VarType(p) = 5 Then
-                    If p > 0 Then
-                        gRfPrice(n) = p
-                        gRfUnit(n) = CStr(d(i)(0))
-                    End If
-                End If
-            End If
-        End If
     Next i
     Exit Sub
 EH:
@@ -115,16 +84,6 @@ End Sub
 Function RefName(n As Long) As String
     If Not gRfOk Then RefsLoad()
     If n >= 1 And n <= gRfHi Then RefName = gRfName(n)
-End Function
-
-' the price of one unit of the position n by the order it came with — when the unit asked is the unit of that order (otherwise the
-' amount would be a guess); 0 — not known
-Function RefPrice(n As Long, sUnit As String) As Double
-    If Not gRfOk Then RefsLoad()
-    If n < 1 Or n > gRfHi Then Exit Function
-    If gRfPrice(n) <= 0 Then Exit Function
-    If WmsPack.UnitKey(sUnit) <> WmsPack.UnitKey(gRfUnit(n)) Then Exit Function
-    RefPrice = gRfPrice(n)
 End Function
 
 ' a key for the lists «name=count;…»: no separators of the list inside
@@ -200,15 +159,14 @@ Function PeriodTotals(d0 As Double, d1 As Double, ByRef nDays As Long) As String
     Dim nRcv As Long, rcvU As String, nSp As Long, nIss As Long, issU As String, nRet As Long, retU As String, nCars As Long, nMove As Long, nWo As Long, woU As String, nInv As Long
     Dim nSplit As Long, nSup As Long, nKit As Long, nAsm As Long, nFix As Long, nDel As Long, nCancel As Long, whoAcc As String, delNos As String, nDoc As Long, docs As String, nIssDel As Long
     Dim iNo() As String, iWho() As String, iQty() As Double, iUn() As String, iEi() As Long, n2 As Long, k As Long, out As String, nNew As Long
-    Dim rcvSum As Double, nNoPr As Long, issSum As Double, nIssNoPr As Long, supAcc As String, itemAcc As String, price As Double, nm As String, dq As Double, nDocChk As Long, nDiff As Long, shortU As String, overU As String
-    Dim rcEi() As Long, rcQ() As Double, rcU() As String, rcSp() As String, rcPr() As Double, rcDq() As Double, rcDel() As Boolean, nRc As Long, slot As Long, k2 As Long, j As Long
+    Dim supAcc As String, itemAcc As String, nm As String, dq As Double, nDocChk As Long, nDiff As Long, shortU As String, overU As String
+    Dim rcEi() As Long, rcQ() As Double, rcU() As String, rcSp() As String, rcDq() As Double, rcDel() As Boolean, nRc As Long, slot As Long, k2 As Long, j As Long
     Dim rtNo() As Long, rtQ() As Double, rtU() As String, rtDel() As Boolean, nRt As Long
     On Error GoTo EH
     ReDim rcEi(500)
     ReDim rcQ(500)
     ReDim rcU(500)
     ReDim rcSp(500)
-    ReDim rcPr(500)
     ReDim rcDq(500)
     ReDim rcDel(500)
     ReDim rtNo(500)
@@ -268,7 +226,6 @@ Function PeriodTotals(d0 As Double, d1 As Double, ByRef nDays As Long) As String
                                             ReDim Preserve rcQ(2 * nRc)
                                             ReDim Preserve rcU(2 * nRc)
                                             ReDim Preserve rcSp(2 * nRc)
-                                            ReDim Preserve rcPr(2 * nRc)
                                             ReDim Preserve rcDq(2 * nRc)
                                             ReDim Preserve rcDel(2 * nRc)
                                         End If
@@ -281,9 +238,6 @@ Function PeriodTotals(d0 As Double, d1 As Double, ByRef nDays As Long) As String
                                         rcQ(slot) = q
                                         rcU(slot) = un
                                         rcSp(slot) = RefKey(WmsView.JField(fields, "SUPPLIER"))
-                                        w = WmsView.JField(fields, "PRICE")
-                                        rcPr(slot) = -1
-                                        If w <> "" Then rcPr(slot) = Val(w)
                                         w = WmsView.JField(fields, "DOC_QTY")
                                         rcDq(slot) = -1
                                         If w <> "" Then rcDq(slot) = Val(w)
@@ -400,11 +354,6 @@ Function PeriodTotals(d0 As Double, d1 As Double, ByRef nDays As Long) As String
             nRcv = nRcv + 1
             rcvU = SumAdd(rcvU, rcU(k), rcQ(k))
             If rcSp(k) <> "" Then supAcc = SumAdd(supAcc, rcSp(k), 1)
-            If rcPr(k) >= 0 Then
-                rcvSum = rcvSum + rcPr(k) * rcQ(k)
-            Else
-                nNoPr = nNoPr + 1
-            End If
             If rcDq(k) >= 0 Then
                 nDocChk = nDocChk + 1
                 If Abs(rcDq(k) - rcQ(k)) > 0.0000001 Then
@@ -431,13 +380,7 @@ Function PeriodTotals(d0 As Double, d1 As Double, ByRef nDays As Long) As String
             n2 = n2 + 1
             issU = SumAdd(issU, iUn(k), iQty(k))
             If Trim(iWho(k)) <> "" Then whoAcc = SumAdd(whoAcc, RefKey(Trim(iWho(k))), 1)
-            ' 1.4.0: the amount by the price of the order the position came with (only when the unit is that of the order) and the goods most issued
-            price = RefPrice(iEi(k), iUn(k))
-            If price > 0 Then
-                issSum = issSum + price * iQty(k)
-            Else
-                nIssNoPr = nIssNoPr + 1
-            End If
+            ' 1.4.0: the goods most issued (no sums of money in the report)
             nm = RefName(iEi(k))
             If nm <> "" Then itemAcc = SumAdd(itemAcc, RefKey(nm), 1)
         End If
@@ -448,9 +391,7 @@ Function PeriodTotals(d0 As Double, d1 As Double, ByRef nDays As Long) As String
     out = "• Проведено складских операций: " & nOps & " (дней с операциями — " & nDays & ")"
     If nCars > 0 Then out = out & Chr(10) & "• Принято автомашин с грузом от поставщиков: " & nCars
     If nRcv > 0 Then
-        w = "• Приёмка товара по заказам: принято позиций — " & nRcv & "; количество: " & SumText(rcvU)
-        If rcvSum > 0 Then w = w & "; на сумму около " & MoneyRub(rcvSum) & IIf(nNoPr > 0, " (по " & nNoPr & " поз. цена не указана)", "")
-        out = out & Chr(10) & w
+        out = out & Chr(10) & "• Приёмка товара по заказам: принято позиций — " & nRcv & "; количество: " & SumText(rcvU)
         If supAcc <> "" Then out = out & Chr(10) & "• Поставщики (по числу принятых позиций): " & TopText(supAcc, 5)
         If nDocChk > 0 Then
             If nDiff = 0 Then
@@ -465,9 +406,7 @@ Function PeriodTotals(d0 As Double, d1 As Double, ByRef nDays As Long) As String
     End If
     If nSp > 0 Then out = out & Chr(10) & "• Прочее оприходование (остатки по результатам пересчёта, принятое от производства и др.): записей — " & nSp
     If n2 > 0 Then
-        w = "• Отпуск товара со склада: выдач — " & n2 & "; отпущено: " & SumText(issU)
-        If issSum > 0 Then w = w & "; на сумму около " & MoneyRub(issSum) & IIf(nIssNoPr > 0, " (оценено без " & nIssNoPr & " поз.)", "")
-        out = out & Chr(10) & w
+        out = out & Chr(10) & "• Отпуск товара со склада: выдач — " & n2 & "; отпущено: " & SumText(issU)
         If whoAcc <> "" Then out = out & Chr(10) & "• Кому выдавали чаще всего (по числу выдач): " & TopText(whoAcc, 5)
         If itemAcc <> "" Then out = out & Chr(10) & "• Чаще всего выдавали (по числу выдач): " & TopText(itemAcc, 5)
     End If

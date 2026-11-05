@@ -815,15 +815,14 @@ Private Sub DrFill(dt As Double)
     Dim iDate() As Double, iWho() As String, iQty() As Double, iUnit() As String, iNo() As String, nIss As Long, delNos As String
     Dim nRet As Long, retU As String, nMove As Long, nWo As Long, nInv As Long, nSplit As Long, nSup As Long, nKit As Long, nAsm As Long
     Dim nSerial As Long, nPack As Long, nDocNo As Long, docNos As String, nCancel As Long, iLo As Long, iHi As Long
-    Dim iEi() As Long, rSup(40) As String, rSupC(40) As Long, nRSup As Long, j As Long, rcvSum As Double, nNoPr As Long, nDocChk As Long, nDiff As Long, shortU As String, overU As String, dq As Double
-    Dim rcEi() As Long, rcQ() As Double, rcU() As String, rcSp() As String, rcPr() As Double, rcDq() As Double, rcPl() As Boolean, rcDel() As Boolean, nRc As Long, slot As Long, k2 As Long
+    Dim iEi() As Long, rSup(40) As String, rSupC(40) As Long, nRSup As Long, j As Long, nDocChk As Long, nDiff As Long, shortU As String, overU As String, dq As Double
+    Dim rcEi() As Long, rcQ() As Double, rcU() As String, rcSp() As String, rcDq() As Double, rcPl() As Boolean, rcDel() As Boolean, nRc As Long, slot As Long, k2 As Long
     Dim rtNo() As Long, rtQ() As Double, rtU() As String, rtDel() As Boolean, nRt As Long
     On Error GoTo EH
     ReDim rcEi(100)
     ReDim rcQ(100)
     ReDim rcU(100)
     ReDim rcSp(100)
-    ReDim rcPr(100)
     ReDim rcDq(100)
     ReDim rcPl(100)
     ReDim rcDel(100)
@@ -900,7 +899,6 @@ Private Sub DrFill(dt As Double)
                                     ReDim Preserve rcQ(2 * nRc)
                                     ReDim Preserve rcU(2 * nRc)
                                     ReDim Preserve rcSp(2 * nRc)
-                                    ReDim Preserve rcPr(2 * nRc)
                                     ReDim Preserve rcDq(2 * nRc)
                                     ReDim Preserve rcPl(2 * nRc)
                                     ReDim Preserve rcDel(2 * nRc)
@@ -914,9 +912,6 @@ Private Sub DrFill(dt As Double)
                                 rcQ(slot) = q
                                 rcU(slot) = un
                                 rcSp(slot) = Trim(WmsView.JField(fields, "SUPPLIER"))
-                                w = WmsView.JField(fields, "PRICE")
-                                rcPr(slot) = -1
-                                If w <> "" Then rcPr(slot) = Val(w)
                                 w = WmsView.JField(fields, "DOC_QTY")
                                 rcDq(slot) = -1
                                 If w <> "" Then rcDq(slot) = Val(w)
@@ -1068,11 +1063,6 @@ Private Sub DrFill(dt As Double)
                 End If
                 rSupC(slot) = rSupC(slot) + 1
             End If
-            If rcPr(k) >= 0 Then
-                rcvSum = rcvSum + rcPr(k) * rcQ(k)
-            Else
-                nNoPr = nNoPr + 1
-            End If
             If rcDq(k) >= 0 Then
                 nDocChk = nDocChk + 1
                 If Abs(rcDq(k) - rcQ(k)) > 0.0000001 Then
@@ -1096,7 +1086,6 @@ Private Sub DrFill(dt As Double)
     If nCars > 0 Then DrAdd("D", "Принято автомашин с грузом от поставщиков: " & nCars & IIf(carSup <> "", " (" & Replace(carSup, ";", ", ") & ")", ""))
     If nRcv > 0 Then
         u = "Приёмка товара по заказам: принято позиций — " & nRcv & "; количество: " & DrUnitText(rcvU)
-        If rcvSum > 0 Then u = u & "; на сумму около " & WmsPeriod.MoneyRub(rcvSum) & IIf(nNoPr > 0, " (по " & nNoPr & " поз. цена не указана)", "")
         DrAdd("D", u & IIf(Right(u, 1) = ".", " ", ". ") & "Товар пересчитан и оприходован на склад")
         If nRSup > 0 Then
             u = ""
@@ -1253,20 +1242,14 @@ End Sub
 
 Private Sub DrIssueDay(dt As Double, d As Double, iDate() As Double, iWho() As String, iQty() As Double, iUnit() As String, iEi() As Long, nIss As Long)
     Dim i As Long, j As Long, cnt As Long, un As String, who() As String, wc() As Long, nW As Long, s As String, found As Boolean
-    Dim tw As String, tc As Long, label As String, shown As Long, sum As Double, nNoPr As Long, price As Double, nm As String, items As String, head As String
+    Dim tw As String, tc As Long, label As String, shown As Long, nm As String, items As String, head As String
     ReDim who(nIss)
     ReDim wc(nIss)
     For i = 0 To nIss - 1
         If iDate(i) = d Then
             cnt = cnt + 1
             un = DrUnitAdd(un, iUnit(i), iQty(i))
-            ' 1.4.0: the amount by the price of the order the position came with and the goods issued most
-            price = WmsPeriod.RefPrice(iEi(i), iUnit(i))
-            If price > 0 Then
-                sum = sum + price * iQty(i)
-            Else
-                nNoPr = nNoPr + 1
-            End If
+            ' 1.4.0: the goods issued most (no sums of money in the report)
             nm = WmsPeriod.RefName(iEi(i))
             If nm <> "" Then items = WmsPeriod.SumAdd(items, WmsPeriod.RefKey(nm), 1)
             found = False
@@ -1311,7 +1294,6 @@ Private Sub DrIssueDay(dt As Double, d As Double, iDate() As Double, iWho() As S
         label = "Оцифровка выдач за " & Format(CDate(d), "DD.MM.YYYY") & " (" & DrDayName(d) & ")"
     End If
     head = label & ": оформлено выдач — " & cnt & "; отпущено: " & DrUnitText(un)
-    If sum > 0 Then head = head & "; на сумму около " & WmsPeriod.MoneyRub(sum) & IIf(nNoPr > 0, " (оценено без " & nNoPr & " поз.)", "")
     DrAdd("D", head & "; получатели: " & s)
     If items <> "" Then DrAdd("D", "Чаще всего выдавали" & IIf(d = dt, " сегодня", "") & " (по числу выдач): " & WmsPeriod.TopText(items, 3))
 End Sub
